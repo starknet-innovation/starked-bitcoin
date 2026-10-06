@@ -7,3 +7,5 @@ import StarkedAir.Bits
 import StarkedAir.Spec.Sha256
 import StarkedAir.Gadgets.Sha256Sound
 import StarkedAir.Gadgets.HeaderChain
+import StarkedAir.Spec.Bitcoin
+import StarkedAir.Gadgets.HeaderChainSound
