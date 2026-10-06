@@ -400,4 +400,216 @@ end
 
 end Columns
 
+/-! ## Layer 6: additions -/
+
+section Adds
+
+variable {n : ℕ} {main : ℕ → ℕ → F} {r : ℕ}
+
+theorem eval_foldl_add (terms : List Expr) (init : Expr) :
+    (terms.foldl .add init).eval n preCols main r =
+      init.eval n preCols main r + (terms.map (·.eval n preCols main r)).sum := by
+  induction terms generalizing init with
+  | nil => simp
+  | cons t ts ih => simp [List.foldl, ih, Expr.eval, add_assoc]
+
+/-- A gated sum constraint, with the gate on and every term a small natural, is an
+equation over ℕ. -/
+theorem addC_nat {sel result carry : Expr} {terms : List Expr} {ts : List ℕ} {R C : ℕ}
+    (h0 : (addC sel terms result carry).eval n preCols main r = 0)
+    (hsel : sel.eval n preCols main r = 1)
+    (hts : terms.map (·.eval n preCols main r) = ts.map (Nat.cast : ℕ → F))
+    (hR : result.eval n preCols main r = (R : F)) (hC : carry.eval n preCols main r = (C : F))
+    (hb1 : ts.sum < P) (hb2 : R + 65536 * C < P) : ts.sum = R + 65536 * C := by
+  have hs : (ts.map (Nat.cast : ℕ → F)).sum = ((ts.sum : ℕ) : F) := (Nat.cast_list_sum ts).symm
+  simp only [addC, Expr.eval, eval_foldl_add, eval_cst, hsel, hts, hR, hC, one_mul, hs,
+    Nat.cast_zero, zero_add] at h0
+  apply natCast_inj_of_lt hb1 hb2
+  rw [Nat.cast_add, Nat.cast_mul]
+  have : ((65536 : ℕ) : F) = 65536 := by norm_num
+  rw [this]
+  linear_combination h0
+
+theorem eval_bitsOf {base k : ℕ} (hr : r < n) (hb : ∀ j < k, (main (base + j) r).val ≤ 1) :
+    (bitsOf base k).eval n preCols main r = ((ofBits (fun j => bit main (base + j) r) k : ℕ) : F) :=
+  eval_sumPow_bits _ _ k (fun j hj => by rw [eval_col, wrap_zero hr]; exact eq_bit (hb j hj))
+
+theorem eval_col0_val {i : ℕ} (hr : r < n) :
+    (col i).eval n preCols main r = (((main i r).val : ℕ) : F) := by
+  rw [eval_col, wrap_zero hr, ZMod.natCast_zmod_val]
+
+theorem half16_split (y : Word) : y.toNat = half16 y 0 + 65536 * half16 y 1 := by
+  simp only [half16]; omega
+
+end Adds
+
+section Pre
+
+variable {n : ℕ} {main : ℕ → ℕ → F} {r : ℕ}
+
+private theorem periodic_at (f : ℕ → ℕ) (hr : r < n) {i : ℕ}
+    (hi : preCols.getD i (.periodic [0]) = .periodic ((List.range PERIOD).map f)) :
+    (pre i).eval n preCols main r = ((f (r % 72) : ℕ) : F) := by
+  simp only [pre, Expr.eval, wrap_zero hr]
+  rw [hi]
+  have : r % 72 < 72 := Nat.mod_lt _ (by norm_num)
+  simp [PreCol.eval, PERIOD, List.getD_eq_getElem?_getD, this]
+
+theorem pre_round (hr : r < n) :
+    (pre IS_ROUND).eval n preCols main r =
+      (((if 4 ≤ r % 72 ∧ r % 72 < 68 then 1 else 0 : ℕ)) : F) := by
+  rw [periodic_at (fun p => if 4 ≤ p ∧ p < 68 then 1 else 0) hr (by simp [preCols, IS_ROUND])]
+
+theorem pre_sched (hr : r < n) :
+    (pre IS_SCHED).eval n preCols main r =
+      (((if 20 ≤ r % 72 ∧ r % 72 < 68 then 1 else 0 : ℕ)) : F) := by
+  rw [periodic_at (fun p => if 20 ≤ p ∧ p < 68 then 1 else 0) hr (by simp [preCols, IS_SCHED])]
+
+theorem pre_final (hr : r < n) :
+    (pre IS_FINAL).eval n preCols main r = (((if 68 ≤ r % 72 then 1 else 0 : ℕ)) : F) := by
+  rw [periodic_at (fun p => if 68 ≤ p then 1 else 0) hr (by simp [preCols, IS_FINAL])]
+
+theorem pre_klo (hr : r < n) (h4 : 4 ≤ r % 72) (h68 : r % 72 < 68) :
+    (pre K_LO).eval n preCols main r = ((half16 (Spec.Sha256.K (r % 72 - 4)) 0 : ℕ) : F) := by
+  rw [periodic_at (fun p => if 4 ≤ p ∧ p < 68 then Kn.getD (p - 4) 0 % 2 ^ 16 else 0) hr
+    (by simp [preCols, K_LO, K])]
+  simp [h4, h68, half16, K_toNat]
+
+theorem pre_khi (hr : r < n) (h4 : 4 ≤ r % 72) (h68 : r % 72 < 68) :
+    (pre (K_LO + 1)).eval n preCols main r = ((half16 (Spec.Sha256.K (r % 72 - 4)) 1 : ℕ) : F) := by
+  rw [periodic_at (fun p => if 4 ≤ p ∧ p < 68 then Kn.getD (p - 4) 0 / 2 ^ 16 else 0) hr
+    (by simp [preCols, K_LO, K])]
+  simp [h4, h68, half16, K_toNat]
+
+end Pre
+
+/-! ## Layer 7: one round -/
+
+section Round
+
+variable {logSize : ℕ} {main : ℕ → ℕ → F} (hsat : air.Satisfied logSize main)
+include hsat
+
+theorem roundAdds_sat {r : ℕ} (hr : r < 2 ^ logSize) : ∀ c ∈ roundAdds, c.eval (2 ^ logSize) preCols main r = 0 :=
+  fun _ hc => sat hsat (by simp only [constraints, List.mem_append]; left; left; right; exact hc) hr
+
+theorem limbs_back {r k base : ℕ} (hr : r < 2 ^ logSize) (hk : k ≤ r) (hbase : base + 32 ≤ 96)
+    {h : ℕ} (hh : h ≤ 1) :
+    (limb base h (-(k : ℤ))).eval (2 ^ logSize) preCols main r = ((half16 (word main base (r - k)) h : ℕ) : F) :=
+  eval_limb (wrap_back hk hr) (word_bits hsat (by omega) hbase) hh
+
+theorem carry_val {r base k : ℕ} (hr : r < 2 ^ logSize) (hbase : 108 ≤ base) (hk : base + k ≤ 124) :
+    (bitsOf base k).eval (2 ^ logSize) preCols main r = ((ofBits (fun j => bit main (base + j) r) k : ℕ) : F) :=
+  eval_bitsOf hr (fun j hj => bool_val hsat hr (Or.inr ⟨by omega, by omega⟩))
+
+/-- **Round step.** At a round row, `a` and `e` are FIPS round `t = r mod 72 − 4` applied to
+the previous rows. -/
+theorem round_step {r : ℕ} (hr : r < 2 ^ logSize) (h4 : 4 ≤ r % 72) (h68 : r % 72 < 68) :
+    word main A r =
+        (word main E (r - 4) + bsig1 (word main E (r - 1)) +
+          ch (word main E (r - 1)) (word main E (r - 2)) (word main E (r - 3)) +
+          Spec.Sha256.K (r % 72 - 4) + word main W r) +
+        (bsig0 (word main A (r - 1)) +
+          maj (word main A (r - 1)) (word main A (r - 2)) (word main A (r - 3))) ∧
+    word main E r =
+      word main A (r - 4) +
+        (word main E (r - 4) + bsig1 (word main E (r - 1)) +
+          ch (word main E (r - 1)) (word main E (r - 2)) (word main E (r - 3)) +
+          Spec.Sha256.K (r % 72 - 4) + word main W r) := by
+  have hr4 : 4 ≤ r := le_trans h4 (Nat.mod_le _ _)
+  have h3 : 3 ≤ r := by omega
+  -- Column facts.
+  obtain ⟨S0l, S0h⟩ := S0_vals hsat hr h3
+  obtain ⟨S1l, S1h⟩ := S1_vals hsat hr h3
+  obtain ⟨CHl, CHh⟩ := CH_vals hsat hr h3
+  obtain ⟨MJl, MJh⟩ := MJ_vals hsat hr h3
+  have hsel : (pre IS_ROUND).eval (2 ^ logSize) preCols main r = 1 := by
+    rw [pre_round hr]; simp [h4, h68]
+  have E4 := fun h (hh : h ≤ 1) => limbs_back hsat hr (k := 4) hr4 (base := E) (by decide) hh
+  have A4 := fun h (hh : h ≤ 1) => limbs_back hsat hr (k := 4) hr4 (base := A) (by decide) hh
+  have W0 := fun h (hh : h ≤ 1) => limbs_back hsat hr (k := 0) (Nat.zero_le _) (base := W) (by decide) hh
+  have A0 := fun h (hh : h ≤ 1) => limbs_back hsat hr (k := 0) (Nat.zero_le _) (base := A) (by decide) hh
+  have E0 := fun h (hh : h ≤ 1) => limbs_back hsat hr (k := 0) (Nat.zero_le _) (base := E) (by decide) hh
+  simp only [Nat.cast_ofNat, Nat.cast_zero, neg_zero, Nat.sub_zero] at E4 A4 W0 A0 E0
+  have cAl := carry_val hsat hr (base := CA_LO) (k := 3) (by decide) (by decide)
+  have cAh := carry_val hsat hr (base := CA_HI) (k := 3) (by decide) (by decide)
+  have cEl := carry_val hsat hr (base := CE_LO) (k := 3) (by decide) (by decide)
+  have cEh := carry_val hsat hr (base := CE_HI) (k := 3) (by decide) (by decide)
+  have kl := pre_klo (main := main) hr h4 h68
+  have kh := pre_khi (main := main) hr h4 h68
+  have c0 := fun i => eval_col0_val (n := 2 ^ logSize) (main := main) (i := i) hr
+  -- The four addition constraints.
+  have hall := roundAdds_sat hsat hr
+  simp only [roundAdds, List.forall_mem_cons, List.not_mem_nil, IsEmpty.forall_iff,
+    implies_true, and_true] at hall
+  obtain ⟨ea0, ea1, ee0, ee1⟩ := hall
+  have hP : (2 : ℕ) ^ 20 < P := by norm_num [P]
+  have bc := fun base k => ofBits_lt (fun j => bit main (base + j) r) k
+  have hb := fun y h => half16_lt y h
+  set Yr := word main E (r - 4)
+  have na0 := addC_nat ea0 hsel
+    (ts := [half16 Yr 0, half16 (bsig1 (word main E (r - 1))) 0,
+      half16 (ch (word main E (r - 1)) (word main E (r - 2)) (word main E (r - 3))) 0,
+      half16 (Spec.Sha256.K (r % 72 - 4)) 0, half16 (word main W r) 0,
+      half16 (bsig0 (word main A (r - 1))) 0,
+      half16 (maj (word main A (r - 1)) (word main A (r - 2)) (word main A (r - 3))) 0])
+    (by simp only [List.cons_append, List.nil_append, List.map_cons, List.map_nil, Nat.add_zero,
+          E4 0 (by norm_num), W0 0 (by norm_num), kl, c0, S1l, CHl, S0l, MJl])
+    (A0 0 (by norm_num)) cAl
+    (by simp only [List.sum_cons, List.sum_nil]; linarith [hb Yr 0, hb (bsig1 (word main E (r - 1))) 0,
+      hb (ch (word main E (r - 1)) (word main E (r - 2)) (word main E (r - 3))) 0,
+      hb (Spec.Sha256.K (r % 72 - 4)) 0, hb (word main W r) 0, hb (bsig0 (word main A (r - 1))) 0,
+      hb (maj (word main A (r - 1)) (word main A (r - 2)) (word main A (r - 3))) 0])
+    (by linarith [hb (word main A r) 0, bc CA_LO 3])
+  set Ch := ch (word main E (r - 1)) (word main E (r - 2)) (word main E (r - 3))
+  set Mj := maj (word main A (r - 1)) (word main A (r - 2)) (word main A (r - 3))
+  set B1 := bsig1 (word main E (r - 1))
+  set B0 := bsig0 (word main A (r - 1))
+  set Kt := Spec.Sha256.K (r % 72 - 4)
+  set Wr := word main W r
+  set Xr := word main A (r - 4)
+  set cAL := ofBits (fun j => bit main (CA_LO + j) r) 3
+  set cEL := ofBits (fun j => bit main (CE_LO + j) r) 3
+  have na1 := addC_nat ea1 hsel
+    (ts := [half16 Yr 1, half16 B1 1, half16 Ch 1, half16 Kt 1, half16 Wr 1, half16 B0 1,
+      half16 Mj 1, cAL])
+    (by simp only [List.cons_append, List.nil_append, List.map_cons, List.map_nil,
+          E4 1 (by norm_num), W0 1 (by norm_num), kh, c0, S1h, CHh, S0h, MJh, cAl])
+    (A0 1 (by norm_num)) cAh
+    (by simp only [List.sum_cons, List.sum_nil]
+        linarith [hb Yr 1, hb B1 1, hb Ch 1, hb Kt 1, hb Wr 1, hb B0 1, hb Mj 1, bc CA_LO 3])
+    (by linarith [hb (word main A r) 1, bc CA_HI 3])
+  have ne0 := addC_nat ee0 hsel
+    (ts := [half16 Xr 0, half16 Yr 0, half16 B1 0, half16 Ch 0, half16 Kt 0, half16 Wr 0])
+    (by simp only [List.cons_append, List.nil_append, List.map_cons, List.map_nil, Nat.add_zero,
+          A4 0 (by norm_num), E4 0 (by norm_num), W0 0 (by norm_num), kl, c0, S1l, CHl])
+    (E0 0 (by norm_num)) cEl
+    (by simp only [List.sum_cons, List.sum_nil]
+        linarith [hb Xr 0, hb Yr 0, hb B1 0, hb Ch 0, hb Kt 0, hb Wr 0])
+    (by linarith [hb (word main E r) 0, bc CE_LO 3])
+  have ne1 := addC_nat ee1 hsel
+    (ts := [half16 Xr 1, half16 Yr 1, half16 B1 1, half16 Ch 1, half16 Kt 1, half16 Wr 1, cEL])
+    (by simp only [List.cons_append, List.nil_append, List.map_cons, List.map_nil,
+          A4 1 (by norm_num), E4 1 (by norm_num), W0 1 (by norm_num), kh, c0, S1h, CHh, cEl])
+    (E0 1 (by norm_num)) cEh
+    (by simp only [List.sum_cons, List.sum_nil]
+        linarith [hb Xr 1, hb Yr 1, hb B1 1, hb Ch 1, hb Kt 1, hb Wr 1, bc CE_LO 3])
+    (by linarith [hb (word main E r) 1, bc CE_HI 3])
+  simp only [List.sum_cons, List.sum_nil] at na0 na1 ne0 ne1
+  have sp := fun y => half16_split y
+  have lt := fun y h => half16_lt y h
+  constructor
+  · apply BitVec.eq_of_toNat_eq
+    simp only [BitVec.toNat_add]
+    rw [sp (word main A r), sp Yr, sp B1, sp Ch, sp Kt, sp Wr, sp B0, sp Mj]
+    have := lt (word main A r) 0; have := lt (word main A r) 1
+    omega
+  · apply BitVec.eq_of_toNat_eq
+    simp only [BitVec.toNat_add]
+    rw [sp (word main E r), sp Xr, sp Yr, sp B1, sp Ch, sp Kt, sp Wr]
+    have := lt (word main E r) 0; have := lt (word main E r) 1
+    omega
+
+end Round
+
 end StarkedAir.Sha256
