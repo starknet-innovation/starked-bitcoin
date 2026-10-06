@@ -11,6 +11,8 @@
 //! - `col{tree, index, offset}` at row i denotes `column[(i + offset) mod N]`.
 //!   Wrap-around is real. Constraints that must not wrap need an explicit
 //!   preprocessed selector.
+//! - `pub i` is public input i (canonical M31), part of the statement and
+//!   mixed into the Fiat–Shamir transcript.
 //! - Every constraint expression must evaluate to 0 at every row i ∈ [0, N).
 //! - Trees: 0 = preprocessed, 1 = main witness. Preprocessed columns are
 //!   *defined by the AIR* (`PreCol`), generated identically by prover and
@@ -22,7 +24,7 @@ const std = @import("std");
 const M31 = @import("stwo_core").fields.m31.M31;
 const P = @import("stwo_core").fields.m31.Modulus;
 
-pub const schema = "starked-air-v0";
+pub const schema = "starked-air-v1";
 
 pub const Tree = enum(u8) { preprocessed = 0, main = 1 };
 
@@ -36,12 +38,18 @@ pub const PreCol = union(enum) {
     not_last,
     /// values[i mod values.len] (canonical M31). The period need not divide N.
     periodic: []const u32,
+    /// 1 on rows < k, else 0.
+    row_lt: u32,
+    /// 1 on the last k rows (row + k ≥ N), else 0.
+    row_ge_end: u32,
 
     pub fn at(self: PreCol, row: usize, n: usize) M31 {
         return switch (self) {
             .is_first => if (row == 0) M31.one() else M31.zero(),
             .not_last => if (row + 1 < n) M31.one() else M31.zero(),
             .periodic => |v| M31.fromCanonical(v[row % v.len]),
+            .row_lt => |k| if (row < k) M31.one() else M31.zero(),
+            .row_ge_end => |k| if (row + k >= n) M31.one() else M31.zero(),
         };
     }
 };
@@ -53,6 +61,7 @@ pub const Expr = union(enum) {
     sub: [2]ExprId,
     mul: [2]ExprId,
     neg: ExprId,
+    @"pub": u32,
 };
 
 /// An AIR as a DAG of expressions (children always precede parents) plus
@@ -61,6 +70,7 @@ pub const Air = struct {
     name: []const u8,
     n_preprocessed: u32,
     n_main: u32,
+    n_pub: u32 = 0,
     preprocessed: []const PreCol,
     exprs: []const Expr,
     constraints: []const ExprId,
@@ -93,6 +103,7 @@ pub const Air = struct {
             .constant => |v| if (v >= P) return error.NonCanonicalConstant,
             .add, .sub, .mul => |args| for (args) |a| if (a >= id) return error.NotTopological,
             .neg => |a| if (a >= id) return error.NotTopological,
+            .@"pub" => |i| if (i >= self.n_pub) return error.PublicInputOutOfRange,
         };
         for (self.constraints) |c| if (c >= self.exprs.len) return error.ConstraintOutOfRange;
     }
@@ -106,6 +117,7 @@ pub const Air = struct {
             .add, .sub => |a| @max(out[a[0]], out[a[1]]),
             .mul => |a| out[a[0]] + out[a[1]],
             .neg => |a| out[a],
+            .@"pub" => 0,
         };
         return out;
     }
@@ -148,6 +160,7 @@ pub const Air = struct {
             .name = self.name,
             .n_preprocessed = self.n_preprocessed,
             .n_main = self.n_main,
+            .n_pub = self.n_pub,
             .preprocessed = self.preprocessed,
             .exprs = self.exprs,
             .constraints = self.constraints,
@@ -173,6 +186,7 @@ pub const Air = struct {
             .name = parsed.value.name,
             .n_preprocessed = parsed.value.n_preprocessed,
             .n_main = parsed.value.n_main,
+            .n_pub = parsed.value.n_pub,
             .preprocessed = parsed.value.preprocessed,
             .exprs = parsed.value.exprs,
             .constraints = parsed.value.constraints,
@@ -187,6 +201,7 @@ const JsonAir = struct {
     name: []const u8,
     n_preprocessed: u32,
     n_main: u32,
+    n_pub: u32,
     preprocessed: []const PreCol,
     exprs: []const Expr,
     constraints: []const ExprId,

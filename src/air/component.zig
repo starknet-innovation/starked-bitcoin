@@ -32,6 +32,8 @@ pub const Component = struct {
     allocator: std.mem.Allocator,
     air: ir.Air,
     log_size: u32,
+    /// Public input values (canonical M31).
+    pubs: []const M31,
     /// Sorted distinct offsets read from each main column.
     main_offsets: [][]i32,
 
@@ -42,8 +44,9 @@ pub const Component = struct {
         prover_air_accumulation.DomainEvaluationAccumulator,
     );
 
-    pub fn init(allocator: std.mem.Allocator, air: ir.Air, log_size: u32) !Component {
+    pub fn init(allocator: std.mem.Allocator, air: ir.Air, log_size: u32, pubs: []const M31) !Component {
         try air.validate();
+        if (pubs.len != air.n_pub) return error.PublicInputCountMismatch;
         if (try air.maxConstraintDegree(allocator) > MAX_DEGREE) return error.DegreeTooHigh;
         for (air.exprs) |e| switch (e) {
             .col => |c| if (c.tree == .preprocessed and c.offset != 0)
@@ -54,6 +57,7 @@ pub const Component = struct {
             .allocator = allocator,
             .air = air,
             .log_size = log_size,
+            .pubs = pubs,
             .main_offsets = try air.columnOffsets(allocator, .main),
         };
     }
@@ -158,7 +162,7 @@ pub const Component = struct {
             .main = @ptrCast(mask.items[1]),
             .offsets = @ptrCast(self.main_offsets),
         };
-        interp.evalConstraints(QM31, self.air, scratch, &ctx, out);
+        interp.evalConstraints(QM31, self.air, self.pubs, scratch, &ctx, out);
 
         const denominator_inv = try core_constraints.cosetVanishing(
             QM31,
@@ -242,6 +246,7 @@ pub const Component = struct {
         defer allocator.free(values);
         const job = DomainJob{
             .air = self.air,
+            .pubs = self.pubs,
             .ctx = .{ .pre = pre, .main = main, .log_size = self.log_size, .eval_log_size = eval_log_size },
             .powers = column.random_coeff_powers,
             .denominator_inv = denominator_inv,
@@ -268,6 +273,7 @@ pub const Component = struct {
 
 const DomainJob = struct {
     air: ir.Air,
+    pubs: []const M31,
     ctx: Component.DomainCtx,
     powers: []const QM31,
     denominator_inv: [2]M31,
@@ -279,7 +285,7 @@ const DomainJob = struct {
         const n = self.air.constraints.len;
         for (start..end) |row| {
             ctx.row = row;
-            interp.evalConstraints(M31, self.air, scratch, &ctx, out);
+            interp.evalConstraints(M31, self.air, self.pubs, scratch, &ctx, out);
             var combined = QM31.zero();
             for (out, 0..) |c, i| combined = combined.add(self.powers[n - 1 - i].mulM31(c));
             self.values[row] = combined.mulM31(self.denominator_inv[row >> @intCast(self.log_size)]);

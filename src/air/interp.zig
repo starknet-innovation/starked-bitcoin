@@ -10,10 +10,12 @@ const ir = @import("ir.zig");
 const M31 = @import("stwo_core").fields.m31.M31;
 const QM31 = @import("stwo_core").fields.qm31.QM31;
 
-/// `F` is M31 or QM31. `ctx.read(tree, index, offset) F` supplies column values.
+/// `F` is M31 or QM31. `ctx.read(tree, index, offset) F` supplies column values;
+/// `pubs` are the public inputs.
 pub fn evalConstraints(
     comptime F: type,
     air: ir.Air,
+    pubs: []const M31,
     scratch: []F,
     ctx: anytype,
     out: []F,
@@ -26,6 +28,7 @@ pub fn evalConstraints(
         .sub => |a| scratch[a[0]].sub(scratch[a[1]]),
         .mul => |a| scratch[a[0]].mul(scratch[a[1]]),
         .neg => |a| scratch[a].neg(),
+        .@"pub" => |i| lift(F, pubs[i]),
     };
     for (air.constraints, out) |root, *o| o.* = scratch[root];
 }
@@ -37,6 +40,7 @@ fn lift(comptime F: type, v: M31) F {
 /// Plain trace in natural row order, for witness checking.
 pub const RowTrace = struct {
     log_size: u32,
+    pubs: []const M31 = &.{},
     preprocessed: []const []const M31,
     main: []const []const M31,
     row: usize = 0,
@@ -65,7 +69,7 @@ pub fn firstViolation(
     const n = @as(usize, 1) << @intCast(trace.log_size);
     for (0..n) |row| {
         t.row = row;
-        evalConstraints(M31, air, scratch, &t, out);
+        evalConstraints(M31, air, trace.pubs, scratch, &t, out);
         for (out, 0..) |v, c| if (!v.isZero()) return .{ .row = row, .constraint = c };
     }
     return null;
@@ -73,10 +77,12 @@ pub fn firstViolation(
 
 test "matches the Lean semantics (Expr.eval) on the probe oracle" {
     // airs/probe_oracle.json is produced by lean/StarkedAir/Testing/Probe.lean:
-    // offsets −3…+5 with wrap-around, every preprocessed kind, every operator.
+    // offsets −3…+5 with wrap-around, every preprocessed kind, every operator,
+    // public inputs.
     const Oracle = struct {
         log_size: u32,
         air: std.json.Value,
+        @"pub": []const u32,
         main: []const []const u32,
         evals: []const []const u32,
     };
@@ -100,12 +106,14 @@ test "matches the Lean semantics (Expr.eval) on the probe oracle" {
         .preprocessed = @ptrCast(try air.genPreprocessed(a, oracle.log_size)),
         .main = @ptrCast(main),
     };
+    const pubs = try a.alloc(M31, oracle.@"pub".len);
+    for (pubs, oracle.@"pub") |*p, x| p.* = M31.fromCanonical(x);
     const scratch = try a.alloc(M31, air.exprs.len);
     const out = try a.alloc(M31, air.constraints.len);
     try std.testing.expectEqual(n, oracle.evals.len);
     for (0..n) |row| {
         t.row = row;
-        evalConstraints(M31, air, scratch, &t, out);
+        evalConstraints(M31, air, pubs, scratch, &t, out);
         for (out, oracle.evals[row]) |got, want| try std.testing.expectEqual(want, got.toU32());
     }
 }

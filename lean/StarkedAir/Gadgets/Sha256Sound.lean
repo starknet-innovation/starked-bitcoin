@@ -18,7 +18,7 @@ open StarkedAir Spec.Sha256
 
 section Eval
 
-variable {n : ℕ} {main : ℕ → ℕ → F} {r : ℕ}
+variable {n : ℕ} {pc : List PreCol} {pub : ℕ → F} {main : ℕ → ℕ → F} {r : ℕ}
 
 theorem cast_ofBits (g : ℕ → Bool) (k : ℕ) :
     ((ofBits g k : ℕ) : F) = ∑ j ∈ Finset.range k, (2 : F) ^ j * ((g j).toNat : F) := by
@@ -27,24 +27,24 @@ theorem cast_ofBits (g : ℕ → Bool) (k : ℕ) :
   | succ k ih => simp [ofBits, ih, Finset.sum_range_succ]
 
 theorem eval_sumPow (f : ℕ → Expr) (k : ℕ) :
-    (sumPow f k).eval n preCols main r =
-      ∑ j ∈ Finset.range k, (2 : F) ^ j * (f j).eval n preCols main r := by
+    (sumPow f k).eval n pc pub main r =
+      ∑ j ∈ Finset.range k, (2 : F) ^ j * (f j).eval n pc pub main r := by
   induction k with
   | zero => simp [sumPow, cst, Expr.eval]
   | succ k ih => simp [sumPow, cst, Expr.eval, ih, Finset.sum_range_succ]
 
 /-- A weighted sum of boolean-valued expressions is the value of those bits. -/
 theorem eval_sumPow_bits (f : ℕ → Expr) (g : ℕ → Bool) (k : ℕ)
-    (h : ∀ j < k, (f j).eval n preCols main r = ((g j).toNat : F)) :
-    (sumPow f k).eval n preCols main r = ((ofBits g k : ℕ) : F) := by
+    (h : ∀ j < k, (f j).eval n pc pub main r = ((g j).toNat : F)) :
+    (sumPow f k).eval n pc pub main r = ((ofBits g k : ℕ) : F) := by
   rw [eval_sumPow, cast_ofBits]
   exact Finset.sum_congr rfl (fun j hj => by rw [h j (Finset.mem_range.mp hj)])
 
 theorem eval_col (i : ℕ) (off : ℤ) :
-    (col i off).eval n preCols main r = main i (wrap n r off) := by
+    (col i off).eval n pc pub main r = main i (wrap n r off) := by
   simp [col, Expr.eval]
 
-theorem eval_cst (v : ℕ) : (cst v).eval n preCols main r = (v : F) := by
+theorem eval_cst (v : ℕ) : (cst v).eval n pc pub main r = (v : F) := by
   simp [cst, Expr.eval]
 
 /-- The boolean held by a column cell (meaningful once booleanity holds). -/
@@ -83,24 +83,24 @@ theorem maj_poly (a b c : Bool) :
 
 section
 variable {x y z : Expr} {a b c : Bool}
-  (hx : x.eval n preCols main r = (a.toNat : F))
-  (hy : y.eval n preCols main r = (b.toNat : F))
-  (hz : z.eval n preCols main r = (c.toNat : F))
+  (hx : x.eval n pc pub main r = (a.toNat : F))
+  (hy : y.eval n pc pub main r = (b.toNat : F))
+  (hz : z.eval n pc pub main r = (c.toNat : F))
 include hx hy
 
-theorem eval_xor2 : (xor2 x y).eval n preCols main r = ((a ^^ b).toNat : F) := by
+theorem eval_xor2 : (xor2 x y).eval n pc pub main r = ((a ^^ b).toNat : F) := by
   simp only [xor2, Expr.eval, eval_cst, hx, hy]; rw [← xor2_poly]; norm_num
 
 include hz
 
-theorem eval_xor3 : (xor3 x y z).eval n preCols main r = ((a ^^ b ^^ c).toNat : F) := by
+theorem eval_xor3 : (xor3 x y z).eval n pc pub main r = ((a ^^ b ^^ c).toNat : F) := by
   simp only [xor3, Expr.eval, eval_cst, hx, hy, hz]; rw [← xor3_poly]; norm_num
 
-theorem eval_ch : (chE x y z).eval n preCols main r = (((a && b) ^^ (!a && c)).toNat : F) := by
+theorem eval_ch : (chE x y z).eval n pc pub main r = (((a && b) ^^ (!a && c)).toNat : F) := by
   simp only [chE, Expr.eval, hx, hy, hz]; exact ch_poly a b c
 
 theorem eval_maj :
-    (majE x y z).eval n preCols main r = (((a && b) ^^ (a && c) ^^ (b && c)).toNat : F) := by
+    (majE x y z).eval n pc pub main r = (((a && b) ^^ (a && c) ^^ (b && c)).toNat : F) := by
   simp only [majE, Expr.eval, eval_cst, hx, hy, hz]; rw [← maj_poly]; norm_num
 end
 
@@ -157,12 +157,12 @@ theorem half16_lt (y : Word) (h : ℕ) : half16 y h < 65536 := by
   cases h <;> simp [half16] <;> omega
 
 section
-variable {n : ℕ} {main : ℕ → ℕ → F} {r : ℕ}
+variable {n : ℕ} {pc : List PreCol} {pub : ℕ → F} {main : ℕ → ℕ → F} {r : ℕ}
 
 /-- A limb of bit-expressions that encode word `y` evaluates to that half of `y`. -/
 theorem eval_limbOf (f : ℕ → Expr) (y : Word) {half : ℕ} (hh : half ≤ 1)
-    (h : ∀ i < 32, (f i).eval n preCols main r = ((y.getLsbD i).toNat : F)) :
-    (limbOf f half).eval n preCols main r = ((half16 y half : ℕ) : F) := by
+    (h : ∀ i < 32, (f i).eval n pc pub main r = ((y.getLsbD i).toNat : F)) :
+    (limbOf f half).eval n pc pub main r = ((half16 y half : ℕ) : F) := by
   unfold limbOf
   rw [eval_sumPow_bits _ (fun j => y.getLsbD (16 * half + j)) 16
     (fun j hj => h _ (by omega))]
@@ -179,18 +179,18 @@ theorem word_getLsbD (base r' : ℕ) {i : ℕ} (hi : i < 32) :
 /-- Bit columns, read through an offset that lands on row `r'`. -/
 theorem eval_bitcol {base r' : ℕ} {off : ℤ} (hw : wrap n r off = r')
     (hb : ∀ i < 32, (main (base + i) r').val ≤ 1) {i : ℕ} (hi : i < 32) :
-    (col (base + i) off).eval n preCols main r = (((word main base r').getLsbD i).toNat : F) := by
+    (col (base + i) off).eval n pc pub main r = (((word main base r').getLsbD i).toNat : F) := by
   rw [eval_col, hw, word_getLsbD _ _ hi]; exact eq_bit (hb i hi)
 
 theorem eval_limb {base r' : ℕ} {off : ℤ} (hw : wrap n r off = r')
     (hb : ∀ i < 32, (main (base + i) r').val ≤ 1) {half : ℕ} (hh : half ≤ 1) :
-    (limb base half off).eval n preCols main r = ((half16 (word main base r') half : ℕ) : F) :=
+    (limb base half off).eval n pc pub main r = ((half16 (word main base r') half : ℕ) : F) :=
   eval_limbOf _ _ hh (fun _ hi => eval_bitcol hw hb hi)
 
 /-- A column pinned to a limb expression by `col D − limbOf f half = 0` holds that half. -/
 theorem limbcol_val {D : ℕ} (f : ℕ → Expr) (y : Word) {half : ℕ} (hh : half ≤ 1) (hr : r < n)
-    (hc : (Expr.sub (col D) (limbOf f half)).eval n preCols main r = 0)
-    (h : ∀ i < 32, (f i).eval n preCols main r = ((y.getLsbD i).toNat : F)) :
+    (hc : (Expr.sub (col D) (limbOf f half)).eval n pc pub main r = 0)
+    (h : ∀ i < 32, (f i).eval n pc pub main r = ((y.getLsbD i).toNat : F)) :
     (main D r).val = half16 y half := by
   simp only [Expr.eval, eval_col, wrap_zero hr, eval_limbOf f y hh h, sub_eq_zero] at hc
   rw [hc, ZMod.val_natCast, Nat.mod_eq_of_lt (lt_trans (half16_lt y half) (by norm_num [P]))]
@@ -210,16 +210,22 @@ theorem Kn_lt (t : ℕ) : Kn.getD t 0 < 2 ^ 32 := by
 theorem K_toNat (t : ℕ) : (Spec.Sha256.K t).toNat = Kn.getD t 0 := by
   rw [Spec.Sha256.K, BitVec.toNat_ofNat, Nat.mod_eq_of_lt (Kn_lt t)]
 
+/-- Every SHA-256 compression constraint holds on every row. This is implied by satisfying
+`Sha256.air` itself, and by any larger AIR (e.g. the header chain) that includes these
+constraints. -/
+def ShaSat (n : ℕ) (pc : List PreCol) (pub : ℕ → F) (main : ℕ → ℕ → F) : Prop :=
+  ∀ r < n, ∀ c ∈ constraints, c.eval n pc pub main r = 0
+
 section Row
 
-variable {logSize : ℕ} {main : ℕ → ℕ → F} (hsat : air.Satisfied logSize main)
+variable {n : ℕ} {pc : List PreCol} {pub : ℕ → F} {main : ℕ → ℕ → F} (hsat : ShaSat n pc pub main)
 include hsat
 
-theorem sat {c : Expr} (hc : c ∈ constraints) {r : ℕ} (hr : r < 2 ^ logSize) :
-    c.eval (2 ^ logSize) preCols main r = 0 := hsat r hr c hc
+theorem sat {c : Expr} (hc : c ∈ constraints) {r : ℕ} (hr : r < n) :
+    c.eval n pc pub main r = 0 := hsat r hr c hc
 
 /-- Every bit and carry column is boolean at every row. -/
-theorem bool_val {c r : ℕ} (hr : r < 2 ^ logSize) (hc : c < 96 ∨ (108 ≤ c ∧ c < 124)) :
+theorem bool_val {c r : ℕ} (hr : r < n) (hc : c < 96 ∨ (108 ≤ c ∧ c < 124)) :
     (main c r).val ≤ 1 := by
   have hm : boolC (col c) ∈ constraints := by
     simp only [constraints, List.mem_append]
@@ -233,18 +239,9 @@ theorem bool_val {c r : ℕ} (hr : r < 2 ^ logSize) (hc : c < 96 ∨ (108 ≤ c 
   simp only [boolC, Expr.eval, eval_col, eval_cst, wrap_zero hr, Nat.cast_one] at this
   exact val_le_one_of_bool this
 
-theorem word_bits {base r : ℕ} (hr : r < 2 ^ logSize) (hbase : base + 32 ≤ 96) :
+theorem word_bits {base r : ℕ} (hr : r < n) (hbase : base + 32 ≤ 96) :
     ∀ i < 32, (main (base + i) r).val ≤ 1 :=
   fun i hi => bool_val hsat hr (Or.inl (by omega))
-
-/-! Preprocessed columns. -/
-
-omit hsat in
-theorem eval_pre_periodic {i r : ℕ} (hr : r < 2 ^ logSize) {vals : List ℕ}
-    (hi : preCols.getD i (.periodic [0]) = .periodic vals) :
-    (pre i).eval (2 ^ logSize) preCols main r = ((vals.getD (r % vals.length) 0 : ℕ) : F) := by
-  simp only [pre, Expr.eval, wrap_zero hr]
-  rw [hi]; simp [PreCol.eval]
 
 end Row
 
@@ -252,12 +249,12 @@ end Row
 
 section Bitwise
 
-variable {n : ℕ} {main : ℕ → ℕ → F} {r : ℕ}
+variable {n : ℕ} {pc : List PreCol} {pub : ℕ → F} {main : ℕ → ℕ → F} {r : ℕ}
 
 theorem eval_bigSigmaBit {base r' : ℕ} {off : ℤ} (hw : wrap n r off = r')
     (hb : ∀ i < 32, (main (base + i) r').val ≤ 1) {r1 r2 r3 i : ℕ}
     (h1 : r1 < 32) (h2 : r2 < 32) (h3 : r3 < 32) (hi : i < 32) :
-    (bigSigmaBit base off r1 r2 r3 i).eval n preCols main r =
+    (bigSigmaBit base off r1 r2 r3 i).eval n pc pub main r =
       ((((word main base r').rotateRight r1 ^^^ (word main base r').rotateRight r2 ^^^
         (word main base r').rotateRight r3).getLsbD i).toNat : F) := by
   unfold bigSigmaBit
@@ -268,14 +265,14 @@ theorem eval_bigSigmaBit {base r' : ℕ} {off : ℤ} (hw : wrap n r off = r')
 theorem eval_smallSigmaBit {base r' : ℕ} {off : ℤ} (hw : wrap n r off = r')
     (hb : ∀ i < 32, (main (base + i) r').val ≤ 1) {r1 r2 sh i : ℕ}
     (h1 : r1 < 32) (h2 : r2 < 32) (hi : i < 32) :
-    (smallSigmaBit base off r1 r2 sh i).eval n preCols main r =
+    (smallSigmaBit base off r1 r2 sh i).eval n pc pub main r =
       ((((word main base r').rotateRight r1 ^^^ (word main base r').rotateRight r2 ^^^
         (word main base r' >>> sh)).getLsbD i).toNat : F) := by
   unfold smallSigmaBit
   simp only
   split
   · rename_i hs
-    have h3 : (col (base + i + sh) off).eval n preCols main r =
+    have h3 : (col (base + i + sh) off).eval n pc pub main r =
         (((word main base r').getLsbD (i + sh)).toNat : F) := by
       rw [Nat.add_assoc]; exact eval_bitcol hw hb hs
     rw [eval_xor3 (eval_bitcol hw hb (Nat.mod_lt _ (by norm_num)))
@@ -292,7 +289,7 @@ theorem eval_chBit {base r1 r2 r3 : ℕ} {o1 o2 o3 : ℤ} (hw1 : wrap n r o1 = r
     (hw2 : wrap n r o2 = r2) (hw3 : wrap n r o3 = r3)
     (hb1 : ∀ i < 32, (main (base + i) r1).val ≤ 1) (hb2 : ∀ i < 32, (main (base + i) r2).val ≤ 1)
     (hb3 : ∀ i < 32, (main (base + i) r3).val ≤ 1) {i : ℕ} (hi : i < 32) :
-    (chE (col (base + i) o1) (col (base + i) o2) (col (base + i) o3)).eval n preCols main r =
+    (chE (col (base + i) o1) (col (base + i) o2) (col (base + i) o3)).eval n pc pub main r =
       (((ch (word main base r1) (word main base r2) (word main base r3)).getLsbD i).toNat : F) := by
   rw [eval_ch (eval_bitcol hw1 hb1 hi) (eval_bitcol hw2 hb2 hi) (eval_bitcol hw3 hb3 hi)]
   simp [ch, BitVec.getLsbD_xor, BitVec.getLsbD_and, BitVec.getLsbD_not, hi]
@@ -301,7 +298,7 @@ theorem eval_majBit {base r1 r2 r3 : ℕ} {o1 o2 o3 : ℤ} (hw1 : wrap n r o1 = 
     (hw2 : wrap n r o2 = r2) (hw3 : wrap n r o3 = r3)
     (hb1 : ∀ i < 32, (main (base + i) r1).val ≤ 1) (hb2 : ∀ i < 32, (main (base + i) r2).val ≤ 1)
     (hb3 : ∀ i < 32, (main (base + i) r3).val ≤ 1) {i : ℕ} (hi : i < 32) :
-    (majE (col (base + i) o1) (col (base + i) o2) (col (base + i) o3)).eval n preCols main r =
+    (majE (col (base + i) o1) (col (base + i) o2) (col (base + i) o3)).eval n pc pub main r =
       (((maj (word main base r1) (word main base r2) (word main base r3)).getLsbD i).toNat : F) := by
   rw [eval_maj (eval_bitcol hw1 hb1 hi) (eval_bitcol hw2 hb2 hi) (eval_bitcol hw3 hb3 hi)]
   simp [maj, BitVec.getLsbD_xor, BitVec.getLsbD_and]
@@ -325,32 +322,32 @@ end Subsets
 
 section Columns
 
-variable {logSize : ℕ} {main : ℕ → ℕ → F} (hsat : air.Satisfied logSize main)
+variable {n : ℕ} {pc : List PreCol} {pub : ℕ → F} {main : ℕ → ℕ → F} (hsat : ShaSat n pc pub main)
 include hsat
 
-theorem bitwise_sat {c : Expr} (hc : c ∈ bitwise) {r : ℕ} (hr : r < 2 ^ logSize) :
-    c.eval (2 ^ logSize) preCols main r = 0 :=
+theorem bitwise_sat {c : Expr} (hc : c ∈ bitwise) {r : ℕ} (hr : r < n) :
+    c.eval n pc pub main r = 0 :=
   sat hsat (by simp only [constraints, List.mem_append]; left; left; left; right; exact hc) hr
 
 /-- A limb pair `defineLimbs D f` whose bit expressions encode word `y`: columns `D`, `D+1`
 hold the low and high halves of `y`. -/
 theorem limbcols {D : ℕ} {f : ℕ → Expr} (hsub : defineLimbs D f ⊆ bitwise) (y : Word) {r : ℕ}
-    (hr : r < 2 ^ logSize)
-    (h : ∀ i < 32, (f i).eval (2 ^ logSize) preCols main r = ((y.getLsbD i).toNat : F)) :
+    (hr : r < n)
+    (h : ∀ i < 32, (f i).eval n pc pub main r = ((y.getLsbD i).toNat : F)) :
     (main D r).val = half16 y 0 ∧ (main (D + 1) r).val = half16 y 1 :=
   ⟨limbcol_val f y (by norm_num) hr (bitwise_sat hsat (hsub List.mem_cons_self) hr) h,
    limbcol_val f y (by norm_num) hr
      (bitwise_sat hsat (hsub (List.mem_cons_of_mem _ List.mem_cons_self)) hr) h⟩
 
 section
-variable {r : ℕ} (hr : r < 2 ^ logSize)
+variable {r : ℕ} (hr : r < n)
 include hr
 
 private theorem bits_back {k base : ℕ} (hk : k ≤ r) (hbase : base + 32 ≤ 96) :
     ∀ i < 32, (main (base + i) (r - k)).val ≤ 1 := word_bits hsat (by omega) hbase
 
 omit hsat in
-private theorem wrap_k {k : ℕ} (hk : k ≤ r) : wrap (2 ^ logSize) r (-(k : ℤ)) = r - k :=
+private theorem wrap_k {k : ℕ} (hk : k ≤ r) : wrap n r (-(k : ℤ)) = r - k :=
   wrap_back hk hr
 
 theorem S0_vals (h3 : 3 ≤ r) : (main S0 r).val = half16 (bsig0 (word main A (r - 1))) 0 ∧
@@ -404,11 +401,11 @@ end Columns
 
 section Adds
 
-variable {n : ℕ} {main : ℕ → ℕ → F} {r : ℕ}
+variable {n : ℕ} {pc : List PreCol} {pub : ℕ → F} {main : ℕ → ℕ → F} {r : ℕ}
 
 theorem eval_foldl_add (terms : List Expr) (init : Expr) :
-    (terms.foldl .add init).eval n preCols main r =
-      init.eval n preCols main r + (terms.map (·.eval n preCols main r)).sum := by
+    (terms.foldl .add init).eval n pc pub main r =
+      init.eval n pc pub main r + (terms.map (·.eval n pc pub main r)).sum := by
   induction terms generalizing init with
   | nil => simp
   | cons t ts ih => simp [List.foldl, ih, Expr.eval, add_assoc]
@@ -416,10 +413,10 @@ theorem eval_foldl_add (terms : List Expr) (init : Expr) :
 /-- A gated sum constraint, with the gate on and every term a small natural, is an
 equation over ℕ. -/
 theorem addC_nat {sel result carry : Expr} {terms : List Expr} {ts : List ℕ} {R C : ℕ}
-    (h0 : (addC sel terms result carry).eval n preCols main r = 0)
-    (hsel : sel.eval n preCols main r = 1)
-    (hts : terms.map (·.eval n preCols main r) = ts.map (Nat.cast : ℕ → F))
-    (hR : result.eval n preCols main r = (R : F)) (hC : carry.eval n preCols main r = (C : F))
+    (h0 : (addC sel terms result carry).eval n pc pub main r = 0)
+    (hsel : sel.eval n pc pub main r = 1)
+    (hts : terms.map (·.eval n pc pub main r) = ts.map (Nat.cast : ℕ → F))
+    (hR : result.eval n pc pub main r = (R : F)) (hC : carry.eval n pc pub main r = (C : F))
     (hb1 : ts.sum < P) (hb2 : R + 65536 * C < P) : ts.sum = R + 65536 * C := by
   have hs : (ts.map (Nat.cast : ℕ → F)).sum = ((ts.sum : ℕ) : F) := (Nat.cast_list_sum ts).symm
   simp only [addC, Expr.eval, eval_foldl_add, eval_cst, hsel, hts, hR, hC, one_mul, hs,
@@ -431,11 +428,11 @@ theorem addC_nat {sel result carry : Expr} {terms : List Expr} {ts : List ℕ} {
   linear_combination h0
 
 theorem eval_bitsOf {base k : ℕ} (hr : r < n) (hb : ∀ j < k, (main (base + j) r).val ≤ 1) :
-    (bitsOf base k).eval n preCols main r = ((ofBits (fun j => bit main (base + j) r) k : ℕ) : F) :=
+    (bitsOf base k).eval n pc pub main r = ((ofBits (fun j => bit main (base + j) r) k : ℕ) : F) :=
   eval_sumPow_bits _ _ k (fun j hj => by rw [eval_col, wrap_zero hr]; exact eq_bit (hb j hj))
 
 theorem eval_col0_val {i : ℕ} (hr : r < n) :
-    (col i).eval n preCols main r = (((main i r).val : ℕ) : F) := by
+    (col i).eval n pc pub main r = (((main i r).val : ℕ) : F) := by
   rw [eval_col, wrap_zero hr, ZMod.natCast_zmod_val]
 
 theorem half16_split (y : Word) : y.toNat = half16 y 0 + 65536 * half16 y 1 := by
@@ -445,40 +442,37 @@ end Adds
 
 section Pre
 
-variable {n : ℕ} {main : ℕ → ℕ → F} {r : ℕ}
+/-- The value SHA's own preprocessed column `i` takes at offset `p` within a 72-row block. -/
+def shaPre (i p : ℕ) : F := (preCols.getD i (.periodic [0])).eval 72 p
 
-private theorem periodic_at (f : ℕ → ℕ) (hr : r < n) {i : ℕ}
+private theorem shaPre_periodic (f : ℕ → ℕ) {i p : ℕ} (hp : p < 72)
     (hi : preCols.getD i (.periodic [0]) = .periodic ((List.range PERIOD).map f)) :
-    (pre i).eval n preCols main r = ((f (r % 72) : ℕ) : F) := by
-  simp only [pre, Expr.eval, wrap_zero hr]
-  rw [hi]
-  have : r % 72 < 72 := Nat.mod_lt _ (by norm_num)
-  simp [PreCol.eval, PERIOD, List.getD_eq_getElem?_getD, this]
+    shaPre i p = ((f p : ℕ) : F) := by
+  rw [shaPre, hi]
+  simp [PreCol.eval, PERIOD, List.getD_eq_getElem?_getD, Nat.mod_eq_of_lt hp, hp]
 
-theorem pre_round (hr : r < n) :
-    (pre IS_ROUND).eval n preCols main r =
-      (((if 4 ≤ r % 72 ∧ r % 72 < 68 then 1 else 0 : ℕ)) : F) := by
-  rw [periodic_at (fun p => if 4 ≤ p ∧ p < 68 then 1 else 0) hr (by simp [preCols, IS_ROUND])]
+theorem shaPre_round {p : ℕ} (hp : p < 72) :
+    shaPre IS_ROUND p = ((if 4 ≤ p ∧ p < 68 then 1 else 0 : ℕ) : F) :=
+  shaPre_periodic (fun p => if 4 ≤ p ∧ p < 68 then 1 else 0) hp (by simp [preCols, IS_ROUND])
 
-theorem pre_sched (hr : r < n) :
-    (pre IS_SCHED).eval n preCols main r =
-      (((if 20 ≤ r % 72 ∧ r % 72 < 68 then 1 else 0 : ℕ)) : F) := by
-  rw [periodic_at (fun p => if 20 ≤ p ∧ p < 68 then 1 else 0) hr (by simp [preCols, IS_SCHED])]
+theorem shaPre_sched {p : ℕ} (hp : p < 72) :
+    shaPre IS_SCHED p = ((if 20 ≤ p ∧ p < 68 then 1 else 0 : ℕ) : F) :=
+  shaPre_periodic (fun p => if 20 ≤ p ∧ p < 68 then 1 else 0) hp (by simp [preCols, IS_SCHED])
 
-theorem pre_final (hr : r < n) :
-    (pre IS_FINAL).eval n preCols main r = (((if 68 ≤ r % 72 then 1 else 0 : ℕ)) : F) := by
-  rw [periodic_at (fun p => if 68 ≤ p then 1 else 0) hr (by simp [preCols, IS_FINAL])]
+theorem shaPre_final {p : ℕ} (hp : p < 72) :
+    shaPre IS_FINAL p = ((if 68 ≤ p then 1 else 0 : ℕ) : F) :=
+  shaPre_periodic (fun p => if 68 ≤ p then 1 else 0) hp (by simp [preCols, IS_FINAL])
 
-theorem pre_klo (hr : r < n) (h4 : 4 ≤ r % 72) (h68 : r % 72 < 68) :
-    (pre K_LO).eval n preCols main r = ((half16 (Spec.Sha256.K (r % 72 - 4)) 0 : ℕ) : F) := by
-  rw [periodic_at (fun p => if 4 ≤ p ∧ p < 68 then Kn.getD (p - 4) 0 % 2 ^ 16 else 0) hr
-    (by simp [preCols, K_LO, K])]
+theorem shaPre_klo {p : ℕ} (h4 : 4 ≤ p) (h68 : p < 68) :
+    shaPre K_LO p = ((half16 (Spec.Sha256.K (p - 4)) 0 : ℕ) : F) := by
+  rw [shaPre_periodic (fun p => if 4 ≤ p ∧ p < 68 then Kn.getD (p - 4) 0 % 2 ^ 16 else 0)
+    (by omega) (by simp [preCols, K_LO, K])]
   simp [h4, h68, half16, K_toNat]
 
-theorem pre_khi (hr : r < n) (h4 : 4 ≤ r % 72) (h68 : r % 72 < 68) :
-    (pre (K_LO + 1)).eval n preCols main r = ((half16 (Spec.Sha256.K (r % 72 - 4)) 1 : ℕ) : F) := by
-  rw [periodic_at (fun p => if 4 ≤ p ∧ p < 68 then Kn.getD (p - 4) 0 / 2 ^ 16 else 0) hr
-    (by simp [preCols, K_LO, K])]
+theorem shaPre_khi {p : ℕ} (h4 : 4 ≤ p) (h68 : p < 68) :
+    shaPre (K_LO + 1) p = ((half16 (Spec.Sha256.K (p - 4)) 1 : ℕ) : F) := by
+  rw [shaPre_periodic (fun p => if 4 ≤ p ∧ p < 68 then Kn.getD (p - 4) 0 / 2 ^ 16 else 0)
+    (by omega) (by simp [preCols, K_LO, K])]
   simp [h4, h68, half16, K_toNat]
 
 end Pre
@@ -487,44 +481,44 @@ end Pre
 
 section Round
 
-variable {logSize : ℕ} {main : ℕ → ℕ → F} (hsat : air.Satisfied logSize main)
+variable {n : ℕ} {pc : List PreCol} {pub : ℕ → F} {main : ℕ → ℕ → F} (hsat : ShaSat n pc pub main)
 include hsat
 
-theorem roundAdds_sat {r : ℕ} (hr : r < 2 ^ logSize) : ∀ c ∈ roundAdds, c.eval (2 ^ logSize) preCols main r = 0 :=
+theorem roundAdds_sat {r : ℕ} (hr : r < n) : ∀ c ∈ roundAdds, c.eval n pc pub main r = 0 :=
   fun _ hc => sat hsat (by simp only [constraints, List.mem_append]; left; left; right; exact hc) hr
 
-theorem limbs_back {r k base : ℕ} (hr : r < 2 ^ logSize) (hk : k ≤ r) (hbase : base + 32 ≤ 96)
+theorem limbs_back {r k base : ℕ} (hr : r < n) (hk : k ≤ r) (hbase : base + 32 ≤ 96)
     {h : ℕ} (hh : h ≤ 1) :
-    (limb base h (-(k : ℤ))).eval (2 ^ logSize) preCols main r = ((half16 (word main base (r - k)) h : ℕ) : F) :=
+    (limb base h (-(k : ℤ))).eval n pc pub main r = ((half16 (word main base (r - k)) h : ℕ) : F) :=
   eval_limb (wrap_back hk hr) (word_bits hsat (by omega) hbase) hh
 
-theorem carry_val {r base k : ℕ} (hr : r < 2 ^ logSize) (hbase : 108 ≤ base) (hk : base + k ≤ 124) :
-    (bitsOf base k).eval (2 ^ logSize) preCols main r = ((ofBits (fun j => bit main (base + j) r) k : ℕ) : F) :=
+theorem carry_val {r base k : ℕ} (hr : r < n) (hbase : 108 ≤ base) (hk : base + k ≤ 124) :
+    (bitsOf base k).eval n pc pub main r = ((ofBits (fun j => bit main (base + j) r) k : ℕ) : F) :=
   eval_bitsOf hr (fun j hj => bool_val hsat hr (Or.inr ⟨by omega, by omega⟩))
 
 /-- **Round step.** At a round row, `a` and `e` are FIPS round `t = r mod 72 − 4` applied to
 the previous rows. -/
-theorem round_step {r : ℕ} (hr : r < 2 ^ logSize) (h4 : 4 ≤ r % 72) (h68 : r % 72 < 68) :
+theorem round_step {r t : ℕ} (hr : r < n) (hr4 : 4 ≤ r)
+    (hsel : (pre IS_ROUND).eval n pc pub main r = 1)
+    (kl : (pre K_LO).eval n pc pub main r = ((half16 (Spec.Sha256.K t) 0 : ℕ) : F))
+    (kh : (pre (K_LO + 1)).eval n pc pub main r = ((half16 (Spec.Sha256.K t) 1 : ℕ) : F)) :
     word main A r =
         (word main E (r - 4) + bsig1 (word main E (r - 1)) +
           ch (word main E (r - 1)) (word main E (r - 2)) (word main E (r - 3)) +
-          Spec.Sha256.K (r % 72 - 4) + word main W r) +
+          Spec.Sha256.K t + word main W r) +
         (bsig0 (word main A (r - 1)) +
           maj (word main A (r - 1)) (word main A (r - 2)) (word main A (r - 3))) ∧
     word main E r =
       word main A (r - 4) +
         (word main E (r - 4) + bsig1 (word main E (r - 1)) +
           ch (word main E (r - 1)) (word main E (r - 2)) (word main E (r - 3)) +
-          Spec.Sha256.K (r % 72 - 4) + word main W r) := by
-  have hr4 : 4 ≤ r := le_trans h4 (Nat.mod_le _ _)
+          Spec.Sha256.K t + word main W r) := by
   have h3 : 3 ≤ r := by omega
   -- Column facts.
   obtain ⟨S0l, S0h⟩ := S0_vals hsat hr h3
   obtain ⟨S1l, S1h⟩ := S1_vals hsat hr h3
   obtain ⟨CHl, CHh⟩ := CH_vals hsat hr h3
   obtain ⟨MJl, MJh⟩ := MJ_vals hsat hr h3
-  have hsel : (pre IS_ROUND).eval (2 ^ logSize) preCols main r = 1 := by
-    rw [pre_round hr]; simp [h4, h68]
   have E4 := fun h (hh : h ≤ 1) => limbs_back hsat hr (k := 4) hr4 (base := E) (by decide) hh
   have A4 := fun h (hh : h ≤ 1) => limbs_back hsat hr (k := 4) hr4 (base := A) (by decide) hh
   have W0 := fun h (hh : h ≤ 1) => limbs_back hsat hr (k := 0) (Nat.zero_le _) (base := W) (by decide) hh
@@ -535,9 +529,7 @@ theorem round_step {r : ℕ} (hr : r < 2 ^ logSize) (h4 : 4 ≤ r % 72) (h68 : r
   have cAh := carry_val hsat hr (base := CA_HI) (k := 3) (by decide) (by decide)
   have cEl := carry_val hsat hr (base := CE_LO) (k := 3) (by decide) (by decide)
   have cEh := carry_val hsat hr (base := CE_HI) (k := 3) (by decide) (by decide)
-  have kl := pre_klo (main := main) hr h4 h68
-  have kh := pre_khi (main := main) hr h4 h68
-  have c0 := fun i => eval_col0_val (n := 2 ^ logSize) (main := main) (i := i) hr
+  have c0 := fun i => eval_col0_val (n := n) (pc := pc) (pub := pub) (main := main) (i := i) hr
   -- The four addition constraints.
   have hall := roundAdds_sat hsat hr
   simp only [roundAdds, List.forall_mem_cons, List.not_mem_nil, IsEmpty.forall_iff,
@@ -550,7 +542,7 @@ theorem round_step {r : ℕ} (hr : r < 2 ^ logSize) (h4 : 4 ≤ r % 72) (h68 : r
   have na0 := addC_nat ea0 hsel
     (ts := [half16 Yr 0, half16 (bsig1 (word main E (r - 1))) 0,
       half16 (ch (word main E (r - 1)) (word main E (r - 2)) (word main E (r - 3))) 0,
-      half16 (Spec.Sha256.K (r % 72 - 4)) 0, half16 (word main W r) 0,
+      half16 (Spec.Sha256.K t) 0, half16 (word main W r) 0,
       half16 (bsig0 (word main A (r - 1))) 0,
       half16 (maj (word main A (r - 1)) (word main A (r - 2)) (word main A (r - 3))) 0])
     (by simp only [List.cons_append, List.nil_append, List.map_cons, List.map_nil, Nat.add_zero,
@@ -558,14 +550,14 @@ theorem round_step {r : ℕ} (hr : r < 2 ^ logSize) (h4 : 4 ≤ r % 72) (h68 : r
     (A0 0 (by norm_num)) cAl
     (by simp only [List.sum_cons, List.sum_nil]; linarith [hb Yr 0, hb (bsig1 (word main E (r - 1))) 0,
       hb (ch (word main E (r - 1)) (word main E (r - 2)) (word main E (r - 3))) 0,
-      hb (Spec.Sha256.K (r % 72 - 4)) 0, hb (word main W r) 0, hb (bsig0 (word main A (r - 1))) 0,
+      hb (Spec.Sha256.K t) 0, hb (word main W r) 0, hb (bsig0 (word main A (r - 1))) 0,
       hb (maj (word main A (r - 1)) (word main A (r - 2)) (word main A (r - 3))) 0])
     (by linarith [hb (word main A r) 0, bc CA_LO 3])
   set Ch := ch (word main E (r - 1)) (word main E (r - 2)) (word main E (r - 3))
   set Mj := maj (word main A (r - 1)) (word main A (r - 2)) (word main A (r - 3))
   set B1 := bsig1 (word main E (r - 1))
   set B0 := bsig0 (word main A (r - 1))
-  set Kt := Spec.Sha256.K (r % 72 - 4)
+  set Kt := Spec.Sha256.K t
   set Wr := word main W r
   set Xr := word main A (r - 4)
   set cAL := ofBits (fun j => bit main (CA_LO + j) r) 3
@@ -611,22 +603,20 @@ theorem round_step {r : ℕ} (hr : r < 2 ^ logSize) (h4 : 4 ≤ r % 72) (h68 : r
     omega
 
 /-- **Schedule step.** At a scheduled row, `W` follows the FIPS message-schedule recurrence. -/
-theorem schedule_step {r : ℕ} (hr : r < 2 ^ logSize) (h20 : 20 ≤ r % 72) (h68 : r % 72 < 68) :
+theorem schedule_step {r : ℕ} (hr : r < n) (hr20 : 16 ≤ r)
+    (hsel : (pre IS_SCHED).eval n pc pub main r = 1) :
     word main W r = ssig1 (word main W (r - 2)) + word main W (r - 7) +
       ssig0 (word main W (r - 15)) + word main W (r - 16) := by
-  have hr20 : 20 ≤ r := le_trans h20 (Nat.mod_le _ _)
   obtain ⟨s0l, s0h⟩ := s0_vals hsat hr (by omega)
   obtain ⟨s1l, s1h⟩ := s1_vals hsat hr (by omega)
-  have hsel : (pre IS_SCHED).eval (2 ^ logSize) preCols main r = 1 := by
-    rw [pre_sched hr]; simp [h20, h68]
   have W7 := fun h (hh : h ≤ 1) => limbs_back hsat hr (k := 7) (by omega) (base := W) (by decide) hh
   have W16 := fun h (hh : h ≤ 1) => limbs_back hsat hr (k := 16) (by omega) (base := W) (by decide) hh
   have W0 := fun h (hh : h ≤ 1) => limbs_back hsat hr (k := 0) (Nat.zero_le _) (base := W) (by decide) hh
   simp only [Nat.cast_ofNat, Nat.cast_zero, neg_zero, Nat.sub_zero] at W7 W16 W0
   have cl := carry_val hsat hr (base := CW_LO) (k := 2) (by decide) (by decide)
   have ch' := carry_val hsat hr (base := CW_HI) (k := 2) (by decide) (by decide)
-  have c0 := fun i => eval_col0_val (n := 2 ^ logSize) (main := main) (i := i) hr
-  have hall : ∀ c ∈ scheduleAdds, c.eval (2 ^ logSize) preCols main r = 0 :=
+  have c0 := fun i => eval_col0_val (n := n) (pc := pc) (pub := pub) (main := main) (i := i) hr
+  have hall : ∀ c ∈ scheduleAdds, c.eval n pc pub main r = 0 :=
     fun _ hc => sat hsat (by simp only [constraints, List.mem_append]; left; right; exact hc) hr
   simp only [scheduleAdds, List.forall_mem_cons, List.not_mem_nil, IsEmpty.forall_iff,
     implies_true, and_true] at hall
@@ -660,12 +650,10 @@ theorem schedule_step {r : ℕ} (hr : r < 2 ^ logSize) (h20 : 20 ≤ r % 72) (h6
 
 /-- **Finalize step.** At a finalize row, `a`/`e` hold the sum (mod 2^32) of the word four rows
 up and the word 68 rows up. -/
-theorem final_step {r : ℕ} (hr : r < 2 ^ logSize) (h68 : 68 ≤ r % 72) :
+theorem final_step {r : ℕ} (hr : r < n) (hr68 : 68 ≤ r)
+    (hsel : (pre IS_FINAL).eval n pc pub main r = 1) :
     word main A r = word main A (r - 4) + word main A (r - 68) ∧
     word main E r = word main E (r - 4) + word main E (r - 68) := by
-  have hr68 : 68 ≤ r := le_trans h68 (Nat.mod_le _ _)
-  have hsel : (pre IS_FINAL).eval (2 ^ logSize) preCols main r = 1 := by
-    rw [pre_final hr]; simp [h68]
   have L := fun base k h (hk : k ≤ 68) (hbase : base + 32 ≤ 96) (hh : h ≤ 1) =>
     limbs_back hsat hr (k := k) (by omega) (base := base) hbase hh
   have A4 := fun h hh => L A 4 h (by norm_num) (by decide) hh
@@ -679,7 +667,7 @@ theorem final_step {r : ℕ} (hr : r < 2 ^ logSize) (h68 : 68 ≤ r % 72) :
   have cAh := carry_val hsat hr (base := CA_HI) (k := 3) (by decide) (by decide)
   have cEl := carry_val hsat hr (base := CE_LO) (k := 3) (by decide) (by decide)
   have cEh := carry_val hsat hr (base := CE_HI) (k := 3) (by decide) (by decide)
-  have hall : ∀ c ∈ finalAdds, c.eval (2 ^ logSize) preCols main r = 0 :=
+  have hall : ∀ c ∈ finalAdds, c.eval n pc pub main r = 0 :=
     fun _ hc => sat hsat (by simp only [constraints, List.mem_append]; right; exact hc) hr
   simp only [finalAdds, List.forall_mem_cons, List.not_mem_nil, IsEmpty.forall_iff,
     implies_true, and_true] at hall
@@ -740,9 +728,10 @@ def messageAt (main : ℕ → ℕ → F) (s : ℕ) : ℕ → Word := fun t => wo
 /-- Output state, read from the finalize rows of the block at `s`. -/
 def outputAt (main : ℕ → ℕ → F) (s : ℕ) : State := stAt main (s + 71)
 
-variable {logSize : ℕ} {main : ℕ → ℕ → F} (hsat : air.Satisfied logSize main)
-  {s : ℕ} (hs : s % 72 = 0) (hsn : s + 72 ≤ 2 ^ logSize)
-include hsat hs hsn
+variable {n : ℕ} {pc : List PreCol} {pub : ℕ → F} {main : ℕ → ℕ → F} (hsat : ShaSat n pc pub main)
+  {s : ℕ} (hsn : s + 72 ≤ n)
+  (hpre : ∀ p < 72, ∀ i < 5, (pre i).eval n pc pub main (s + p) = shaPre i p)
+include hsat hsn hpre
 
 theorem schedule_trace : ∀ t < 64, word main W (s + 4 + t) = schedule (messageAt main s) t := by
   intro t
@@ -753,21 +742,24 @@ theorem schedule_trace : ∀ t < 64, word main W (s + 4 + t) = schedule (message
     split
     · rfl
     · rename_i h16
-      have hmod : (s + 4 + t) % 72 = 4 + t := by
-        rw [Nat.add_assoc, Nat.add_mod, hs, Nat.zero_add, Nat.mod_mod, Nat.mod_eq_of_lt (by omega)]
-      have step := schedule_step hsat (r := s + 4 + t) (by omega) (by rw [hmod]; omega)
-        (by rw [hmod]; omega)
+      have hsel : (pre IS_SCHED).eval n pc pub main (s + 4 + t) = 1 := by
+        rw [show s + 4 + t = s + (4 + t) by omega, hpre _ (by omega) _ (by decide),
+          shaPre_sched (by omega)]
+        simp [show 20 ≤ 4 + t by omega, show 4 + t < 68 by omega]
+      have step := schedule_step hsat (r := s + 4 + t) (by omega) (by omega) hsel
       rw [show s + 4 + t - 2 = s + 4 + (t - 2) by omega, show s + 4 + t - 7 = s + 4 + (t - 7) by omega,
         show s + 4 + t - 15 = s + 4 + (t - 15) by omega,
         show s + 4 + t - 16 = s + 4 + (t - 16) by omega] at step
       rw [step, ih (t - 2) (by omega) (by omega), ih (t - 7) (by omega) (by omega),
         ih (t - 15) (by omega) (by omega), ih (t - 16) (by omega) (by omega)]
 
-omit hs hsn in
-theorem stAt_succ {r : ℕ} (hr : r < 2 ^ logSize) (h4 : 4 ≤ r % 72) (h68 : r % 72 < 68) :
-    round (stAt main (r - 1)) (Spec.Sha256.K (r % 72 - 4)) (word main W r) = stAt main r := by
-  obtain ⟨ha, he⟩ := round_step hsat hr h4 h68
-  have hr4 : 4 ≤ r := le_trans h4 (Nat.mod_le _ _)
+omit hsn hpre in
+theorem stAt_succ {r t : ℕ} (hr : r < n) (hr4 : 4 ≤ r)
+    (hsel : (pre IS_ROUND).eval n pc pub main r = 1)
+    (kl : (pre K_LO).eval n pc pub main r = ((half16 (Spec.Sha256.K t) 0 : ℕ) : F))
+    (kh : (pre (K_LO + 1)).eval n pc pub main r = ((half16 (Spec.Sha256.K t) 1 : ℕ) : F)) :
+    Spec.Sha256.round (stAt main (r - 1)) (Spec.Sha256.K t) (word main W r) = stAt main r := by
+  obtain ⟨ha, he⟩ := round_step hsat hr hr4 hsel kl kh
   have e1 : r - 1 - 1 = r - 2 := by omega
   have e2 : r - 1 - 2 = r - 3 := by omega
   have e3 : r - 1 - 3 = r - 4 := by omega
@@ -779,22 +771,29 @@ theorem rounds_trace : ∀ t ≤ 64, rounds (inputAt main s) (messageAt main s) 
   induction t with
   | zero => rfl
   | succ t ih =>
-    rw [rounds, ih (by omega), ← schedule_trace hsat hs hsn t (by omega)]
-    have := stAt_succ hsat (r := s + 4 + t) (by omega) (by omega) (by omega)
-    rw [show s + 4 + t - 1 = s + 3 + t by omega, show (s + 4 + t) % 72 - 4 = t by omega] at this
+    rw [rounds, ih (by omega), ← schedule_trace hsat hsn hpre t (by omega)]
+    have hp := fun i (hi : i < 5) => hpre (4 + t) (by omega) i hi
+    rw [show s + (4 + t) = s + 4 + t by omega] at hp
+    have := stAt_succ hsat (r := s + 4 + t) (t := t) (by omega) (by omega)
+      (by rw [hp _ (by decide), shaPre_round (by omega)]; simp [show 4 + t < 68 by omega])
+      (by rw [hp _ (by decide), shaPre_klo (by omega) (by omega)]; simp)
+      (by rw [hp _ (by decide), shaPre_khi (by omega) (by omega)]; simp)
+    rw [show s + 4 + t - 1 = s + 3 + t by omega] at this
     rw [this, show s + 3 + (t + 1) = s + 4 + t by omega]
 
-/-- **SHA-256 compression soundness.** In any trace satisfying the AIR, every aligned
-72-row block computes the FIPS 180-4 compression function: its finalize rows hold
+/-- **SHA-256 compression soundness (embedded form).** Wherever the SHA constraints hold on
+every row and SHA's selectors take their block values on rows `s … s+71`, the finalize rows hold
 `compress H M`, where `H` is read from the init rows and `M` from the first 16 round rows. -/
 theorem compress_sound : compress (inputAt main s) (messageAt main s) = outputAt main s := by
   have f := fun j (hj : j < 4) => final_step hsat (r := s + 68 + j) (by omega) (by omega)
+    (by rw [show s + 68 + j = s + (68 + j) by omega, hpre _ (by omega) _ (by decide),
+          shaPre_final (by omega)]; simp)
   obtain ⟨fa0, fe0⟩ := f 0 (by norm_num)
   obtain ⟨fa1, fe1⟩ := f 1 (by norm_num)
   obtain ⟨fa2, fe2⟩ := f 2 (by norm_num)
   obtain ⟨fa3, fe3⟩ := f 3 (by norm_num)
   simp only [compress]
-  rw [rounds_trace hsat hs hsn 64 le_rfl]
+  rw [rounds_trace hsat hsn hpre 64 le_rfl]
   simp only [inputAt, outputAt, stAt, State.mk.injEq]
   simp only [show s + 68 + 0 = s + 68 by omega, show s + 68 + 0 - 4 = s + 64 by omega,
     show s + 68 + 0 - 68 = s by omega, show s + 68 + 1 = s + 69 by omega,
@@ -811,5 +810,23 @@ theorem compress_sound : compress (inputAt main s) (messageAt main s) = outputAt
     fa0, fe0, fa1, fe1, fa2, fe2, fa3, fe3, BitVec.add_comm, and_self]
 
 end Block
+
+/-! ## The standalone SHA-256 AIR -/
+
+theorem preCols_periodic {i : ℕ} (hi : i < 5) :
+    ∃ vals : List ℕ, preCols.getD i (.periodic [0]) = .periodic vals ∧ vals.length = 72 := by
+  interval_cases i <;> exact ⟨_, rfl, by simp [PERIOD]⟩
+
+/-- **SHA-256 compression soundness for `Sha256.air`.** In any trace satisfying the AIR, every
+aligned 72-row block computes the FIPS 180-4 compression function. -/
+theorem compress_sound_air {logSize : ℕ} {pub : ℕ → F} {main : ℕ → ℕ → F}
+    (hsat : air.Satisfied logSize pub main) {s : ℕ} (hs : s % 72 = 0) (hsn : s + 72 ≤ 2 ^ logSize) :
+    compress (inputAt main s) (messageAt main s) = outputAt main s := by
+  refine compress_sound (pc := preCols) (pub := pub) hsat hsn ?_
+  intro p hp i hi
+  obtain ⟨vals, hv, hl⟩ := preCols_periodic hi
+  simp only [pre, Expr.eval, wrap_zero (show s + p < 2 ^ logSize by omega), shaPre]
+  rw [hv]
+  simp only [PreCol.eval, hl, show (s + p) % 72 = p by omega, Nat.mod_eq_of_lt hp]
 
 end StarkedAir.Sha256

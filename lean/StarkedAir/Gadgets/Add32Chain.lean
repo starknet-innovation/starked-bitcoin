@@ -58,10 +58,10 @@ def word (main : ℕ → ℕ → F) (base r : ℕ) : ℕ :=
 /-! ### Soundness -/
 
 section
-variable {n : ℕ} {main : ℕ → ℕ → F}
+variable {n : ℕ} {pub : ℕ → F} {main : ℕ → ℕ → F}
 
 theorem limbAux_eval (base half : ℕ) (off : ℤ) (r k : ℕ) :
-    (limbAux base half off k).eval n [.notLast] main r =
+    (limbAux base half off k).eval n [.notLast] pub main r =
       ((∑ j ∈ Finset.range k, 2 ^ j * (main (base + (16 * half + j)) (wrap n r off)).val : ℕ) : F) := by
   induction k with
   | zero => simp [limbAux, Expr.eval]
@@ -94,13 +94,13 @@ theorem mem_bool {i : ℕ} (hi : i < 98) : boolC (.col .main i 0) ∈ constraint
 theorem P_gt : 2 ^ 20 < P := by norm_num [P]
 
 /-- **Soundness of the add32-chain AIR.** -/
-theorem sound {logSize : ℕ} {main : ℕ → ℕ → F} (h : air.Satisfied logSize main) :
+theorem sound {logSize : ℕ} {pub : ℕ → F} {main : ℕ → ℕ → F} (h : air.Satisfied logSize pub main) :
     ∀ r < 2 ^ logSize,
       word main Z r = (word main X r + word main Y r) % 2 ^ 32 ∧
       (r + 1 < 2 ^ logSize → word main X (r + 1) = word main Z r) := by
   intro r hr
   set n := 2 ^ logSize with hn
-  have ev : ∀ c ∈ constraints, c.eval n [.notLast] main r = 0 := fun c hc => h r hr c hc
+  have ev : ∀ c ∈ constraints, c.eval n [.notLast] pub main r = 0 := fun c hc => h r hr c hc
   -- Every bit and carry column is boolean at every row < n.
   have bools : ∀ r' < n, ∀ i < 98, (main i r').val ≤ 1 := by
     intro r' hr' i hi
@@ -112,7 +112,7 @@ theorem sound {logSize : ℕ} {main : ℕ → ℕ → F} (h : air.Satisfied logS
       limbNat main base half r' < 2 ^ 16 := by
     intro r' hr' base half hle
     exact limbNat_lt (fun j hj => bools r' hr' _ (by omega))
-  have limb_eval : ∀ base half (off : ℤ), (limb base half off).eval n [.notLast] main r =
+  have limb_eval : ∀ base half (off : ℤ), (limb base half off).eval n [.notLast] pub main r =
       ((limbNat main base half (wrap n r off) : ℕ) : F) := by
     intro base half off; exact limbAux_eval base half off r 16
   have cLo_le := bools r hr cLo (by decide)

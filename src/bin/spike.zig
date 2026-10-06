@@ -47,7 +47,7 @@ pub fn main() !void {
         try sb.air.prove.prove(sb.air.prove.Engine(CpuBackend), a, config, prepared);
     const prove_s = @as(f64, @floatFromInt(timer.lap())) / 1e9;
     const bytes = try proof_wire.encodeProofBytes(a, proof);
-    try sb.air.prove.verify(a, config, air, log_size, proof);
+    try sb.air.prove.verify(a, config, air, log_size, &.{}, proof);
     const verify_s = @as(f64, @floatFromInt(timer.lap())) / 1e9;
     const digest = try air.digest(a);
     var proof_hash: [32]u8 = undefined;
@@ -81,7 +81,7 @@ fn sha(a: std.mem.Allocator, log_size: u32, use_metal: bool) !void {
         try sb.air.prove.prove(sb.air.prove.Engine(CpuBackend), a, config, prepared);
     const prove_s = @as(f64, @floatFromInt(timer.lap())) / 1e9;
     const bytes = try proof_wire.encodeProofBytes(a, proof);
-    try sb.air.prove.verify(a, config, air, log_size, proof);
+    try sb.air.prove.verify(a, config, air, log_size, &.{}, proof);
     const verify_s = @as(f64, @floatFromInt(timer.lap())) / 1e9;
     std.debug.print(
         "sha256_compress rows=2^{d} compressions={d} backend={s} witness={d:.3}s prove={d:.3}s verify={d:.3}s proof={d}B => {d:.0} compressions/s ({d:.0} headers/s)\n",

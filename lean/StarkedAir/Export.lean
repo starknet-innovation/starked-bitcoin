@@ -26,6 +26,7 @@ private def emit (e : Expr) : StateM EmitState ℕ := do
     | .sub a b => do let a ← emit a; let b ← emit b; pure s!"\{\"sub\":[{a},{b}]}"
     | .mul a b => do let a ← emit a; let b ← emit b; pure s!"\{\"mul\":[{a},{b}]}"
     | .neg a => do let a ← emit a; pure s!"\{\"neg\":{a}}"
+    | .pub i => pure s!"\{\"pub\":{i}}"
   let s ← get
   let id := s.out.size
   set { s with ids := s.ids.insert e id, out := s.out.push node }
@@ -35,13 +36,23 @@ private def preJson : PreCol → String
   | .isFirst => "{\"is_first\":{}}"
   | .notLast => "{\"not_last\":{}}"
   | .periodic vs => s!"\{\"periodic\":[{",".intercalate (vs.map toString)}]}"
+  | .rowLt k => s!"\{\"row_lt\":{k}}"
+  | .rowGeEnd k => s!"\{\"row_ge_end\":{k}}"
+
+/-- Number of public inputs referenced (max index + 1). -/
+def Expr.nPub : Expr → ℕ
+  | .pub i => i + 1
+  | .add a b | .sub a b | .mul a b => max a.nPub b.nPub
+  | .neg a => a.nPub
+  | _ => 0
 
 def Air.toJson (air : Air) : String :=
   let (roots, st) := (air.constraints.mapM emit).run {}
   let join (xs : List String) := ",".intercalate xs
-  "{\"schema\":\"starked-air-v0\"" ++
+  "{\"schema\":\"starked-air-v1\"" ++
     s!",\"name\":\"{air.name}\"" ++
     s!",\"n_preprocessed\":{air.pre.length},\"n_main\":{air.nMain}" ++
+    s!",\"n_pub\":{(air.constraints.map Expr.nPub).foldl max 0}" ++
     s!",\"preprocessed\":[{join (air.pre.map preJson)}]" ++
     s!",\"exprs\":[{join st.out.toList}]" ++
     s!",\"constraints\":[{join (roots.map toString)}]}"

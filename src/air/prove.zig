@@ -2,8 +2,8 @@
 //! with stwo-zig's generic prover engine on any backend (CPU, Metal, ...).
 //!
 //! Transcript: pcs config → preprocessed commitment → statement
-//! (`log_size` and the AIR digest) → main commitment → STARK. The AIR digest
-//! binds the exact constraint program into Fiat–Shamir.
+//! (`log_size`, the AIR digest and the public inputs) → main commitment → STARK.
+//! The AIR digest binds the exact constraint program into Fiat–Shamir.
 
 const std = @import("std");
 const ir = @import("ir.zig");
@@ -34,16 +34,20 @@ pub fn Engine(comptime Backend: type) type {
 pub const AirStatement = struct {
     log_size: u32,
     digest: [32]u8,
+    /// Public inputs (canonical M31 values).
+    pubs: []const M31 = &.{},
     /// Not part of the public statement; carried so the spec can build the component.
     air: *const ir.Air,
     allocator: std.mem.Allocator,
 };
 
-fn mixStatement(channel: *Channel, log_size: u32, digest: [32]u8) void {
-    var words: [9]u32 = undefined;
+fn mixStatement(channel: *Channel, log_size: u32, digest: [32]u8, pubs: []const M31) void {
+    var words: [10]u32 = undefined;
     words[0] = log_size;
     for (0..8) |i| words[1 + i] = std.mem.readInt(u32, digest[4 * i ..][0..4], .little);
+    words[9] = @intCast(pubs.len);
     channel.mixU32s(&words);
+    for (pubs) |p| channel.mixU32s(&.{p.toU32()});
 }
 
 pub const Prepared = prover_transaction.PreparedInput(AirStatement);
@@ -134,13 +138,13 @@ const Spec = struct {
     }
 
     pub fn beforeMainCommit(channel: *Channel, request: AirStatement) !void {
-        mixStatement(channel, request.log_size, request.digest);
+        mixStatement(channel, request.log_size, request.digest, request.pubs);
     }
 
     pub fn initProverContext(out: *ProverContext, _: *Channel, request: AirStatement) !void {
         out.* = .{
             .statement_value = request,
-            .component = try component_mod.Component.init(request.allocator, request.air.*, request.log_size),
+            .component = try component_mod.Component.init(request.allocator, request.air.*, request.log_size, request.pubs),
         };
     }
 
@@ -184,6 +188,7 @@ pub fn verify(
     pcs_config: pcs_core.PcsConfig,
     air: ir.Air,
     log_size: u32,
+    pubs: []const M31,
     proof_in: Proof,
 ) !void {
     var proof = proof_in;
@@ -207,10 +212,10 @@ pub fn verify(
     if (!std.mem.eql(u8, std.mem.asBytes(&expected_pre), std.mem.asBytes(&proof.commitment_scheme_proof.commitments.items[0])))
         return error.PreprocessedRootMismatch;
     try scheme.commit(allocator, proof.commitment_scheme_proof.commitments.items[0], pre_logs, &channel);
-    mixStatement(&channel, log_size, try air.digest(allocator));
+    mixStatement(&channel, log_size, try air.digest(allocator), pubs);
     try scheme.commit(allocator, proof.commitment_scheme_proof.commitments.items[1], main_logs, &channel);
 
-    var component = try component_mod.Component.init(allocator, air, log_size);
+    var component = try component_mod.Component.init(allocator, air, log_size, pubs);
     defer component.deinit();
     const components = [_]core_air_components.Component{component.asVerifierComponent()};
     moved = true;

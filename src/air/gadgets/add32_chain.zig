@@ -170,7 +170,7 @@ test "prove and verify on CPU; verification rejects a bad witness and a differen
     {
         const w = try witness(a, log_size, 12345, try randomYs(a, n, 2));
         const proof = try prove_mod.prove(Engine, a, config, try prove_mod.prepare(a, statement, @ptrCast(w.main)));
-        try prove_mod.verify(a, config, air, log_size, proof);
+        try prove_mod.verify(a, config, air, log_size, &.{}, proof);
     }
     {
         // The honest prover refuses a witness that violates the AIR (its
@@ -188,7 +188,7 @@ test "prove and verify on CPU; verification rejects a bad witness and a differen
         const w = try witness(a, log_size, 7, try randomYs(a, n, 4));
         const proof = try prove_mod.prove(Engine, a, config, try prove_mod.prepare(a, statement, @ptrCast(w.main)));
         const other = try build(a, false);
-        try std.testing.expectError(error.OodsNotMatching, prove_mod.verify(a, config, other, log_size, proof));
+        try std.testing.expectError(error.OodsNotMatching, prove_mod.verify(a, config, other, log_size, &.{}, proof));
     }
 }
 
@@ -231,7 +231,7 @@ test "a prover that commits forged preprocessed columns is rejected" {
     const Engine = prove_mod.Engine(CpuBackend);
     const config = try testConfig();
     const proof = try prove_mod.prove(Engine, a, config, forged);
-    try std.testing.expectError(error.PreprocessedRootMismatch, prove_mod.verify(a, config, air, log_size, proof));
+    try std.testing.expectError(error.PreprocessedRootMismatch, prove_mod.verify(a, config, air, log_size, &.{}, proof));
 }
 
 /// The AIR as exported from Lean (`lean/StarkedAir/Gadgets/Add32Chain.lean`),
@@ -265,5 +265,5 @@ test "Lean-exported AIR: Zig witness satisfies it, proves on CPU, and verifies" 
     const statement = prove_mod.AirStatement{ .log_size = log_size, .digest = try air.digest(a), .air = &air, .allocator = a };
     const config = try testConfig();
     const proof = try prove_mod.prove(prove_mod.Engine(CpuBackend), a, config, try prove_mod.prepare(a, statement, @ptrCast(w.main)));
-    try prove_mod.verify(a, config, air, log_size, proof);
+    try prove_mod.verify(a, config, air, log_size, &.{}, proof);
 }

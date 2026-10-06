@@ -253,5 +253,5 @@ test "SHA-256 AIR: prove and verify on CPU" {
         .fri_config = try @import("stwo_core").fri.FriConfig.init(0, 1, 3),
     };
     const proof = try prove_mod.prove(prove_mod.Engine(CpuBackend), a, config, try prove_mod.prepare(a, statement, @ptrCast(wit.main)));
-    try prove_mod.verify(a, config, air, log_size, proof);
+    try prove_mod.verify(a, config, air, log_size, &.{}, proof);
 }
