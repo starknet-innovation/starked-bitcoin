@@ -89,4 +89,38 @@ instance (H : State) (n : ℕ) : Decidable (powOk H n) := by
 -- A harder target than the genesis hash meets (hash ≈ 0x19d6…·2^184): rejected.
 #guard !decide (powOk (sha256d genesis) 0x1800ffff)
 
+/-! ## Difficulty retarget (Bitcoin Core `GetNextWorkRequired`, mainnet) -/
+
+/-- `arith_uint256::SetCompact` value (ignoring the validity flags). -/
+def compactValue (n : ℕ) : ℕ :=
+  let nSize := n / 2 ^ 24
+  let nWord := n % 2 ^ 23
+  if nSize ≤ 3 then nWord / 256 ^ (3 - nSize) else nWord * 256 ^ (nSize - 3)
+
+/-- `arith_uint256::GetCompact` for a non-negative value. -/
+def getCompact (t : ℕ) : ℕ :=
+  let size := (Nat.size t + 7) / 8
+  let c := if size ≤ 3 then t * 256 ^ (3 - size) else t / 256 ^ (size - 3)
+  if c % 2 ^ 24 / 2 ^ 23 = 1 then (c / 256) + 2 ^ 24 * (size + 1) else c + 2 ^ 24 * size
+
+def targetTimespan : ℕ := 1209600
+
+/-- `CalculateNextWorkRequired`: `prevTime` is the last block of the period and `pst` the
+first (timestamps as integers; the span may be negative before clamping). -/
+def nextWork (prevNBits : ℕ) (prevTime pst : ℤ) : ℕ :=
+  let span : ℤ := max 302400 (min 4838400 (prevTime - pst))
+  let t := compactValue prevNBits * span.toNat / targetTimespan
+  getCompact (min t powLimit)
+
+/-- Timestamp field (header bytes 68..71, little-endian) = header word 17 byte-swapped. -/
+def timeOf (hw : ℕ → Word) : ℕ :=
+  let w := (hw 17).toNat
+  (w / 2 ^ 24) % 256 + 256 * ((w / 2 ^ 16) % 256) + 65536 * ((w / 2 ^ 8) % 256) + 2 ^ 24 * (w % 256)
+
+-- First real retarget (height 32256): span = time(32255) − time(30240) = 1022578.
+#guard nextWork 0x1d00ffff 1262152739 1261130161 == 0x1d00d86a
+-- Height 2016: span far above 2 weeks · 4 is clamped, the result exceeds powLimit and is capped.
+#guard nextWork 0x1d00ffff 1233061996 1231006505 == 0x1d00ffff
+#guard getCompact (0xffff * 2 ^ 208) == 0x1d00ffff
+
 end StarkedAir.Spec.Bitcoin

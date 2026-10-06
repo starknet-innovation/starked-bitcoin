@@ -1,5 +1,35 @@
 # Header-chain AIR
 
+## v3b (2026-10-06): difficulty retarget — implemented and tested; proof in progress
+
+- **Spec:** `nextWork` (Core `GetNextWorkRequired`, mainnet) and `getCompact`
+  in `lean/StarkedAir/Spec/Bitcoin.lean`. Checked against the first real
+  retarget at height 32256 (`0x1d00d86a`) and the capped case at 2016.
+- **AIR:** `lean/StarkedAir/Gadgets/Retarget.lean` (rows 220–228).
+  - Row 220 copies the predecessor's nBits, time and period-start time.
+  - At heights that are positive multiples of 2016:
+    - clamp the span (branches for below, inside and above the range, with
+      exact 16-bit-limb time arithmetic);
+    - compute `P0 = mant_prev · span` byte by byte;
+    - then either check the quotient
+      `div·mant' + ρ = 256·P0` with `ρ < div` and
+      `div = 1209600·256^(1+d)`, `d = s' − s_prev ∈ {−1, 0, 1}`, plus a
+      canonical mantissa ≥ 0x8000;
+    - or take the cap branch: nBits must be `0x1d00ffff`, with
+      `P0 ≥ 1209600·256^(28 − s_prev)`.
+  - Totals: 307 constraints, degree ≤ 3, 40 preprocessed columns, 48 public
+    inputs.
+- **Zig:** `src/btc/retarget.zig` holds the witness and an independent
+  reference `nextWork`.
+- **Tests:**
+  - heights 1984..2047 (cap branch at 2016);
+  - heights 32192..32319 (the real change at 32256);
+  - tampering with the remainder, the d flag or the clamp flag is caught;
+  - a wrong period start is refused.
+- **Benchmark:** about 350 headers/s on Metal with the CPU constraint
+  interpreter.
+
+
 ## v3a (2026-10-06): chain state — proven sound
 
 - **Rows 218–219** hold the header's height (< 2³⁰) and the boundary flag

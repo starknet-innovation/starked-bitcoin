@@ -4,6 +4,7 @@ in any satisfying trace, every header meets Bitcoin Core's `CheckProofOfWork` fo
 `nBits` on mainnet (`Spec.Bitcoin.powOk`).
 -/
 import StarkedAir.Gadgets.HeaderChainSound
+import StarkedAir.Gadgets.Retarget
 
 namespace StarkedAir.HeaderChain
 

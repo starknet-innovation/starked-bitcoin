@@ -12,7 +12,8 @@ const sha = @import("../sha256/witness.zig");
 const M31 = @import("stwo_core").fields.m31.M31;
 
 pub const PERIOD: usize = 256;
-pub const N_PUB: usize = 44;
+pub const N_PUB: usize = 48;
+const retarget = @import("retarget.zig");
 
 pub const lean_json = @embedFile("air:header_chain");
 
@@ -61,6 +62,7 @@ pub const ChainStart = struct {
     /// Previous header's nBits and period-start time, as raw header words 18 and 17.
     prev_nbits_word: u32 = 0,
     prev_pst_word: u32 = 0,
+    prev_time_word: u32 = 0,
 };
 
 /// Start state for a segment beginning at genesis (height 0 is a period boundary, so the
@@ -143,6 +145,31 @@ pub fn generateFrom(allocator: std.mem.Allocator, log_size: u32, headers: []cons
         prev_nbits = nbits;
     }
 
+    // Retarget (rows 220..228): copies of the predecessor's nBits / time / pst, then the
+    // GetNextWorkRequired witness at period boundaries.
+    var v32s = try allocator.alloc(u32, headers.len);
+    defer allocator.free(v32s);
+    var mid_carries = try allocator.alloc(u32, headers.len);
+    defer allocator.free(mid_carries);
+    for (headers, 0..) |*header, i| {
+        const base = i * PERIOD;
+        const prev_nb = if (i == 0) start.prev_nbits_word else headerWordAt(&headers[i - 1], 18);
+        const prev_time = if (i == 0) start.prev_time_word else headerWordAt(&headers[i - 1], 17);
+        const prev_pst = if (i == 0) start.prev_pst_word else words.e[base - PERIOD + 218];
+        words.a[base + 220] = prev_nb;
+        words.e[base + 220] = prev_time;
+        words.w[base + 220] = prev_pst;
+        const height = start.height + @as(u32, @intCast(i));
+        const rs = try retarget.scratch(height, prev_nb, prev_time, prev_pst, headerWordAt(header, 18));
+        for (0..8) |k| {
+            words.a[base + 221 + k] = rs.a[k];
+            words.e[base + 221 + k] = rs.e[k];
+            words.w[base + 221 + k] = rs.w[k];
+        }
+        v32s[i] = rs.v32;
+        mid_carries[i] = rs.mid_carry;
+    }
+
     var pubs: [N_PUB]M31 = undefined;
     const first = spec.blockFromBytes(headers[0][0..64]);
     wordsPubs(pubs[0..16], first[1..9].*);
@@ -151,6 +178,7 @@ pub fn generateFrom(allocator: std.mem.Allocator, log_size: u32, headers: []cons
     const limbs = [_]u32{
         start.height,         start.prev_nbits_word,                 start.prev_pst_word,
         start.height + @as(u32, @intCast(last)), headerWordAt(&headers[last], 18), words.e[last * PERIOD + 218],
+        start.prev_time_word, headerWordAt(&headers[last], 17),
     };
     for (limbs, 0..) |v, k| {
         pubs[32 + 2 * k] = M31.fromCanonical(v & 0xffff);
@@ -158,6 +186,10 @@ pub fn generateFrom(allocator: std.mem.Allocator, log_size: u32, headers: []cons
     }
     const main = try sha.columns(allocator, words, &role);
     for (height_carries, 0..) |c, i| main[sha.CA_LO][i * PERIOD + 218] = M31.fromCanonical(c);
+    for (v32s, mid_carries, 0..) |v, c, i| {
+        main[sha.CA_LO][i * PERIOD + 222] = M31.fromCanonical(v);
+        main[sha.CE_LO][i * PERIOD + 222] = M31.fromCanonical(c);
+    }
     return .{ .main = main, .pubs = pubs, .hashes = hashes };
 }
 
@@ -312,13 +344,15 @@ test "chain state: a segment from height 1 and one across the first period bound
     const genesis = &early[0];
 
     // Heights 1..16: the predecessor is genesis (a boundary, so pst = genesis time).
-    const start1 = ChainStart{ .height = 1, .prev_nbits_word = headerWordAt(genesis, 18), .prev_pst_word = headerWordAt(genesis, 17) };
+    const start1 = ChainStart{ .height = 1, .prev_nbits_word = headerWordAt(genesis, 18), .prev_pst_word = headerWordAt(genesis, 17), .prev_time_word = headerWordAt(genesis, 17) };
     const w1 = try generateFrom(a, 12, early[1..17], start1);
     try std.testing.expectEqual(null, try checkSatisfied(a, air, 12, w1));
 
     // Heights 1984..2047 cross the boundary at 2016 (pst resets to block 2016's time).
     const around = try loadHeaders(a, @embedFile("testdata:mainnet_headers_1984_2048"));
-    const start2 = ChainStart{ .height = 1984, .prev_nbits_word = headerWordAt(&early[1023], 18), .prev_pst_word = headerWordAt(genesis, 17) };
+    // Block 1983's own time is not in the test data; it only matters at a boundary, and the
+    // first boundary here (2016) reads block 2015's time from the trace.
+    const start2 = ChainStart{ .height = 1984, .prev_nbits_word = headerWordAt(&early[1023], 18), .prev_pst_word = headerWordAt(genesis, 17), .prev_time_word = 0 };
     const w2 = try generateFrom(a, 14, around, start2);
     try std.testing.expectEqual(null, try checkSatisfied(a, air, 14, w2));
     // pst of the last header (height 2047) is block 2016's time.
@@ -337,7 +371,34 @@ test "chain state: a segment from height 1 and one across the first period bound
         try std.testing.expect(try checkSatisfied(a, air, 14, w) != null);
     }
     {
-        const start_bad = ChainStart{ .height = 1, .prev_nbits_word = 0x1c00ffff, .prev_pst_word = headerWordAt(genesis, 17) };
+        const start_bad = ChainStart{ .height = 1, .prev_nbits_word = 0x1c00ffff, .prev_pst_word = headerWordAt(genesis, 17), .prev_time_word = headerWordAt(genesis, 17) };
         try std.testing.expectError(error.DifficultyChangedMidPeriod, generateFrom(a, 12, early[1..17], start_bad));
     }
+}
+
+test "retarget: the first real difficulty change (height 32256) is enforced" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const air = (try ir.Air.parseJson(a, lean_json)).value;
+    const hs = try loadHeaders(a, @embedFile("testdata:mainnet_headers_32192_32320"));
+    const p30240 = (try loadHeaders(a, @embedFile("testdata:mainnet_header_30240")))[0];
+    // Heights 32192..32319; the period started at 30240 with nBits 0x1d00ffff.
+    const start = ChainStart{ .height = 32192, .prev_nbits_word = headerWordAt(&hs[0], 18), .prev_pst_word = headerWordAt(&p30240, 17), .prev_time_word = 0 };
+    const wit = try generateFrom(a, 15, hs, start);
+    try std.testing.expectEqual(null, try checkSatisfied(a, air, 15, wit));
+    try std.testing.expectEqual(@as(u32, 0x1d00d86a), retarget.le(headerWordAt(&hs[64], 18)));
+
+    // Tampering with the boundary header's retarget witness is caught: the remainder, the
+    // exponent-difference flag, or the clamp-branch flag.
+    const r = 64 * PERIOD;
+    for ([_][2]usize{ .{ sha.A + 3, r + 225 }, .{ sha.W + 6, r + 221 }, .{ sha.W + 3, r + 221 } }) |cell| {
+        const w = try generateFrom(a, 15, hs, start);
+        w.main[cell[0]][cell[1]] = M31.one().sub(w.main[cell[0]][cell[1]]);
+        try std.testing.expect(try checkSatisfied(a, air, 15, w) != null);
+    }
+    // Claiming a mid-period difficulty for the first header's predecessor is refused.
+    var bad_start = start;
+    bad_start.prev_pst_word = headerWordAt(&hs[0], 17);
+    try std.testing.expectError(error.RetargetMismatch, generateFrom(a, 15, hs, bad_start));
 }

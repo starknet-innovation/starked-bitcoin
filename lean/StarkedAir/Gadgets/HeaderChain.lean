@@ -81,7 +81,9 @@ def preCols : List PreCol :=
   [ .rowLt PERIOD, .rowGeEnd PERIOD ] ++                                              -- 30, 31
   (List.range 4).map (fun j => oneRow (212 + j)) ++                                  -- 32..35 OUT_j
   [ oneRow 216,                                                                       -- 36 POW
-    oneRow 218 ]                                                                      -- 37 STATE
+    oneRow 218,                                                                       -- 37 STATE
+    oneRow 220,                                                                       -- 38 PREV (retarget copies)
+    oneRow 221 ]                                                                      -- 39 RT (retarget)
 
 /-! ### Constraints -/
 
@@ -245,8 +247,6 @@ def stateFam (h : ℕ) : List Expr :=
 
 def stateCs : List Expr := stateBase ++ [0, 1].flatMap stateFam
 
-def constraints : List Expr := baseConstraints ++ powCs ++ stateCs
-
-def air : Air := { name := "header_chain_v3a", nMain := Sha256.N_MAIN, pre := preCols, constraints }
+-- The full constraint list and `air` are assembled in `Gadgets/Retarget.lean`.
 
 end StarkedAir.HeaderChain
