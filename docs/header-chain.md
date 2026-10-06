@@ -1,6 +1,6 @@
 # Header-chain AIR
 
-## v3a (2026-10-06): chain state — implemented and tested; proof in progress
+## v3a (2026-10-06): chain state — proven sound
 
 - **Rows 218–219** hold the header's height (< 2³⁰) and the boundary flag
   (set iff `height mod 2016 = 0`, via a range-checked
@@ -21,6 +21,15 @@
     time resets to block 2016's timestamp);
   - a wrong first height or a flipped flag is caught;
   - a mid-period nBits change is refused by the generator.
+- **Proof:** `lean/StarkedAir/Gadgets/StateSound.lean`, theorem
+  `state_sound`, standard axioms only. For every header, in a satisfying
+  trace:
+  - the height is the public start height plus its index, and is below 2³⁰;
+  - nBits equals the predecessor's (or the public predecessor value)
+    whenever the height is not divisible by 2016;
+  - the period-start time equals the header's own time at such heights and is
+    inherited otherwise;
+  - the last header's height, nBits and period-start time are public.
 - **Not yet constrained:** the retarget value at a boundary (v3b), median
   time past (v4) and chainwork (v5). See `docs/consensus-rules.md`.
 

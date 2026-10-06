@@ -10,3 +10,4 @@ import StarkedAir.Gadgets.HeaderChain
 import StarkedAir.Spec.Bitcoin
 import StarkedAir.Gadgets.HeaderChainSound
 import StarkedAir.Gadgets.PowSound
+import StarkedAir.Gadgets.StateSound
