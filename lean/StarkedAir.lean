@@ -6,3 +6,4 @@ import StarkedAir.Gadgets.Sha256
 import StarkedAir.Bits
 import StarkedAir.Spec.Sha256
 import StarkedAir.Gadgets.Sha256Sound
+import StarkedAir.Gadgets.HeaderChain

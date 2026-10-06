@@ -3,7 +3,7 @@
     .fingerprint = 0xaa3a7146a36b2452,
     .version = "0.0.1",
     .minimum_zig_version = "0.15.2",
-    .paths = .{ "build.zig", "build.zig.zon", "src", "airs" },
+    .paths = .{ "build.zig", "build.zig.zon", "src", "airs", "testdata" },
     .dependencies = .{
         .stwo_core = .{ .path = "third_party/stwo-zig/src/core" },
         .stwo_prover_engine = .{ .path = "third_party/stwo-zig/src/prover" },

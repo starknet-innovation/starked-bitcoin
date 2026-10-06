@@ -55,63 +55,90 @@ fn hi(x: u32) u32 {
     return x >> 16;
 }
 
-pub fn generate(allocator: std.mem.Allocator, log_size: u32, compressions: []const Compression) !Witness {
-    const n = @as(usize, 1) << @intCast(log_size);
-    if (compressions.len > capacity(log_size)) return error.TooManyCompressions;
+/// What a row does in the compression constraints, which decides its carries.
+pub const Role = union(enum) {
+    /// Init rows and rows outside any compression: no addition is active.
+    idle,
+    /// Round `t` (0..63); the message-schedule addition is active for t ≥ 16.
+    round: u32,
+    /// Finalize rows: output = input + final working variables.
+    final,
+};
 
-    // Word-level trace of a, e, w per row.
-    const a = try allocator.alloc(u32, n);
-    defer allocator.free(a);
-    const e = try allocator.alloc(u32, n);
-    defer allocator.free(e);
-    const w = try allocator.alloc(u32, n);
-    defer allocator.free(w);
-    @memset(w, 0);
-    const outputs = try allocator.alloc(spec.State, compressions.len);
-    errdefer allocator.free(outputs);
+/// Word-level trace: a, e and w per row.
+pub const Words = struct {
+    a: []u32,
+    e: []u32,
+    w: []u32,
 
-    const n_blocks = (n + PERIOD - 1) / PERIOD;
-    const dummy = Compression{ .input = [_]u32{0} ** 8, .block = [_]u32{0} ** 16 };
-    for (0..n_blocks) |b| {
-        const c = if (b < compressions.len) compressions[b] else dummy;
-        const trace = spec.compressTraced(c.input, c.block);
-        if (b < compressions.len) outputs[b] = trace.output;
-        const base = b * PERIOD;
-        for (0..PERIOD) |p| {
-            const r = base + p;
-            if (r >= n) break;
-            if (p < 4) {
-                a[r] = c.input[3 - p];
-                e[r] = c.input[7 - p];
-            } else if (p < 68) {
-                const t = trace.rounds[p - 4];
-                a[r] = t.a;
-                e[r] = t.e;
-                w[r] = t.w;
-            } else {
-                a[r] = a[r - 4] +% a[r - 68];
-                e[r] = e[r - 4] +% e[r - 68];
-            }
-        }
+    pub fn init(allocator: std.mem.Allocator, n: usize) !Words {
+        const words = Words{ .a = try allocator.alloc(u32, n), .e = try allocator.alloc(u32, n), .w = try allocator.alloc(u32, n) };
+        @memset(words.a, 0);
+        @memset(words.e, 0);
+        @memset(words.w, 0);
+        return words;
     }
 
+    pub fn deinit(self: Words, allocator: std.mem.Allocator) void {
+        allocator.free(self.a);
+        allocator.free(self.e);
+        allocator.free(self.w);
+    }
+
+    /// Lays one compression out on rows `start .. start+72` (truncated at the trace end).
+    /// Returns its output state.
+    pub fn place(self: Words, start: usize, c: Compression) spec.State {
+        const trace = spec.compressTraced(c.input, c.block);
+        const n = self.a.len;
+        for (0..PERIOD) |p| {
+            const r = start + p;
+            if (r >= n) break;
+            if (p < 4) {
+                self.a[r] = c.input[3 - p];
+                self.e[r] = c.input[7 - p];
+            } else if (p < 68) {
+                const t = trace.rounds[p - 4];
+                self.a[r] = t.a;
+                self.e[r] = t.e;
+                self.w[r] = t.w;
+            } else {
+                self.a[r] = self.a[r - 4] +% self.a[r - 68];
+                self.e[r] = self.e[r - 4] +% self.e[r - 68];
+            }
+        }
+        return trace.output;
+    }
+};
+
+/// Role of row `r` in the standalone SHA-256 AIR (period 72).
+pub fn shaRole(r: usize) Role {
+    const p = r % PERIOD;
+    return if (p < 4) .idle else if (p < 68) .{ .round = @intCast(p - 4) } else .final;
+}
+
+/// Fills all 124 main columns from the word-level trace. Derived columns are computed for
+/// every row from cyclic neighbours. Carries follow each row's role.
+pub fn columns(allocator: std.mem.Allocator, words: Words, roleOf: *const fn (usize) Role) ![][]M31 {
+    const n = words.a.len;
+    const a = words.a;
+    const e = words.e;
+    const w = words.w;
     const main = try allocator.alloc([]M31, N_MAIN);
     for (main) |*col| {
         col.* = try allocator.alloc(M31, n);
         @memset(col.*, M31.zero());
     }
     const at = struct {
-        fn f(words: []const u32, r: usize, back: usize) u32 {
-            return words[(r + words.len - back) % words.len];
+        fn f(xs: []const u32, r: usize, back: usize) u32 {
+            return xs[(r + xs.len - back) % xs.len];
         }
     }.f;
     for (0..n) |r| {
-        const p = r % PERIOD;
         for (0..32) |i| {
-            const s: u5 = @intCast(i);
-            main[A + i][r] = M31.fromCanonical((a[r] >> s) & 1);
-            main[E + i][r] = M31.fromCanonical((e[r] >> s) & 1);
-            main[W + i][r] = M31.fromCanonical((w[r] >> s) & 1);
+            const sh: u5 = @intCast(i);
+            main[A + i][r] = M31.fromCanonical((a[r] >> sh) & 1);
+            main[E + i][r] = M31.fromCanonical((e[r] >> sh) & 1);
+            main[W + i][r] = M31.fromCanonical((w[r] >> sh) & 1);
         }
         const s0v = spec.bigSigma0(at(a, r, 1));
         const s1v = spec.bigSigma1(at(e, r, 1));
@@ -127,41 +154,67 @@ pub fn generate(allocator: std.mem.Allocator, log_size: u32, compressions: []con
         var ca = [2]u32{ 0, 0 };
         var ce = [2]u32{ 0, 0 };
         var cw = [2]u32{ 0, 0 };
-        if (p >= 4 and p < 68) {
-            const k = spec.K[p - 4];
-            const h4 = at(e, r, 4);
-            const d4 = at(a, r, 4);
-            const t1_lo = lo(h4) + lo(s1v) + lo(chv) + lo(k) + lo(w[r]);
-            const t1_hi = hi(h4) + hi(s1v) + hi(chv) + hi(k) + hi(w[r]);
-            ca[0] = (t1_lo + lo(s0v) + lo(mjv)) >> 16;
-            ca[1] = (t1_hi + hi(s0v) + hi(mjv) + ca[0]) >> 16;
-            ce[0] = (lo(d4) + t1_lo) >> 16;
-            ce[1] = (hi(d4) + t1_hi + ce[0]) >> 16;
-            if (p >= 20) {
-                const w7 = at(w, r, 7);
-                const w16 = at(w, r, 16);
-                cw[0] = (lo(ss1) + lo(w7) + lo(ss0) + lo(w16)) >> 16;
-                cw[1] = (hi(ss1) + hi(w7) + hi(ss0) + hi(w16) + cw[0]) >> 16;
-            }
-        } else if (p >= 68) {
-            ca[0] = (lo(at(a, r, 4)) + lo(at(a, r, 68))) >> 16;
-            ca[1] = (hi(at(a, r, 4)) + hi(at(a, r, 68)) + ca[0]) >> 16;
-            ce[0] = (lo(at(e, r, 4)) + lo(at(e, r, 68))) >> 16;
-            ce[1] = (hi(at(e, r, 4)) + hi(at(e, r, 68)) + ce[0]) >> 16;
+        switch (roleOf(r)) {
+            .idle => {},
+            .round => |t| {
+                const k = spec.K[t];
+                const h4 = at(e, r, 4);
+                const d4 = at(a, r, 4);
+                const t1_lo = lo(h4) + lo(s1v) + lo(chv) + lo(k) + lo(w[r]);
+                const t1_hi = hi(h4) + hi(s1v) + hi(chv) + hi(k) + hi(w[r]);
+                ca[0] = (t1_lo + lo(s0v) + lo(mjv)) >> 16;
+                ca[1] = (t1_hi + hi(s0v) + hi(mjv) + ca[0]) >> 16;
+                ce[0] = (lo(d4) + t1_lo) >> 16;
+                ce[1] = (hi(d4) + t1_hi + ce[0]) >> 16;
+                if (t >= 16) {
+                    const w7 = at(w, r, 7);
+                    const w16 = at(w, r, 16);
+                    cw[0] = (lo(ss1) + lo(w7) + lo(ss0) + lo(w16)) >> 16;
+                    cw[1] = (hi(ss1) + hi(w7) + hi(ss0) + hi(w16) + cw[0]) >> 16;
+                }
+            },
+            .final => {
+                ca[0] = (lo(at(a, r, 4)) + lo(at(a, r, 68))) >> 16;
+                ca[1] = (hi(at(a, r, 4)) + hi(at(a, r, 68)) + ca[0]) >> 16;
+                ce[0] = (lo(at(e, r, 4)) + lo(at(e, r, 68))) >> 16;
+                ce[1] = (hi(at(e, r, 4)) + hi(at(e, r, 68)) + ce[0]) >> 16;
+            },
         }
         inline for (.{ .{ CA_LO, 0, 3, &ca }, .{ CA_HI, 1, 3, &ca }, .{ CE_LO, 0, 3, &ce }, .{ CE_HI, 1, 3, &ce }, .{ CW_LO, 0, 2, &cw }, .{ CW_HI, 1, 2, &cw } }) |cfg| {
             const v = cfg[3][cfg[1]];
             for (0..cfg[2]) |j| main[cfg[0] + j][r] = M31.fromCanonical((v >> @intCast(j)) & 1);
         }
     }
-    return .{ .main = main, .outputs = outputs };
+    return main;
+}
+
+/// Standalone SHA-256 AIR witness: compressions back to back every 72 rows. Rows of a
+/// trailing partial block carry a dummy compression so its constraints hold.
+pub fn generate(allocator: std.mem.Allocator, log_size: u32, compressions: []const Compression) !Witness {
+    const n = @as(usize, 1) << @intCast(log_size);
+    if (compressions.len > capacity(log_size)) return error.TooManyCompressions;
+    const words = try Words.init(allocator, n);
+    defer words.deinit(allocator);
+    const outputs = try allocator.alloc(spec.State, compressions.len);
+    errdefer allocator.free(outputs);
+    const dummy = Compression{ .input = [_]u32{0} ** 8, .block = [_]u32{0} ** 16 };
+    for (0..(n + PERIOD - 1) / PERIOD) |b| {
+        const out = words.place(b * PERIOD, if (b < compressions.len) compressions[b] else dummy);
+        if (b < compressions.len) outputs[b] = out;
+    }
+    return .{ .main = try columns(allocator, words, &shaRole), .outputs = outputs };
 }
 
 /// Reads the output state of compression `index` back from its finalize rows.
 pub fn readOutput(main: []const []const M31, index: usize) spec.State {
+    return readOutputAt(main, index * PERIOD);
+}
+
+/// Reads the output state of the compression placed at row `start`.
+pub fn readOutputAt(main: []const []const M31, start: usize) spec.State {
     var out: spec.State = undefined;
     for (0..4) |j| {
-        const r = index * PERIOD + 68 + j;
+        const r = start + 68 + j;
         var aw: u32 = 0;
         var ew: u32 = 0;
         for (0..32) |i| {

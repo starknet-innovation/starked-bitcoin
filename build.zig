@@ -26,12 +26,16 @@ pub fn build(b: *std.Build) void {
             .{ .name = "stwo_core", .module = stwo_core },
             .{ .name = "stwo_prover_engine", .module = stwo_prover_engine },
             .{ .name = "stwo_cpu_backend", .module = stwo_cpu_backend },
+            .{ .name = "stwo_proof_wire", .module = b.dependency("stwo_proof_wire", .{ .target = target, .optimize = optimize }).module("stwo_proof_wire") },
         },
     });
 
     // AIRs exported from the Lean definitions (lean/), consumed verbatim.
     lib.addAnonymousImport("air:add32_chain", .{ .root_source_file = b.path("airs/add32_chain.json") });
     lib.addAnonymousImport("air:sha256_compress", .{ .root_source_file = b.path("airs/sha256_compress.json") });
+    lib.addAnonymousImport("air:header_chain", .{ .root_source_file = b.path("airs/header_chain.json") });
+    lib.addAnonymousImport("testdata:mainnet_headers_0_16", .{ .root_source_file = b.path("testdata/mainnet_headers_0_16.hex") });
+    lib.addAnonymousImport("testdata:mainnet_hash_15", .{ .root_source_file = b.path("testdata/mainnet_hash_15.txt") });
     lib.addAnonymousImport("air:probe_oracle", .{ .root_source_file = b.path("airs/probe_oracle.json") });
 
     const tests = b.addTest(.{ .root_module = lib });
