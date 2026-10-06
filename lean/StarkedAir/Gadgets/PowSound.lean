@@ -150,11 +150,11 @@ variable {logSize : ℕ} {pub : ℕ → F} {main : ℕ → ℕ → F} (hsat : ai
 include hsat
 
 theorem chainSat_of : ChainSat (2 ^ logSize) pub main :=
-  fun r hr c hc => hsat r hr c (List.mem_append_left _ hc)
+  fun r hr c hc => hsat r hr c (by show c ∈ constraints; simp only [constraints, List.mem_append]; tauto)
 
 theorem pow_sat {r : ℕ} (hr : r < 2 ^ logSize) :
     ∀ c ∈ powCs, c.eval (2 ^ logSize) preCols pub main r = 0 :=
-  fun c hc => hsat r hr c (List.mem_append_right _ hc)
+  fun c hc => hsat r hr c (by show c ∈ constraints; simp only [constraints, List.mem_append]; tauto)
 
 variable {j : ℕ} (hj : 256 * (j + 1) ≤ 2 ^ logSize)
 include hj

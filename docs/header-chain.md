@@ -1,5 +1,30 @@
 # Header-chain AIR
 
+## v3a (2026-10-06): chain state — implemented and tested; proof in progress
+
+- **Rows 218–219** hold the header's height (< 2³⁰) and the boundary flag
+  (set iff `height mod 2016 = 0`, via a range-checked
+  `height = 2016·q + rem`). They also hold the period-start time and two
+  auxiliary selector bits.
+- **Constraints:**
+  - the height increments by one per header;
+  - `nBits` is unchanged inside a period;
+  - the period-start time is reset at a boundary and otherwise carried.
+- **Public inputs:**
+  - 32..37: the segment's first height, and its predecessor's nBits and
+    period-start time;
+  - 38..43: the last header's height, nBits and period-start time, for
+    linking segments.
+- **Tests:**
+  - heights 1..16 after genesis;
+  - heights 1984..2047, which cross the boundary at 2016 (the period-start
+    time resets to block 2016's timestamp);
+  - a wrong first height or a flipped flag is caught;
+  - a mid-period nBits change is refused by the generator.
+- **Not yet constrained:** the retarget value at a boundary (v3b), median
+  time past (v4) and chainwork (v5). See `docs/consensus-rules.md`.
+
+
 ## v2 (2026-10-06): + proof of work — proven sound
 
 - **Definition:** `HeaderChain.powCs`. It runs on each header's row 216 and

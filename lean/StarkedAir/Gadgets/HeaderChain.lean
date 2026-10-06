@@ -45,6 +45,7 @@ def FIRST : ℕ := 30
 def LAST : ℕ := 31
 def OUT0 : ℕ := 32
 def POW : ℕ := 36
+def STATE : ℕ := 37
 
 def ivWords : List ℕ :=
   [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]
@@ -79,7 +80,8 @@ def preCols : List PreCol :=
   (List.range 8).map (fun k => oneRow (5 + k)) ++                                    -- 22..29 LINK_k
   [ .rowLt PERIOD, .rowGeEnd PERIOD ] ++                                              -- 30, 31
   (List.range 4).map (fun j => oneRow (212 + j)) ++                                  -- 32..35 OUT_j
-  [ oneRow 216 ]                                                                      -- 36 POW
+  [ oneRow 216,                                                                       -- 36 POW
+    oneRow 218 ]                                                                      -- 37 STATE
 
 /-! ### Constraints -/
 
@@ -181,8 +183,70 @@ def powCs : List Expr :=
     .mul sel (.sub (.sub mantE (cst 1)) m1E),                                     -- mant ≥ 1
     .mul sel (.mul (ohE 26) (sumPow (fun t => nbBit (8 + t)) 7)) ]                -- powLimit
 
-def constraints : List Expr := baseConstraints ++ powCs
+/-! ### Chain state (row 218 of each header; scratch in rows 218–219)
 
-def air : Air := { name := "header_chain_v2", nMain := Sha256.N_MAIN, pre := preCols, constraints }
+Row 218: `A` = height (30 bits; bits 30, 31 zero), `E` = period-start time `pst` (raw header
+word-17 form), `W` bit 0 = boundary flag, bits 1..11 = `rem = height mod 2016`,
+bits 12..22 = `rem − 1` (when not a boundary), bit 23 = `g = ¬first ∧ ¬boundary`,
+bit 24 = `g2 = first ∧ ¬boundary`; carry column `CA_LO` bit 0 = carry of the height
+increment. Row 219: `A` bits 0..19 = `q = height / 2016`; `E` bits 0..10 = `2015 − rem`.
+
+Public inputs 32..37: the segment's first height and its predecessor's nBits and pst
+(lo/hi limbs). Outputs 38..43: the last header's height, nBits and pst. -/
+
+def bitsAt (base k : ℕ) (off : ℤ := 0) : Expr := sumPow (fun i => col (base + i) off) k
+def heightE : Expr := bitsAt A 30
+def flagE : Expr := col W
+def remE : Expr := bitsAt (W + 1) 11
+def remM1E : Expr := bitsAt (W + 12) 11
+def gE : Expr := col (W + 23)
+def g2E : Expr := col (W + 24)
+def qE : Expr := bitsAt A 20 1
+def remCompE : Expr := bitsAt E 11 1
+def hCarryE : Expr := col CA_LO
+
+def stateSel : Expr := pre STATE
+def notFirst : Expr := .sub (cst 1) (pre FIRST)
+
+def stateBase : List Expr :=
+  let sel := stateSel
+  let first := pre FIRST
+  let one := cst 1
+  [ -- height: < 2^30, increments from the previous header, or is public for the first one.
+    .mul sel (col (A + 30)), .mul sel (col (A + 31)),
+    .mul (.mul sel notFirst)
+      (.sub (.add (limb A 0 (-256)) one) (.add (limb A 0) (.mul (cst 65536) hCarryE))),
+    .mul (.mul sel notFirst) (.sub (.add (limb A 1 (-256)) hCarryE) (limb A 1)),
+    .mul (.mul sel first) (.sub (limb A 0) (.pub 32)),
+    .mul (.mul sel first) (.sub (limb A 1) (.pub 33)),
+    -- height = 2016·q + rem, rem ≤ 2015, flag ↔ rem = 0.
+    .mul sel (.sub heightE (.add (.mul (cst 2016) qE) remE)),
+    .mul sel (.sub (cst 2015) (.add remE remCompE)),
+    .mul (.mul sel flagE) remE,
+    .mul (.mul sel (.sub one flagE)) (.sub (.sub remE one) remM1E),
+    -- g = ¬first ∧ ¬flag, g2 = first ∧ ¬flag.
+    .mul sel (.sub gE (.mul notFirst (.sub one flagE))),
+    .mul sel (.sub g2E (.mul first (.sub one flagE))) ]
+
+/-- nBits (word 18, row 78) is constant within a period. -/
+def nbitsLink (h : ℕ) : Expr := .mul (.mul stateSel gE) (.sub (limb W h (-140)) (limb W h (-396)))
+def nbitsFirst (h : ℕ) : Expr := .mul (.mul stateSel g2E) (.sub (limb W h (-140)) (.pub (34 + h)))
+/-- pst resets to the header's own time (word 17, row 77) at a boundary, else carries over. -/
+def pstReset (h : ℕ) : Expr := .mul (.mul stateSel flagE) (.sub (limb E h) (limb W h (-141)))
+def pstCarry (h : ℕ) : Expr := .mul (.mul stateSel gE) (.sub (limb E h) (limb E h (-256)))
+def pstFirst (h : ℕ) : Expr := .mul (.mul stateSel g2E) (.sub (limb E h) (.pub (36 + h)))
+/-- Outputs of the last header: height, nBits, pst. -/
+def outHeight (h : ℕ) : Expr := .mul (.mul stateSel (pre LAST)) (.sub (limb A h) (.pub (38 + h)))
+def outNBits (h : ℕ) : Expr := .mul (.mul stateSel (pre LAST)) (.sub (limb W h (-140)) (.pub (40 + h)))
+def outPst (h : ℕ) : Expr := .mul (.mul stateSel (pre LAST)) (.sub (limb E h) (.pub (42 + h)))
+
+def stateFam (h : ℕ) : List Expr :=
+  [nbitsLink h, nbitsFirst h, pstReset h, pstCarry h, pstFirst h, outHeight h, outNBits h, outPst h]
+
+def stateCs : List Expr := stateBase ++ [0, 1].flatMap stateFam
+
+def constraints : List Expr := baseConstraints ++ powCs ++ stateCs
+
+def air : Air := { name := "header_chain_v3a", nMain := Sha256.N_MAIN, pre := preCols, constraints }
 
 end StarkedAir.HeaderChain

@@ -12,7 +12,7 @@ const sha = @import("../sha256/witness.zig");
 const M31 = @import("stwo_core").fields.m31.M31;
 
 pub const PERIOD: usize = 256;
-pub const N_PUB: usize = 32;
+pub const N_PUB: usize = 44;
 
 pub const lean_json = @embedFile("air:header_chain");
 
@@ -54,6 +54,19 @@ pub fn powScratch(header: *const Header, hash: spec.State) !PowScratch {
     };
 }
 
+/// State before the segment's first header (see docs/consensus-rules.md).
+pub const ChainStart = struct {
+    /// Height of the segment's first header (< 2^30).
+    height: u32,
+    /// Previous header's nBits and period-start time, as raw header words 18 and 17.
+    prev_nbits_word: u32 = 0,
+    prev_pst_word: u32 = 0,
+};
+
+/// Start state for a segment beginning at genesis (height 0 is a period boundary, so the
+/// predecessor values are unused).
+pub const genesis_start = ChainStart{ .height = 0 };
+
 pub const Witness = struct {
     main: [][]M31,
     pubs: [N_PUB]M31,
@@ -74,8 +87,16 @@ fn wordsPubs(out: []M31, words: [8]u32) void {
     }
 }
 
+fn headerWordAt(header: *const Header, t: usize) u32 {
+    return std.mem.readInt(u32, header[4 * t ..][0..4], .big);
+}
+
 /// Builds the trace for exactly `2^log_size / 256` headers.
 pub fn generate(allocator: std.mem.Allocator, log_size: u32, headers: []const Header) !Witness {
+    return generateFrom(allocator, log_size, headers, genesis_start);
+}
+
+pub fn generateFrom(allocator: std.mem.Allocator, log_size: u32, headers: []const Header, start: ChainStart) !Witness {
     const n = @as(usize, 1) << @intCast(log_size);
     if (n % PERIOD != 0 or headers.len != n / PERIOD) return error.HeaderCountMismatch;
     const words = try sha.Words.init(allocator, n);
@@ -96,11 +117,48 @@ pub fn generate(allocator: std.mem.Allocator, log_size: u32, headers: []const He
         words.a[base + 217] = pow.a217;
     }
 
+    // Chain state (rows 218, 219).
+    var prev_nbits = start.prev_nbits_word;
+    var pst = start.prev_pst_word;
+    var height_carries = try allocator.alloc(u32, headers.len);
+    defer allocator.free(height_carries);
+    for (headers, 0..) |*header, i| {
+        const base = i * PERIOD;
+        const height = start.height + @as(u32, @intCast(i));
+        if (height >= 1 << 30) return error.HeightOutOfRange;
+        const rem = height % 2016;
+        const flag = rem == 0;
+        const nbits = headerWordAt(header, 18);
+        if (!flag and nbits != prev_nbits) return error.DifficultyChangedMidPeriod;
+        if (flag) pst = headerWordAt(header, 17);
+        const g: u32 = @intFromBool(i > 0 and !flag);
+        const g2: u32 = @intFromBool(i == 0 and !flag);
+        words.a[base + 218] = height;
+        words.e[base + 218] = pst;
+        words.w[base + 218] = @as(u32, @intFromBool(flag)) | (rem << 1) |
+            ((if (flag) 0 else rem - 1) << 12) | (g << 23) | (g2 << 24);
+        words.a[base + 219] = height / 2016;
+        words.e[base + 219] = 2015 - rem;
+        height_carries[i] = @intFromBool(i > 0 and (height - 1) & 0xffff == 0xffff);
+        prev_nbits = nbits;
+    }
+
     var pubs: [N_PUB]M31 = undefined;
     const first = spec.blockFromBytes(headers[0][0..64]);
     wordsPubs(pubs[0..16], first[1..9].*);
     wordsPubs(pubs[16..32], hashes[headers.len - 1]);
-    return .{ .main = try sha.columns(allocator, words, &role), .pubs = pubs, .hashes = hashes };
+    const last = headers.len - 1;
+    const limbs = [_]u32{
+        start.height,         start.prev_nbits_word,                 start.prev_pst_word,
+        start.height + @as(u32, @intCast(last)), headerWordAt(&headers[last], 18), words.e[last * PERIOD + 218],
+    };
+    for (limbs, 0..) |v, k| {
+        pubs[32 + 2 * k] = M31.fromCanonical(v & 0xffff);
+        pubs[33 + 2 * k] = M31.fromCanonical(v >> 16);
+    }
+    const main = try sha.columns(allocator, words, &role);
+    for (height_carries, 0..) |c, i| main[sha.CA_LO][i * PERIOD + 218] = M31.fromCanonical(c);
+    return .{ .main = main, .pubs = pubs, .hashes = hashes };
 }
 
 // ---------------------------------------------------------------- tests
@@ -233,4 +291,53 @@ test "header chain AIR: prove and verify blocks 0..15 on CPU" {
     const bytes = try wire.encodeProofBytes(a, proof);
     try std.testing.expect(std.meta.isError(prove_mod.verify(a, config, air, 12, &other, try wire.decodeProofBytes(a, bytes))));
     try prove_mod.verify(a, config, air, 12, &wit.pubs, proof);
+}
+
+fn checkSatisfied(a: std.mem.Allocator, air: ir.Air, log_size: u32, wit: Witness) !?usize {
+    const t = interp.RowTrace{
+        .log_size = log_size,
+        .pubs = &wit.pubs,
+        .preprocessed = @ptrCast(try air.genPreprocessed(a, log_size)),
+        .main = @ptrCast(wit.main),
+    };
+    return if (try interp.firstViolation(a, air, t)) |v| v.row else null;
+}
+
+test "chain state: a segment from height 1 and one across the first period boundary (2016)" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const air = (try ir.Air.parseJson(a, lean_json)).value;
+    const early = try loadHeaders(a, @embedFile("testdata:mainnet_headers_0_1024"));
+    const genesis = &early[0];
+
+    // Heights 1..16: the predecessor is genesis (a boundary, so pst = genesis time).
+    const start1 = ChainStart{ .height = 1, .prev_nbits_word = headerWordAt(genesis, 18), .prev_pst_word = headerWordAt(genesis, 17) };
+    const w1 = try generateFrom(a, 12, early[1..17], start1);
+    try std.testing.expectEqual(null, try checkSatisfied(a, air, 12, w1));
+
+    // Heights 1984..2047 cross the boundary at 2016 (pst resets to block 2016's time).
+    const around = try loadHeaders(a, @embedFile("testdata:mainnet_headers_1984_2048"));
+    const start2 = ChainStart{ .height = 1984, .prev_nbits_word = headerWordAt(&early[1023], 18), .prev_pst_word = headerWordAt(genesis, 17) };
+    const w2 = try generateFrom(a, 14, around, start2);
+    try std.testing.expectEqual(null, try checkSatisfied(a, air, 14, w2));
+    // pst of the last header (height 2047) is block 2016's time.
+    try std.testing.expectEqual(headerWordAt(&around[2016 - 1984], 17), (w2.pubs[42].toU32()) | (w2.pubs[43].toU32() << 16));
+
+    // A wrong first height, a flipped boundary flag, or a mid-period difficulty change fail.
+    {
+        var bad = w1;
+        bad.pubs[32] = bad.pubs[32].add(M31.one());
+        try std.testing.expect(try checkSatisfied(a, air, 12, bad) != null);
+    }
+    {
+        const w = try generateFrom(a, 14, around, start2);
+        const r = (2016 - 1984) * PERIOD + 218;
+        w.main[sha.W][r] = M31.one().sub(w.main[sha.W][r]);
+        try std.testing.expect(try checkSatisfied(a, air, 14, w) != null);
+    }
+    {
+        const start_bad = ChainStart{ .height = 1, .prev_nbits_word = 0x1c00ffff, .prev_pst_word = headerWordAt(genesis, 17) };
+        try std.testing.expectError(error.DifficultyChangedMidPeriod, generateFrom(a, 12, early[1..17], start_bad));
+    }
 }
