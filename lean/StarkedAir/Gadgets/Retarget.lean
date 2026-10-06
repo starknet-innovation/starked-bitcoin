@@ -101,30 +101,36 @@ def sumCol (k : ℕ) (f : ℕ → ℕ → Expr) (ni nj : ℕ) : Expr :=
 
 /-! ### Constraints -/
 
-/-- Copies of the predecessor's nBits, time and pst at row 220. -/
-def copyCs : List Expr :=
-  let sel := pre PREV
-  let nf := Expr.mul sel (.sub (cst 1) (pre FIRST))
-  let f := Expr.mul sel (pre FIRST)
-  [0, 1].flatMap fun h =>
-    [ .mul nf (.sub (limb A h) (limb W h (-398))), .mul f (.sub (limb A h) (.pub (34 + h))),
-      .mul nf (.sub (limb E h) (limb W h (-399))), .mul f (.sub (limb E h) (.pub (44 + h))),
-      .mul nf (.sub (limb W h) (limb E h (-258))), .mul f (.sub (limb W h) (.pub (36 + h))),
-      .mul (.mul sel (pre LAST)) (.sub (limb W h (-143)) (.pub (46 + h))) ]
+def copySelNF : Expr := .mul (pre PREV) (.sub (cst 1) (pre FIRST))
+def copySelF : Expr := .mul (pre PREV) (pre FIRST)
 
-def retargetCs : List Expr :=
-  let sel := pre RT
+/-- Copies of the predecessor's nBits, time and pst at row 220 (and the last header's time
+as output). -/
+def copyFam (h : ℕ) : List Expr :=
+  [ .mul copySelNF (.sub (limb A h) (limb W h (-398))), .mul copySelF (.sub (limb A h) (.pub (34 + h))),
+    .mul copySelNF (.sub (limb E h) (limb W h (-399))), .mul copySelF (.sub (limb E h) (.pub (44 + h))),
+    .mul copySelNF (.sub (limb W h) (limb E h (-258))), .mul copySelF (.sub (limb W h) (.pub (36 + h))),
+    .mul (.mul (pre PREV) (pre LAST)) (.sub (limb W h (-143)) (.pub (46 + h))) ]
+
+def copyCs : List Expr := [0, 1].flatMap copyFam
+
+def rtSel : Expr := pre RT
+def flagAt : Expr := col W (-3)
+def qAt : Expr := sumPow (fun i => col (A + i) (-2)) 20
+def ohSum : Expr := (List.range 27).foldl (fun acc s => .add acc (ohP s)) (cst 0)
+def ohWeighted : Expr := (List.range 27).foldl (fun acc s => .add acc (.mul (cst s) (ohP s))) (cst 0)
+def ownOhWeighted : Expr := (List.range 27).foldl (fun acc s => .add acc (.mul (cst s) (col (A + s) (-5)))) (cst 0)
+
+def rtBase : List Expr :=
+  let sel := rtSel
   let one := cst 1
-  let flag := col W (-3)
-  let q := sumPow (fun i => col (A + i) (-2)) 20
   [ -- rt = boundary ∧ height > 0;  nz ↔ q ≥ 1.
-    .mul sel (.sub rtE (.mul flag nzE)),
-    .mul (.mul sel nzE) (.sub (.sub q one) (bitsR W 0 20 6)),
-    .mul (.mul sel (.sub one nzE)) q,
+    .mul sel (.sub rtE (.mul flagAt nzE)),
+    .mul (.mul sel nzE) (.sub (.sub qAt one) (bitsR W 0 20 6)),
+    .mul (.mul sel (.sub one nzE)) qAt,
     -- previous exponent one-hot (only when rt).
-    .mul sel (.sub ((List.range 27).foldl (fun acc s => .add acc (ohP s)) (cst 0)) rtE),
-    .mul sel (.sub (.mul rtE (.sub prevExp (cst 3)))
-      ((List.range 27).foldl (fun acc s => .add acc (.mul (cst s) (ohP s))) (cst 0))),
+    .mul sel (.sub ohSum rtE),
+    .mul sel (.sub (.mul rtE (.sub prevExp (cst 3))) ohWeighted),
     -- clamp branch flags.
     .mul sel (.sub (.add (.add loE midE') hiE) rtE),
     -- mid: prevTime = pst + span exactly, span ∈ [302400, 4838400].
@@ -145,39 +151,48 @@ def retargetCs : List Expr :=
         (.mul (cst 65536) knE))
       (.add (timeLimb E 0 (-1)) (.mul (cst 65536) kpE))),
     .mul (.mul sel hiE) (.sub (.add (.add (.add (.add (timeLimb W 1 (-1)) (cst (4838401 / 65536))) (bitsR W 16 16 1))
-        (.mul (cst 65536) (col CA_LO 1))) kpE) (.add (timeLimb E 1 (-1)) knE)) ] ++
-  -- P0 = mant_prev · span, byte-wise (ungated by rt): column k.
-  (List.range 6).map (fun k =>
-    .mul sel (.sub (.add (sumCol k (fun i j => .mul (prevMant i) (spanByte j)) 3 3)
-        (if k = 0 then cst 0 else mcE (k - 1)))
-      (.add (p0Byte k) (if k < 5 then .mul (cst 256) (mcE k) else cst 0)))) ++
+        (.mul (cst 65536) (col CA_LO 1))) kpE) (.add (timeLimb E 1 (-1)) knE)) ]
+
+/-- P0 = mant_prev · span, byte-wise (ungated by rt): column k. -/
+def p0Col (k : ℕ) : Expr :=
+  .mul rtSel (.sub (.add (sumCol k (fun i j => .mul (prevMant i) (spanByte j)) 3 3)
+      (if k = 0 then cst 0 else mcE (k - 1)))
+    (.add (p0Byte k) (if k < 5 then .mul (cst 256) (mcE k) else cst 0)))
+
+def dHead : List Expr :=
   [ -- division branch flags: exactly one when rt ∧ ¬cap; cap only when rt.
-    .mul sel (.sub (.add dAny capE) rtE),
+    .mul rtSel (.sub (.add dAny capE) rtE),
     -- s' − s_prev = d.
-    .mul (.mul sel dAny) (.sub
-      (.sub ((List.range 27).foldl (fun acc s => .add acc (.mul (cst s) (col (A + s) (-5)))) (cst 0))
-        ((List.range 27).foldl (fun acc s => .add acc (.mul (cst s) (ohP s))) (cst 0)))
-      (.sub (dE' 2) (dE' 0))),
+    .mul (.mul rtSel dAny) (.sub (.sub ownOhWeighted ohWeighted) (.sub (dE' 2) (dE' 0))),
     -- canonical mantissa: mant' ≥ 0x8000.
-    .mul (.mul sel dAny) (.sub (.sub ownMantE (cst 0x8000)) (bitsR E 0 23 6)) ] ++
-  -- divisor · mant' + ρ = 256 · P0, column k (k = 0..7).
-  (List.range 8).map (fun k =>
-    .mul sel (.sub (.add (.add (byD fun d => sumCol k (fun i j => .mul (cst ((divBytes d).getD i 0)) (ownMant j)) 5 3)
-          (.mul dAny (rhoByte k))) (.mul dAny (if k = 0 then cst 0 else dcE (k - 1))))
-      (.mul dAny (.add (if k = 0 then cst 0 else p0Byte (k - 1)) (if k < 7 then .mul (cst 256) (dcE k) else cst 0))))) ++
-  -- ρ + σ = divisor − 1, column k (k = 0..4).
-  (List.range 5).map (fun k =>
-    .mul sel (.sub (.add (.mul dAny (.add (rhoByte k) (sigByte k))) (.mul dAny (if k = 0 then cst 0 else scE (k - 1))))
-      (.add (byD fun d => cst ((divM1Bytes d).getD k 0)) (.mul dAny (if k < 4 then .mul (cst 256) (scE k) else cst 0))))) ++
+    .mul (.mul rtSel dAny) (.sub (.sub ownMantE (cst 0x8000)) (bitsR E 0 23 6)) ]
+
+/-- divisor · mant' + ρ = 256 · P0, column k (k = 0..7). -/
+def divCol (k : ℕ) : Expr :=
+  .mul rtSel (.sub (.add (.add (byD fun d => sumCol k (fun i j => .mul (cst ((divBytes d).getD i 0)) (ownMant j)) 5 3)
+        (.mul dAny (rhoByte k))) (.mul dAny (if k = 0 then cst 0 else dcE (k - 1))))
+    (.mul dAny (.add (if k = 0 then cst 0 else p0Byte (k - 1)) (if k < 7 then .mul (cst 256) (dcE k) else cst 0))))
+
+/-- ρ + σ = divisor − 1, column k (k = 0..4). -/
+def remCol (k : ℕ) : Expr :=
+  .mul rtSel (.sub (.add (.mul dAny (.add (rhoByte k) (sigByte k))) (.mul dAny (if k = 0 then cst 0 else scE (k - 1))))
+    (.add (byD fun d => cst ((divM1Bytes d).getD k 0)) (.mul dAny (if k < 4 then .mul (cst 256) (scE k) else cst 0))))
+
+def capHead : List Expr :=
   [ -- cap: s_prev ∈ {25, 26}, own nBits = 0x1d00ffff (raw word 0xffff001d).
-    .mul (.mul sel capE) (.sub (.add (ohP 25) (ohP 26)) one),
-    .mul (.mul sel capE) (.sub (limb W 0 (-143)) (cst 0x001d)),
-    .mul (.mul sel capE) (.sub (limb W 1 (-143)) (cst 0xffff)) ] ++
-  -- cap: P0 = threshold(s_prev) + τ, column k (k = 0..5).
-  (List.range 6).map (fun k =>
-    .mul (.mul sel capE) (.sub (.add (.add (.add (.mul (ohP 25) (cst (capThr25.getD k 0))) (.mul (ohP 26) (cst (capThr26.getD k 0))))
-        (tauByte k)) (if k = 0 then cst 0 else ccE (k - 1)))
-      (.add (p0Byte k) (if k < 5 then .mul (cst 256) (ccE k) else cst 0))))
+    .mul (.mul rtSel capE) (.sub (.add (ohP 25) (ohP 26)) (cst 1)),
+    .mul (.mul rtSel capE) (.sub (limb W 0 (-143)) (cst 0x001d)),
+    .mul (.mul rtSel capE) (.sub (limb W 1 (-143)) (cst 0xffff)) ]
+
+/-- cap: P0 = threshold(s_prev) + τ, column k (k = 0..5). -/
+def capCol (k : ℕ) : Expr :=
+  .mul (.mul rtSel capE) (.sub (.add (.add (.add (.mul (ohP 25) (cst (capThr25.getD k 0))) (.mul (ohP 26) (cst (capThr26.getD k 0))))
+      (tauByte k)) (if k = 0 then cst 0 else ccE (k - 1)))
+    (.add (p0Byte k) (if k < 5 then .mul (cst 256) (ccE k) else cst 0)))
+
+def retargetCs : List Expr :=
+  rtBase ++ (List.range 6).map p0Col ++ dHead ++ (List.range 8).map divCol ++ (List.range 5).map remCol ++
+    capHead ++ (List.range 6).map capCol
 
 def constraints : List Expr := baseConstraints ++ powCs ++ stateCs ++ copyCs ++ retargetCs
 

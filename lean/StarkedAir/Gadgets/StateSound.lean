@@ -79,7 +79,8 @@ theorem state_row :
     (bit main (W + 23) (256 * j + 218) = true ↔ (j ≠ 0 ∧ heightAt main j % 2016 ≠ 0)) ∧
     (bit main (W + 24) (256 * j + 218) = true ↔ (j = 0 ∧ heightAt main j % 2016 ≠ 0)) ∧
     (1 ≤ j → heightAt main j = heightAt main (j - 1) + 1) ∧
-    (j = 0 → heightAt main j = (pubWord pub 32).toNat) := by
+    (j = 0 → heightAt main j = (pubWord pub 32).toNat) ∧
+    heightAt main j = 2016 * ofBits (fun i => bit main (A + i) (256 * j + 218 + 1)) 20 + heightAt main j % 2016 := by
   set r := 256 * j + 218
   have hr : r < 2 ^ logSize := hrow hsat hj
   have hr1 : r + 1 < 2 ^ logSize := by omega
@@ -174,7 +175,7 @@ theorem state_row :
     rw [hmod]
     by_cases h0 : j = 0 <;> by_cases hR : R = 0 <;> cases hb1 : bit main W r <;>
       cases hb2 : bit main (W + 24) r <;> simp_all <;> norm_num at eG2
-  refine ⟨hHlt, by rw [hmod]; exact hflag, hg, hg2, fun hj1 => ?_, fun hj0 => ?_⟩
+  refine ⟨hHlt, by rw [hmod]; exact hflag, hg, hg2, fun hj1 => ?_, fun hj0 => ?_, by omega⟩
   · -- height increments.
     have hfz : (pre FIRST).eval (2 ^ logSize) preCols pub main r = 0 := by rw [hfirst]; simp; omega
     have hlo := eval_limb (pc := preCols) (pub := pub) (r := r) (wrap_back (k := 256) (by omega) hr)
@@ -352,7 +353,7 @@ theorem state_sound {logSize : ℕ} {pub : ℕ → F} {main : ℕ → ℕ → F}
     have h2 : 2 ^ logSize = 2 ^ 8 * 2 ^ (logSize - 8) := by rw [← pow_add]; congr 1; omega
     omega
   refine ⟨fun j hj => (state_row hsat (j := j) (by omega)).1,
-    (state_row hsat (j := 0) (by omega)).2.2.2.2.2 rfl,
+    (state_row hsat (j := 0) (by omega)).2.2.2.2.2.1 rfl,
     fun j hj hj1 => (state_row hsat (j := j) (by omega)).2.2.2.2.1 hj1,
     fun j hj hm => nbits_fact hsat (by omega) hm,
     fun j hj => pst_fact hsat (by omega),
