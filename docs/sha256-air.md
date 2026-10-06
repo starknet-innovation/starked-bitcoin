@@ -6,7 +6,31 @@
   constraints, degree ≤ 3.
 - The Zig witness (`src/sha256/witness.zig`) satisfies it. The genesis-block
   SHA256d is reproduced from the finalize rows, and tampering is caught.
-- **Soundness proof: not started.**
+- **Soundness: proven in Lean** (`lean/StarkedAir/Gadgets/Sha256Sound.lean`,
+  theorem `compress_sound`; depends only on `propext`, `Classical.choice` and
+  `Quot.sound`):
+
+  > For every trace satisfying the AIR, and every block starting at row
+  > `s ≡ 0 (mod 72)` with `s + 72 ≤ 2^logSize`, the words in the finalize rows
+  > equal `Spec.Sha256.compress H M`. Here `H` is read from the init rows,
+  > `M` from the first 16 round rows, and `compress` is FIPS 180-4 over
+  > `BitVec 32` (checked against the "abc" vector).
+
+  The proof is layered:
+  1. evaluation lemmas;
+  2. boolean polynomials ↔ `Bool` operations;
+  3. limbs ↔ 16-bit halves of words;
+  4. booleanity and fixed-column values;
+  5. Σ/σ/Ch/Maj column contents;
+  6. gated additions → exact ℕ equations → `BitVec` addition;
+  7. round, schedule and finalize steps;
+  8. induction over the schedule and 64 rounds.
+
+  **What the proof does not cover:**
+  - The Zig parser/interpreter has to implement the same semantics as Lean's
+    `Expr.eval`. This is differential-tested, not proven.
+  - The exporter has to be a faithful printer.
+  - Stwo's protocol soundness (FRI, LogUp, Fiat–Shamir) is assumed.
 
 **Benchmark (M4 Pro, ReleaseFast, secure profile: 70 queries, 26-bit PoW).**
 Constraint evaluation runs on the CPU interpreter (14 threads); commitment and
