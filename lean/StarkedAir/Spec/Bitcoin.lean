@@ -46,4 +46,47 @@ def genesis : ℕ → Word := fun t => BitVec.ofNat 32 <| [
   ⟨0x6fe28c0a#32, 0xb6f1b372#32, 0xc1a6a246#32, 0xae63f74f#32,
    0x931e8365#32, 0xe15a089c#32, 0x68d61900#32, 0x00000000#32⟩
 
+/-! ## Proof of work (Bitcoin Core `CheckProofOfWork`) -/
+
+/-- Byte `i` (0..31) of a digest in internal order: the big-endian bytes of `H0, …, H7`. -/
+def hashByte (H : State) (i : ℕ) : ℕ := (stateWord H (i / 4)).toNat / 2 ^ (8 * (3 - i % 4)) % 256
+
+/-- `UintToArith256(hash)`: the digest bytes read as a little-endian 256-bit integer. -/
+def hashNat (H : State) : ℕ := ∑ i ∈ Finset.range 32, hashByte H i * 256 ^ i
+
+/-- The header's `nBits` field: bytes 72..75 read little-endian, i.e. header word 18
+byte-swapped. -/
+def nBitsOf (hw : ℕ → Word) : ℕ :=
+  let w := (hw 18).toNat
+  (w / 2 ^ 24) % 256 + 256 * ((w / 2 ^ 16) % 256) + 65536 * ((w / 2 ^ 8) % 256) + 2 ^ 24 * (w % 256)
+
+/-- `arith_uint256::SetCompact`, returning `none` when Bitcoin Core's `CheckProofOfWork`
+rejects the encoding itself (negative, overflow, or zero target). -/
+def compactTarget (n : ℕ) : Option ℕ :=
+  let nSize := n / 2 ^ 24
+  let nWord := n % 2 ^ 23
+  let negative := nWord ≠ 0 ∧ (n / 2 ^ 23) % 2 = 1
+  let overflow := nWord ≠ 0 ∧ (34 < nSize ∨ (0xff < nWord ∧ 33 < nSize) ∨ (0xffff < nWord ∧ 32 < nSize))
+  let target := if nSize ≤ 3 then nWord / 256 ^ (3 - nSize) else nWord * 256 ^ (nSize - 3)
+  if negative ∨ overflow ∨ target = 0 then none else some target
+
+/-- Mainnet `powLimit` = 0x00000000ffff…ff. -/
+def powLimit : ℕ := 2 ^ 224 - 1
+
+/-- `CheckProofOfWork(hash, nBits, mainnet)`. -/
+def powOk (H : State) (nBits : ℕ) : Prop :=
+  ∃ t, compactTarget nBits = some t ∧ t ≤ powLimit ∧ hashNat H ≤ t
+
+instance (H : State) (n : ℕ) : Decidable (powOk H n) := by
+  unfold powOk
+  cases h : compactTarget n with
+  | none => exact isFalse (by simp)
+  | some t => exact decidable_of_iff (t ≤ powLimit ∧ hashNat H ≤ t) (by simp)
+
+#guard nBitsOf genesis == 0x1d00ffff
+#guard compactTarget 0x1d00ffff == some (0xffff * 2 ^ 208)
+#guard decide (powOk (sha256d genesis) (nBitsOf genesis))
+-- A harder target than the genesis hash meets (hash ≈ 0x19d6…·2^184): rejected.
+#guard !decide (powOk (sha256d genesis) 0x1800ffff)
+
 end StarkedAir.Spec.Bitcoin

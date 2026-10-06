@@ -152,28 +152,33 @@ theorem half16_ofNat {v : ℕ} (hv : v < 2 ^ 32) (h : ℕ) (hh : h ≤ 1) :
   rcases (by omega : h = 0 ∨ h = 1) with rfl | rfl <;>
     simp only [half16, BitVec.toNat_ofNat, Nat.mod_eq_of_lt hv] <;> simp
 
+/-- The v1 (base) constraints hold on every row. Implied by satisfying `HeaderChain.air` and by
+any extension of it (e.g. with proof-of-work constraints). -/
+def ChainSat (n : ℕ) (pub : ℕ → F) (main : ℕ → ℕ → F) : Prop :=
+  ∀ r < n, ∀ c ∈ baseConstraints, c.eval n preCols pub main r = 0
+
 section Header
 
-variable {logSize : ℕ} {pub : ℕ → F} {main : ℕ → ℕ → F} (hsat : air.Satisfied logSize pub main)
+variable {logSize : ℕ} {pub : ℕ → F} {main : ℕ → ℕ → F} (hsat : ChainSat (2 ^ logSize) pub main)
 include hsat
 
-theorem sat' {c : Expr} (hc : c ∈ constraints) {r : ℕ} (hr : r < 2 ^ logSize) :
+theorem sat' {c : Expr} (hc : c ∈ baseConstraints) {r : ℕ} (hr : r < 2 ^ logSize) :
     c.eval (2 ^ logSize) preCols pub main r = 0 := hsat r hr c hc
 
 theorem sha_sat : ShaSat (2 ^ logSize) preCols pub main :=
-  fun r hr c hc => sat' hsat (by simp only [constraints, List.mem_append]; left; left; left; exact hc) hr
+  fun r hr c hc => sat' hsat (by simp only [baseConstraints, List.mem_append]; left; left; left; exact hc) hr
 
 theorem plumbing_sat {c : Expr} (hc : c ∈ plumbing) {r : ℕ} (hr : r < 2 ^ logSize) :
     c.eval (2 ^ logSize) preCols pub main r = 0 :=
-  sat' hsat (by simp only [constraints, List.mem_append]; left; left; right; exact hc) hr
+  sat' hsat (by simp only [baseConstraints, List.mem_append]; left; left; right; exact hc) hr
 
 theorem linkage_sat {c : Expr} (hc : c ∈ linkage) {r : ℕ} (hr : r < 2 ^ logSize) :
     c.eval (2 ^ logSize) preCols pub main r = 0 :=
-  sat' hsat (by simp only [constraints, List.mem_append]; left; right; exact hc) hr
+  sat' hsat (by simp only [baseConstraints, List.mem_append]; left; right; exact hc) hr
 
 theorem outputs_sat {c : Expr} (hc : c ∈ outputs) {r : ℕ} (hr : r < 2 ^ logSize) :
     c.eval (2 ^ logSize) preCols pub main r = 0 :=
-  sat' hsat (by simp only [constraints, List.mem_append]; right; exact hc) hr
+  sat' hsat (by simp only [baseConstraints, List.mem_append]; right; exact hc) hr
 
 theorem bits {base r : ℕ} (hr : r < 2 ^ logSize) (hbase : base + 32 ≤ 96) :
     ∀ i < 32, (main (base + i) r).val ≤ 1 := word_bits (sha_sat hsat) hr hbase
@@ -479,7 +484,7 @@ end Header
 3. the first header's prev-hash is `pubState pub 0`;
 4. the last header's hash is `pubState pub 16`. -/
 theorem chain_sound {logSize : ℕ} {pub : ℕ → F} {main : ℕ → ℕ → F}
-    (hsat : air.Satisfied logSize pub main) (hlog : 8 ≤ logSize) :
+    (hsat : ChainSat (2 ^ logSize) pub main) (hlog : 8 ≤ logSize) :
     let H := 2 ^ logSize / 256
     (∀ j < H, sha256d (headerWord main j) = hashAt main j) ∧
     (∀ j < H, 1 ≤ j → prevHash (headerWord main j) = hashAt main (j - 1)) ∧

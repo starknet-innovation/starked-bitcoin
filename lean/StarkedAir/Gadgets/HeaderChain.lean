@@ -44,6 +44,7 @@ def LINK0 : ℕ := 22
 def FIRST : ℕ := 30
 def LAST : ℕ := 31
 def OUT0 : ℕ := 32
+def POW : ℕ := 36
 
 def ivWords : List ℕ :=
   [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]
@@ -77,7 +78,8 @@ def preCols : List PreCol :=
   (List.range 8).map (fun k => oneRow (148 + k)) ++                                  -- 14..21 MSG_k
   (List.range 8).map (fun k => oneRow (5 + k)) ++                                    -- 22..29 LINK_k
   [ .rowLt PERIOD, .rowGeEnd PERIOD ] ++                                              -- 30, 31
-  (List.range 4).map (fun j => oneRow (212 + j))                                     -- 32..35 OUT_j
+  (List.range 4).map (fun j => oneRow (212 + j)) ++                                  -- 32..35 OUT_j
+  [ oneRow 216 ]                                                                      -- 36 POW
 
 /-! ### Constraints -/
 
@@ -116,8 +118,71 @@ def outputs : List Expr :=
     eqLimbs (.mul (pre (OUT0 + j)) (pre LAST)) A 0 (fun h => .pub (16 + 2 * (3 - j) + h)) ++
     eqLimbs (.mul (pre (OUT0 + j)) (pre LAST)) E 0 (fun h => .pub (16 + 2 * (7 - j) + h)))
 
-def constraints : List Expr := Sha256.constraints ++ plumbing ++ linkage ++ outputs
+/-- SHA256d, linkage and endpoint constraints (v1). -/
+def baseConstraints : List Expr := Sha256.constraints ++ plumbing ++ linkage ++ outputs
 
-def air : Air := { name := "header_chain_v1", nMain := Sha256.N_MAIN, pre := preCols, constraints }
+/-! ### Proof of work (row 216 of each header; scratch in rows 216–217)
+
+Row 216 reuses bit columns as scratch: `A` bits 0..26 are a one-hot `s = nSize − 3`;
+`E` bits 0..23 are `D`; `W` bit 0 is `lt`; `W` bits 1..23 are `mant − 1`. Row 217's `A` bits
+0..12 hold `L`, the sum of the hash bytes below the mantissa position. The hash is read from
+rows 212..215 and `nBits` from header word 18 (row 78). -/
+
+/-- Bit `k` of hash byte `i` (internal byte order): word `i/4`, bits `8·(3 − i%4) + k`.
+Words 0..3 are `a` at rows 215..212, words 4..7 are `e` at rows 215..212. -/
+def hashBit (i k : ℕ) : Expr :=
+  let w := i / 4
+  let b := 8 * (3 - i % 4) + k
+  if w < 4 then col (A + b) (-((1 + w : ℕ) : ℤ)) else col (E + b) (-((1 + (w - 4) : ℕ) : ℤ))
+
+def hashByteE (i : ℕ) : Expr := sumPow (hashBit i) 8
+
+/-- Bit `k` of header word 18 (nBits, byte-swapped), 138 rows up. -/
+def nbBit (k : ℕ) : Expr := col (W + k) (-138)
+
+/-- `nSize`: header byte 75 = word-18 bits 0..7. -/
+def expE : Expr := sumPow nbBit 8
+
+/-- `nWord = nBits & 0x7fffff`: bytes 72, 73 and the low 7 bits of byte 74. -/
+def mantBit (t : ℕ) : Expr := if t < 8 then nbBit (24 + t) else if t < 16 then nbBit (8 + t) else nbBit (t - 8)
+
+def mantE : Expr := sumPow mantBit 23
+
+/-- Σ_{i ∈ [s, 32)} byte_i. -/
+def suffixE (s : ℕ) : Expr := ((List.range 32).filter (s ≤ ·)).foldl (fun acc i => .add acc (hashByteE i)) (cst 0)
+
+/-- Σ_{i < s} byte_i. -/
+def prefixE (s : ℕ) : Expr := (List.range s).foldl (fun acc i => .add acc (hashByteE i)) (cst 0)
+
+def midE (s : ℕ) : Expr :=
+  .add (.add (hashByteE s) (.mul (cst 256) (hashByteE (s + 1)))) (.mul (cst 65536) (hashByteE (s + 2)))
+
+def ohE (s : ℕ) : Expr := col (A + s)
+
+/-- `Σ_{s ≤ 26} oh_s · f s`. -/
+def selectE (f : ℕ → Expr) : Expr :=
+  (List.range 27).foldl (fun acc s => .add acc (.mul (ohE s) (f s))) (cst 0)
+
+def dE : Expr := sumPow (fun k => col (E + k)) 24
+def ltE : Expr := col W
+def m1E : Expr := sumPow (fun k => col (W + 1 + k)) 23
+def lE : Expr := sumPow (fun k => col (A + k) 1) 13
+
+def powCs : List Expr :=
+  let sel := pre POW
+  [ .mul sel (.sub (selectE (fun _ => cst 1)) (cst 1)),                          -- exactly one s
+    .mul sel (.sub (.sub expE (cst 3)) (selectE (fun s => cst s))),               -- s = nSize − 3
+    .mul sel (nbBit 15),                                                          -- not negative
+    .mul sel (selectE (fun s => suffixE (s + 3))),                                -- high bytes zero
+    .mul sel (.sub (.sub (.sub mantE (selectE midE)) ltE) dE),                    -- mant = mid + lt + D
+    .mul sel (.mul (.sub (cst 1) ltE) dE),                                        -- ¬lt → D = 0
+    .mul sel (.sub lE (selectE prefixE)),                                         -- L = low-byte sum
+    .mul sel (.mul (.sub (cst 1) ltE) lE),                                        -- ¬lt → low bytes zero
+    .mul sel (.sub (.sub mantE (cst 1)) m1E),                                     -- mant ≥ 1
+    .mul sel (.mul (ohE 26) (sumPow (fun t => nbBit (8 + t)) 7)) ]                -- powLimit
+
+def constraints : List Expr := baseConstraints ++ powCs
+
+def air : Air := { name := "header_chain_v2", nMain := Sha256.N_MAIN, pre := preCols, constraints }
 
 end StarkedAir.HeaderChain

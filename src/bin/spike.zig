@@ -1,6 +1,7 @@
 //! Spike CLI: prove an AIR on CPU or Metal and verify on CPU.
 //!   spike <log_size> <cpu|metal> [lean]   add32-chain (Zig-built or Lean-exported)
 //!   spike sha <log_size> <cpu|metal>      SHA-256 compressions (Lean-exported)
+//!   spike headers <log_size> <cpu|metal> <headers.hex>   header chain v2 (Lean-exported)
 
 const std = @import("std");
 const sb = @import("starked_bitcoin");
@@ -19,7 +20,7 @@ pub fn main() !void {
 
     const args = try std.process.argsAlloc(a);
     if (args.len == 4 and std.mem.eql(u8, args[1], "sha")) return sha(a, try std.fmt.parseInt(u32, args[2], 10), std.mem.eql(u8, args[3], "metal"));
-    if (args.len == 4 and std.mem.eql(u8, args[1], "headers")) return headers(a, try std.fmt.parseInt(u32, args[2], 10), std.mem.eql(u8, args[3], "metal"));
+    if (args.len == 5 and std.mem.eql(u8, args[1], "headers")) return headers(a, try std.fmt.parseInt(u32, args[2], 10), std.mem.eql(u8, args[3], "metal"), args[4]);
     if (args.len != 3 and args.len != 4) return error.Usage;
     const log_size = try std.fmt.parseInt(u32, args[1], 10);
     const use_metal = std.mem.eql(u8, args[2], "metal");
@@ -90,19 +91,14 @@ fn sha(a: std.mem.Allocator, log_size: u32, use_metal: bool) !void {
     );
 }
 
-/// Synthetic linked chain (no proof-of-work yet): header i+1's prev-hash is header i's hash.
-fn headers(a: std.mem.Allocator, log_size: u32, use_metal: bool) !void {
+/// Real mainnet headers from a hex file (one 80-byte header per line), from height 0.
+fn headers(a: std.mem.Allocator, log_size: u32, use_metal: bool, path: []const u8) !void {
     const H = sb.header_chain;
     const air = (try sb.air.ir.Air.parseJson(a, H.lean_json)).value;
     const count = (@as(usize, 1) << @intCast(log_size)) / H.PERIOD;
-    const hs = try a.alloc(H.Header, count);
-    var prng = std.Random.DefaultPrng.init(11);
-    var prev = [_]u8{0} ** 32;
-    for (hs) |*h| {
-        prng.random().bytes(h);
-        @memcpy(h[4..36], &prev);
-        prev = sb.sha256.stateToBytes(sb.sha256.headerHash(h));
-    }
+    const all = try H.loadHeaders(a, try std.fs.cwd().readFileAlloc(a, path, 1 << 30));
+    if (all.len < count) return error.NotEnoughHeaders;
+    const hs = all[0..count];
     const config = pcs_core.PcsConfig{ .pow_bits = 26, .fri_config = try FriConfig.init(0, 1, 70) };
     if (use_metal) try metal.MetalProverEngine.initializeRuntime(a, .source_jit);
     var timer = try std.time.Timer.start();
