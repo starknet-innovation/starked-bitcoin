@@ -3,3 +3,6 @@ import StarkedAir.Export
 import StarkedAir.Gadgets.Add32Chain
 import StarkedAir.Testing.Probe
 import StarkedAir.Gadgets.Sha256
+import StarkedAir.Bits
+import StarkedAir.Spec.Sha256
+import StarkedAir.Gadgets.Sha256Sound
