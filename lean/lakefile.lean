@@ -9,5 +9,5 @@ require "leanprover-community" / "mathlib" @ git "v4.33.1"
 @[default_target]
 lean_lib StarkedAir
 
-lean_exe «export-air» where
-  root := `Export
+-- Export with `lake env lean --run Export.lean <name>` (interpreted; avoids
+-- natively linking all of Mathlib).

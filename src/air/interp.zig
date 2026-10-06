@@ -70,3 +70,42 @@ pub fn firstViolation(
     }
     return null;
 }
+
+test "matches the Lean semantics (Expr.eval) on the probe oracle" {
+    // airs/probe_oracle.json is produced by lean/StarkedAir/Testing/Probe.lean:
+    // offsets −3…+5 with wrap-around, every preprocessed kind, every operator.
+    const Oracle = struct {
+        log_size: u32,
+        air: std.json.Value,
+        main: []const []const u32,
+        evals: []const []const u32,
+    };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const bytes = @embedFile("air:probe_oracle");
+    const oracle = try std.json.parseFromSliceLeaky(Oracle, a, bytes, .{});
+    var air_json: std.Io.Writer.Allocating = .init(a);
+    try std.json.Stringify.value(oracle.air, .{}, &air_json.writer);
+    const air = (try ir.Air.parseJson(a, air_json.written())).value;
+
+    const n = @as(usize, 1) << @intCast(oracle.log_size);
+    const main = try a.alloc([]M31, oracle.main.len);
+    for (main, oracle.main) |*col, src| {
+        col.* = try a.alloc(M31, n);
+        for (col.*, src) |*v, x| v.* = M31.fromCanonical(x);
+    }
+    var t = RowTrace{
+        .log_size = oracle.log_size,
+        .preprocessed = @ptrCast(try air.genPreprocessed(a, oracle.log_size)),
+        .main = @ptrCast(main),
+    };
+    const scratch = try a.alloc(M31, air.exprs.len);
+    const out = try a.alloc(M31, air.constraints.len);
+    try std.testing.expectEqual(n, oracle.evals.len);
+    for (0..n) |row| {
+        t.row = row;
+        evalConstraints(M31, air, scratch, &t, out);
+        for (out, oracle.evals[row]) |got, want| try std.testing.expectEqual(want, got.toU32());
+    }
+}

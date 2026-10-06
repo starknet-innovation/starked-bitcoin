@@ -67,18 +67,19 @@ Lean definition ──► Lean soundness proof (standard axioms only)
 
 ## Known gaps (spike scope)
 
-- **Wrap-around semantics on the Zig side are tested only indirectly**,
-  through end-to-end proofs with a +1 offset. A dedicated differential test of
-  the Lean `Expr.eval` against Zig `interp` over random traces should come
-  next. One option: export a Lean `#eval` oracle.
+- ~~Wrap-around semantics tested only indirectly.~~ Now covered by a
+  differential test: Lean `Expr.eval` writes an oracle
+  (`airs/probe_oracle.json`, offsets −3…+5, every preprocessed kind and every
+  operator), and Zig `interp` must match every value. A mutation check
+  confirms the test fails on a single wrong value.
 - **No interaction / LogUp in the IR yet** (needed for SHA ↔ header linkage).
   Port StarkWare's `tuple_inclusion` for the Lean side.
 - **The verifier recomputes the preprocessed root**, which is O(N). Production
   should ship per-(AIR, log_size) roots in a verification key.
 - **The interpreter is the correctness baseline, not the fast path.** GPU
   kernels generated from the same IR come later (M2).
-- **The `export-air` executable links all of Mathlib** (a slow first build).
-  Switch to an `#eval`-based exporter.
+- ~~The `export-air` executable links all of Mathlib.~~ Export now runs with
+  `lake env lean --run Export.lean <name>`.
 - **`AirStatement` carries a pointer and an allocator** — prototype
   ergonomics only.
 - **Single trace size only**; no lifting.

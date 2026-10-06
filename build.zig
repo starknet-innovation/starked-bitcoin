@@ -31,6 +31,7 @@ pub fn build(b: *std.Build) void {
 
     // AIRs exported from the Lean definitions (lean/), consumed verbatim.
     lib.addAnonymousImport("air:add32_chain", .{ .root_source_file = b.path("airs/add32_chain.json") });
+    lib.addAnonymousImport("air:probe_oracle", .{ .root_source_file = b.path("airs/probe_oracle.json") });
 
     const tests = b.addTest(.{ .root_module = lib });
 
