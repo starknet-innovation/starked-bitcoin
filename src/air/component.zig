@@ -236,18 +236,53 @@ pub const Component = struct {
         defer allocator.free(columns);
         const column = &columns[0];
 
-        const scratch = try allocator.alloc(M31, self.air.exprs.len);
+        // Rows are independent: evaluate in parallel into a buffer, then feed
+        // the (stateful, sequential) accumulator in row order.
+        const values = try allocator.alloc(QM31, eval_size);
+        defer allocator.free(values);
+        const job = DomainJob{
+            .air = self.air,
+            .ctx = .{ .pre = pre, .main = main, .log_size = self.log_size, .eval_log_size = eval_log_size },
+            .powers = column.random_coeff_powers,
+            .denominator_inv = denominator_inv,
+            .log_size = self.log_size,
+            .values = values,
+        };
+        const n_threads = @min(std.Thread.getCpuCount() catch 1, 64, @max(eval_size / 1024, 1));
+        var threads: [64]std.Thread = undefined;
+        // Scratch is allocated up front: the caller's allocator need not be thread-safe.
+        const scratch = try allocator.alloc(M31, n_threads * (self.air.exprs.len + self.air.constraints.len));
         defer allocator.free(scratch);
-        const out = try allocator.alloc(M31, self.air.constraints.len);
-        defer allocator.free(out);
-        var ctx = DomainCtx{ .pre = pre, .main = main, .log_size = self.log_size, .eval_log_size = eval_log_size };
+        const per = self.air.exprs.len + self.air.constraints.len;
+        const chunk = (eval_size + n_threads - 1) / n_threads;
+        for (0..n_threads) |t| {
+            const mine = scratch[t * per ..][0..per];
+            threads[t] = try std.Thread.spawn(.{}, DomainJob.run, .{
+                &job, mine[0..self.air.exprs.len], mine[self.air.exprs.len..], t * chunk, @min((t + 1) * chunk, eval_size),
+            });
+        }
+        for (threads[0..n_threads]) |th| th.join();
+        for (values, 0..) |v, row| column.accumulate(row, v);
+    }
+};
+
+const DomainJob = struct {
+    air: ir.Air,
+    ctx: Component.DomainCtx,
+    powers: []const QM31,
+    denominator_inv: [2]M31,
+    log_size: u32,
+    values: []QM31,
+
+    fn run(self: *const DomainJob, scratch: []M31, out: []M31, start: usize, end: usize) void {
+        var ctx = self.ctx;
         const n = self.air.constraints.len;
-        for (0..eval_size) |row| {
+        for (start..end) |row| {
             ctx.row = row;
             interp.evalConstraints(M31, self.air, scratch, &ctx, out);
             var combined = QM31.zero();
-            for (out, 0..) |c, i| combined = combined.add(column.random_coeff_powers[n - 1 - i].mulM31(c));
-            column.accumulate(row, combined.mulM31(denominator_inv[row >> @intCast(self.log_size)]));
+            for (out, 0..) |c, i| combined = combined.add(self.powers[n - 1 - i].mulM31(c));
+            self.values[row] = combined.mulM31(self.denominator_inv[row >> @intCast(self.log_size)]);
         }
     }
 };

@@ -1,4 +1,44 @@
-# SHA-256 compression AIR — layout (draft v0)
+# SHA-256 compression AIR — layout v1
+
+**Status (2026-10-06):**
+- Defined in Lean (`lean/StarkedAir/Gadgets/Sha256.lean`) and exported to
+  `airs/sha256_compress.json`: 124 columns, 5 preprocessed columns, 134
+  constraints, degree ≤ 3.
+- The Zig witness (`src/sha256/witness.zig`) satisfies it. The genesis-block
+  SHA256d is reproduced from the finalize rows, and tampering is caught.
+- **Soundness proof: not started.**
+
+**Benchmark (M4 Pro, ReleaseFast, secure profile: 70 queries, 26-bit PoW).**
+Constraint evaluation runs on the CPU interpreter (14 threads); commitment and
+FRI run on Metal.
+
+| Rows | Compressions | Prove (Metal) | Verify | Proof | Throughput |
+|---|---|---|---|---|---|
+| 2¹⁴ | 227 | 0.086 s | 0.007 s | 594 KB | 2.6k comp/s |
+| 2¹⁶ | 910 | 0.324 s | 0.012 s | 770 KB | 2.8k comp/s |
+| 2¹⁸ | 3,640 | 1.20 s | 0.030 s | 1.0 MB | 3.0k comp/s ≈ 1,000 headers/s |
+
+The CPU-only prover reaches 1.4k comp/s at 2¹⁶. GPU constraint code
+generated from the IR (M2) is the next large speedup.
+
+## v1 decisions (resolving the v0 open questions)
+
+1. **Period 72:** 4 init rows, 64 round rows and 4 finalize rows. The
+   finalize rows hold `input + final` in the same (d,c,b,a)/(h,g,f,e) order
+   as the init rows. Chained compressions therefore link with constant
+   offsets, and a header's three compressions can be bound by periodic
+   constraints without LogUp.
+2. **Output addition uses offsets −4 and −68**, reusing the `a`/`e` bit
+   columns and the carry columns.
+3. **Σ/σ/Ch/Maj limb constraints are unconditional**, because gating them
+   would raise the degree to 4. The witness computes them cyclically for
+   every row.
+4. **No lookups.**
+
+---
+
+(The v0 draft follows for reference.)
+
 
 Goals, in priority order:
 

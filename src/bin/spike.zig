@@ -1,5 +1,6 @@
-//! Spike CLI: prove the add32-chain AIR on CPU or Metal and verify on CPU.
-//!   spike <log_size> <cpu|metal>
+//! Spike CLI: prove an AIR on CPU or Metal and verify on CPU.
+//!   spike <log_size> <cpu|metal> [lean]   add32-chain (Zig-built or Lean-exported)
+//!   spike sha <log_size> <cpu|metal>      SHA-256 compressions (Lean-exported)
 
 const std = @import("std");
 const sb = @import("starked_bitcoin");
@@ -17,6 +18,7 @@ pub fn main() !void {
     const a = arena.allocator();
 
     const args = try std.process.argsAlloc(a);
+    if (args.len == 4 and std.mem.eql(u8, args[1], "sha")) return sha(a, try std.fmt.parseInt(u32, args[2], 10), std.mem.eql(u8, args[3], "metal"));
     if (args.len != 3 and args.len != 4) return error.Usage;
     const log_size = try std.fmt.parseInt(u32, args[1], 10);
     const use_metal = std.mem.eql(u8, args[2], "metal");
@@ -53,5 +55,36 @@ pub fn main() !void {
     std.debug.print(
         "source={s} air={s} digest={x}... rows=2^{d} cols={d} constraints={d} backend={s} prove={d:.3}s verify={d:.3}s proof={d}B proof_sha256={x}...\n",
         .{ if (from_lean) "lean" else "zig", air.name, digest[0..8], log_size, air.n_main + air.n_preprocessed, air.constraints.len, args[2], prove_s, verify_s, bytes.len, proof_hash[0..8] },
+    );
+}
+
+fn sha(a: std.mem.Allocator, log_size: u32, use_metal: bool) !void {
+    const W = sb.sha256_witness;
+    const air = (try sb.air.ir.Air.parseJson(a, W.lean_json)).value;
+    const count = W.capacity(log_size);
+    var prng = std.Random.DefaultPrng.init(7);
+    const cs = try a.alloc(W.Compression, count);
+    for (cs) |*c| {
+        for (&c.input) |*x| x.* = prng.random().int(u32);
+        for (&c.block) |*x| x.* = prng.random().int(u32);
+    }
+    const config = pcs_core.PcsConfig{ .pow_bits = 26, .fri_config = try FriConfig.init(0, 1, 70) };
+    if (use_metal) try metal.MetalProverEngine.initializeRuntime(a, .source_jit);
+    var timer = try std.time.Timer.start();
+    const wit = try W.generate(a, log_size, cs);
+    const witness_s = @as(f64, @floatFromInt(timer.lap())) / 1e9;
+    const statement = sb.air.prove.AirStatement{ .log_size = log_size, .digest = try air.digest(a), .air = &air, .allocator = a };
+    const prepared = try sb.air.prove.prepare(a, statement, @ptrCast(wit.main));
+    const proof = if (use_metal)
+        try sb.air.prove.prove(metal.MetalProverEngine, a, config, prepared)
+    else
+        try sb.air.prove.prove(sb.air.prove.Engine(CpuBackend), a, config, prepared);
+    const prove_s = @as(f64, @floatFromInt(timer.lap())) / 1e9;
+    const bytes = try proof_wire.encodeProofBytes(a, proof);
+    try sb.air.prove.verify(a, config, air, log_size, proof);
+    const verify_s = @as(f64, @floatFromInt(timer.lap())) / 1e9;
+    std.debug.print(
+        "sha256_compress rows=2^{d} compressions={d} backend={s} witness={d:.3}s prove={d:.3}s verify={d:.3}s proof={d}B => {d:.0} compressions/s ({d:.0} headers/s)\n",
+        .{ log_size, count, if (use_metal) "metal" else "cpu", witness_s, prove_s, verify_s, bytes.len, @as(f64, @floatFromInt(count)) / prove_s, @as(f64, @floatFromInt(count)) / prove_s / 3 },
     );
 }
