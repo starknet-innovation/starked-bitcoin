@@ -1,0 +1,98 @@
+# SHA-256 compression AIR — layout (draft v0)
+
+Goals, in priority order:
+
+1. **Easy to verify formally.** Every constraint is a low-degree polynomial
+   identity over bits and 16-bit limbs. There are no lookups inside the
+   compression, so soundness reduces to bit-vector lemmas plus induction over
+   rows.
+2. Fits Stwo's degree bound: all constraints have degree ≤ 3, with the
+   composition log-degree bound at `log_size + 1`, the same as stwo-zig's
+   Blake example.
+3. Cheap enough. Optimization (lookup-based chunking) comes later, if
+   benchmarks show the SHA AIR dominates.
+
+## Rows
+
+One row per round. A compression occupies **68 rows**:
+
+| Rows | Role |
+|---|---|
+| 0–3 | **Init.** Columns `a`, `e` hold the input state in the order the rounds read it back: rows 0..3 hold (d,c,b,a) in `a` and (h,g,f,e) in `e`. |
+| 4–67 | **Round t = row − 4.** The `a` and `e` columns hold the new working values a′, e′. |
+
+Only `a` and `e` are stored. The others are earlier rows:
+`b,c,d = a@−1,−2,−3` and `f,g,h = e@−1,−2,−3`. This is the standard "a/e
+only" layout. It uses next-row (here, previous-row) offsets, which the formal
+model must support (stwo-zig's AIR IR v2 doesn't).
+
+The output state is `input + final` mod 2³². It is exposed through a
+**digest interface** (see open questions) rather than stored in every row.
+
+## Columns (main trace), ~124
+
+| Group | Columns | Constraint (degree) |
+|---|---|---|
+| `a_bits[32]`, `e_bits[32]`, `w_bits[32]` | 96 | booleanity `x(x−1)=0` (2) |
+| `Σ0`, `Σ1`, `Ch`, `Maj` as lo/hi 16-bit limbs | 8 | limb = Σᵢ 2ⁱ·f(bits), where f is xor3 (3), ch (2) or maj (3) |
+| `σ0`, `σ1` as lo/hi limbs | 4 | same, over `w_bits@−15` and `w_bits@−2` (3) |
+| carry bits for a′ (lo, hi): 3+3 | 6 | booleanity (2) |
+| carry bits for e′ (lo, hi): 3+3 | 6 | booleanity (2) |
+| carry bits for W (lo, hi): 2+2 | 4 | booleanity (2) |
+
+Bit-level formulas over booleans:
+- `xor3(x,y,z) = x+y+z − 2(xy+yz+zx) + 4xyz`
+- `ch(x,y,z) = xy + z − xz`
+- `maj(x,y,z) = xy + yz + zx − 2xyz`
+- Rotations and shifts are just index permutations of the bit columns (shifts
+  feed in 0).
+
+## Addition constraints (degree 1–2)
+
+With `lo(x) = Σ_{i<16} 2ⁱ x_i`, `hi(x) = Σ_{i<16} 2ⁱ x_{16+i}`, and carries
+`c = c0 + 2c1 + 4c2`:
+
+- **a′ = h + Σ1 + Ch + K[t] + W + Σ0 + Maj** (7 terms, carry ≤ 6):
+  - `lo(h)+Σ1.lo+Ch.lo+K.lo+lo(W)+Σ0.lo+Maj.lo − lo(a′) − 2¹⁶·c_lo = 0`
+  - `hi(…)+c_lo − hi(a′) − 2¹⁶·c_hi = 0`
+- **e′ = d + h + Σ1 + Ch + K[t] + W** (6 terms, carry ≤ 5).
+- **W[t] = σ1 + W@−7 + σ0 + W@−16**, rows with t ≥ 16 (4 terms, carry ≤ 3).
+
+Every sum stays far below p = 2³¹−1, since 7·2¹⁶ + 6 < 2²⁰. So each equation
+holds over the integers, not just mod p. That is the property the soundness
+proof relies on.
+
+`K[t]` lo/hi come from **preprocessed columns** (period 68). Selectors are
+also preprocessed:
+- `is_round` (rows 4–67);
+- `is_schedule` (rows 20–67), which gates the W recurrence;
+- `is_init` (rows 0–3).
+
+Rows 4–19 take W as free message input. It is bound to the caller through the
+digest/message interface.
+
+## Size
+
+About 124 columns × 68 rows ≈ **8.4k trace cells per compression**, before
+the interaction trace. For comparison, stwo-zig's RISC-V SHA-256 precompile
+candidate is about 277k cells per 64-byte block. That isn't apples-to-apples
+(it's built for memory-bus integration), but it shows the direct-AIR margin.
+
+A header's SHA256d is 3 compressions, about 25k cells, so ~950k headers come to
+about 2.4·10¹⁰ cells. That is well within reach of parallel per-segment proofs
+plus recursion.
+
+## Open questions
+
+1. **Digest interface.** Should the header-chain component consume
+   `(input_state, message, output_state)` tuples through a LogUp relation, or
+   should both live in one component with fixed row offsets? LogUp is cleaner
+   to compose and to verify formally, and is the standard pattern.
+2. **Output addition** `input + final`. Use one extra "finalize" row with
+   offset references back to the init rows (offsets up to −67), or copy the
+   input state down every row? Offsets are cheaper in columns but cost one
+   extra sampled value per (column, offset) pair.
+3. **Period 68 vs 64.** We could use a 64-row period by keeping the input
+   state in dedicated columns. Measure both.
+4. Whether to move to lookup-based 4–8-bit chunking later, for fewer columns.
+   Only if benchmarks say so; it costs formal-verification simplicity.
