@@ -1,5 +1,43 @@
 # Header-chain AIR
 
+## v2 (2026-10-06): + proof of work — proven sound
+
+- **Definition:** `HeaderChain.powCs`. It runs on each header's row 216 and
+  uses the bit columns of rows 216–217 as scratch, so no new columns are
+  needed. The AIR now has 218 constraints and 37 preprocessed columns.
+- **Proof:** `lean/StarkedAir/Gadgets/PowSound.lean`, theorem `chain_sound_v2`.
+  It depends only on `propext`, `Classical.choice` and `Quot.sound`.
+- **Statement added:** every header satisfies `powOk (hash_j) (nBits_j)`.
+  - `powOk` transcribes Bitcoin Core's `arith_uint256::SetCompact` plus
+    `CheckProofOfWork` for mainnet: it rejects negative, overflowing and zero
+    targets, requires target ≤ powLimit = 2²²⁴−1, and requires hash ≤ target.
+  - The hash is the 32 digest bytes read as a little-endian integer
+    (`UintToArith256`).
+  - `nBits` is header bytes 72..75 read little-endian.
+  - Spec: `lean/StarkedAir/Spec/Bitcoin.lean`, checked on genesis and on a
+    too-hard target.
+- **How the circuit does it** (the encoding is in the docstrings of
+  `HeaderChain.lean`):
+  - a one-hot exponent `s = nSize − 3` with `s ≤ 26`;
+  - hash bytes above `s+2` must be zero;
+  - `mant = mid + lt + D`, where `D` is a 24-bit range check;
+  - `lt = 0` forces `D = 0` and all bytes below `s` to be zero;
+  - `mant ≥ 1` via a 23-bit range check;
+  - the sign bit must be 0;
+  - when `s = 26`, `mant < 2¹⁶`, which together with the bound above gives
+    target ≤ powLimit.
+- **Completeness gap (deliberate):** encodings with `nSize < 3` cannot be
+  proven. They describe targets below 2²⁴, which no real block can meet.
+  Overflowing encodings are already excluded by `powLimit`.
+- **Tests:**
+  - mainnet blocks 0..15 satisfy the AIR;
+  - a header claiming a harder `nBits` than its hash meets cannot be laid
+    out;
+  - tampering with `lt`, the exponent one-hot or `D` is caught.
+- **Benchmark:** real mainnet headers 0..1023 on Metal run at about 500–640
+  headers/s.
+
+
 ## v1 (2026-10-06): SHA256d + linkage — proven sound
 
 - **Definition:** `lean/StarkedAir/Gadgets/HeaderChain.lean`
@@ -33,8 +71,8 @@ Because 256 divides the trace length, there are no partial headers.
 4. `hash_{H−1}` = public inputs 16..31.
 
 **What this does not establish yet:**
-- **Proof-of-work.** `hash ≤ target(nBits)` and the validity of nBits are next.
-- **Difficulty transitions, timestamps (median time past), cumulative work.**
+- **nBits validity** (the difficulty retarget rules), timestamps (median time
+  past) and cumulative work. Proof of work is covered by v2 above.
 - **The usual trust base:**
   - Zig interpreter ≡ Lean semantics (differential-tested, not proven);
   - the exporter is a faithful printer;
