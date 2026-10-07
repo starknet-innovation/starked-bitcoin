@@ -21,6 +21,26 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-10-07 (session 4) — HC-V6 proven, Core audit, full-chain tooling; download running
+Who: Claude (agent), with the owner
+Roadmap: HC-V6, HC-AUDIT → done; HC-FULLRUN → in-progress. Decision D-022 (owner): defer GPU/H200.
+Done:
+- HC-V6 minimum block version (BIP34/66/65; heights verified in Core `chainparams.cpp`): spec,
+  AIR v6, witness, real segment at 400000, `version_sound`, added to `SegmentValid` (b8a2e8c).
+- HC-AUDIT against Core master: `SegmentValid` covers every mainnet header rule except
+  `time-too-new` (verification.md § Coverage audit).
+- `scripts/fetch_headers.py` (verified header download) and `spike fullrun` (a1a0320).
+  Heights 0..2047: check mode OK, Metal prove+verify OK, chaining OK, chainwork exact.
+Evidence:
+- `lake build` OK (8733 jobs); `#print axioms header_chain_sound` → standard axioms only.
+- `zig build test`: 27/27.
+Problems / lessons:
+- Blockstream started returning 429 under 4 parallel workers; the fetcher now puts a failing
+  source on cooldown and uses the other.
+- An overclaiming test comment ("version 3 refused" may fail on PoW first) was corrected.
+Next: when the download finishes, merge the chunks (`fetch_headers.py --merge data/chunk_{0,1,2,3}.bin`)
+and run `spike fullrun 16 check data/headers.bin`; then `fullrun 18 metal` to measure the full-chain proving time.
+
 ## 2026-10-07 (session 3) — HC-V5, HC-TOP, BENCH-RAITO, FV-Z3; version rule found missing
 Who: Claude (agent), with the owner
 Roadmap: HC-V5, HC-TOP, BENCH-RAITO, FV-Z3 → done. New: HC-V6 (next), HC-AUDIT, HC-FULLRUN.
