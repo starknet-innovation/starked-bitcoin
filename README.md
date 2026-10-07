@@ -45,6 +45,7 @@ src/sha256/        SHA-256 reference and AIR witness
 src/btc/           Header-chain and retarget witnesses
 src/bin/spike.zig  Benchmark CLI (macOS / Metal)
 testdata/          Mainnet headers used by the tests
+bench/             External benchmarks (raito-sha256: Raito's Cairo SHA-256 under `scarb prove`)
 third_party/       stwo-zig (pinned submodule; do not edit in place)
 docs/              Documentation (see below)
 ```

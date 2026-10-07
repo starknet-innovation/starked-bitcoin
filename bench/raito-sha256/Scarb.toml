@@ -1,0 +1,14 @@
+[package]
+name = "raito_sha256_bench"
+version = "0.1.0"
+edition = "2024_07"
+
+# Raito's Cairo SHA-256 (packages/utils/src/sha256.cairo), pinned to the commit benchmarked.
+[dependencies]
+utils = { git = "https://github.com/starkware-bitcoin/raito.git", rev = "48c237ac941d8061a857ecd111d7e81107912556" }
+cairo_execute = "2.18.0"
+
+[executable]
+
+[cairo]
+enable-gas = false
