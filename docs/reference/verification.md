@@ -77,7 +77,7 @@ height decomposition, retarget clamp, PoW one-hot). See the
 | Stwo protocol soundness (circle FRI, Fiat–Shamir, Blake2s channel) | Upstream; out of scope |
 | stwo-zig implements Stwo correctly | Upstream tests. We pin the preprocessed root ourselves (stwo-zig#225). |
 | The Zig interpreter matches Lean `Expr.eval` | Differential test against `probe_oracle` (`src/air/interp.zig`) |
-| The JSON exporter is a faithful printer | Small and reviewed; drift check in [status.md](../project/status.md) |
+| The JSON exporter is a faithful printer | **Mostly proven (2026-10-07):** the node array it prints is `Air.toDag`, and `dag_correct` (`Dag.lean`) proves that it evaluates, in any commutative ring, to each constraint (`Expr.evalR`; `eval_eq_evalR` links this to `Expr.eval`). What remains trusted is the 7-case `nodeJson` string printer and the Zig JSON parser. Drift check in [status.md](../project/status.md). |
 | Committed `airs/*.json` equals the current Lean definitions | Drift check (regenerate and `cmp`) |
 | The specs in `Spec/*.lean` match Bitcoin Core | `#guard`s on real mainnet values, and Zig tests on mainnet headers. Not proven against Core's C++. |
 | Lean kernel, Mathlib, toolchain | Pinned versions |

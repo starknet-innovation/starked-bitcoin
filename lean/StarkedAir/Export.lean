@@ -1,36 +1,25 @@
 /-
 Export an `Air` to the canonical JSON consumed by `src/air/ir.zig`.
 
-Expressions are emitted as a DAG in post-order (children before parents),
-with structurally equal subexpressions shared. This export is a plain
-printer of the very `Air` value the soundness theorems are about, so it
-needs no separate correctness argument beyond being a faithful printer.
+The node array is `Air.toDag` (Dag.lean): expressions in post-order, structurally equal
+subexpressions shared. `dag_correct` proves that this DAG evaluates, in any commutative ring, to
+the AIR's constraints. This file only prints it.
 -/
 import StarkedAir.IR
-import Std.Data.HashMap
+import StarkedAir.Dag
 
 namespace StarkedAir
 
-private structure EmitState where
-  ids : Std.HashMap Expr ℕ := {}
-  out : Array String := #[]
-
-private def emit (e : Expr) : StateM EmitState ℕ := do
-  if let some id := (← get).ids.get? e then return id
-  let node ← match e with
-    | .col t i off =>
-      let tree := match t with | .pre => "preprocessed" | .main => "main"
-      pure s!"\{\"col\":\{\"tree\":\"{tree}\",\"index\":{i},\"offset\":{off}}}"
-    | .const v => pure s!"\{\"constant\":{v % P}}"
-    | .add a b => do let a ← emit a; let b ← emit b; pure s!"\{\"add\":[{a},{b}]}"
-    | .sub a b => do let a ← emit a; let b ← emit b; pure s!"\{\"sub\":[{a},{b}]}"
-    | .mul a b => do let a ← emit a; let b ← emit b; pure s!"\{\"mul\":[{a},{b}]}"
-    | .neg a => do let a ← emit a; pure s!"\{\"neg\":{a}}"
-    | .pub i => pure s!"\{\"pub\":{i}}"
-  let s ← get
-  let id := s.out.size
-  set { s with ids := s.ids.insert e id, out := s.out.push node }
-  return id
+private def nodeJson : Node → String
+  | .col t i off =>
+    let tree := match t with | .pre => "preprocessed" | .main => "main"
+    s!"\{\"col\":\{\"tree\":\"{tree}\",\"index\":{i},\"offset\":{off}}}"
+  | .const v => s!"\{\"constant\":{v % P}}"
+  | .add a b => s!"\{\"add\":[{a},{b}]}"
+  | .sub a b => s!"\{\"sub\":[{a},{b}]}"
+  | .mul a b => s!"\{\"mul\":[{a},{b}]}"
+  | .neg a => s!"\{\"neg\":{a}}"
+  | .pub i => s!"\{\"pub\":{i}}"
 
 private def preJson : PreCol → String
   | .isFirst => "{\"is_first\":{}}"
@@ -47,14 +36,14 @@ def Expr.nPub : Expr → ℕ
   | _ => 0
 
 def Air.toJson (air : Air) : String :=
-  let (roots, st) := (air.constraints.mapM emit).run {}
+  let (nodes, roots) := air.toDag
   let join (xs : List String) := ",".intercalate xs
   "{\"schema\":\"starked-air-v1\"" ++
     s!",\"name\":\"{air.name}\"" ++
     s!",\"n_preprocessed\":{air.pre.length},\"n_main\":{air.nMain}" ++
     s!",\"n_pub\":{(air.constraints.map Expr.nPub).foldl max 0}" ++
     s!",\"preprocessed\":[{join (air.pre.map preJson)}]" ++
-    s!",\"exprs\":[{join st.out.toList}]" ++
+    s!",\"exprs\":[{join (nodes.toList.map nodeJson)}]" ++
     s!",\"constraints\":[{join (roots.map toString)}]}"
 
 end StarkedAir

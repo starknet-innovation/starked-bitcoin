@@ -36,7 +36,7 @@ abbrev F := ZMod P
 inductive Tree where
   | pre
   | main
-  deriving DecidableEq, BEq, Hashable, Repr
+  deriving DecidableEq, Hashable, Repr
 
 inductive Expr where
   | col (t : Tree) (i : ℕ) (off : ℤ)
@@ -46,7 +46,7 @@ inductive Expr where
   | mul (a b : Expr)
   | neg (a : Expr)
   | pub (i : ℕ)
-  deriving DecidableEq, BEq, Hashable, Repr
+  deriving DecidableEq, Hashable, Repr
 
 inductive PreCol where
   /-- `1` at row 0, else `0`. -/

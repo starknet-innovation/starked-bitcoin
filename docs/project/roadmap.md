@@ -46,7 +46,7 @@ Rules:
 | REC-LEAF | `BitcoinSegmentStatement` (IR → circuit builder) and leaf-wrap one segment proof | todo | |
 | REC-FOLD | Fold two leaves; measure time and memory (Q-MEM) | todo | |
 | REC-COMPOSE | Lean: valid segments whose outputs equal the next inputs compose into a valid chain from genesis (pure spec theorem over `SegmentValid`) | done (this commit: `segment_compose`) | Provable now; no circuits involved |
-| REC-STMT-EQ | Lean + tests: the in-circuit evaluation of our IR (`BitcoinSegmentStatement`) equals `Expr.eval` | todo | With REC-LEAF | Generic; candidate for upstreaming to stwo-zig |
+| REC-STMT-EQ | Lean + tests: the in-circuit evaluation of our IR (`BitcoinSegmentStatement`) equals `Expr.eval` | in-progress (the DAG half is proven: `dag_correct`; the in-circuit interpreter remains) | With REC-LEAF | Generic; candidate for upstreaming to stwo-zig |
 | AGG | Segment aggregation: link segments through the public inputs, aggregate in a tree up to the tip | todo | |
 | H200 | Run the full chain on the H200 | deferred (D-022) | Needs owner access |
 

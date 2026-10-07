@@ -20,7 +20,8 @@ them.
 | File | Contents |
 |---|---|
 | `IR.lean` | `F = ZMod P`, `P = 2^31−1`, `P_prime` (Lucas–Lehmer, no `native_decide`); `Expr`, `PreCol`, `Air`, `wrap`, `Expr.eval`, `Air.Satisfied` |
-| `Export.lean` | `Air.toJson` (canonical JSON printer). The driver is `lean/Export.lean`. |
+| `Dag.lean` | `Expr.evalR` (evaluation in any commutative ring), `eval_eq_evalR`, `Node`, `runDag`, `emitN`/`emitAll`/`Air.toDag` (the exported DAG), **`dag_correct`** |
+| `Export.lean` | `Air.toJson`: prints `Air.toDag` as canonical JSON. The driver is `lean/Export.lean`. |
 | `Bits.lean` | `ofBits`, bit/limb lemmas shared by the gadgets |
 | `Testing/Probe.lean` | Generates the `probe_oracle` used to differential-test the Zig interpreter |
 | `Spec/Sha256.lean` | FIPS 180-4 SHA-256 over `BitVec 32`, checked against the "abc" vector |
