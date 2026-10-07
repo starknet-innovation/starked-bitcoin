@@ -61,6 +61,12 @@ zig-out/bin/spike headers <log_size> <cpu|metal> <file>  # header chain over a .
 - **Rule:** to add a JSON or test-data file, add the anonymous import in
   `build.zig` and reference it by that name. Do not use a relative path.
 
+## Scripts
+
+| File | Purpose |
+|---|---|
+| `scripts/air_z3.py` | Z3 witness-uniqueness checks on exported AIRs (`list`, `check <preset>`, `all`, `--bv`). Needs `.venv-fv` (see the [Z3 report](../reports/2026-10-07-z3-uniqueness.md)). |
+
 ## Dependency on stwo-zig
 
 - stwo-zig is pinned as the submodule `third_party/stwo-zig`. The packages

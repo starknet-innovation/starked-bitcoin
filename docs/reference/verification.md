@@ -32,8 +32,16 @@ is built from.
 ## Not yet constrained (header chain)
 
 - Wall-clock time: `time ≤ now + 2h` is out of scope by design.
-- Version-bit rules do not affect historical header validity.
+- **Minimum block version** (Core "bad-version": nVersion ≥ 2, 3, 4 from
+  heights 227931, 363725, 388381). Not enforced yet; roadmap `HC-V6`.
+  (An earlier version of this file wrongly said version rules never affect
+  header validity.)
+- Other version-bit signalling (BIP9) does not affect header validity.
 - Testnet and regtest rules: the specs are mainnet only.
+
+**Independent check:** Z3 witness-uniqueness on four gadget windows (MTP flag,
+height decomposition, retarget clamp, PoW one-hot). See the
+[Z3 report](../reports/2026-10-07-z3-uniqueness.md).
 
 ## Trusted, not proven
 

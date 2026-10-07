@@ -18,7 +18,8 @@ interpreted by the Zig prover and verifier.
 | Component | State |
 |---|---|
 | SHA-256 compression AIR | Implemented; **proven** equal to FIPS 180-4 |
-| Header chain: SHA256d, linkage, proof of work, height/period state, difficulty retarget, median time past, exact chainwork | Implemented; **proven**: `header_chain_sound` shows any accepted segment is valid under Bitcoin Core's mainnet header rules |
+| Header chain: SHA256d, linkage, proof of work, height/period state, difficulty retarget, median time past, exact chainwork | Implemented; **proven**: `header_chain_sound` shows any accepted segment satisfies these Bitcoin Core mainnet header rules |
+| Header chain: minimum block version (BIP34/66/65) | Not yet (`HC-V6`) |
 | Recursion / aggregation, CUDA, UTXO state | Not yet |
 
 - Exact guarantees and trust assumptions:

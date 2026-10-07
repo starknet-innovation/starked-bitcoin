@@ -21,6 +21,28 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-10-07 (session 3) — HC-V5, HC-TOP, BENCH-RAITO, FV-Z3; version rule found missing
+Who: Claude (agent), with the owner
+Roadmap: HC-V5, HC-TOP, BENCH-RAITO, FV-Z3 → done. New: HC-V6 (next), HC-AUDIT, HC-FULLRUN.
+Decisions: D-020 (exact chainwork, owner), D-021 (s ≥ 16, agent).
+Done:
+- HC-V5 exact chainwork: definition 1250f02, proof e1353f0 (`work_q`, `work_step`, `work_out`,
+  built on the generic `carry_chain`/`shift_sum`/`cauchy`).
+- HC-TOP: `Spec/Chain.lean` `SegmentValid` and `header_chain_sound` (c30c715).
+- BENCH-RAITO: our SHA AIR is about 250× faster than Raito's Cairo SHA-256 under `scarb prove` (0c7f39c).
+- FV-Z3: `scripts/air_z3.py`. Four windows unique, SHA round unknown, control behaves (this commit).
+Evidence:
+- `lake build` OK (8731 jobs). No sorry/native_decide/bv_decide. `#print axioms header_chain_sound`
+  → propext, Classical.choice, Quot.sound.
+- `zig build test`: 26/26. JSON drift: in sync. Benchmarks and Z3 runs: see the reports.
+Problems / lessons:
+- **A consensus rule was missing.** Core rejects low block versions after BIP34/66/65
+  ("bad-version"). I had wrongly recorded that version rules never matter. Found while answering
+  the owner; now HC-V6, plus HC-AUDIT so that a line-by-line check of Core replaces memory.
+- Z3: integer encoding hopeless at this size; cone of influence + bit-vectors made 4/5 tractable.
+- Lean: `set` trap again (facts derived after `set` keep the unfolded form); derive first, set last.
+Next: HC-V6 (version rule). Q-HEADERS is open for HC-FULLRUN.
+
 ## 2026-10-07 (session 2) — HC-V4 median time past: defined, tested, proven
 Who: Claude (agent), with the owner
 Roadmap: HC-V4 → done; HC-V5 → next. Owner decisions D-018 (counting) and D-019 (M1 before M2).

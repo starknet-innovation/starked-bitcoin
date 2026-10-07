@@ -27,7 +27,10 @@ Rules:
 | HC-V5 | Exact chainwork (D-020): per-header `⌊2^256/(T+1)⌋`, accumulated, public in/out | done (1250f02, this commit) | Needs 256-bit limb arithmetic in the scratch rows |
 | HC-TOP | A single top-level theorem combining `chain_sound_v2`, `state_sound`, `retarget_sound`, the v4 MTP theorems (and v5) into one statement about the public inputs | done (this commit: `header_chain_sound`) | Must prove, by induction with `mtp_window`, that each window is the real predecessors' times padded with `sentinel`, given the genesis/segment public-input convention; then apply `mtp_core`. One theorem plus a doc paragraph in verification.md. |
 | BENCH-RAITO | Benchmark our SHA-256 AIR against Raito's Cairo SHA-256 | done (this commit) | Same machine, documented methodology, results in airs/sha256.md |
-| FV-Z3 **(next)** | Tier-1 formal verification: Z3 search for under-constrained witnesses (adapt stwo-zig `scripts/air_uniqueness_board.py`) | todo | Runs on each exported AIR; results recorded |
+| HC-V6 **(next)** | Minimum block version (Core `ContextualCheckBlockHeader` "bad-version"): nVersion ≥ 2/3/4 from heights 227931/363725/388381 (BIP34/66/65) | todo | Found 2026-10-07: missing from `SegmentValid`. Done per [adding-an-air.md](../guides/adding-an-air.md); add to `SegmentValid` and `header_chain_sound`. |
+| HC-AUDIT | Line-by-line audit of Core `CheckBlockHeader` + `ContextualCheckBlockHeader` (mainnet) against `SegmentValid`; record in verification.md | todo | Guards against further omissions like HC-V6 |
+| HC-FULLRUN | Generate (and satisfy-check) the witness for every mainnet header, genesis to tip | todo | Needs all headers: local `bitcoind` preferred (Q-HEADERS), else rate-limited public API. Proves completeness on real data. |
+| FV-Z3 | Tier-1 formal verification: Z3 search for under-constrained witnesses (adapt stwo-zig `scripts/air_uniqueness_board.py`) | done (this commit; [report](../reports/2026-10-07-z3-uniqueness.md)) | Runs on each exported AIR; results recorded |
 
 ## M2: full chain to the tip, on the H200
 
