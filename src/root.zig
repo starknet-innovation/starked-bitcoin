@@ -7,6 +7,7 @@ pub const retarget = @import("btc/retarget.zig");
 pub const work = @import("btc/work.zig");
 pub const recursion = struct {
     pub const plain_verifier = @import("recursion/plain_verifier.zig");
+    pub const leaf = @import("recursion/leaf.zig");
 };
 pub const air = struct {
     pub const ir = @import("air/ir.zig");
