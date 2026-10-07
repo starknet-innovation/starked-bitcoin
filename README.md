@@ -56,6 +56,7 @@ docs/              Documentation (see below)
 
 | You want to… | Read |
 |---|---|
+| Work on this repo as an agent (read order, hard rules) | [AGENTS.md](AGENTS.md) (`CLAUDE.md` imports it) |
 | Understand the goals, architecture and trust model | [docs/design/overview.md](docs/design/overview.md) |
 | See which Bitcoin rules are covered and how they're planned | [docs/design/consensus-rules.md](docs/design/consensus-rules.md) |
 | Know exactly what is proven and what is trusted | [docs/reference/verification.md](docs/reference/verification.md) |
