@@ -27,6 +27,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "stwo_prover_engine", .module = stwo_prover_engine },
             .{ .name = "stwo_cpu_backend", .module = stwo_cpu_backend },
             .{ .name = "stwo_proof_wire", .module = b.dependency("stwo_proof_wire", .{ .target = target, .optimize = optimize }).module("stwo_proof_wire") },
+            .{ .name = "stwo_circuit_frontend", .module = b.dependency("stwo_circuit_frontend", .{ .target = target, .optimize = optimize }).module("stwo_circuit_frontend") },
         },
     });
 

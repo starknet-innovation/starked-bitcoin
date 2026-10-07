@@ -81,6 +81,23 @@ Recommendation: **B**. Our strongest asset is the formally verified AIR, and B
 keeps it. The circuit cost of about 2.5k extra OODS samples is small next to
 the verifier's Blake2s work (INFERRED).
 
+## Status of the plain path (2026-10-07)
+
+`src/recursion/plain_verifier.zig` is a parallel in-circuit verifier built only
+from stwo-zig's public circuit pieces; the byte-parity path is untouched. It
+replays `prove_rec`'s native transcript, samples each main column at its
+offsets, emits the DEEP responses in native order (including the duplicated
+sample of two-offset columns), checks the composition through the AIR's
+exported DAG, and decommits three trees.
+- **Test:** a mainnet header-chain segment (2¹² rows) proven with `prove_rec`
+  is accepted (value mode, `isCircuitValid`). The circuit is rejected after
+  tampering with a public input, an OODS sample, a decommitted value, a FRI
+  coset value or the composition root, and accepted again once restored.
+- **Size:** about 5.1 M circuit variables for a 2¹² segment.
+- **Validation:** every value the circuit checks comes from the native
+  verifier's capture of the same proof, so native and circuit agree on
+  acceptance (UNVERIFIED in general; differential fuzzing is a follow-up).
+
 ## Open questions
 
 - **Q-CHAIN:** check chaining inside the fold (a custom fold statement), or in

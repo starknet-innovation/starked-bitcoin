@@ -5,6 +5,9 @@ pub const sha256_witness = @import("sha256/witness.zig");
 pub const header_chain = @import("btc/header_chain.zig");
 pub const retarget = @import("btc/retarget.zig");
 pub const work = @import("btc/work.zig");
+pub const recursion = struct {
+    pub const plain_verifier = @import("recursion/plain_verifier.zig");
+};
 pub const air = struct {
     pub const ir = @import("air/ir.zig");
     pub const interp = @import("air/interp.zig");

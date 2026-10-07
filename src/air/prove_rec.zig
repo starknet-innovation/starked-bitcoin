@@ -130,6 +130,44 @@ pub fn verify(
     try core.verifier.verify(Hasher, MerkleChannel, allocator, components[0..], &channel, &scheme, proof);
 }
 
+/// `verify`, also capturing what the in-circuit verifier needs (query positions, Merkle paths,
+/// FRI layers). The capture is owned by the caller (`capture.deinit`).
+pub fn verifyCapture(
+    allocator: std.mem.Allocator,
+    cfg: Config,
+    air: ir.Air,
+    log_size: u32,
+    pubs: []const M31,
+    proof_in: Proof,
+    capture: *core.verifier.ProofCapture(Hasher),
+) !void {
+    var proof = proof_in;
+    var moved = false;
+    defer if (!moved) proof.deinit(allocator);
+    if (proof.commitment_scheme_proof.commitments.items.len != 3) return error.InvalidProofShape;
+    var channel = Channel{};
+    Revision.proving_5a7c5ed.mixConfig(cfg, &channel);
+    var scheme = try core.pcs.verifier.CommitmentSchemeVerifier(Hasher, MerkleChannel).init(allocator, cfg);
+    defer scheme.deinit(allocator);
+    const pre_logs = try allocator.alloc(u32, air.n_preprocessed);
+    defer allocator.free(pre_logs);
+    @memset(pre_logs, log_size);
+    const main_logs = try allocator.alloc(u32, air.n_main);
+    defer allocator.free(main_logs);
+    @memset(main_logs, log_size);
+    const expected_pre = try preprocessedRoot(allocator, cfg, air, log_size);
+    if (!std.mem.eql(u8, std.mem.asBytes(&expected_pre), std.mem.asBytes(&proof.commitment_scheme_proof.commitments.items[0])))
+        return error.PreprocessedRootMismatch;
+    try scheme.commit(allocator, proof.commitment_scheme_proof.commitments.items[0], pre_logs, &channel);
+    base.mixStatement(&channel, log_size, try air.digest(allocator), pubs);
+    try scheme.commit(allocator, proof.commitment_scheme_proof.commitments.items[1], main_logs, &channel);
+    var component = try component_mod.Component.init(allocator, air, log_size, pubs);
+    defer component.deinit();
+    const components = [_]core.air.components.Component{component.asVerifierComponent()};
+    moved = true;
+    try core.verifier.verifyWithProofCapture(Hasher, MerkleChannel, allocator, components[0..], &channel, &scheme, proof, capture);
+}
+
 test "header chain segment proves and verifies under the recursion profile" {
     const H = @import("../btc/header_chain.zig");
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
