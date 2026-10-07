@@ -98,16 +98,42 @@ exported DAG, and decommits three trees.
   verifier's capture of the same proof, so native and circuit agree on
   acceptance (UNVERIFIED in general; differential fuzzing is a follow-up).
 
+## Aggregation as built (2026-10-08, D-025)
+
+- **Leaf** (`src/recursion/leaf.zig`): the plain verifier checks one segment
+  proof in-circuit; the circuit outputs `Blake2s(0⁸ ‖ pubs)` (108 public
+  inputs as u32 words, `guessM31` so the encoding is injective).
+- **Node** (`src/recursion/node.zig`): verifies two child circuit proofs with
+  stwo-zig's `CircuitStatement` + `verify`, after recomputing each child's
+  digest from a guessed key and public inputs. It checks `PubLink` (the Lean
+  definition, line by line: input state of the right child = output state of
+  the left; heights +1 via 16-bit limbs and a carry bit, range-checked as
+  `m31ToU32(x) = x`). Output: `Blake2s(K ‖ combine(pL, pR))` with
+  `K = Blake2s(hL ‖ kL ‖ hR ‖ kR)`.
+- **Shape:** leaves of every size and the node are padded to one target
+  (fixpoint as upstream's `sharedTargetFixpoint`), so one node circuit
+  verifies leaves and nodes. A leaf's circuit hash depends only on its log
+  size (tested); the node's identity is derived from topology (tested).
+- **Tree:** layers pair left to right; an unpaired last entry is carried up.
+- **Outer verifier** (`verifyRoot`): native circuit-proof verification; the
+  root's preprocessed root must be the node circuit's; the output must equal
+  `Blake2s(K_expected ‖ P)`, with `K_expected` recomputed from the leaf circuit
+  hashes and the node hash; `P`'s input state must be genesis. Then
+  `chain_from_genesis` (Lean) gives a valid chain from genesis to `P`'s tip.
+- **Lean:** `leaf_valid`, `pub_compose`, `chain_from_genesis`
+  (`Gadgets/Aggregate.lean`), standard axioms only. The node circuit's code is
+  trusted to implement `PubLink`/`combine` (verification.md).
+- **Measured** (M4 Pro, CPU, 70 queries, 26-bit PoW): leaf of a 2²⁰ segment
+  (4,096 headers) 31–33 s padded to the shared shape, plus 33 s for the segment
+  proofs; node 24 s; root proof 0.98 MB, verified in 0.22 s; peak RSS 13.3 GB
+  for a 2-leaf tree.
+
 ## Open questions
 
-- **Q-CHAIN:** check chaining inside the fold (a custom fold statement), or in
-  a small final aggregator over the revealed `(circuit_hash, output_digest)`
-  tree, as StarkWare's applicative aggregator does. Leaning towards the final
-  aggregator.
-- **Q-REGISTRY:** the shared circuit-size registry is padded for Cairo leaves
-  (about 570 M cells). Our leaves are much smaller, so we may need our own
-  registry or topology to avoid paying for Cairo-sized circuits.
-- **Q-MEM:** fold memory (11–18 GB reported) on a 24 GB laptop.
+- **Q-CHAIN:** resolved (D-025): chaining is checked inside every node.
+- **Q-REGISTRY:** resolved: our own shape (leaf + node fixpoint), not the
+  Cairo-sized registry.
+- **Q-MEM:** resolved for now: 13.3 GB peak at 2²⁰ leaves on the 24 GB laptop.
 - **What is proven and what is trusted** (decided 2026-10-07):
   - The composition (segments → chain) is a pure Lean theorem, **proven**:
     `segment_compose` (`Spec/Compose.lean`). The aggregator only has to check
