@@ -14,3 +14,4 @@ import StarkedAir.Gadgets.StateSound
 import StarkedAir.Gadgets.Retarget
 import StarkedAir.Spec.RetargetMath
 import StarkedAir.Gadgets.RetargetSound
+import StarkedAir.Gadgets.RetargetDiv

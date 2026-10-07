@@ -325,10 +325,14 @@ include hsat
 omit hsat in
 theorem lt_P_of {a : ℕ} (h : a < 2 ^ 30) : a < P := lt_trans h (by norm_num [P])
 
-/-- **Proof of work.** Every header of a satisfying trace meets Bitcoin Core's
-`CheckProofOfWork` (mainnet) for its own `nBits`. -/
-theorem header_pow {j : ℕ} (hj : 256 * (j + 1) ≤ 2 ^ logSize) :
-    powOk (hashAt main j) (nBitsOf (headerWord main j)) := by
+/-- Proof of work, plus the row-216 exponent one-hot and the `powLimit` bounds (used by the
+retarget soundness proof). -/
+theorem header_pow_ex {j : ℕ} (hj : 256 * (j + 1) ≤ 2 ^ logSize) :
+    powOk (hashAt main j) (nBitsOf (headerWord main j)) ∧
+    ∃ s0 < 27, bit main (A + s0) (256 * j + 216) = true ∧
+      (∀ s < 27, s ≠ s0 → bit main (A + s) (256 * j + 216) = false) ∧
+      (headerWord main j 18).toNat % 256 = s0 + 3 ∧ (s0 = 26 → mantNat (headerWord main j 18) < 65536) ∧
+      1 ≤ mantNat (headerWord main j 18) ∧ (headerWord main j 18).toNat / 2 ^ 8 % 256 < 128 := by
   set n := 2 ^ logSize
   set r := 256 * j + 216
   have hr : r < n := hr216 hj
@@ -487,7 +491,14 @@ theorem header_pow {j : ℕ} (hj : 256 * (j + 1) ≤ 2 ^ logSize) :
       rw [hL0] at hLeq
       exact List.sum_eq_zero_iff.mp hLeq.symm _ (List.mem_map.mpr ⟨i, List.mem_range.mpr hi, rfl⟩)
   have hle := le_target (hashByte H) hbyte (s := s0) (by omega) hhigh hcmp
-  exact powOk_intro H (headerWord main j) (mant := mantNat y) hexp rfl hsign (by rw [hm1]; omega) (by omega) hlim hle
+  exact ⟨powOk_intro H (headerWord main j) (mant := mantNat y) hexp rfl hsign (by rw [hm1]; omega) (by omega)
+    hlim hle, s0, hs0, hg, hu, hexp, hlim, by omega, by omega⟩
+
+/-- **Proof of work.** Every header of a satisfying trace meets Bitcoin Core's
+`CheckProofOfWork` (mainnet) for its own `nBits`. -/
+theorem header_pow {j : ℕ} (hj : 256 * (j + 1) ≤ 2 ^ logSize) :
+    powOk (hashAt main j) (nBitsOf (headerWord main j)) :=
+  (header_pow_ex hsat hj).1
 
 end Main
 

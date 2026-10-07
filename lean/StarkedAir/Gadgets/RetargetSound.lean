@@ -140,6 +140,14 @@ theorem ev_beByte {base i rr : ℕ} {off : ℤ} (hi : i < 4) (hw : wrap n r off 
   congr 1
   exact ofBits_congr (fun k hk => by rw [Nat.add_assoc]; exact (word_getLsbD _ _ (by omega)).symm)
 
+/-- A window of `k` bits starting at `lo` of a word held in bit columns. -/
+theorem ev_window {base lo k rr : ℕ} {off : ℤ} (hk : lo + k ≤ 32) (hw : wrap n r off = rr)
+    (hb : ∀ i < 32, (main (base + i) rr).val ≤ 1) :
+    (bitsR base lo k off).eval n pc pub main r = (((word main base rr).toNat / 2 ^ lo % 2 ^ k : ℕ) : F) := by
+  rw [ev_bitsR hw (fun i hi => by rw [Nat.add_assoc]; exact hb _ (by omega)), ← ofBits_window]
+  congr 1
+  exact ofBits_congr (fun i hi => by rw [Nat.add_assoc]; exact (word_getLsbD _ _ (by omega)).symm)
+
 end Ev
 
 /-! ## Facts at the retarget row (221) -/
@@ -454,6 +462,277 @@ theorem rt_span (hm : heightAt main j % 2016 = 0) (hpos : 0 < heightAt main j) :
     have hdiff : 4838401 ≤ ((tl tP 0 + 65536 * tl tP 1 : ℕ) : ℤ) - ((tl pS 0 + 65536 * tl pS 1 : ℕ) : ℤ) := by
       push_cast; omega
     rw [min_eq_left (by omega), max_eq_right (by omega), n1]; rfl
+
+set_option maxHeartbeats 1600000 in
+/-- The retarget row's product: `P0 = mant_prev · span`, with everything read from words. -/
+theorem rt_p0 :
+    let pa := (word main A (256 * j + 223)).toNat
+    let pe := (word main E (256 * j + 223)).toNat
+    pa + 2 ^ 32 * (pe % 2 ^ 16) =
+      (leN (prevNB pub main j) % 2 ^ 23) * ((word main E (256 * j + 221)).toNat % 2 ^ 23) := by
+  intro pa pe
+  set r := 256 * j + 221
+  have hr : r < 2 ^ logSize := by omega
+  have hr2 : r + 2 < 2 ^ logSize := by omega
+  have hr3 : r + 3 < 2 ^ logSize := by omega
+  have hsel := ev_rtSel hsat hj
+  have w0 : wrap (2 ^ logSize) r 0 = r := wrap_zero hr
+  have wm1 : wrap (2 ^ logSize) r (-1) = 256 * j + 220 := by
+    have := wrapN (N := 2 ^ logSize) (k := 1) (show 1 ≤ r by omega) hr; simp only [Nat.cast_one] at this
+    rw [this]; omega
+  have w2 : wrap (2 ^ logSize) r 2 = 256 * j + 223 := by
+    rw [wrap_eq (by omega) (by omega)]; omega
+  have w3 : wrap (2 ^ logSize) r 3 = 256 * j + 224 := by
+    rw [wrap_eq (by omega) (by omega)]; omega
+  have bAm1 := bA hsat hj (rr := 256 * j + 220) (by omega) (base := A) (by decide)
+  have bE0 := bA hsat hj (rr := r) hr (base := E) (by decide)
+  have bA2 := bA hsat hj (rr := 256 * j + 223) (by omega) (base := A) (by decide)
+  have bE2 := bA hsat hj (rr := 256 * j + 223) (by omega) (base := E) (by decide)
+  have bA3 := bA hsat hj (rr := 256 * j + 224) (by omega) (base := A) (by decide)
+  have bE3 := bA hsat hj (rr := 256 * j + 224) (by omega) (base := E) (by decide)
+  set wv := (word main A (256 * j + 220)).toNat
+  set sv := (word main E r).toNat
+  set ma := (word main A (256 * j + 224)).toNat
+  set me := (word main E (256 * j + 224)).toNat
+  -- Operand and result digits.
+  have ea : ∀ i < 3, (prevMant i).eval (2 ^ logSize) preCols pub main r =
+      ((if i = 0 then wv / 2 ^ 24 % 2 ^ 8 else if i = 1 then wv / 2 ^ 16 % 2 ^ 8 else wv / 2 ^ 8 % 2 ^ 7 : ℕ) : F) := by
+    intro i hi
+    interval_cases i
+    · exact ev_window (by norm_num) wm1 bAm1
+    · exact ev_window (by norm_num) wm1 bAm1
+    · exact ev_window (by norm_num) wm1 bAm1
+  have eb : ∀ i < 3, (spanByte i).eval (2 ^ logSize) preCols pub main r =
+      ((if i = 0 then sv / 2 ^ 0 % 2 ^ 8 else if i = 1 then sv / 2 ^ 8 % 2 ^ 8 else sv / 2 ^ 16 % 2 ^ 7 : ℕ) : F) := by
+    intro i hi
+    interval_cases i
+    · exact ev_window (by norm_num) w0 bE0
+    · exact ev_window (by norm_num) w0 bE0
+    · exact ev_window (by norm_num) w0 bE0
+  have ep : ∀ k < 6, (p0Byte k).eval (2 ^ logSize) preCols pub main r =
+      ((if k < 4 then pa / 2 ^ (8 * k) % 2 ^ 8 else pe / 2 ^ (8 * (k - 4)) % 2 ^ 8 : ℕ) : F) := by
+    intro k hk
+    interval_cases k
+    all_goals first
+      | exact ev_window (by norm_num) w2 bA2
+      | exact ev_window (by norm_num) w2 bE2
+  have em : ∀ k < 5, (mcE k).eval (2 ^ logSize) preCols pub main r =
+      ((if k < 3 then ma / 2 ^ (10 * k) % 2 ^ 10 else me / 2 ^ (10 * (k - 3)) % 2 ^ 10 : ℕ) : F) := by
+    intro k hk
+    interval_cases k
+    all_goals first
+      | exact ev_window (by norm_num) w3 bA3
+      | exact ev_window (by norm_num) w3 bE3
+  -- Column equations.
+  have col : ∀ k < 6, (p0Col k).eval (2 ^ logSize) preCols pub main r = 0 := fun k hk =>
+    rt_sat hsat hj _ (by
+      unfold retargetCs
+      exact List.mem_append_left _ (List.mem_append_left _ (List.mem_append_left _ (List.mem_append_left _
+        (List.mem_append_left _ (List.mem_append_right _ (List.mem_map.mpr ⟨k, List.mem_range.mpr hk, rfl⟩)))))))
+  have c0 := col 0 (by norm_num); have c1 := col 1 (by norm_num); have c2 := col 2 (by norm_num)
+  have c3 := col 3 (by norm_num); have c4 := col 4 (by norm_num); have c5 := col 5 (by norm_num)
+  let f := fun i j => Expr.mul (prevMant i) (spanByte j)
+  have s0 : sumCol 0 f 3 3 = (cst 0).add (f 0 0) := rfl
+  have s1 : sumCol 1 f 3 3 = ((cst 0).add (f 0 1)).add (f 1 0) := rfl
+  have s2 : sumCol 2 f 3 3 = (((cst 0).add (f 0 2)).add (f 1 1)).add (f 2 0) := rfl
+  have s3 : sumCol 3 f 3 3 = ((cst 0).add (f 1 2)).add (f 2 1) := rfl
+  have s4 : sumCol 4 f 3 3 = (cst 0).add (f 2 2) := rfl
+  have s5 : sumCol 5 f 3 3 = cst 0 := rfl
+  have ea0 := ea 0 (by norm_num); have ea1 := ea 1 (by norm_num); have ea2 := ea 2 (by norm_num)
+  have eb0 := eb 0 (by norm_num); have eb1 := eb 1 (by norm_num); have eb2 := eb 2 (by norm_num)
+  have ep0 := ep 0 (by norm_num); have ep1 := ep 1 (by norm_num); have ep2 := ep 2 (by norm_num)
+  have ep3 := ep 3 (by norm_num); have ep4 := ep 4 (by norm_num); have ep5 := ep 5 (by norm_num)
+  have em0 := em 0 (by norm_num); have em1 := em 1 (by norm_num); have em2 := em 2 (by norm_num)
+  have em3 := em 3 (by norm_num); have em4 := em 4 (by norm_num)
+  have hsel' : Expr.eval (2 ^ logSize) preCols pub main r rtSel = 1 := hsel
+  simp only [Nat.reduceEqDiff, Nat.reduceLT, ↓reduceIte, Nat.reduceMul, Nat.reduceSub, pow_zero,
+    Nat.div_one] at ea0 ea1 ea2 eb0 eb1 eb2 ep0 ep1 ep2 ep3 ep4 ep5 em0 em1 em2 em3 em4
+  simp only [p0Col, s0, s1, s2, s3, s4, s5, f, Nat.reduceEqDiff, Nat.reduceLT, ↓reduceIte, Nat.reduceSub,
+    Nat.reduceAdd, eval_mul', eval_sub', eval_add', eval_cst, hsel', one_mul, ea0, ea1, ea2, eb0, eb1, eb2, ep0, ep1, ep2, ep3, ep4, ep5,
+    em0, em1, em2, em3, em4, Nat.cast_zero, zero_add, add_zero] at c0 c1 c2 c3 c4 c5
+  -- Digit bounds.
+  have bnd : ∀ x m : ℕ, x % 2 ^ m < 2 ^ m := fun x m => Nat.mod_lt _ (by positivity)
+  have hwv : wv < 2 ^ 32 := (word main A (256 * j + 220)).isLt
+  have hsv : sv < 2 ^ 32 := (word main E r).isLt
+  have hpa : pa < 2 ^ 32 := (word main A (256 * j + 223)).isLt
+  have hpe : pe < 2 ^ 32 := (word main E (256 * j + 223)).isLt
+  have hma : ma < 2 ^ 32 := (word main A (256 * j + 224)).isLt
+  have hme : me < 2 ^ 32 := (word main E (256 * j + 224)).isLt
+  set a0 := wv / 2 ^ 24 % 2 ^ 8 with ha0; set a1 := wv / 2 ^ 16 % 2 ^ 8 with ha1; set a2 := wv / 2 ^ 8 % 2 ^ 7 with ha2
+  set b0 := sv % 2 ^ 8 with hb0; set b1 := sv / 2 ^ 8 % 2 ^ 8 with hb1; set b2 := sv / 2 ^ 16 % 2 ^ 7 with hb2
+  set p0 := pa % 2 ^ 8 with hp0; set p1 := pa / 2 ^ 8 % 2 ^ 8 with hp1; set p2 := pa / 2 ^ 16 % 2 ^ 8 with hp2; set p3 := pa / 2 ^ 24 % 2 ^ 8 with hp3
+  set p4 := pe % 2 ^ 8 with hp4; set p5 := pe / 2 ^ 8 % 2 ^ 8 with hp5
+  set m0 := ma % 2 ^ 10 with hm0; set m1 := ma / 2 ^ 10 % 2 ^ 10 with hm1; set m2 := ma / 2 ^ 20 % 2 ^ 10 with hm2
+  set m3 := me % 2 ^ 10 with hm3; set m4 := me / 2 ^ 10 % 2 ^ 10 with hm4
+  have la0 : a0 < 256 := bnd _ 8; have la1 : a1 < 256 := bnd _ 8; have la2 : a2 < 128 := bnd _ 7
+  have lb0 : b0 < 256 := bnd _ 8; have lb1 : b1 < 256 := bnd _ 8; have lb2 : b2 < 128 := bnd _ 7
+  have lp0 : p0 < 256 := bnd _ 8; have lp1 : p1 < 256 := bnd _ 8; have lp2 : p2 < 256 := bnd _ 8
+  have lp3 : p3 < 256 := bnd _ 8; have lp4 : p4 < 256 := bnd _ 8; have lp5 : p5 < 256 := bnd _ 8
+  have lm0 : m0 < 1024 := bnd _ 10; have lm1 : m1 < 1024 := bnd _ 10; have lm2 : m2 < 1024 := bnd _ 10
+  have lm3 : m3 < 1024 := bnd _ 10; have lm4 : m4 < 1024 := bnd _ 10
+  have q1 : a0 * b0 ≤ 255 * 255 := Nat.mul_le_mul (by omega) (by omega)
+  have q2 : a0 * b1 ≤ 255 * 255 := Nat.mul_le_mul (by omega) (by omega)
+  have q3 : a1 * b0 ≤ 255 * 255 := Nat.mul_le_mul (by omega) (by omega)
+  have q4 : a0 * b2 ≤ 255 * 255 := Nat.mul_le_mul (by omega) (by omega)
+  have q5 : a1 * b1 ≤ 255 * 255 := Nat.mul_le_mul (by omega) (by omega)
+  have q6 : a2 * b0 ≤ 255 * 255 := Nat.mul_le_mul (by omega) (by omega)
+  have q7 : a1 * b2 ≤ 255 * 255 := Nat.mul_le_mul (by omega) (by omega)
+  have q8 : a2 * b1 ≤ 255 * 255 := Nat.mul_le_mul (by omega) (by omega)
+  have q9 : a2 * b2 ≤ 255 * 255 := Nat.mul_le_mul (by omega) (by omega)
+  have n0 : a0 * b0 = p0 + 256 * m0 :=
+    natCast_inj_of_lt (lt_P_of (by omega)) (lt_P_of (by omega)) (by push_cast at c0 ⊢; linear_combination c0)
+  have n1 : a0 * b1 + a1 * b0 + m0 = p1 + 256 * m1 :=
+    natCast_inj_of_lt (lt_P_of (by omega)) (lt_P_of (by omega)) (by push_cast at c1 ⊢; linear_combination c1)
+  have n2 : a0 * b2 + a1 * b1 + a2 * b0 + m1 = p2 + 256 * m2 :=
+    natCast_inj_of_lt (lt_P_of (by omega)) (lt_P_of (by omega)) (by push_cast at c2 ⊢; linear_combination c2)
+  have n3 : a1 * b2 + a2 * b1 + m2 = p3 + 256 * m3 :=
+    natCast_inj_of_lt (lt_P_of (by omega)) (lt_P_of (by omega)) (by push_cast at c3 ⊢; linear_combination c3)
+  have n4 : a2 * b2 + m3 = p4 + 256 * m4 :=
+    natCast_inj_of_lt (lt_P_of (by omega)) (lt_P_of (by omega)) (by push_cast at c4 ⊢; linear_combination c4)
+  have n5 : m4 = p5 :=
+    natCast_inj_of_lt (lt_P_of (by omega)) (lt_P_of (by omega)) (by push_cast at c5 ⊢; linear_combination c5)
+  have hwvd : (prevNB pub main j).toNat = wv := by rw [← (copy_facts hsat hj).1]
+  clear_value pa pe wv sv ma me a0 a1 a2 b0 b1 b2 p0 p1 p2 p3 p4 p5 m0 m1 m2 m3 m4
+  have dpa : pa = p0 + 256 * p1 + 65536 * p2 + 2 ^ 24 * p3 := by
+    rw [hp0, hp1, hp2, hp3]
+    exact (fun x : ℕ => (by omega : x < 2 ^ 32 → x = x % 2 ^ 8 + 256 * (x / 2 ^ 8 % 2 ^ 8) +
+      65536 * (x / 2 ^ 16 % 2 ^ 8) + 2 ^ 24 * (x / 2 ^ 24 % 2 ^ 8))) pa hpa
+  have dpe : pe % 2 ^ 16 = p4 + 256 * p5 := by
+    rw [hp4, hp5]; exact (fun x : ℕ => (by omega : x % 2 ^ 16 = x % 2 ^ 8 + 256 * (x / 2 ^ 8 % 2 ^ 8))) pe
+  have dm : leN (prevNB pub main j) % 2 ^ 23 = a0 + 256 * a1 + 65536 * a2 := by
+    unfold leN; rw [hwvd, ha0, ha1, ha2]
+    exact (fun x : ℕ => (by omega : (x / 2 ^ 24 % 256 + 256 * (x / 2 ^ 16 % 256) + 65536 * (x / 2 ^ 8 % 256) +
+      2 ^ 24 * (x % 256)) % 2 ^ 23 = x / 2 ^ 24 % 2 ^ 8 + 256 * (x / 2 ^ 16 % 2 ^ 8) + 65536 * (x / 2 ^ 8 % 2 ^ 7))) wv
+  have ds : sv % 2 ^ 23 = b0 + 256 * b1 + 65536 * b2 := by
+    rw [hb0, hb1, hb2]
+    exact (fun x : ℕ => (by omega : x % 2 ^ 23 = x % 2 ^ 8 + 256 * (x / 2 ^ 8 % 2 ^ 8) + 65536 * (x / 2 ^ 16 % 2 ^ 7))) sv
+  rw [dpa, dpe, dm, ds]
+  have : ((p0 + 256 * p1 + 65536 * p2 + 2 ^ 24 * p3 + 2 ^ 32 * (p4 + 256 * p5) : ℕ) : ℤ) =
+      (((a0 + 256 * a1 + 65536 * a2) * (b0 + 256 * b1 + 65536 * b2) : ℕ) : ℤ) := by
+    have z0 : ((a0 * b0 : ℕ) : ℤ) = p0 + 256 * m0 := by exact_mod_cast n0
+    have z1 : ((a0 * b1 + a1 * b0 + m0 : ℕ) : ℤ) = p1 + 256 * m1 := by exact_mod_cast n1
+    have z2 : ((a0 * b2 + a1 * b1 + a2 * b0 + m1 : ℕ) : ℤ) = p2 + 256 * m2 := by exact_mod_cast n2
+    have z3 : ((a1 * b2 + a2 * b1 + m2 : ℕ) : ℤ) = p3 + 256 * m3 := by exact_mod_cast n3
+    have z4 : ((a2 * b2 + m3 : ℕ) : ℤ) = p4 + 256 * m4 := by exact_mod_cast n4
+    have z5 : ((m4 : ℕ) : ℤ) = p5 := by exact_mod_cast n5
+    push_cast at z0 z1 z2 z3 z4 z5 ⊢
+    linear_combination -z0 - 256 * z1 - 65536 * z2 - 2 ^ 24 * z3 - 2 ^ 32 * z4 - 2 ^ 40 * z5
+  exact_mod_cast this
+
+omit hsat in
+theorem w143 : wrap (2 ^ logSize) (256 * j + 221) (-143) = 256 * j + 78 := by
+  have := wrapN (N := 2 ^ logSize) (k := 143) (show 143 ≤ 256 * j + 221 by omega) (by omega)
+  simp only [Nat.cast_ofNat] at this; rw [this]; omega
+
+omit hsat in
+theorem wfwd {k : ℕ} (hk : k ≤ 7) : wrap (2 ^ logSize) (256 * j + 221) (k : ℤ) = 256 * j + 221 + k := by
+  rw [wrap_eq (by omega) (by omega)]; omega
+
+/-- The header's own mantissa (header word 18, row 78) seen from row 221. -/
+theorem ev_ownMantE : ownMantE.eval (2 ^ logSize) preCols pub main (256 * j + 221) =
+    ((mantNat (headerWord main j 18) : ℕ) : F) := by
+  have hy : headerWord main j 18 = word main W (256 * j + 78) := by simp [headerWord]
+  have hb := bA hsat hj (rr := 256 * j + 78) (by omega) (base := W) (by decide)
+  unfold ownMantE ownMant
+  simp only [show (0 : ℕ) < 2 from by norm_num, show (1 : ℕ) < 2 from by norm_num,
+    show ¬ ((2 : ℕ) < 2) from by norm_num, if_true, if_false]
+  rw [eval_add', eval_add', eval_mul', eval_mul', eval_cst, eval_cst,
+    ev_beByte (by norm_num) (w143 hj) hb, ev_beByte (by norm_num) (w143 hj) hb,
+    ev_window (by norm_num) (w143 hj) hb, ← hy]
+  unfold mantNat; push_cast; norm_num
+
+/-- The header's own exponent one-hot (row 216) seen from row 221. -/
+theorem ev_ownOh : ownOhWeighted.eval (2 ^ logSize) preCols pub main (256 * j + 221) =
+    ∑ s ∈ Finset.range 27, ((s : ℕ) : F) * ((bit main (A + s) (256 * j + 216)).toNat : F) := by
+  have w5 : wrap (2 ^ logSize) (256 * j + 221) (-5) = 256 * j + 216 := by
+    have := wrapN (N := 2 ^ logSize) (k := 5) (show 5 ≤ 256 * j + 221 by omega) (by omega)
+    simp only [Nat.cast_ofNat] at this; rw [this]; omega
+  unfold ownOhWeighted
+  rw [eval_foldl_list _ (fun s => .mul (cst s) (col (A + s) (-5))), eval_cst, Nat.cast_zero, zero_add,
+    list_range_sum]
+  refine Finset.sum_congr rfl (fun s hs => ?_)
+  rw [eval_mul', eval_cst, ev_bit w5 (bA hsat hj (by omega) (by decide) s (by simp at hs; omega))]
+
+theorem ev_dflag {k : ℕ} (hk : k < 3) :
+    (dE' k).eval (2 ^ logSize) preCols pub main (256 * j + 221) =
+      ((bit main (W + (5 + k)) (256 * j + 221)).toNat : F) :=
+  ev_wbit hsat hj (i := 5 + k) (by omega)
+
+theorem dHead_sat : ∀ c ∈ dHead, c.eval (2 ^ logSize) preCols pub main (256 * j + 221) = 0 :=
+  fun c hc => rt_sat hsat hj c (by
+    unfold retargetCs
+    exact List.mem_append_left _ (List.mem_append_left _ (List.mem_append_left _ (List.mem_append_left _
+      (List.mem_append_right _ hc)))))
+
+/-- Division branch (no cap): exactly one `d` flag `dd`, the exponent steps by `dd − 1`, and the
+new mantissa is canonical. -/
+theorem rt_dhead (hm : heightAt main j % 2016 = 0) (hpos : 0 < heightAt main j)
+    (hcap : bit main (W + 8) (256 * j + 221) = false) :
+    ∃ dd ≤ 2, (∀ k < 3, bit main (W + (5 + k)) (256 * j + 221) = decide (k = dd)) ∧
+      (headerWord main j 18).toNat % 256 + 1 = (prevNB pub main j).toNat % 256 + dd ∧
+      0x8000 ≤ mantNat (headerWord main j 18) := by
+  set r := 256 * j + 221
+  obtain ⟨hrt1, sp, hsp, hu, hg, hpe⟩ := rt_core hsat hj hm hpos
+  obtain ⟨-, s0, hs0, hg0, hu0, hexp, -, -, -⟩ := header_pow_ex hsat hj
+  have hsel := ev_rtSel hsat hj
+  have hd := dHead_sat hsat hj
+  simp only [dHead, List.forall_mem_cons, List.not_mem_nil, IsEmpty.forall_iff, implies_true,
+    and_true] at hd
+  obtain ⟨e1, e2, e3⟩ := hd
+  have f0 := ev_dflag hsat hj (k := 0) (by norm_num)
+  have f1 := ev_dflag hsat hj (k := 1) (by norm_num)
+  have f2 := ev_dflag hsat hj (k := 2) (by norm_num)
+  have hc := ev_wbit hsat hj (i := 8) (by norm_num)
+  have hr0 := ev_wbit hsat hj (i := 0) (by norm_num)
+  set g := fun k => bit main (W + (5 + k)) r
+  -- (1) exactly one d flag.
+  unfold dAny capE rtE wctl bitR at e1
+  rw [eval_mul', hsel, one_mul, eval_sub', eval_add', eval_add', eval_add', f0, f1, f2, hc, hcap, hr0] at e1
+  simp only [Nat.add_zero] at e1; rw [hrt1] at e1
+  have hsum : ∑ k ∈ Finset.range 3, (g k).toNat = 1 := by
+    simp only [Finset.sum_range_succ, Finset.sum_range_zero, zero_add]
+    have := Bool.toNat_le (g 0); have := Bool.toNat_le (g 1); have := Bool.toNat_le (g 2)
+    apply natCast_inj_of_lt (lt_P_of (by omega)) (by norm_num [P])
+    push_cast; simp only [Bool.toNat_false, Bool.toNat_true, Nat.cast_zero, Nat.cast_one, add_zero] at e1
+    linear_combination e1
+  obtain ⟨dd, hdd, hgd, hud⟩ := onehot_of_sum hsum
+  have hflags : ∀ k < 3, g k = decide (k = dd) := fun k hk => by
+    by_cases h : k = dd
+    · subst h; simpa using hgd
+    · simpa [h] using hud k hk h
+  have hany : dAny.eval (2 ^ logSize) preCols pub main r = 1 := by
+    unfold dAny; rw [eval_add', eval_add', f0, f1, f2]
+    have h0 := hflags 0 (by norm_num); have h1 := hflags 1 (by norm_num); have h2 := hflags 2 (by norm_num)
+    simp only [g] at h0 h1 h2
+    rw [h0, h1, h2]
+    interval_cases dd <;> simp
+  refine ⟨dd, by omega, hflags, ?_, ?_⟩
+  · -- (2) s_own − s_prev = d.
+    have hw : ∑ s ∈ Finset.range 27, ((s : ℕ) : F) * ((bit main (A + s) r).toNat : F) = (sp : F) := by
+      rw [Finset.sum_congr rfl (fun s _ => mul_comm _ _)]; exact sum_onehot hsp hg hu (fun s => (s : F))
+    have hw0 : ∑ s ∈ Finset.range 27, ((s : ℕ) : F) * ((bit main (A + s) (256 * j + 216)).toNat : F) = (s0 : F) := by
+      rw [Finset.sum_congr rfl (fun s _ => mul_comm _ _)]; exact sum_onehot hs0 hg0 hu0 (fun s => (s : F))
+    unfold ohWeighted at e2
+    rw [eval_mul', eval_mul', hsel, one_mul, hany, one_mul, eval_sub', eval_sub', eval_sub', ev_ownOh hsat hj, hw0,
+      ev_ohSum hsat hj (fun s => s), hw, f0, f2] at e2
+    have := hflags 0 (by norm_num); have := hflags 2 (by norm_num)
+    simp only [g] at this
+    have key : s0 + (g 0).toNat = sp + (g 2).toNat := by
+      have := Bool.toNat_le (g 0); have := Bool.toNat_le (g 2)
+      apply natCast_inj_of_lt (lt_P_of (by omega)) (lt_P_of (by omega))
+      push_cast; linear_combination e2
+    rw [hflags 0 (by norm_num), hflags 2 (by norm_num)] at key
+    interval_cases dd <;> simp at key <;> omega
+  · -- (3) canonical mantissa.
+    have hb6 := bA hsat hj (rr := r + 6) (by omega) (base := E) (by decide)
+    have w6 : wrap (2 ^ logSize) r 6 = r + 6 := by rw [wrap_eq (by omega) (by omega)]; omega
+    rw [eval_mul', eval_mul', hsel, one_mul, hany, one_mul, eval_sub', eval_sub', ev_ownMantE hsat hj, eval_cst,
+      ev_window (by norm_num) w6 hb6] at e3
+    have hlt := Nat.mod_lt ((word main E (r + 6)).toNat / 2 ^ 0) (show 0 < 2 ^ 23 by norm_num)
+    have hml : mantNat (headerWord main j 18) < 2 ^ 23 := by unfold mantNat; omega
+    have : mantNat (headerWord main j 18) = (word main E (r + 6)).toNat / 2 ^ 0 % 2 ^ 23 + 0x8000 :=
+      natCast_inj_of_lt (lt_P_of (by omega)) (lt_P_of (by omega)) (by push_cast; linear_combination e3)
+    omega
 
 end Rt
 

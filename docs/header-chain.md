@@ -1,6 +1,6 @@
 # Header-chain AIR
 
-## v3b (2026-10-06): difficulty retarget — implemented and tested; proof in progress
+## v3b (2026-10-07): difficulty retarget — proven sound
 
 - **Spec:** `nextWork` (Core `GetNextWorkRequired`, mainnet) and `getCompact`
   in `lean/StarkedAir/Spec/Bitcoin.lean`. Checked against the first real
@@ -28,6 +28,25 @@
   - a wrong period start is refused.
 - **Benchmark:** about 350 headers/s on Metal with the CPU constraint
   interpreter.
+- **Statement proven** (`retarget_sound`, `lean/StarkedAir/Gadgets/RetargetDiv.lean`).
+  - For every header `j` of a satisfying trace whose height is a positive
+    multiple of 2016:
+    `nBitsOf header_j = nextWork (nBits_{j−1}) (time_{j−1}) (pst_{j−1})`.
+  - The predecessor values come from the previous header in the trace, or
+    from public inputs for the first header.
+  - Axioms: `propext`, `Classical.choice`, `Quot.sound` only.
+  - Proof outline:
+    - `rt_core`/`rt_span` (RetargetSound) give the previous exponent and the
+      clamped span;
+    - `rt_p0` gives `P0 = mant_prev · span`;
+    - the division branch uses `rt_dhead`, `rt_divq` and `rt_rem`;
+    - the cap branch uses `rt_cap`;
+    - assembly goes through `nextWork_noncap`/`nextWork_cap` (Spec/RetargetMath).
+  - **Soundness depends on the PoW row.** A prover could pick the division
+    branch when Core would cap. The quotient would then exceed powLimit. That
+    is excluded only by the PoW constraints (`s ≤ 26`, and `s = 26 →
+    mant < 2^16`, exported by `header_pow_ex`), not by the retarget rows.
+    Keep this coupling in mind if the PoW gadget changes.
 
 
 ## v3a (2026-10-06): chain state — proven sound
