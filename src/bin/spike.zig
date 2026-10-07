@@ -2,6 +2,7 @@
 //!   spike <log_size> <cpu|metal> [lean]   add32-chain (Zig-built or Lean-exported)
 //!   spike sha <log_size> <cpu|metal>      SHA-256 compressions (Lean-exported)
 //!   spike headers <log_size> <cpu|metal> <headers.hex>   header chain v2 (Lean-exported)
+//!   spike leaf <log_size> <n_queries> <pow_bits> <headers.bin>   REC-LEAF: wrap one segment (CPU)
 
 const std = @import("std");
 const sb = @import("starked_bitcoin");
@@ -21,6 +22,14 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(a);
     if (args.len == 4 and std.mem.eql(u8, args[1], "sha")) return sha(a, try std.fmt.parseInt(u32, args[2], 10), std.mem.eql(u8, args[3], "metal"));
     if (args.len == 5 and std.mem.eql(u8, args[1], "headers")) return headers(a, try std.fmt.parseInt(u32, args[2], 10), std.mem.eql(u8, args[3], "metal"), args[4]);
+    if (args.len == 6 and std.mem.eql(u8, args[1], "leaf")) return leaf(
+        gpa.allocator(),
+        a,
+        try std.fmt.parseInt(u32, args[2], 10),
+        try std.fmt.parseInt(u32, args[3], 10),
+        try std.fmt.parseInt(u32, args[4], 10),
+        args[5],
+    );
     if (args.len >= 5 and std.mem.eql(u8, args[1], "fullrun")) return fullrun(
         gpa.allocator(),
         try std.fmt.parseInt(u32, args[2], 10),
@@ -137,6 +146,26 @@ fn word(h: *const sb.header_chain.Header, t: usize) u32 {
 /// generate the witness, and either check it against the Lean-exported AIR (`check`) or prove
 /// and verify it (`cpu` / `metal`). Also checks that each segment's public outputs equal the next
 /// segment's public inputs (what aggregation will enforce).
+fn leaf(gpa: std.mem.Allocator, a: std.mem.Allocator, log_size: u32, n_queries: u32, pow_bits: u32, path: []const u8) !void {
+    const H = sb.header_chain;
+    const raw = try std.fs.cwd().readFileAlloc(a, path, 1 << 31);
+    const n = @as(usize, 1) << @intCast(log_size - 8);
+    if (raw.len < 80 * n) return error.BadHeaderFile;
+    const segment: []const H.Header = @as([*]const H.Header, @ptrCast(raw.ptr))[0..n];
+    const fri = try @import("stwo_core").pcs.config_v2.FriConfigV2.init(pow_bits, 0, 1, n_queries, 1);
+    const tables = try sb.recursion.leaf.Tables.init(gpa);
+    defer tables.deinit(gpa);
+    var r = try sb.recursion.leaf.wrapSegment(gpa, a, tables, log_size, segment, sb.header_chain.genesis_start, null, fri);
+    defer r.proof.deinit();
+    const t = r.timings;
+    const s = struct {
+        fn f(ns: u64) f64 {
+            return @as(f64, @floatFromInt(ns)) / 1e9;
+        }
+    }.f;
+    std.debug.print("leaf log={d} headers={d} queries={d} pow={d}: segment {d:.2}s, circuit {d} vars built {d:.2}s, leaf prove {d:.2}s, verify {d:.2}s, proof {d} bytes\n", .{ log_size, n, n_queries, pow_bits, s(t.segment_ns), t.n_vars, s(t.build_ns), s(t.prove_ns), s(t.verify_ns), r.proof.bytes.len });
+}
+
 fn fullrun(gpa: std.mem.Allocator, log_size: u32, mode: []const u8, path: []const u8, from: usize, to_req: usize) !void {
     const H = sb.header_chain;
     const R = sb.retarget;
@@ -175,15 +204,7 @@ fn fullrun(gpa: std.mem.Allocator, log_size: u32, mode: []const u8, path: []cons
         defer arena.deinit();
         const a = arena.allocator();
         const seg = all[h0 .. h0 + n];
-        var start = H.genesis_start;
-        if (h0 > 0) {
-            var prev: [11]u32 = undefined;
-            const k = @min(h0, 11);
-            for (0..k) |i| prev[i] = word(&all[h0 - 1 - i], 17);
-            const p = (h0 - 1) - (h0 - 1) % 2016;
-            start = .{ .height = @intCast(h0), .prev_nbits_word = word(&all[h0 - 1], 18),
-                .prev_pst_word = word(&all[p], 17), .window = H.windowFrom(prev[0..k]), .work = work };
-        }
+        const start = sb.segments.startAt(all, h0, work);
         const wit = H.generateFrom(a, ls, seg, start) catch |e| {
             std.debug.print("FAIL witness at segment {d}..{d}: {s}\n", .{ h0, h0 + n - 1, @errorName(e) });
             failures += 1;

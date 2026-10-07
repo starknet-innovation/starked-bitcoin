@@ -29,6 +29,7 @@ is built from.
 | Exact chainwork: per-header `q = GetBlockProof(nBits)`; `W_j = W_{j−1} + q_j`; last `W` public | `work_q`, `work_step`, `work_out` | v5 |
 | Minimum block version (Core "bad-version", BIP34/66/65 heights) | `version_sound` | v6 |
 | Median time past: ≥ 6 of the 11 window times are below the header's time; the window shifts along the chain and is public at segment ends; equals Core's `GetMedianTimePast` rule given the window form | `mtp_count`, `mtp_window`, `mtp_out`, `mtp_core` (with `mtpOk_iff_count`, `sentinel_sound`) | v4 |
+| Aggregation at the public-input level: every header-chain trace yields proven public inputs; a node over two proven children passing `PubLink` yields proven combined inputs; proven inputs with genesis input state give a valid chain from genesis to the decoded tip | `leaf_valid`, `pub_compose`, `chain_from_genesis` (`Gadgets/Aggregate.lean`) | v6, node circuit (D-025) |
 
 ## Coverage audit against Bitcoin Core (2026-10-07)
 
@@ -83,7 +84,8 @@ height decomposition, retarget clamp, PoW one-hot). See the
 | Lean kernel, Mathlib, toolchain | Pinned versions |
 | **(M2)** Our plain in-circuit verifier path (`src/recursion/plain_verifier.zig`, D-024) correctly verifies our proofs | New code with no Rust parity oracle. Built from stwo-zig's audited-by-parity pieces; tested to accept honest proofs and to reject five kinds of tampering. To do: differential fuzzing against the native verifier, and review. |
 | **(M2, planned)** The recursive verifier circuit: stwo-zig's port of StarkWare's circuit recursion (PR #204) correctly implements Stwo verification in-circuit | Not formally verified anywhere, as of 2026-10-07; stwo-zig's Lean work is RISC-V-only. Byte-parity tests against StarkWare's Rust; audit; independent native check of the final root. The composition (`REC-COMPOSE`) and our in-circuit statement (`REC-STMT-EQ`) are to be proven in Lean. |
-| **Verifier obligation:** a segment starting at height 0 uses exactly the sentinel window (pubs 44/45 = `0xffff,0xffff`; pubs 48..67 as in `SENTINEL`), and later segments' input windows equal the previous segment's outputs. Also: the input-work public limbs 88..97 are 16-bit, and a genesis segment's input work is 0. | Checked by whoever verifies or aggregates segments. To be enforced in aggregation (roadmap `AGG`). |
+| **(M2)** The node circuit (`src/recursion/node.zig`, D-025) implements `PubLink` and `combine` exactly, binds each child's digest to its verified proof, and computes the key `Blake2s(hL ‖ kL ‖ hR ‖ kR)` | Mirrors the Lean definitions line by line (same index lists). Tested: chained children fold; swapped (non-chained) children make the circuit unsatisfiable. 16-bit range checks use `m31ToU32(x) = x`, relying on stwo-zig's `m31_to_u32` component. |
+| **Root verifier obligation:** the root proof's preprocessed root is the node circuit's; its output digest equals `Blake2s(K ‖ P)` with `K` recomputed from the tree shape and the known leaf/node circuit hashes, and `P`'s input state is genesis (prev-hash 0, height 0, sentinel window, work 0) | Checked by the outer verifier (`AGG`). Segment-to-segment linking and the 16-bit work limbs are now enforced inside the nodes and by `chain_from_genesis`. |
 
 ## Known completeness gaps
 
