@@ -23,9 +23,9 @@ Rules:
 | HC-V3A | Header chain: height, period boundary, nBits continuity, period-start time | done (6a3250e, b1660b5) | `state_sound` |
 | HC-V3B | Header chain: difficulty retarget | done (c52ddcf, 9a03734) | `retarget_sound` |
 | DOCS | Project documentation and PM process | done (97dbca4) | README, docs/ tree, project/ |
-| HC-V4 | Median time past: `time > median(prev 11)` | **in-progress** | Counting approach (D-018). Design: [consensus-rules.md](../design/consensus-rules.md). The first 11 headers of a segment need public inputs for earlier times. Done per [adding-an-air.md](../guides/adding-an-air.md). |
-| HC-V5 | Chainwork as a sound lower bound: `q·(T+1) ≤ 2^256`, accumulated, with the total as a public output | todo | Needs 256-bit limb arithmetic in the scratch rows |
-| HC-TOP | A single top-level theorem combining `chain_sound_v2`, `state_sound`, `retarget_sound` (and v4/v5) into one statement about the public inputs | todo | One theorem plus a doc paragraph in verification.md |
+| HC-V4 | Median time past: `time > median(prev 11)` | done (35710cb, this commit) | Counting approach (D-018). Design: [consensus-rules.md](../design/consensus-rules.md). The first 11 headers of a segment need public inputs for earlier times. Done per [adding-an-air.md](../guides/adding-an-air.md). |
+| HC-V5 | Chainwork as a sound lower bound: `q·(T+1) ≤ 2^256`, accumulated, with the total as a public output | **todo (next)** | Needs 256-bit limb arithmetic in the scratch rows |
+| HC-TOP | A single top-level theorem combining `chain_sound_v2`, `state_sound`, `retarget_sound`, the v4 MTP theorems (and v5) into one statement about the public inputs | todo | Must prove, by induction with `mtp_window`, that each window is the real predecessors' times padded with `sentinel`, given the genesis/segment public-input convention; then apply `mtp_core`. One theorem plus a doc paragraph in verification.md. |
 | BENCH-RAITO | Benchmark our SHA-256 AIR against Raito's Cairo SHA-256 | todo | Same machine, documented methodology, results in airs/sha256.md |
 | FV-Z3 | Tier-1 formal verification: Z3 search for under-constrained witnesses (adapt stwo-zig `scripts/air_uniqueness_board.py`) | todo | Runs on each exported AIR; results recorded |
 

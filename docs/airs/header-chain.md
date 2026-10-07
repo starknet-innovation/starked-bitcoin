@@ -5,7 +5,7 @@ Status: current · Updated: 2026-10-07 · Owner files: `lean/StarkedAir/Gadgets/
 Versions are listed newest first. The guarantees as a whole are in
 [reference/verification.md](../reference/verification.md).
 
-## v4 (2026-10-07): median time past — implemented and tested; proof pending
+## v4 (2026-10-07): median time past — proven sound
 
 Roadmap `HC-V4`; counting approach per decision D-018. Spec: `mtpOk` in
 `lean/StarkedAir/Spec/Bitcoin.lean`. Counting equivalence: `mtpOk_iff_count` in
@@ -61,6 +61,24 @@ constraints, 52 preprocessed columns, 88 public inputs.
 **Zig:** `ChainStart.window` (11 raw time words, newest first), `windowFrom`
 (pads with `SENTINEL` near genesis). The generator refuses a header that fails
 the rule (`error.TimeTooOld`).
+
+**Statement proven** (`lean/StarkedAir/Gadgets/MtpSound.lean`, standard axioms only):
+- `mtp_count`: for every header `j`, at least 6 of its window times
+  `winAt main j 1..11` are strictly below its own time (numeric, `leN`).
+- `mtp_window`: `T_1 = prevTime`; on non-first headers `T_{i+1}(j) = T_i(j−1)`;
+  on the first header `T_{i+1} = pubWord pub (48 + 2(i−1))`.
+- `mtp_out`: the last header's `T_1..T_10` are public inputs 68..87.
+- `mtp_core`: if a header's window is its real predecessors' times padded with
+  the sentinel, the header passes Core's `GetMedianTimePast` check
+  (`mtpOk`). It rests on `mtpOk_iff_count` and `sentinel_sound`
+  (`Spec/MtpMath.lean`).
+- Showing along a whole chain that the window *is* the real predecessors'
+  times is the job of the top-level theorem (roadmap `HC-TOP`), by induction
+  with `mtp_window`.
+
+**Benchmark** (M4 Pro, Metal, 70 queries, 26-bit PoW, 2026-10-07): mainnet
+headers 0..1023 at 2¹⁸ rows. Proving takes 3.65 s (≈ 280 headers/s, against
+≈ 350 at v3b), verifying 0.13 s, and the proof is 1.07 MB.
 
 **Tests** (`src/btc/header_chain.zig`):
 - every existing segment satisfies v4, including the genesis segment with the

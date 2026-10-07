@@ -20,10 +20,10 @@ system guarantees that doesn't appear here is not a claim the project makes.
 | Proof of work (Core `CheckProofOfWork`, mainnet; target ≤ powLimit) | `chain_sound_v2`, `header_pow` | v2+ |
 | Height counter, nBits constant inside a period, period-start time | `state_sound` | v3a+ |
 | Difficulty retarget at positive multiples of 2016 (Core `GetNextWorkRequired`, mainnet, including the powLimit cap) | `retarget_sound` | v3b |
+| Median time past: ≥ 6 of the 11 window times are below the header's time; the window shifts along the chain and is public at segment ends; equals Core's `GetMedianTimePast` rule given the window form | `mtp_count`, `mtp_window`, `mtp_out`, `mtp_core` (with `mtpOk_iff_count`, `sentinel_sound`) | v4 |
 
 ## Not yet constrained (header chain)
 
-- Median time past (v4).
 - Cumulative chainwork (v5).
 - Wall-clock time: `time ≤ now + 2h` is out of scope by design.
 - Version-bit rules do not affect historical header validity.
@@ -40,6 +40,7 @@ system guarantees that doesn't appear here is not a claim the project makes.
 | Committed `airs/*.json` equals the current Lean definitions | Drift check (regenerate and `cmp`) |
 | The specs in `Spec/*.lean` match Bitcoin Core | `#guard`s on real mainnet values, and Zig tests on mainnet headers. Not proven against Core's C++. |
 | Lean kernel, Mathlib, toolchain | Pinned versions |
+| **Verifier obligation:** a segment starting at height 0 uses exactly the sentinel window (pubs 44/45 = `0xffff,0xffff`; pubs 48..67 as in `SENTINEL`), and later segments' input windows equal the previous segment's outputs | Checked by whoever verifies or aggregates segments. To be enforced in aggregation (roadmap `AGG`). |
 
 ## Known completeness gaps
 
@@ -50,11 +51,16 @@ that can.
   gadget. No real block can meet such a target.
 - A retarget whose previous exponent is outside 3..29 is rejected by the
   witness (`UnsupportedTargetEncoding`). This doesn't occur on mainnet.
+- At heights below 11, a header with time 0 cannot be proven: the zero
+  sentinels are not below 0. Core would reject it anyway, because the
+  genesis time is above 0.
 
 ## Cross-gadget dependencies
 
 These are soundness couplings. Re-check them whenever either side changes.
 
+- `mtp_window` takes `T_1` from the row-220 copy of the predecessor's time
+  (`copy_facts`), which the retarget also uses. Changing that copy affects both.
 - `retarget_sound` relies on the PoW row: it uses `header_pow_ex` for
   `s ≤ 26` and `s = 26 → mant < 2^16`. Without those, the division branch
   could claim a target above powLimit.

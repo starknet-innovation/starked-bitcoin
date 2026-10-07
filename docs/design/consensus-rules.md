@@ -4,7 +4,7 @@ Status: current · Updated: 2026-10-07
 
 Design for the header rules beyond SHA256d and proof of work. v3a and v3b
 are implemented and proven (see [airs/header-chain.md](../airs/header-chain.md)).
-v4 is implemented (proof pending) and v5 is planned (roadmap `HC-V4`, `HC-V5`).
+v4 is implemented and proven; v5 is planned (roadmap `HC-V5`).
 
 Bitcoin Core's contextual header checks are in `ContextualCheckBlockHeader`
 and `GetNextWorkRequired`. For mainnet:
@@ -60,8 +60,8 @@ aggregation.
 - **v4.** MTP: count ≥ 6 of the previous 11 times strictly below
   `time_j`, each with a range-checked difference. Heights < 11 use a fixed
   sentinel history on the genesis segment (see
-  [airs/header-chain.md § v4](../airs/header-chain.md)). Implemented; proof
-  pending.
+  [airs/header-chain.md § v4](../airs/header-chain.md)). Implemented and
+  proven.
 - **v5.** Chainwork as a sound lower bound: `q·(T+1) ≤ 2²⁵⁶`, accumulated.
 
 Scratch space: rows 218–255 of each header (38 rows × 96 bit columns, plus

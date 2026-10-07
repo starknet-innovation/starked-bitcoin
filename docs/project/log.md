@@ -21,6 +21,34 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-10-07 (session 2) — HC-V4 median time past: defined, tested, proven
+Who: Claude (agent), with the owner
+Roadmap: HC-V4 → done; HC-V5 → next. Owner decisions D-018 (counting) and D-019 (M1 before M2).
+Done:
+- Spec `mtpOk` (Core `GetMedianTimePast`) with `#guard`s, including mainnet height 101982 whose
+  time is below two predecessors. Counting equivalence `mtpOk_iff_count` and `sentinel_sound` proven.
+- v4 AIR (`Mtp.lean`, rows 229–240, 394 constraints, 52 preprocessed, 88 pubs), Zig witness,
+  tests, real pre-history test data (35710cb, ffa4c89).
+- Soundness (`MtpSound.lean`): `mtp_window`, `mtp_cmp`, `mtp_count`, `mtp_out`, `mtp_core`.
+Evidence:
+- `lake build`: OK, 8727 jobs. No sorry/native_decide/bv_decide. `#print axioms` on all 10 main
+  theorems → `propext, Classical.choice, Quot.sound`.
+- `zig build test`: 23/23 passed. JSON drift: all 4 files in sync.
+- Python brute force (200k cases) and a Zig randomized test (100k) agree: the sentinel counting
+  rule matches Core's sorted median (sound always, and complete for t > 0).
+- Benchmark: 1024 headers at 2^18 rows, Metal, 70 queries/26-bit PoW: 3.65 s prove (≈ 280
+  headers/s, down from ≈ 350), 0.13 s verify, 1.07 MB.
+Problems / lessons:
+- My first `#guard` had the median of 1..11 wrong; the guard caught it. Keep writing guards
+  before the circuit.
+- The Blockstream API rate-limited after the timestamp scans. Fetched the new test data from
+  mempool.space (same Esplora API) and recorded the source.
+- The doc-edit script aborted midway but the shell chain still committed. Fixed in ffa4c89.
+  Run edit scripts so a failure stops the commit (`&&`, assertions).
+- `set` lesson again: facts obtained after `set x := e` mention `e`, not `x`; state them with
+  the `set` name.
+Next: HC-V5 (chainwork). Start with the design note in `docs/design/consensus-rules.md` § v5.
+
 ## 2026-10-07 — v3b retarget proven; docs and PM process
 Who: Claude (agent), with the owner
 Roadmap: HC-V3B → done (9a03734); DOCS → done

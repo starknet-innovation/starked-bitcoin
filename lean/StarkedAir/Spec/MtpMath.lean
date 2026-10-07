@@ -58,4 +58,39 @@ theorem mtpOk_iff_count (time : ℕ) (prev : List ℕ) :
     simp only [he, false_or]
     exact key
 
+/-- The genesis segment's sentinel window `T_1..T_11` (numeric; `2^32 − 1` = "never below"). -/
+def sentinel : List ℕ := [2 ^ 32 - 1, 0, 2 ^ 32 - 1, 0, 2 ^ 32 - 1, 0, 2 ^ 32 - 1, 0, 2 ^ 32 - 1, 0, 0]
+
+/-- **Sentinel soundness.** If a header's 11-slot window is its real predecessors' times
+(newest first) padded with the sentinel, and at least 6 slots are below its time `t < 2^32`,
+then the header satisfies Core's median-time-past rule over the real predecessors. -/
+theorem sentinel_sound {t : ℕ} (ht : t < 2 ^ 32) (real : List ℕ)
+    (hc : 6 ≤ ((real ++ sentinel).take 11).countP (· < t)) : mtpOk t real = true := by
+  rw [mtpOk_iff_count]
+  by_cases hlen : 11 ≤ real.length
+  · right
+    rw [List.take_append_of_le_length hlen] at hc
+    have : (real.take 11).length = 11 := by simp; omega
+    rw [this, ← List.countP_eq_length_filter]; omega
+  · rcases Nat.eq_zero_or_pos real.length with h0 | hpos
+    · left; exact List.length_eq_zero_iff.mp h0
+    · right
+      have htake : real.take 11 = real := List.take_of_length_le (by omega)
+      rw [htake, ← List.countP_eq_length_filter]
+      rw [List.take_append, List.take_of_length_le (by omega : real.length ≤ 11), List.countP_append] at hc
+      -- The visible sentinels contain `5 − k/2` zeros and no value below `t` otherwise.
+      have hs : ∀ m ≤ 10, (sentinel.take m).countP (· < t) ≤ (sentinel.take m).countP (· = 0) := by
+        intro m _
+        apply List.countP_mono_left
+        intro x hx hlt
+        have : x = 0 ∨ x = 2 ^ 32 - 1 := by
+          have := List.mem_of_mem_take hx; simp [sentinel] at this; omega
+        simp at hlt ⊢; omega
+      have hk := hs (11 - real.length) (by omega)
+      have hz : (sentinel.take (11 - real.length)).countP (· = 0) = 5 - real.length / 2 := by
+        have : real.length ∈ Finset.Icc 1 10 := Finset.mem_Icc.mpr ⟨hpos, by omega⟩
+        generalize real.length = k at this ⊢
+        fin_cases this <;> decide
+      omega
+
 end StarkedAir.Spec.Bitcoin
