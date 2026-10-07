@@ -69,8 +69,13 @@ Cairo steps.
   registry or topology to avoid paying for Cairo-sized circuits.
 - **Q-MEM:** fold memory (11–18 GB reported) on a 24 GB laptop.
 - **What is proven and what is trusted** (decided 2026-10-07):
-  - The composition (segments → chain) is a pure Lean theorem
-    (`REC-COMPOSE`).
+  - The composition (segments → chain) is a pure Lean theorem, **proven**:
+    `segment_compose` (`Spec/Compose.lean`). The aggregator only has to check
+    `Link`: prev-hash = tip, height + 1, nBits, time, period start and work.
+    The window obligation of `header_chain_sound` is discharged by linking:
+    take segment 2's real window to be segment 1's history; the public window
+    inputs then match. Only the genesis segment's inputs must equal fixed
+    constants (sentinel window, zero work).
   - Our in-circuit statement must provably evaluate our IR (`REC-STMT-EQ`).
   - The recursive verifier circuit itself is trusted, in the same class as
     Stwo: it is not formally verified anywhere as of 2026-10-07. See

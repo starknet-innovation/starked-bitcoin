@@ -39,6 +39,7 @@ them.
 | `Gadgets/StateSound.lean` | `heightAt`, `pstAt`, `state_row`, `state_sound` (v3a) |
 | `Gadgets/RetargetSound.lean` | Copies (`copy_facts`), evaluation helpers, `rt_core`, `rt_span`, `rt_p0`, `rt_dhead` |
 | `Gadgets/RetargetDiv.lean` | `rt_divq`, `rt_rem`, `rt_cap`, `retarget_sound` (v3b) |
+| `Spec/Compose.lean` | `catHs`, `Link`, `pstOf_cat`, `prevTimes_cat`, **`segment_compose`**: two valid segments joined by `Link` form one valid segment (aggregation soundness at the spec level) |
 | `Spec/Chain.lean` | `SegIn`, `SegOut`, `pstOf`, `prevTimes`, `SegmentValid`: the whole-segment statement over Bitcoin objects |
 | `Gadgets/TopSound.lean` | `pubWindow`, `decodeIn`, `decodeOut`, `out_time`, `pst_eq`, `win_eq`, `work_eq`, **`header_chain_sound`** |
 | `Gadgets/Version.lean` | Minimum-version constraints (rows 254–255) and the final `constraints` / `air` (`header_chain_v6`) |

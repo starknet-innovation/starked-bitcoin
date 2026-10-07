@@ -61,6 +61,11 @@ Result: `SegmentValid` covers every mainnet header-validity rule except
   minimum-version rule does, and is enforced; see the table above.)
 - Testnet and regtest rules: the specs are mainnet only.
 
+**Aggregation soundness (spec level):** `segment_compose` (`Spec/Compose.lean`).
+Two valid segments, the second starting where the first ends (`Link`), form
+one valid segment. By induction, any number of linked segments from genesis
+form a valid chain.
+
 **Independent check:** Z3 witness-uniqueness on four gadget windows (MTP flag,
 height decomposition, retarget clamp, PoW one-hot). See the
 [Z3 report](../reports/2026-10-07-z3-uniqueness.md).

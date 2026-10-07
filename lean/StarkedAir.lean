@@ -18,6 +18,7 @@ import StarkedAir.Gadgets.Version
 import StarkedAir.Spec.RetargetMath
 import StarkedAir.Spec.MtpMath
 import StarkedAir.Spec.Chain
+import StarkedAir.Spec.Compose
 import StarkedAir.Gadgets.RetargetSound
 import StarkedAir.Gadgets.RetargetDiv
 import StarkedAir.Gadgets.MtpSound
