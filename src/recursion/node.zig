@@ -192,10 +192,13 @@ pub fn proveNode(
     left: *const Proved,
     right: *const Proved,
 ) !Proved {
+    // The children's proof values live only while the circuit is built.
+    var scratch = std.heap.ArenaAllocator.init(gpa);
+    defer scratch.deinit();
     var inputs: [2]ChildInput(QM31) = undefined;
     var values: [2]stark_proof.Proof(QM31) = undefined;
     for ([_]*const Proved{ left, right }, &inputs, &values) |child, *input, *v| {
-        v.* = try circuit_cpu.verifier_proof.circuitVerifierValues(a, &child.proof.prepared.proof, child.proof.prepared.config);
+        v.* = try circuit_cpu.verifier_proof.circuitVerifierValues(scratch.allocator(), &child.proof.prepared.proof, child.proof.prepared.config);
         var pubs: [N_PUB]QM31 = undefined;
         for (&pubs, child.pubs) |*p, x| p.* = QM31.fromBase(x);
         input.* = .{

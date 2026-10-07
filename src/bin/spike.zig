@@ -3,6 +3,8 @@
 //!   spike sha <log_size> <cpu|metal>      SHA-256 compressions (Lean-exported)
 //!   spike headers <log_size> <cpu|metal> <headers.hex>   header chain v2 (Lean-exported)
 //!   spike leaf <log_size> <n_queries> <pow_bits> <headers.bin>   REC-LEAF: wrap one segment (CPU)
+//!   spike chain <log_size> <n_queries> <pow_bits> <headers.bin> [to]   AGG: all headers [0, to)
+//!       (segments as in fullrun) folded to one root, checked by the outer verifier (CPU)
 //!   spike agg <log_size> <n_leaves> <n_queries> <pow_bits> <headers.bin>   AGG: leaves from genesis,
 //!       folded to one root, checked by the outer verifier (CPU)
 
@@ -31,6 +33,15 @@ pub fn main() !void {
         try std.fmt.parseInt(u32, args[3], 10),
         try std.fmt.parseInt(u32, args[4], 10),
         args[5],
+    );
+    if (args.len >= 6 and std.mem.eql(u8, args[1], "chain")) return chain(
+        gpa.allocator(),
+        a,
+        try std.fmt.parseInt(u32, args[2], 10),
+        try std.fmt.parseInt(u32, args[3], 10),
+        try std.fmt.parseInt(u32, args[4], 10),
+        args[5],
+        if (args.len > 6) try std.fmt.parseInt(usize, args[6], 10) else std.math.maxInt(usize),
     );
     if (args.len == 7 and std.mem.eql(u8, args[1], "agg")) return agg(
         gpa.allocator(),
@@ -216,6 +227,93 @@ fn agg(gpa: std.mem.Allocator, a: std.mem.Allocator, log_size: u32, n_leaves: us
     const t_fold = timer.lap();
     try N.verifyRoot(gpa, a, tables, .{ .node = node_id, .leaf_hashes = leaf_hashes }, &root.proof, root.pubs);
     std.debug.print("agg log={d} leaves={d} headers={d} queries={d} pow={d}: leaves {d:.1}s, fold {d} nodes {d:.1}s, root verified {d:.2}s, root proof {d} bytes, tip height {d}\n", .{ log_size, n_leaves, per * n_leaves, n_queries, pow_bits, secs(t_leaves), n_leaves - 1, secs(t_fold), secs(timer.lap()), root.proof.bytes.len, root.pubs[38].toU32() | (root.pubs[39].toU32() << 16) });
+}
+
+/// Segments of `all[0..to)`: `2^(log-8)` headers each, shrinking (by powers of two) at the end.
+fn plan(a: std.mem.Allocator, log_size: u32, to: usize) ![]const [2]usize {
+    var segs: std.ArrayList([2]usize) = .empty;
+    var h0: usize = 0;
+    while (h0 < to) {
+        var ls = log_size;
+        while (ls > 8 and (@as(usize, 1) << @intCast(ls - 8)) > to - h0) ls -= 1;
+        const n = @as(usize, 1) << @intCast(ls - 8);
+        if (n > to - h0) break;
+        try segs.append(a, .{ h0, ls });
+        h0 += n;
+    }
+    return segs.items;
+}
+
+fn chain(gpa: std.mem.Allocator, a: std.mem.Allocator, log_size: u32, n_queries: u32, pow_bits: u32, path: []const u8, to_req: usize) !void {
+    const L = sb.recursion.leaf;
+    const N = sb.recursion.node;
+    const raw = try std.fs.cwd().readFileAlloc(a, path, 1 << 31);
+    const all: []const sb.header_chain.Header = @as([*]const sb.header_chain.Header, @ptrCast(raw.ptr))[0 .. raw.len / 80];
+    const to = @min(to_req, all.len);
+    const segs = try plan(a, log_size, to);
+    const fri = try @import("stwo_core").pcs.config_v2.FriConfigV2.init(pow_bits, 0, 1, n_queries, 1);
+    const tables = try L.Tables.init(gpa);
+    defer tables.deinit(gpa);
+    var timer = try std.time.Timer.start();
+    const t_all = timer.read();
+
+    // Chainwork before each segment.
+    const works = try a.alloc(u256, segs.len);
+    {
+        var w: u256 = 0;
+        var h: usize = 0;
+        for (segs, works) |seg, *wk| {
+            w += sb.segments.workBefore(all[h..seg[0]], seg[0] - h);
+            h = seg[0];
+            wk.* = w;
+        }
+    }
+
+    // The shape covers the first leaf of every segment size.
+    var start: ?L.ComponentSizes = null;
+    var seen = [_]bool{false} ** 32;
+    for (segs, works) |seg, wk| {
+        if (seen[seg[1]]) continue;
+        seen[seg[1]] = true;
+        var tmp = std.heap.ArenaAllocator.init(gpa);
+        defer tmp.deinit();
+        const n = @as(usize, 1) << @intCast(seg[1] - 8);
+        var sl = try L.buildSegmentLeaf(gpa, tmp.allocator(), @intCast(seg[1]), all[seg[0] .. seg[0] + n], sb.segments.startAt(all, seg[0], wk));
+        defer sl.ctx.deinit();
+        const p = sl.paddedSizes();
+        start = if (start) |s0| s0.elementwiseMax(p) else p;
+    }
+    var shape = try N.Shape.init(gpa, &tables.table, start.?, fri);
+    defer shape.deinit(gpa);
+    const node_id = try N.nodeIdentity(gpa, &tables.table, &shape);
+    std.debug.print("chain: {d} headers in {d} segments; shape and node identity {d:.1}s\n", .{ to, segs.len, secs(timer.lap()) });
+
+    const items = try a.alloc(N.Proved, segs.len);
+    const leaf_hashes = try a.alloc([8]u32, segs.len);
+    for (segs, works, items, leaf_hashes, 0..) |seg, wk, *it, *lh, i| {
+        var tmp = std.heap.ArenaAllocator.init(gpa);
+        defer tmp.deinit();
+        const n = @as(usize, 1) << @intCast(seg[1] - 8);
+        var sl = try L.buildSegmentLeaf(gpa, tmp.allocator(), @intCast(seg[1]), all[seg[0] .. seg[0] + n], sb.segments.startAt(all, seg[0], wk));
+        const lf = try L.proveSegmentLeaf(gpa, a, tables, &sl, shape.target, fri);
+        it.* = .{ .proof = lf.proof, .key = L.zero_key, .pubs = lf.pubs };
+        lh.* = lf.proof.circuit_hash;
+        if (i % 8 == 0 or i + 1 == segs.len)
+            std.debug.print("  leaf {d}/{d} (heights {d}..{d}): segment {d:.1}s, leaf {d:.1}s, elapsed {d:.0}s\n", .{ i + 1, segs.len, seg[0], seg[0] + n - 1, secs(lf.timings.segment_ns), secs(lf.timings.prove_ns), secs(timer.read() - t_all) });
+    }
+    const t_leaves = timer.lap();
+    var root = try N.foldAll(gpa, a, tables, &shape, items);
+    defer root.proof.deinit();
+    const t_fold = timer.lap();
+    try N.verifyRoot(gpa, a, tables, .{ .node = node_id, .leaf_hashes = leaf_hashes }, &root.proof, root.pubs);
+    var tip: [8]u32 = undefined;
+    for (&tip, 0..) |*w, k| w.* = root.pubs[16 + 2 * k].toU32() | (root.pubs[17 + 2 * k].toU32() << 16);
+    var work: u256 = 0;
+    for (0..10) |l| work |= @as(u256, root.pubs[98 + l].toU32()) << @intCast(16 * l);
+    std.debug.print("chain ROOT VERIFIED: headers 0..{d}, {d} leaves, {d} nodes; leaves {d:.0}s, fold {d:.0}s, verify {d:.2}s; root proof {d} bytes\n", .{ to - 1, segs.len, segs.len - 1, secs(t_leaves), secs(t_fold), secs(timer.lap()), root.proof.bytes.len });
+    std.debug.print("  tip height {d}, chainwork 0x{x}, tip state words", .{ root.pubs[38].toU32() | (root.pubs[39].toU32() << 16), work });
+    for (tip) |w| std.debug.print(" {x:0>8}", .{w});
+    std.debug.print("\n", .{});
 }
 
 fn fullrun(gpa: std.mem.Allocator, log_size: u32, mode: []const u8, path: []const u8, from: usize, to_req: usize) !void {
