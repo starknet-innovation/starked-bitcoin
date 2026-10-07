@@ -19,6 +19,7 @@ definitions live in Lean (see [ir.md](ir.md)). Zig has three jobs:
 | `src/air/interp.zig` | The one constraint evaluator, generic over M31/QM31 and over how columns are read | `evalConstraints(F, air, pubs, scratch, ctx, out)`, `RowTrace`, `firstViolation` |
 | `src/air/component.zig` | Stwo component backed by the interpreter, with parallel evaluation over the domain | `Component.init(alloc, air, log_size, pubs)` |
 | `src/air/prove.zig` | Prove/verify any IR AIR on any backend. The transcript binds `log_size`, the AIR digest and the public inputs. The verifier recomputes the preprocessed root. | `AirStatement`, `prepare`, `prove(E, …)`, `verify(alloc, cfg, air, log_size, pubs, proof)`, `Engine(Backend)` |
+| `src/air/prove_rec.zig` | Prove/verify an IR AIR under the `proving_5a7c5ed` recursion profile (Blake2sM31 channel, plain Blake2s Merkle, `PcsConfigV2`); a staging module, as stwo-zig's generic transaction is legacy-revision only (upstream candidate) | `config(log_size)`, `prove(E, …)`, `verify(…)`, `Engine(Backend)` |
 | `src/air/gadgets/add32_chain.zig` | Spike gadget (chained 32-bit adds); witness and tests, including the forged-preprocessed-column test | — |
 | `src/sha256/spec.zig` | Plain SHA-256 reference with a per-round trace | `compress`, `compressTraced`, `headerHash`, `HeaderBlocks` |
 | `src/sha256/witness.zig` | Witness for the SHA-256 compression AIR (72-row period) | `generate`, `Words.place`, `columns`, `shaRole`, `readOutputAt` |

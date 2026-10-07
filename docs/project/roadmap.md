@@ -40,8 +40,8 @@ Rules:
 | VK | Verification key: preprocessed roots per (AIR, log_size), instead of recomputing in O(n) | todo | |
 | GPU-CODEGEN | Generate CUDA/Metal constraint kernels from the IR | deferred (D-022) | Affects completeness and speed only, not soundness. After the full pipeline works. |
 | RECURSION | Recursion via stwo-zig circuit recursion (D-023) | in-progress | Plan in [design/recursion.md](../design/recursion.md) |
-| REC-PROFILE | Prove and verify a segment on the `proving_5a7c5ed` profile (Blake2sM31, `PcsConfigV2`) | **todo (next)** | Native verify passes; the proof shape is accepted by the in-circuit verifier's types |
-| REC-SMOKE | Port StarkWare's `simple_statement` custom-AIR example to Zig and verify it in-circuit | todo | Exercises the `Statement` extension point |
+| REC-PROFILE | Prove and verify a segment on the `proving_5a7c5ed` profile (Blake2sM31, `PcsConfigV2`) | done (this commit; `src/air/prove_rec.zig`) | Native verify passes; the proof shape is accepted by the in-circuit verifier's types |
+| REC-SMOKE | Port StarkWare's `simple_statement` custom-AIR example to Zig and verify it in-circuit | **todo (next)** | Exercises the `Statement` extension point |
 | REC-LEAF | `BitcoinSegmentStatement` (IR → circuit builder) and leaf-wrap one segment proof | todo | |
 | REC-FOLD | Fold two leaves; measure time and memory (Q-MEM) | todo | |
 | REC-COMPOSE | Lean: valid segments whose outputs equal the next inputs compose into a valid chain from genesis (pure spec theorem over `SegmentValid`) | done (this commit: `segment_compose`) | Provable now; no circuits involved |

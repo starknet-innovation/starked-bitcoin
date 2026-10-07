@@ -41,7 +41,9 @@ pub const AirStatement = struct {
     allocator: std.mem.Allocator,
 };
 
-fn mixStatement(channel: *Channel, log_size: u32, digest: [32]u8, pubs: []const M31) void {
+/// Statement transcript: `log_size`, the AIR digest and the public inputs. Shared with
+/// `prove_rec.zig`, so both protocol revisions bind the same statement.
+pub fn mixStatement(channel: anytype, log_size: u32, digest: [32]u8, pubs: []const M31) void {
     var words: [10]u32 = undefined;
     words[0] = log_size;
     for (0..8) |i| words[1 + i] = std.mem.readInt(u32, digest[4 * i ..][0..4], .little);
