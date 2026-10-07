@@ -1,0 +1,83 @@
+# Recursion and aggregation (M2) — design
+
+Status: draft · Updated: 2026-10-07
+
+How segment proofs become one proof for the whole chain. This note records the
+options surveyed and the chosen architecture (decision D-023). Progress is
+tracked in [project/roadmap.md](../project/roadmap.md) (`RECURSION`, `AGG`).
+
+## What already exists (checked in source, 2026-10-07)
+
+stwo-zig PR #204 is in our pinned submodule (`third_party/stwo-zig` @
+`4afa09d`). It is a byte-parity port of StarkWare's circuit recursion
+(`starkware-libs/proving` @ `5a7c5ed`):
+
+| Piece | Path (in `third_party/stwo-zig`) |
+|---|---|
+| Gate-circuit builder (QM31 ops, Blake2s G-gates, M31/U32) | `src/frontends/circuit/builder/` |
+| In-circuit Stwo verifier (channel, merkle, fri, oods, constraint_eval, logup, verify) | `src/frontends/circuit/stark_verifier/` |
+| Generic statement interface (`preprocessedRoot`, `componentLogSizes`, `evaluateComponent`, `publicLogupSum`, …) | `src/frontends/circuit/stark_verifier/verify.zig` |
+| k-to-1 fold circuit | `src/frontends/circuit/statements/multiverifier.zig` |
+| Leaf-wrap / fold / tree drivers | `src/integrations/circuit_cpu/recursion/` |
+| Protocol revisions (`stwo_7b211ed` vs `proving_5a7c5ed`) | `src/core/protocol_revision.zig` |
+| Design doc | `design/starknet-proving-pipeline/recursion/02-design.md` |
+
+UNVERIFIED (from the PR #223 description, not reproduced): leaf-wrapping one
+Cairo proof takes about 13 s and about 40 GB peak; one fold about 8 s and
+about 14 GB. The Cairo `stwo_circuit_verifier` on the root is about 9.7 M
+Cairo steps.
+
+## Options
+
+1. **Native circuit recursion (chosen).**
+   - Re-prove segments on the `proving_5a7c5ed` profile (Blake2sM31 channel,
+     unprefixed Blake2s Merkle, `PcsConfigV2`).
+   - Write a `BitcoinSegmentStatement` whose `evaluateComponent` evaluates our
+     IR through the circuit builder.
+   - Leaf-wrap each segment proof, then fold with the existing tree.
+   - Segment chaining (outputs of segment k = inputs of segment k+1) is
+     checked in the aggregation layer.
+   - No Cairo anywhere.
+2. **Cairo verifier route** (Raito-style, as a tree): implement the `Air`
+   trait for our IR in Cairo (`stwo_cairo_verifier`) and prove its execution
+   with stwo-cairo, then fold. This is the most production-proven route, but
+   it costs millions of Cairo steps and a full Cairo proof per segment, and it
+   cuts against D-003 (native AIRs).
+3. **Bespoke native recursion AIR** (like stwo-zig's RISC-V lane). This is
+   the most work, nothing is reusable, and it brings a new soundness-audit
+   burden.
+
+## Why option 1
+
+- It is consistent with D-003 (native AIRs) and D-008 (generic machinery
+  comes from stwo-zig; Bitcoin-specific code stays here).
+- The recursive verifier is StarkWare's design, ported at byte parity, so we
+  inherit its correctness work rather than writing a verifier.
+- Our constraint evaluation in-circuit is about 14k QM31 gates, which is
+  negligible next to the verifier's Blake2s work.
+- An optional final step, the Cairo `stwo_circuit_verifier` on the root,
+  keeps Starknet settlement open.
+
+## Open questions
+
+- **Q-CHAIN:** check chaining inside the fold (a custom fold statement), or in
+  a small final aggregator over the revealed `(circuit_hash, output_digest)`
+  tree, as StarkWare's applicative aggregator does. Leaning towards the final
+  aggregator.
+- **Q-REGISTRY:** the shared circuit-size registry is padded for Cairo leaves
+  (about 570 M cells). Our leaves are much smaller, so we may need our own
+  registry or topology to avoid paying for Cairo-sized circuits.
+- **Q-MEM:** fold memory (11–18 GB reported) on a 24 GB laptop.
+- **Soundness of the composition** (leaf statement correctness, public-input
+  binding) needs its own argument. How much of it can be stated in Lean is to
+  be decided.
+
+## Plan
+
+1. `REC-PROFILE`: prove and verify a segment on `proving_5a7c5ed` natively.
+2. `REC-SMOKE`: port StarkWare's `simple_statement` (custom-AIR example) to
+   Zig and verify it in-circuit, which exercises the extension point.
+3. `REC-LEAF`: `BitcoinSegmentStatement` (IR → builder), then leaf-wrap one
+   segment proof.
+4. `REC-FOLD`: fold two leaves and measure time and memory.
+5. `AGG`: the chaining aggregator, then the whole chain to one root.

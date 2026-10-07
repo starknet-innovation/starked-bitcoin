@@ -59,6 +59,7 @@ docs/              Documentation (see below)
 | Work on this repo as an agent (read order, hard rules) | [AGENTS.md](AGENTS.md) (`CLAUDE.md` imports it) |
 | Understand the goals, architecture and trust model | [docs/design/overview.md](docs/design/overview.md) |
 | See which Bitcoin rules are covered and how they're planned | [docs/design/consensus-rules.md](docs/design/consensus-rules.md) |
+| Understand how segment proofs will be aggregated (M2 recursion) | [docs/design/recursion.md](docs/design/recursion.md) |
 | Know exactly what is proven and what is trusted | [docs/reference/verification.md](docs/reference/verification.md) |
 | Understand an AIR's layout, versions, tests and benchmarks | [docs/airs/sha256.md](docs/airs/sha256.md), [docs/airs/header-chain.md](docs/airs/header-chain.md) (earlier versions: [header-chain-history.md](docs/airs/header-chain-history.md)) |
 | Understand the constraint IR and JSON format, or regenerate `airs/` | [docs/reference/ir.md](docs/reference/ir.md) |

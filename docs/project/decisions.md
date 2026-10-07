@@ -127,3 +127,8 @@ Why: This is a completeness restriction only. Soundness is unaffected: a header 
 Date: 2026-10-07 · By: owner · Status: active
 Decision: After M1, go to recursion/aggregation and then the UTXO state. GPU codegen and H200 runs (`GPU-CODEGEN`, `H200`) wait until headers + recursion + full UTXO set work end to end.
 Why: Proving the whole header chain is estimated at about 1 h on the M4 Pro (extrapolated, not measured), so performance is not the bottleneck. Optimizing before the system is complete is premature.
+
+### D-023 — Recursion via stwo-zig's circuit recursion (native, no Cairo)
+Date: 2026-10-07 · By: agent · Status: active
+Decision: Aggregate segment proofs with stwo-zig's ported StarkWare circuit recursion (PR #204): segments proven on the `proving_5a7c5ed` profile, a Bitcoin segment statement for the in-circuit verifier, leaf-wrap plus the fold tree. Details: [design/recursion.md](../design/recursion.md).
+Why: It reuses an existing, byte-parity verifier rather than writing one, and it is consistent with D-003 and D-008. The Cairo-verifier route costs millions of Cairo steps per segment, and a bespoke recursion AIR would be the most work and the highest audit burden.
