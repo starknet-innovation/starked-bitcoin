@@ -40,10 +40,6 @@ exact chainwork.
 
 ## Needs owner
 
-- **Q-MASK (blocks M2 recursion):** the recursive verifier only supports row-local AIRs; ours
-  reads rows at offsets. Options A/B/C are in [design/recursion.md § Blocker](../design/recursion.md).
-  Recommendation: B, extending the in-circuit verifier to multi-offset masks in a stwo-zig fork.
-
 - **Push / remote:** nothing has been pushed (D-016).
 - **LICENSE:** none chosen.
 - **STWO-225-FU:** follow up on stwo-zig#225 upstream? This is outward-facing.

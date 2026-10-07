@@ -132,3 +132,8 @@ Why: Proving the whole header chain is estimated at about 1 h on the M4 Pro (ext
 Date: 2026-10-07 · By: agent · Status: active
 Decision: Aggregate segment proofs with stwo-zig's ported StarkWare circuit recursion (PR #204): segments proven on the `proving_5a7c5ed` profile, a Bitcoin segment statement for the in-circuit verifier, leaf-wrap plus the fold tree. Details: [design/recursion.md](../design/recursion.md).
 Why: It reuses an existing, byte-parity verifier rather than writing one, and it is consistent with D-003 and D-008. The Cairo-verifier route costs millions of Cairo steps per segment, and a bespoke recursion AIR would be the most work and the highest audit burden.
+
+### D-024 — Extend the in-circuit verifier to multi-offset masks (Q-MASK option B)
+Date: 2026-10-07 · By: owner · Status: active
+Decision: Keep our AIRs and Lean proofs. Extend stwo-zig's circuit verifier so a trace column can be sampled at several row offsets (one OODS sample point per (column, offset), quotients batched as the native verifier does). The interaction (LogUp) phase becomes optional for AIRs without lookups. The work happens on a local branch of the `third_party/stwo-zig` submodule (`starked/multi-offset-masks`), not pushed until the owner decides (D-016, D-008).
+Why: Preserves the formally verified AIR. The extension is new verifier code with no Rust parity oracle, so it is validated by differential tests against the native verifier and by adversarial tests; recorded in verification.md.

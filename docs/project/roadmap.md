@@ -41,6 +41,7 @@ Rules:
 | GPU-CODEGEN | Generate CUDA/Metal constraint kernels from the IR | deferred (D-022) | Affects completeness and speed only, not soundness. After the full pipeline works. |
 | RECURSION | Recursion via stwo-zig circuit recursion (D-023) | in-progress | Plan in [design/recursion.md](../design/recursion.md) |
 | REC-PROFILE | Prove and verify a segment on the `proving_5a7c5ed` profile (Blake2sM31, `PcsConfigV2`) | done (this commit; `src/air/prove_rec.zig`) | Native verify passes; the proof shape is accepted by the in-circuit verifier's types |
+| REC-MASK **(next)** | Multi-offset masks + optional interaction in the circuit verifier (D-024), on submodule branch `starked/multi-offset-masks` | in-progress | A circuit verifier accepts a native `prove_rec` proof of an IR AIR with offsets; differential tests against the native verifier (accept/reject agree); adversarial tests |
 | REC-SMOKE | Port StarkWare's `simple_statement` custom-AIR example to Zig and verify it in-circuit | **todo (next)** | Exercises the `Statement` extension point |
 | REC-LEAF | `BitcoinSegmentStatement` (IR → circuit builder) and leaf-wrap one segment proof | todo | |
 | REC-FOLD | Fold two leaves; measure time and memory (Q-MEM) | todo | |
