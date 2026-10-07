@@ -24,7 +24,7 @@ them.
 | `Bits.lean` | `ofBits`, bit/limb lemmas shared by the gadgets |
 | `Testing/Probe.lean` | Generates the `probe_oracle` used to differential-test the Zig interpreter |
 | `Spec/Sha256.lean` | FIPS 180-4 SHA-256 over `BitVec 32`, checked against the "abc" vector |
-| `Spec/Bitcoin.lean` | `sha256d`, `prevHash`, `hashNat`, `nBitsOf`, `timeOf`, `compactTarget` (SetCompact), `powOk` (CheckProofOfWork, mainnet), `compactValue`, `getCompact`, `nextWork` (GetNextWorkRequired, mainnet), `medianTimePast`, `mtpOk` (GetMedianTimePast rule), with `#guard`s on genesis and on heights 2016, 32256 and 101982 |
+| `Spec/Bitcoin.lean` | `sha256d`, `prevHash`, `hashNat`, `nBitsOf`, `timeOf`, `compactTarget` (SetCompact), `powOk` (CheckProofOfWork, mainnet), `compactValue`, `getCompact`, `nextWork` (GetNextWorkRequired, mainnet), `medianTimePast`, `mtpOk` (GetMedianTimePast rule), `blockProof` (GetBlockProof) and `blockProof_eq`, with `#guard`s on genesis and on heights 2016, 32256 and 101982 |
 | `Spec/MtpMath.lean` | `sorted_lt_iff`, `mtpOk_iff_count`: the median rule in counting form (D-018) |
 | `Spec/RetargetMath.lean` | Pure arithmetic about `getCompact`/`nextWork`: `getCompact_of`, `getCompact_powLimit`, `quot_shift`, `nextWork_eq`, `nextWork_noncap`, `nextWork_cap` |
 | `Gadgets/Add32Chain.lean` | Spike gadget and its `sound` theorem |
@@ -32,7 +32,8 @@ them.
 | `Gadgets/Sha256Sound.lean` | `ShaSat`, `compress_sound`, `compress_sound_air` |
 | `Gadgets/HeaderChain.lean` | Header-chain AIR: SHA256d layout, `powCs` (row 216), chain-state constraints (rows 218–219), 40 preprocessed columns |
 | `Gadgets/Retarget.lean` | Retarget constraints (rows 220–228) |
-| `Gadgets/Mtp.lean` | Median-time-past constraints (rows 229–240), and the final `constraints` / `air` (`header_chain_v4`) |
+| `Gadgets/Mtp.lean` | Median-time-past constraints (rows 229–240) |
+| `Gadgets/Work.lean` | Chainwork constraints (rows 241–253), and the final `constraints` / `air` (`header_chain_v5`) |
 | `Gadgets/HeaderChainSound.lean` | `ChainSat`, `headerWord`, `hashAt`, `pubWord`, `chain_sound` (v1) |
 | `Gadgets/PowSound.lean` | `header_pow_ex`, `header_pow`, `chain_sound_v2` (v2) |
 | `Gadgets/StateSound.lean` | `heightAt`, `pstAt`, `state_row`, `state_sound` (v3a) |

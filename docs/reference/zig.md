@@ -22,7 +22,8 @@ definitions live in Lean (see [ir.md](ir.md)). Zig has three jobs:
 | `src/air/gadgets/add32_chain.zig` | Spike gadget (chained 32-bit adds); witness and tests, including the forged-preprocessed-column test | — |
 | `src/sha256/spec.zig` | Plain SHA-256 reference with a per-round trace | `compress`, `compressTraced`, `headerHash`, `HeaderBlocks` |
 | `src/sha256/witness.zig` | Witness for the SHA-256 compression AIR (72-row period) | `generate`, `Words.place`, `columns`, `shaRole`, `readOutputAt` |
-| `src/btc/header_chain.zig` | Witness for the header-chain AIR (256 rows per header): 3 compressions, PoW scratch (216–217), chain state (218–219), retarget (220–228), median time past (229–240) | `generate`, `generateFrom(alloc, log_size, headers, ChainStart)`, `windowFrom`, `SENTINEL`, `loadHeaders`, `N_PUB = 88` |
+| `src/btc/header_chain.zig` | Witness for the header-chain AIR (256 rows per header): 3 compressions, PoW scratch (216–217), chain state (218–219), retarget (220–228), median time past (229–240) | `generate`, `generateFrom(alloc, log_size, headers, ChainStart)`, `windowFrom`, `SENTINEL`, `ChainStart.work`, `loadHeaders`, `N_PUB = 108` |
+| `src/btc/work.zig` | Chainwork witness (rows 241–253) and `blockProof` reference (Core formula) | `scratch(word18, prev_work)`, `blockProof` |
 | `src/btc/retarget.zig` | Retarget witness (rows 220–228) plus an independent `nextWork` reference | `scratch`, `nextWork`, `getCompact`, `compactValue` |
 | `src/bin/spike.zig` | Benchmark/demo CLI (built on macOS only, links Metal) | see below |
 

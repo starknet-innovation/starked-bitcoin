@@ -123,6 +123,28 @@ def timeOf (hw : ℕ → Word) : ℕ :=
 #guard nextWork 0x1d00ffff 1233061996 1231006505 == 0x1d00ffff
 #guard getCompact (0xffff * 2 ^ 208) == 0x1d00ffff
 
+/-! ## Chainwork (Bitcoin Core `GetBlockProof`, `nChainWork`) -/
+
+/-- `GetBlockProof`: `(~target / (target + 1)) + 1` over 256-bit integers, or 0 for an invalid
+encoding. `~target = 2^256 − 1 − target`. -/
+def blockProof (nBits : ℕ) : ℕ :=
+  match compactTarget nBits with
+  | some t => (2 ^ 256 - 1 - t) / (t + 1) + 1
+  | none => 0
+
+/-- Core's formula is `⌊2^256 / (target + 1)⌋` for any 256-bit target. -/
+theorem blockProof_eq {n t : ℕ} (h : compactTarget n = some t) (ht : t < 2 ^ 256) :
+    blockProof n = 2 ^ 256 / (t + 1) := by
+  unfold blockProof; rw [h]
+  simp only
+  rw [← Nat.add_div_right _ (by omega : 0 < t + 1)]
+  congr 1; omega
+
+-- Genesis: work 0x100010001 (Core's chainwork at height 0).
+#guard blockProof 0x1d00ffff == 0x100010001
+-- Height 32256's target 0x1d00d86a.
+#guard blockProof 0x1d00d86a == 2 ^ 256 / (0xd86a * 256 ^ 26 + 1)
+
 /-! ## Median time past (Bitcoin Core `GetMedianTimePast`, `ContextualCheckBlockHeader`)
 
 Core rejects a header whose time is not strictly greater than the median of the timestamps of

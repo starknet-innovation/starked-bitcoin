@@ -3,7 +3,7 @@
 //!
 //! One header per 256 rows: compressions at rows 0, 72 and 144 (SHA256d over 80 bytes),
 //! proof-of-work scratch in rows 216..217, chain state 218..219, retarget 220..228, median time
-//! past 229..240, rows 241..255 idle. Layout and public inputs: docs/airs/header-chain.md.
+//! past 229..240, chainwork 241..253, rows 254..255 idle. Layout and public inputs: docs/airs/header-chain.md.
 
 const std = @import("std");
 const spec = @import("../sha256/spec.zig");
@@ -11,8 +11,9 @@ const sha = @import("../sha256/witness.zig");
 const M31 = @import("stwo_core").fields.m31.M31;
 
 pub const PERIOD: usize = 256;
-pub const N_PUB: usize = 88;
+pub const N_PUB: usize = 108;
 const retarget = @import("retarget.zig");
+const work_mod = @import("work.zig");
 
 pub const lean_json = @embedFile("air:header_chain");
 
@@ -65,6 +66,8 @@ pub const ChainStart = struct {
     /// predecessors, newest first (`window[0]` is the predecessor's time). Near genesis it is
     /// padded with `SENTINEL`; use `windowFrom`.
     window: [11]u32,
+    /// Chainwork before the segment (0 before genesis).
+    work: u256 = 0,
 };
 
 const TMAX: u32 = 0xffffffff;
@@ -214,6 +217,19 @@ pub fn generateFrom(allocator: std.mem.Allocator, log_size: u32, headers: []cons
         words.a[base + 240] = count - 6;
     }
 
+    // Chainwork (rows 241..253).
+    var work = start.work;
+    for (headers, 0..) |*header, i| {
+        const base = i * PERIOD;
+        const ws = try work_mod.scratch(headerWordAt(header, 18), work);
+        for (0..13) |k| {
+            words.a[base + 241 + k] = ws.a[k];
+            words.e[base + 241 + k] = ws.e[k];
+            words.w[base + 241 + k] = ws.w[k];
+        }
+        work = ws.work;
+    }
+
     var pubs: [N_PUB]M31 = undefined;
     const first = spec.blockFromBytes(headers[0][0..64]);
     wordsPubs(pubs[0..16], first[1..9].*);
@@ -227,6 +243,10 @@ pub fn generateFrom(allocator: std.mem.Allocator, log_size: u32, headers: []cons
     for (limbs, 0..) |v, k| {
         pubs[32 + 2 * k] = M31.fromCanonical(v & 0xffff);
         pubs[33 + 2 * k] = M31.fromCanonical(v >> 16);
+    }
+    for (0..10) |l| {
+        pubs[88 + l] = M31.fromCanonical(@intCast((start.work >> @intCast(16 * l)) & 0xffff));
+        pubs[98 + l] = M31.fromCanonical(@intCast((work >> @intCast(16 * l)) & 0xffff));
     }
     const main = try sha.columns(allocator, words, &role);
     for (height_carries, 0..) |c, i| main[sha.CA_LO][i * PERIOD + 218] = M31.fromCanonical(c);
@@ -401,13 +421,13 @@ test "chain state: a segment from height 1 and one across the first period bound
     const genesis = &early[0];
 
     // Heights 1..16: the predecessor is genesis (a boundary, so pst = genesis time).
-    const start1 = ChainStart{ .height = 1, .prev_nbits_word = headerWordAt(genesis, 18), .prev_pst_word = headerWordAt(genesis, 17), .window = windowFrom(&.{headerWordAt(genesis, 17)}) };
+    const start1 = ChainStart{ .work = 0x100010001, .height = 1, .prev_nbits_word = headerWordAt(genesis, 18), .prev_pst_word = headerWordAt(genesis, 17), .window = windowFrom(&.{headerWordAt(genesis, 17)}) };
     const w1 = try generateFrom(a, 12, early[1..17], start1);
     try std.testing.expectEqual(null, try checkSatisfied(a, air, 12, w1));
 
     // Heights 1984..2047 cross the boundary at 2016 (pst resets to block 2016's time).
     const around = try loadHeaders(a, @embedFile("testdata:mainnet_headers_1984_2048"));
-    const start2 = ChainStart{ .height = 1984, .prev_nbits_word = headerWordAt(&early[1023], 18), .prev_pst_word = headerWordAt(genesis, 17), .window = try windowOf(a, @embedFile("testdata:mainnet_headers_1973_1984")) };
+    const start2 = ChainStart{ .work = 1984 * 0x100010001, .height = 1984, .prev_nbits_word = headerWordAt(&early[1023], 18), .prev_pst_word = headerWordAt(genesis, 17), .window = try windowOf(a, @embedFile("testdata:mainnet_headers_1973_1984")) };
     const w2 = try generateFrom(a, 14, around, start2);
     try std.testing.expectEqual(null, try checkSatisfied(a, air, 14, w2));
     // pst of the last header (height 2047) is block 2016's time.
@@ -440,7 +460,7 @@ test "retarget: the first real difficulty change (height 32256) is enforced" {
     const hs = try loadHeaders(a, @embedFile("testdata:mainnet_headers_32192_32320"));
     const p30240 = (try loadHeaders(a, @embedFile("testdata:mainnet_header_30240")))[0];
     // Heights 32192..32319; the period started at 30240 with nBits 0x1d00ffff.
-    const start = ChainStart{ .height = 32192, .prev_nbits_word = headerWordAt(&hs[0], 18), .prev_pst_word = headerWordAt(&p30240, 17), .window = try windowOf(a, @embedFile("testdata:mainnet_headers_32181_32192")) };
+    const start = ChainStart{ .work = 32192 * 0x100010001, .height = 32192, .prev_nbits_word = headerWordAt(&hs[0], 18), .prev_pst_word = headerWordAt(&p30240, 17), .window = try windowOf(a, @embedFile("testdata:mainnet_headers_32181_32192")) };
     const wit = try generateFrom(a, 15, hs, start);
     try std.testing.expectEqual(null, try checkSatisfied(a, air, 15, wit));
     try std.testing.expectEqual(@as(u32, 0x1d00d86a), retarget.le(headerWordAt(&hs[64], 18)));
@@ -466,7 +486,7 @@ test "median time past: enforced, tamper-evident, and chained through public inp
     const air = (try ir.Air.parseJson(a, lean_json)).value;
     const around = try loadHeaders(a, @embedFile("testdata:mainnet_headers_1984_2048"));
     const early = try loadHeaders(a, @embedFile("testdata:mainnet_headers_0_1024"));
-    const start = ChainStart{ .height = 1984, .prev_nbits_word = headerWordAt(&early[1023], 18), .prev_pst_word = headerWordAt(&early[0], 17), .window = try windowOf(a, @embedFile("testdata:mainnet_headers_1973_1984")) };
+    const start = ChainStart{ .work = 1984 * 0x100010001, .height = 1984, .prev_nbits_word = headerWordAt(&early[1023], 18), .prev_pst_word = headerWordAt(&early[0], 17), .window = try windowOf(a, @embedFile("testdata:mainnet_headers_1973_1984")) };
     const wit = try generateFrom(a, 14, around, start);
 
     // Outputs: the last header's window T_1..T_10 = times of heights 2046 down to 2037.
@@ -527,5 +547,42 @@ test "median time past: the counting rule with the sentinel window matches Core'
         const core = mtpOkRef(t, prev[0..k]);
         if (ours) try std.testing.expect(core); // soundness
         if (core and t > 0) try std.testing.expect(ours); // completeness (t = 0 never occurs)
+    }
+}
+
+fn pubWork(pubs: []const M31, first: usize) u256 {
+    var w: u256 = 0;
+    for (0..10) |l| w |= @as(u256, pubs[first + l].toU32()) << @intCast(16 * l);
+    return w;
+}
+
+test "chainwork: exact Core values, chained through public inputs, tamper-evident" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const air = (try ir.Air.parseJson(a, lean_json)).value;
+    // Genesis segment: chainwork after height 15 = 16 · 0x100010001 (Core's value).
+    const g = try loadHeaders(a, @embedFile("testdata:mainnet_headers_0_16"));
+    const w0 = try generate(a, 12, g);
+    try std.testing.expectEqual(@as(u256, 0), pubWork(&w0.pubs, 88));
+    try std.testing.expectEqual(@as(u256, 0x1000100010), pubWork(&w0.pubs, 98));
+    // Across the first difficulty change: chainwork after 32319 (reference computed in Python).
+    const hs = try loadHeaders(a, @embedFile("testdata:mainnet_headers_32192_32320"));
+    const p30240 = (try loadHeaders(a, @embedFile("testdata:mainnet_header_30240")))[0];
+    const start = ChainStart{ .work = 32192 * 0x100010001, .height = 32192, .prev_nbits_word = headerWordAt(&hs[0], 18), .prev_pst_word = headerWordAt(&p30240, 17), .window = try windowOf(a, @embedFile("testdata:mainnet_headers_32181_32192")) };
+    const wit = try generateFrom(a, 15, hs, start);
+    try std.testing.expectEqual(@as(u256, 0x7e4c32ec7280), pubWork(&wit.pubs, 98));
+    try std.testing.expectEqual(null, try checkSatisfied(a, air, 15, wit));
+    // Tampering is caught: a q bit, an R bit, a remainder bit, a chainwork bit, a carry, the input work.
+    const r = 70 * PERIOD; // a header after the difficulty change
+    for ([_][2]usize{ .{ sha.A + 3, r + 241 }, .{ sha.E + 9, r + 242 }, .{ sha.W + 1, r + 244 }, .{ sha.E + 0, r + 248 }, .{ sha.A + 0, r + 252 } }) |cell| {
+        const w = try generateFrom(a, 15, hs, start);
+        w.main[cell[0]][cell[1]] = M31.one().sub(w.main[cell[0]][cell[1]]);
+        try std.testing.expect(try checkSatisfied(a, air, 15, w) != null);
+    }
+    {
+        var bad = wit;
+        bad.pubs[90] = bad.pubs[90].add(M31.one());
+        try std.testing.expect(try checkSatisfied(a, air, 15, bad) != null);
     }
 }

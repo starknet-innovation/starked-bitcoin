@@ -1,5 +1,5 @@
 /-
-Median-time-past constraints (header chain v4) and the complete header-chain AIR.
+Median-time-past constraints (header chain v4).
 
 Rule (decision D-018): for every header with time `t` and window `T_1..T_11` (the previous
 11 times, newest first), at least 6 of the `T_i` are strictly below `t`. The segment starting
@@ -73,9 +73,5 @@ def countC : Expr :=
 
 def mtpCs : List Expr :=
   [0, 1].flatMap (fun h => ownTime h ++ window h ++ windowOut h) ++ [cmpLo, cmpHi, countC]
-
-def constraints : List Expr := baseConstraints ++ powCs ++ stateCs ++ copyCs ++ retargetCs ++ mtpCs
-
-def air : Air := { name := "header_chain_v4", nMain := Sha256.N_MAIN, pre := preCols, constraints }
 
 end StarkedAir.HeaderChain

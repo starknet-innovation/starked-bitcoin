@@ -84,7 +84,8 @@ def preCols : List PreCol :=
     oneRow 218,                                                                       -- 37 STATE
     oneRow 220,                                                                       -- 38 PREV (retarget copies)
     oneRow 221 ] ++                                                                   -- 39 RT (retarget)
-  (List.range 12).map (fun k => oneRow (229 + k))                                     -- 40..50 MTP slots, 51 MTP count
+  (List.range 12).map (fun k => oneRow (229 + k)) ++                                  -- 40..50 MTP slots, 51 MTP count
+  [ oneRow 248 ]                                                                      -- 52 WORK (chainwork)
 
 /-! ### Constraints -/
 

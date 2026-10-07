@@ -112,3 +112,13 @@ Why: For a sorted list `s`, `t > s[⌊k/2⌋]` ⟺ `#{i : t_i < t} ≥ ⌊k/2⌋
 ### D-019 — Finish M1 before starting M2
 Date: 2026-10-07 · By: owner · Status: active
 Decision: Complete HC-V4, HC-V5, HC-TOP, BENCH-RAITO and FV-Z3 before recursion/aggregation work.
+
+### D-020 — Exact cumulative chainwork
+Date: 2026-10-07 · By: owner · Status: active
+Decision: HC-V5 exposes Core's exact chainwork: per header `floor(2^256 / (T+1))` (`GetBlockProof`), summed. It is not a lower bound.
+Why: Verifiers can compare the proven value directly with `getblockheader … chainwork`.
+
+### D-021 — Chainwork circuit requires target ≥ 2^128 (exponent s ≥ 16)
+Date: 2026-10-07 · By: agent · Status: active
+Decision: The HC-V5 work constraints require the PoW exponent `s = nSize − 3 ≥ 16`, so `q = ⌊2^256/(T+1)⌋ < 2^128` fits in 16 bytes and the whole computation fits in rows 241..253.
+Why: This is a completeness restriction only. Soundness is unaffected: a header with `s < 16` cannot be proven at all. Mainnet targets so far have `s ≥ 20`, and `s < 16` would need about 2^128 expected hashes per block. The alternative, 32-byte `q`, does not fit the 15 free rows without doubling the rows per header (about 2× slower proving).

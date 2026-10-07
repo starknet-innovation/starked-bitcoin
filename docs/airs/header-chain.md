@@ -5,6 +5,43 @@ Status: current · Updated: 2026-10-07 · Owner files: `lean/StarkedAir/Gadgets/
 Versions are listed newest first. The guarantees as a whole are in
 [reference/verification.md](../reference/verification.md).
 
+## v5 (2026-10-07): exact chainwork — implemented and tested; proof pending
+
+Roadmap `HC-V5`. Decisions: D-020 (exact), D-021 (`s ≥ 16`). Spec: `blockProof` in
+`lean/StarkedAir/Spec/Bitcoin.lean`, with Core's formula
+`(~T / (T+1)) + 1`; `blockProof_eq` proves it equals `⌊2^256 / (T+1)⌋`.
+
+**Enforced per header:** with `T = mant · 256^s` from the proof-of-work row:
+- `q = ⌊2^256/(T+1)⌋`, via `R = q·mant`, `R·256^s + q + ρ = 2^256` and
+  `ρ + σ = T`. All are byte-column identities with range-checked carries, so
+  `0 ≤ ρ ≤ T` and the division is exact.
+- `W_j = W_{j−1} + q_j`, as 16-bit limbs.
+- The first header takes `W_{−1}` from public inputs 88..97; the last
+  header's `W` is public inputs 98..107.
+
+**Layout:** rows 241..253, with all constraints at row 248 (selector
+`WORK`, preprocessed column 52). The row map is in the header comment of
+`lean/StarkedAir/Gadgets/Work.lean`.
+
+**Completeness bound (D-021):** `s ≥ 16` (target ≥ 2^128), so `q` and `R`
+fit in 16 bytes. Mainnet targets have `s ≥ 20`.
+
+**Totals:** 514 constraints, 53 preprocessed columns, 108 public inputs,
+2,514 column/offset reads.
+
+**Zig:** `src/btc/work.zig` (`scratch`, `blockProof`); `ChainStart.work`.
+
+**Tests:**
+- chainwork after height 15 = `0x1000100010` (Core);
+- after height 32319 = `0x7e4c32ec7280` (independent Python reference);
+- tampering with `q`, `R`, `ρ`, `W` or a carry is caught;
+- a wrong input-work public input is caught;
+- `s = 15` is refused.
+
+**Benchmark** (M4 Pro, Metal, 70 queries, 26-bit PoW, 2026-10-07): 1024
+headers at 2¹⁸ rows. Proving takes 4.28 s (≈ 239 headers/s), verifying 0.13 s,
+and the proof is 1.11 MB.
+
 ## v4 (2026-10-07): median time past — proven sound
 
 Roadmap `HC-V4`; counting approach per decision D-018. Spec: `mtpOk` in
