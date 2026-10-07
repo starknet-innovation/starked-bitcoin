@@ -18,7 +18,7 @@ interpreted by the Zig prover and verifier.
 | Component | State |
 |---|---|
 | SHA-256 compression AIR | Implemented; **proven** equal to FIPS 180-4 |
-| Header chain: SHA256d, linkage, proof of work, height/period state, difficulty retarget, median time past, exact chainwork | Implemented; **proven** equal to Bitcoin Core's mainnet rules (per header; a single chain-level theorem is pending, see `HC-TOP`) |
+| Header chain: SHA256d, linkage, proof of work, height/period state, difficulty retarget, median time past, exact chainwork | Implemented; **proven**: `header_chain_sound` shows any accepted segment is valid under Bitcoin Core's mainnet header rules |
 | Recursion / aggregation, CUDA, UTXO state | Not yet |
 
 - Exact guarantees and trust assumptions:
@@ -59,7 +59,7 @@ docs/              Documentation (see below)
 | Understand the goals, architecture and trust model | [docs/design/overview.md](docs/design/overview.md) |
 | See which Bitcoin rules are covered and how they're planned | [docs/design/consensus-rules.md](docs/design/consensus-rules.md) |
 | Know exactly what is proven and what is trusted | [docs/reference/verification.md](docs/reference/verification.md) |
-| Understand an AIR's layout, versions, tests and benchmarks | [docs/airs/sha256.md](docs/airs/sha256.md), [docs/airs/header-chain.md](docs/airs/header-chain.md) |
+| Understand an AIR's layout, versions, tests and benchmarks | [docs/airs/sha256.md](docs/airs/sha256.md), [docs/airs/header-chain.md](docs/airs/header-chain.md) (earlier versions: [header-chain-history.md](docs/airs/header-chain-history.md)) |
 | Understand the constraint IR and JSON format, or regenerate `airs/` | [docs/reference/ir.md](docs/reference/ir.md) |
 | Find a Lean file or theorem, or learn the proof rules | [docs/reference/lean.md](docs/reference/lean.md) |
 | Find a Zig module or API, or run the CLI | [docs/reference/zig.md](docs/reference/zig.md) |

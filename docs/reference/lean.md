@@ -39,6 +39,8 @@ them.
 | `Gadgets/StateSound.lean` | `heightAt`, `pstAt`, `state_row`, `state_sound` (v3a) |
 | `Gadgets/RetargetSound.lean` | Copies (`copy_facts`), evaluation helpers, `rt_core`, `rt_span`, `rt_p0`, `rt_dhead` |
 | `Gadgets/RetargetDiv.lean` | `rt_divq`, `rt_rem`, `rt_cap`, `retarget_sound` (v3b) |
+| `Spec/Chain.lean` | `SegIn`, `SegOut`, `pstOf`, `prevTimes`, `SegmentValid`: the whole-segment statement over Bitcoin objects |
+| `Gadgets/TopSound.lean` | `pubWindow`, `decodeIn`, `decodeOut`, `out_time`, `pst_eq`, `win_eq`, `work_eq`, **`header_chain_sound`** |
 | `Gadgets/WorkSound.lean` | `carry_chain`, `shift_sum`, `cauchy` (generic column arithmetic), `workQ`, `workAt`, `pubWork`, `work_q`, `work_step`, `work_out` (v5) |
 | `Gadgets/MtpSound.lean` | `winAt`, `mtp_window`, `mtp_cmp`, `mtp_count`, `mtp_out`, `mtp_core` (v4) |
 
@@ -50,6 +52,7 @@ Every theorem below depends only on `propext`, `Classical.choice` and
 
 | Theorem | Statement, informally | Doc |
 |---|---|---|
+| **`HeaderChain.header_chain_sound`** | A satisfying trace proves `SegmentValid`: the segment obeys Core's mainnet header rules, from decoded public inputs to outputs | [airs/header-chain.md](../airs/header-chain.md) |
 | `Sha256.compress_sound_air` | Every 72-row block of a satisfying trace computes FIPS 180-4 `compress` | [airs/sha256.md](../airs/sha256.md) |
 | `HeaderChain.chain_sound` | Every header hashes (SHA256d) to its claimed hash; consecutive headers link; endpoints match the public inputs | [airs/header-chain.md](../airs/header-chain.md) |
 | `HeaderChain.chain_sound_v2` | The above, plus `powOk hash nBits` for every header | same |

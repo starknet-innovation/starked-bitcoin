@@ -12,6 +12,12 @@ system guarantees that doesn't appear here is not a claim the project makes.
 
 ## Proven in Lean (standard axioms only)
 
+**Headline:** `HeaderChain.header_chain_sound` (`Gadgets/TopSound.lean`). A
+satisfying trace proves `SegmentValid` (`Spec/Chain.lean`), the whole
+segment's validity under Core's mainnet header rules, from decoded public
+inputs to decoded public outputs. The rows below are the per-rule theorems it
+is built from.
+
 | Property | Theorem | AIR version |
 |---|---|---|
 | SHA-256 compression = FIPS 180-4 | `Sha256.compress_sound_air` | sha256_compress v1 |
