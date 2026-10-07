@@ -194,8 +194,4 @@ def retargetCs : List Expr :=
   rtBase ++ (List.range 6).map p0Col ++ dHead ++ (List.range 8).map divCol ++ (List.range 5).map remCol ++
     capHead ++ (List.range 6).map capCol
 
-def constraints : List Expr := baseConstraints ++ powCs ++ stateCs ++ copyCs ++ retargetCs
-
-def air : Air := { name := "header_chain_v3b", nMain := Sha256.N_MAIN, pre := preCols, constraints }
-
 end StarkedAir.HeaderChain

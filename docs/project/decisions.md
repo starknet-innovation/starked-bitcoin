@@ -103,3 +103,12 @@ Date: 2026-10-06 · By: owner · Status: active
 Date: 2026-10-07 · By: owner (request), agent (structure) · Status: active
 Decision: The README is the map; `docs/{design,airs,reference,guides,reports,project}`;
 the PM process lives in [README.md](README.md).
+
+### D-018 — Median time past by counting, not sorting
+Date: 2026-10-07 · By: owner · Status: active
+Decision: HC-V4 enforces `time_j > MTP` as "at least ⌊k/2⌋+1 of the k ≤ 11 previous times are strictly below `time_j`", with a range-checked difference per comparison. It does not sort inside the circuit.
+Why: For a sorted list `s`, `t > s[⌊k/2⌋]` ⟺ `#{i : t_i < t} ≥ ⌊k/2⌋+1`. Counting is cheaper and much easier to prove than an in-circuit sort.
+
+### D-019 — Finish M1 before starting M2
+Date: 2026-10-07 · By: owner · Status: active
+Decision: Complete HC-V4, HC-V5, HC-TOP, BENCH-RAITO and FV-Z3 before recursion/aggregation work.

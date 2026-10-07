@@ -2,9 +2,8 @@
 //! (lean/StarkedAir/Gadgets/HeaderChain.lean, exported to airs/header_chain.json).
 //!
 //! One header per 256 rows: compressions at rows 0, 72 and 144 (SHA256d over 80 bytes),
-//! proof-of-work scratch in rows 216..217, rows 218..255 idle. Public inputs: the first
-//! header's prev-hash words and the last header's hash words, each word as (lo, hi)
-//! 16-bit limbs.
+//! proof-of-work scratch in rows 216..217, chain state 218..219, retarget 220..228, median time
+//! past 229..240, rows 241..255 idle. Layout and public inputs: docs/airs/header-chain.md.
 
 const std = @import("std");
 const spec = @import("../sha256/spec.zig");
@@ -12,7 +11,7 @@ const sha = @import("../sha256/witness.zig");
 const M31 = @import("stwo_core").fields.m31.M31;
 
 pub const PERIOD: usize = 256;
-pub const N_PUB: usize = 48;
+pub const N_PUB: usize = 88;
 const retarget = @import("retarget.zig");
 
 pub const lean_json = @embedFile("air:header_chain");
@@ -62,12 +61,29 @@ pub const ChainStart = struct {
     /// Previous header's nBits and period-start time, as raw header words 18 and 17.
     prev_nbits_word: u32 = 0,
     prev_pst_word: u32 = 0,
-    prev_time_word: u32 = 0,
+    /// Median-time-past window of the first header: the raw time words of its 11
+    /// predecessors, newest first (`window[0]` is the predecessor's time). Near genesis it is
+    /// padded with `SENTINEL`; use `windowFrom`.
+    window: [11]u32,
 };
+
+const TMAX: u32 = 0xffffffff;
+/// Window of the genesis header (decision D-018, docs/airs/header-chain.md § v4): at height
+/// `h ≤ 10` the visible tail has exactly `5 − h/2` zeros (6 at genesis), so "≥ 6 of 11 below"
+/// matches Core's median over the `h` real predecessors.
+pub const SENTINEL = [11]u32{ TMAX, 0, TMAX, 0, TMAX, 0, TMAX, 0, TMAX, 0, 0 };
+
+/// Window for a first header whose real predecessors' raw time words are `prev`, newest
+/// first (all 11 when the height is at least 11; fewer near genesis).
+pub fn windowFrom(prev: []const u32) [11]u32 {
+    var w: [11]u32 = undefined;
+    for (0..11) |k| w[k] = if (k < prev.len) prev[k] else SENTINEL[k - prev.len];
+    return w;
+}
 
 /// Start state for a segment beginning at genesis (height 0 is a period boundary, so the
 /// predecessor values are unused).
-pub const genesis_start = ChainStart{ .height = 0 };
+pub const genesis_start = ChainStart{ .height = 0, .window = SENTINEL };
 
 pub const Witness = struct {
     main: [][]M31,
@@ -154,7 +170,7 @@ pub fn generateFrom(allocator: std.mem.Allocator, log_size: u32, headers: []cons
     for (headers, 0..) |*header, i| {
         const base = i * PERIOD;
         const prev_nb = if (i == 0) start.prev_nbits_word else headerWordAt(&headers[i - 1], 18);
-        const prev_time = if (i == 0) start.prev_time_word else headerWordAt(&headers[i - 1], 17);
+        const prev_time = if (i == 0) start.window[0] else headerWordAt(&headers[i - 1], 17);
         const prev_pst = if (i == 0) start.prev_pst_word else words.e[base - PERIOD + 218];
         words.a[base + 220] = prev_nb;
         words.e[base + 220] = prev_time;
@@ -170,6 +186,34 @@ pub fn generateFrom(allocator: std.mem.Allocator, log_size: u32, headers: []cons
         mid_carries[i] = rs.mid_carry;
     }
 
+    // Median time past (rows 229..240): slot k holds T_(k+1), the difference d and own time.
+    var bits = try allocator.alloc([11][2]u32, headers.len);
+    defer allocator.free(bits);
+    var win = start.window;
+    for (headers, 0..) |*header, i| {
+        const base = i * PERIOD;
+        if (i > 0) {
+            std.mem.copyBackwards(u32, win[1..], win[0..10]);
+            win[0] = headerWordAt(&headers[i - 1], 17);
+        }
+        const t = headerWordAt(header, 17);
+        const tn = retarget.le(t);
+        var count: u32 = 0;
+        for (win, 0..) |tw, k| {
+            const tp = retarget.le(tw);
+            const b = tp < tn;
+            const d: u32 = if (b) tn - tp - 1 else tp - tn;
+            const c: u32 = if (b) ((tp & 0xffff) + 1 + (d & 0xffff)) >> 16 else ((tn & 0xffff) + (d & 0xffff)) >> 16;
+            words.a[base + 229 + k] = tw;
+            words.e[base + 229 + k] = d;
+            words.w[base + 229 + k] = t;
+            bits[i][k] = .{ @intFromBool(b), c };
+            count += @intFromBool(b);
+        }
+        if (count < 6) return error.TimeTooOld;
+        words.a[base + 240] = count - 6;
+    }
+
     var pubs: [N_PUB]M31 = undefined;
     const first = spec.blockFromBytes(headers[0][0..64]);
     wordsPubs(pubs[0..16], first[1..9].*);
@@ -178,8 +222,8 @@ pub fn generateFrom(allocator: std.mem.Allocator, log_size: u32, headers: []cons
     const limbs = [_]u32{
         start.height,         start.prev_nbits_word,                 start.prev_pst_word,
         start.height + @as(u32, @intCast(last)), headerWordAt(&headers[last], 18), words.e[last * PERIOD + 218],
-        start.prev_time_word, headerWordAt(&headers[last], 17),
-    };
+        start.window[0], headerWordAt(&headers[last], 17),
+    } ++ start.window[1..11].* ++ win[0..10].*;
     for (limbs, 0..) |v, k| {
         pubs[32 + 2 * k] = M31.fromCanonical(v & 0xffff);
         pubs[33 + 2 * k] = M31.fromCanonical(v >> 16);
@@ -190,6 +234,10 @@ pub fn generateFrom(allocator: std.mem.Allocator, log_size: u32, headers: []cons
         main[sha.CA_LO][i * PERIOD + 222] = M31.fromCanonical(v);
         main[sha.CE_LO][i * PERIOD + 222] = M31.fromCanonical(c);
     }
+    for (bits, 0..) |slots, i| for (slots, 0..) |bc, k| {
+        main[sha.CA_LO][i * PERIOD + 229 + k] = M31.fromCanonical(bc[0]);
+        main[sha.CA_LO + 1][i * PERIOD + 229 + k] = M31.fromCanonical(bc[1]);
+    };
     return .{ .main = main, .pubs = pubs, .hashes = hashes };
 }
 
@@ -325,6 +373,15 @@ test "header chain AIR: prove and verify blocks 0..15 on CPU" {
     try prove_mod.verify(a, config, air, 12, &wit.pubs, proof);
 }
 
+/// Window from 11 consecutive headers (oldest first in the file).
+fn windowOf(a: std.mem.Allocator, hex: []const u8) ![11]u32 {
+    const hs = try loadHeaders(a, hex);
+    if (hs.len != 11) return error.HeaderCountMismatch;
+    var w: [11]u32 = undefined;
+    for (0..11) |k| w[k] = headerWordAt(&hs[10 - k], 17);
+    return w;
+}
+
 fn checkSatisfied(a: std.mem.Allocator, air: ir.Air, log_size: u32, wit: Witness) !?usize {
     const t = interp.RowTrace{
         .log_size = log_size,
@@ -344,15 +401,13 @@ test "chain state: a segment from height 1 and one across the first period bound
     const genesis = &early[0];
 
     // Heights 1..16: the predecessor is genesis (a boundary, so pst = genesis time).
-    const start1 = ChainStart{ .height = 1, .prev_nbits_word = headerWordAt(genesis, 18), .prev_pst_word = headerWordAt(genesis, 17), .prev_time_word = headerWordAt(genesis, 17) };
+    const start1 = ChainStart{ .height = 1, .prev_nbits_word = headerWordAt(genesis, 18), .prev_pst_word = headerWordAt(genesis, 17), .window = windowFrom(&.{headerWordAt(genesis, 17)}) };
     const w1 = try generateFrom(a, 12, early[1..17], start1);
     try std.testing.expectEqual(null, try checkSatisfied(a, air, 12, w1));
 
     // Heights 1984..2047 cross the boundary at 2016 (pst resets to block 2016's time).
     const around = try loadHeaders(a, @embedFile("testdata:mainnet_headers_1984_2048"));
-    // Block 1983's own time is not in the test data; it only matters at a boundary, and the
-    // first boundary here (2016) reads block 2015's time from the trace.
-    const start2 = ChainStart{ .height = 1984, .prev_nbits_word = headerWordAt(&early[1023], 18), .prev_pst_word = headerWordAt(genesis, 17), .prev_time_word = 0 };
+    const start2 = ChainStart{ .height = 1984, .prev_nbits_word = headerWordAt(&early[1023], 18), .prev_pst_word = headerWordAt(genesis, 17), .window = try windowOf(a, @embedFile("testdata:mainnet_headers_1973_1984")) };
     const w2 = try generateFrom(a, 14, around, start2);
     try std.testing.expectEqual(null, try checkSatisfied(a, air, 14, w2));
     // pst of the last header (height 2047) is block 2016's time.
@@ -371,7 +426,8 @@ test "chain state: a segment from height 1 and one across the first period bound
         try std.testing.expect(try checkSatisfied(a, air, 14, w) != null);
     }
     {
-        const start_bad = ChainStart{ .height = 1, .prev_nbits_word = 0x1c00ffff, .prev_pst_word = headerWordAt(genesis, 17), .prev_time_word = headerWordAt(genesis, 17) };
+        var start_bad = start1;
+        start_bad.prev_nbits_word = 0x1c00ffff;
         try std.testing.expectError(error.DifficultyChangedMidPeriod, generateFrom(a, 12, early[1..17], start_bad));
     }
 }
@@ -384,7 +440,7 @@ test "retarget: the first real difficulty change (height 32256) is enforced" {
     const hs = try loadHeaders(a, @embedFile("testdata:mainnet_headers_32192_32320"));
     const p30240 = (try loadHeaders(a, @embedFile("testdata:mainnet_header_30240")))[0];
     // Heights 32192..32319; the period started at 30240 with nBits 0x1d00ffff.
-    const start = ChainStart{ .height = 32192, .prev_nbits_word = headerWordAt(&hs[0], 18), .prev_pst_word = headerWordAt(&p30240, 17), .prev_time_word = 0 };
+    const start = ChainStart{ .height = 32192, .prev_nbits_word = headerWordAt(&hs[0], 18), .prev_pst_word = headerWordAt(&p30240, 17), .window = try windowOf(a, @embedFile("testdata:mainnet_headers_32181_32192")) };
     const wit = try generateFrom(a, 15, hs, start);
     try std.testing.expectEqual(null, try checkSatisfied(a, air, 15, wit));
     try std.testing.expectEqual(@as(u32, 0x1d00d86a), retarget.le(headerWordAt(&hs[64], 18)));
@@ -401,4 +457,75 @@ test "retarget: the first real difficulty change (height 32256) is enforced" {
     var bad_start = start;
     bad_start.prev_pst_word = headerWordAt(&hs[0], 17);
     try std.testing.expectError(error.RetargetMismatch, generateFrom(a, 15, hs, bad_start));
+}
+
+test "median time past: enforced, tamper-evident, and chained through public inputs" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const air = (try ir.Air.parseJson(a, lean_json)).value;
+    const around = try loadHeaders(a, @embedFile("testdata:mainnet_headers_1984_2048"));
+    const early = try loadHeaders(a, @embedFile("testdata:mainnet_headers_0_1024"));
+    const start = ChainStart{ .height = 1984, .prev_nbits_word = headerWordAt(&early[1023], 18), .prev_pst_word = headerWordAt(&early[0], 17), .window = try windowOf(a, @embedFile("testdata:mainnet_headers_1973_1984")) };
+    const wit = try generateFrom(a, 14, around, start);
+
+    // Outputs: the last header's window T_1..T_10 = times of heights 2046 down to 2037.
+    for (0..10) |k| {
+        const v = wit.pubs[68 + 2 * k].toU32() | (wit.pubs[69 + 2 * k].toU32() << 16);
+        try std.testing.expectEqual(headerWordAt(&around[around.len - 2 - k], 17), v);
+    }
+    // A predecessor window entirely in the future of the first header is refused.
+    var future = start;
+    future.window = [_]u32{TMAX} ** 11;
+    try std.testing.expectError(error.TimeTooOld, generateFrom(a, 14, around, future));
+    // Tampering is caught: a comparison bit, a difference bit, a window word, the count slack.
+    const r = 5 * PERIOD;
+    for ([_][2]usize{ .{ sha.CA_LO, r + 233 }, .{ sha.E + 7, r + 231 }, .{ sha.A + 12, r + 236 }, .{ sha.A + 1, r + 240 } }) |cell| {
+        const w = try generateFrom(a, 14, around, start);
+        w.main[cell[0]][cell[1]] = M31.one().sub(w.main[cell[0]][cell[1]]);
+        try std.testing.expect(try checkSatisfied(a, air, 14, w) != null);
+    }
+    // A wrong pre-segment window public input is caught.
+    {
+        var bad = wit;
+        bad.pubs[50] = bad.pubs[50].add(M31.one());
+        try std.testing.expect(try checkSatisfied(a, air, 14, bad) != null);
+    }
+}
+
+/// Bitcoin Core `GetMedianTimePast` rule, as a plain reference: sort the (≤ 11) numeric
+/// predecessor times and require `t` above the element at index `k / 2`.
+fn mtpOkRef(t: u32, prev: []const u32) bool {
+    if (prev.len == 0) return true;
+    var buf: [11]u32 = undefined;
+    const k = @min(prev.len, 11);
+    @memcpy(buf[0..k], prev[0..k]);
+    std.mem.sort(u32, buf[0..k], {}, std.sort.asc(u32));
+    return t > buf[k / 2];
+}
+
+test "median time past: the counting rule with the sentinel window matches Core's median" {
+    var prng = std.Random.DefaultPrng.init(2024);
+    const rnd = prng.random();
+    for (0..100_000) |_| {
+        const h = rnd.uintLessThan(usize, 14);
+        var prev: [11]u32 = undefined;
+        const k = @min(h, 11);
+        for (0..k) |i| prev[i] = if (rnd.boolean()) rnd.uintLessThan(u32, 40) else rnd.int(u32);
+        const t: u32 = switch (rnd.uintLessThan(u8, 4)) {
+            0 => rnd.uintLessThan(u32, 40),
+            1 => TMAX,
+            else => rnd.int(u32),
+        };
+        // Raw words = byte-swapped numeric values (the window holds raw header words).
+        var raw: [11]u32 = undefined;
+        for (0..k) |i| raw[i] = @byteSwap(prev[i]);
+        const win = windowFrom(raw[0..k]);
+        var count: usize = 0;
+        for (win) |w| count += @intFromBool(retarget.le(w) < t);
+        const ours = count >= 6;
+        const core = mtpOkRef(t, prev[0..k]);
+        if (ours) try std.testing.expect(core); // soundness
+        if (core and t > 0) try std.testing.expect(ours); // completeness (t = 0 never occurs)
+    }
 }

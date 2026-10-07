@@ -7,7 +7,7 @@ follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work)
 - **Updated:** 2026-10-07
 - **HEAD at last update:** 97dbca4 (plus this status-only commit)
 - **Current milestone:** M1 (header chain, locally, formally verified)
-- **Current item:** none in progress. **Next item: `HC-V4`** (median time past)
+- **Current item:** `HC-V4` (median time past), in progress
 
 ## State in one paragraph
 
@@ -49,9 +49,6 @@ running.
 - **LICENSE:** none chosen.
 - **STWO-225-FU:** follow up on stwo-zig#225 upstream? This is
   outward-facing.
-- **Priority check:** finish M1 (HC-V4, HC-V5, HC-TOP, BENCH-RAITO, FV-Z3)
-  before starting M2 recursion and aggregation? This is the default
-  assumption unless told otherwise.
 
 ## Verify the current state
 

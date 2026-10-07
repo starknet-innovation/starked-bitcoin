@@ -5,6 +5,74 @@ Status: current · Updated: 2026-10-07 · Owner files: `lean/StarkedAir/Gadgets/
 Versions are listed newest first. The guarantees as a whole are in
 [reference/verification.md](../reference/verification.md).
 
+## v4 (2026-10-07): median time past — implemented and tested; proof pending
+
+Roadmap `HC-V4`; counting approach per decision D-018. Spec: `mtpOk` in
+`lean/StarkedAir/Spec/Bitcoin.lean`. Counting equivalence: `mtpOk_iff_count` in
+`lean/StarkedAir/Spec/MtpMath.lean` (proven).
+
+**Rule enforced.** For every header with time `t` and window `T_1..T_11` (the
+previous 11 times, newest first): `#{i : T_i < t} ≥ 6`.
+
+**Layout** (rows of each header; slot `i = row − 228`):
+
+| Row | `a` | `e` | `w` | col 108 | col 109 |
+|---|---|---|---|---|---|
+| 229..239 (slot 1..11) | `T_i` (raw time word) | `d_i` (numeric, 32 bits) | own time `t` (raw word) | `b_i = [T_i < t]` | lo-limb carry `c_i` |
+| 240 | bits 0..2: `r = Σ b_i − 6` | — | — | — | — |
+
+**Constraints:**
+- **Own-time copies:** `w@229 = w@77` (offset −152), and `w@r = w@r−1` for rows 230..239.
+- **Window.**
+  - `T_1 = e@220`, the predecessor's time copy. That copy is already pinned
+    to public input 44/45 for the first header.
+  - `T_i = a@−257` (the predecessor's `T_{i−1}`) for `i ≥ 2` on non-first
+    headers.
+  - On the first header, `T_i` = public inputs `48 + 2(i−2) + h`.
+- **Comparison** (degree 3, on the 16-bit numeric limbs `timeLimb`):
+  - `b = 1`: `T + 1 + d = t`, so `T < t`;
+  - `b = 0`: `t + d = T`, so `T ≥ t`.
+  - The lo limb carries into the hi limb through `c`, and the hi limb has no
+    carry out, so each branch holds exactly over ℕ.
+- **Count:** at row 240, `Σ_{i} col108@(i−12) − 6 = r`, where `r` is 3 bits,
+  so `Σ ≥ 6`.
+- **Outputs (last header):** `T_1..T_10` → public inputs `68..87`. The last
+  header's own time is already public input 46/47. The next segment takes
+  pubs 44/45 and 48..67 from these.
+- **Selectors:** 12 new one-row selectors (rows 229..240), giving 52
+  preprocessed columns. Public inputs: 88.
+
+**Heights below 11 (sentinel history).** Core takes the median over the
+`k = h` existing predecessors. The circuit always uses 11 slots. The
+segment that starts at genesis takes a fixed **sentinel history** as its
+public inputs: `T_1 = 0xFFFFFFFF` (pubs 44/45), then
+`T_2..T_11 = 0, max, 0, max, 0, max, 0, max, 0, 0` (`max = 0xFFFFFFFF`).
+At height `h ≤ 10`, the visible sentinels are the first `11 − h` of that
+list. They contain exactly `5 − ⌊h/2⌋` zeros (6 at `h = 0`), so
+`count ≥ 6 ⟺ #{real T_i < t} ≥ ⌊h/2⌋ + 1`, which is Core's rule. Genesis
+itself (no rule) passes because the 6 zero-sentinels are below any `t > 0`.
+**Verifiers must check that a segment starting at height 0 uses exactly this
+sentinel history.**
+
+**Definition:** `lean/StarkedAir/Gadgets/Mtp.lean` (`mtpCs`; the file also
+assembles the full `constraints` and `air`, now `header_chain_v4`). Totals: 394
+constraints, 52 preprocessed columns, 88 public inputs.
+
+**Zig:** `ChainStart.window` (11 raw time words, newest first), `windowFrom`
+(pads with `SENTINEL` near genesis). The generator refuses a header that fails
+the rule (`error.TimeTooOld`).
+
+**Tests** (`src/btc/header_chain.zig`):
+- every existing segment satisfies v4, including the genesis segment with the
+  sentinel window and segments at 1984 and 32192 with real 11-block
+  pre-histories;
+- window outputs equal the last header's predecessor times;
+- a window entirely in the future is refused;
+- tampering with a comparison bit, a difference bit, a window word or the
+  count slack is caught, as is a wrong window public input;
+- 100,000 random cases check that the sentinel counting rule matches Core's
+  sorted median (sound always, and complete for `t > 0`).
+
 ## v3b (2026-10-07): difficulty retarget — proven sound
 
 - **Spec:** `nextWork` (Core `GetNextWorkRequired`, mainnet) and `getCompact`

@@ -12,6 +12,8 @@ import StarkedAir.Gadgets.HeaderChainSound
 import StarkedAir.Gadgets.PowSound
 import StarkedAir.Gadgets.StateSound
 import StarkedAir.Gadgets.Retarget
+import StarkedAir.Gadgets.Mtp
 import StarkedAir.Spec.RetargetMath
+import StarkedAir.Spec.MtpMath
 import StarkedAir.Gadgets.RetargetSound
 import StarkedAir.Gadgets.RetargetDiv

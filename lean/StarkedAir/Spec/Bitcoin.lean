@@ -123,4 +123,30 @@ def timeOf (hw : ℕ → Word) : ℕ :=
 #guard nextWork 0x1d00ffff 1233061996 1231006505 == 0x1d00ffff
 #guard getCompact (0xffff * 2 ^ 208) == 0x1d00ffff
 
+/-! ## Median time past (Bitcoin Core `GetMedianTimePast`, `ContextualCheckBlockHeader`)
+
+Core rejects a header whose time is not strictly greater than the median of the timestamps of
+its predecessor and that block's ancestors, at most 11 (`nMedianTimeSpan`): "time-too-old".
+`prev` lists those timestamps newest first; near genesis it is shorter. Genesis has none.
+The `#guard` on real data is mainnet height 101982, whose time is below two of its 11
+predecessors' times. -/
+
+/-- `GetMedianTimePast`: sort the (at most 11) timestamps and take index `k / 2`. -/
+def medianTimePast (prev : List ℕ) : ℕ :=
+  let l := prev.take 11
+  (l.mergeSort (fun a b => decide (a ≤ b))).getD (l.length / 2) 0
+
+/-- The header passes the median-time-past rule. -/
+def mtpOk (time : ℕ) (prev : List ℕ) : Bool := prev.isEmpty || decide (medianTimePast prev < time)
+
+#guard mtpOk 1294682031 [1294682118, 1294682046, 1294680974, 1294680362, 1294679671, 1294678793,
+  1294676428, 1294676299, 1294675358, 1294675210, 1294674490]
+#guard mtpOk 6 [1,2,3,4,5,6,7,8,9,10,11] = false
+#guard mtpOk 7 [1,2,3,4,5,6,7,8,9,10,11] = true
+#guard mtpOk 7 [11,10,9,8,7,6,5,4,3,2,1] = true
+#guard mtpOk 6 [11,10,9,8,7,6,5,4,3,2,1] = false
+#guard mtpOk 0 [] = true
+#guard mtpOk 3 [2, 9] = false
+#guard mtpOk 10 [2, 9] = true
+
 end StarkedAir.Spec.Bitcoin
