@@ -39,7 +39,7 @@ Rules:
 | IR-LOGUP | LogUp / interaction terms in the IR (Lean semantics, export, interpreter) | todo | Port StarkWare's `tuple_inclusion` for the Lean side |
 | VK | Verification key: preprocessed roots per (AIR, log_size), instead of recomputing in O(n) | todo | |
 | GPU-CODEGEN | Generate CUDA/Metal constraint kernels from the IR | deferred (D-022) | Affects completeness and speed only, not soundness. After the full pipeline works. |
-| RECURSION | Native-AIR recursion statement (verify a proof inside an AIR) | todo | Generic; candidate for upstreaming to stwo-zig |
+| RECURSION | Native-AIR recursion statement (verify a proof inside an AIR) | in-progress (2026-10-07: surveying existing Stwo/stwo-zig recursion support before design; parallel to HC-FULLRUN per owner) | Generic; candidate for upstreaming to stwo-zig |
 | AGG | Segment aggregation: link segments through the public inputs, aggregate in a tree up to the tip | todo | |
 | H200 | Run the full chain on the H200 | deferred (D-022) | Needs owner access |
 
