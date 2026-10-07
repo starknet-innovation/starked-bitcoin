@@ -28,7 +28,7 @@ Done:
 - `retarget_sound` proven (9a03734). The new file `RetargetDiv.lean` holds
   `rt_divq`, `rt_rem`, `rt_cap` and the final assembly. `header_pow_ex`
   exports the PoW row's exponent and powLimit facts.
-- Documentation tree, README map and PM process (this commit). The old docs
+- Documentation tree, README map and PM process (97dbca4). The old docs
   moved to `docs/design`, `docs/airs` and `docs/reports`.
 Evidence:
 - `lake build`: all 8724 jobs OK. No `sorry`, `native_decide` or `bv_decide`.
