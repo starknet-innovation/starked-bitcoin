@@ -58,6 +58,29 @@ Cairo steps.
 - An optional final step, the Cairo `stwo_circuit_verifier` on the root,
   keeps Starknet settlement open.
 
+## Blocker found 2026-10-07: mask offsets (Q-MASK)
+
+The in-circuit verifier samples **one** OODS value per trace column (offset 0),
+plus the previous row for LogUp cumulative-sum columns only.
+- `stark_verifier/proof.zig`: `trace_at_oods` has one value per column;
+  `at_prev` exists only for interaction columns.
+- `oods.zig`: the sample points are the OODS point and its previous row.
+
+That matches StarkWare's AIR style: row-local constraints, rows linked by
+LogUp. Our AIRs read columns at many row offsets (−399..+7, 2,514
+column/offset pairs in `header_chain_v6`), so our proofs cannot be checked by
+the verifier as-is. Options:
+
+| | Option | Keeps our AIR and Lean proofs | Trust impact | Work |
+|---|---|---|---|---|
+| A | Rewrite the AIRs row-locally, linking rows with LogUp (StarkWare's framework shape) | No: AIRs and proofs are redone, and LogUp soundness must be formalised (StarkWare's `tuple_inclusion` is a starting point) | None: unmodified verifier | Very large |
+| B | Extend the in-circuit verifier to multi-offset masks: a sample point per (column, offset) and a matching quotient batching, mirroring the native verifier that already accepts our proofs | Yes | The extension is new verifier code with no Rust parity oracle. Mitigation: differential testing against the native verifier, plus adversarial tests | Medium (generic, belongs in a stwo-zig fork per D-008) |
+| C | Verify the native proof some other way (Cairo `stwo_cairo_verifier` with a custom `Air`, or a zkVM) | Yes, if that verifier supports masks (UNVERIFIED for Cairo) | Cairo-verifier trust | Large, and against D-003 |
+
+Recommendation: **B**. Our strongest asset is the formally verified AIR, and B
+keeps it. The circuit cost of about 2.5k extra OODS samples is small next to
+the verifier's Blake2s work (INFERRED).
+
 ## Open questions
 
 - **Q-CHAIN:** check chaining inside the fold (a custom fold statement), or in
