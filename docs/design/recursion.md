@@ -68,9 +68,13 @@ Cairo steps.
   (about 570 M cells). Our leaves are much smaller, so we may need our own
   registry or topology to avoid paying for Cairo-sized circuits.
 - **Q-MEM:** fold memory (11–18 GB reported) on a 24 GB laptop.
-- **Soundness of the composition** (leaf statement correctness, public-input
-  binding) needs its own argument. How much of it can be stated in Lean is to
-  be decided.
+- **What is proven and what is trusted** (decided 2026-10-07):
+  - The composition (segments → chain) is a pure Lean theorem
+    (`REC-COMPOSE`).
+  - Our in-circuit statement must provably evaluate our IR (`REC-STMT-EQ`).
+  - The recursive verifier circuit itself is trusted, in the same class as
+    Stwo: it is not formally verified anywhere as of 2026-10-07. See
+    [reference/verification.md](../reference/verification.md).
 
 ## Plan
 
