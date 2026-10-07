@@ -30,8 +30,9 @@ exact chainwork.
 3. **Completeness on all headers:** `zig-out/bin/spike fullrun 16 check data/headers.bin`
    (build ReleaseFast first). Every failure is a header the AIR cannot express:
    investigate each one.
-4. **Measure full-chain proving:** `zig-out/bin/spike fullrun 18 metal data/headers.bin`.
-   Record the time and proof sizes in a report, then close M1.
+4. **Measure full-chain proving:** `zig-out/bin/spike fullrun 20 metal data/headers.bin`.
+   The plan and the 10k sample results (231 headers/s, about 70 min extrapolated) are in
+   [the sample report](../reports/2026-10-07-fullrun-sample.md). Then close M1.
 
 ## In flight
 
