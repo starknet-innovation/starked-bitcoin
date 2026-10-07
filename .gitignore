@@ -2,3 +2,4 @@ zig-out/
 .zig-cache/
 .venv-fv/
 data/
+__pycache__/

@@ -51,6 +51,9 @@ zig build -Doptimize=ReleaseFast    # builds zig-out/bin/spike (macOS)
 zig-out/bin/spike <log_size> <cpu|metal> [lean]          # add32 spike
 zig-out/bin/spike sha <log_size> <cpu|metal>             # SHA-256 compression benchmark
 zig-out/bin/spike headers <log_size> <cpu|metal> <file>  # header chain over a .hex file
+zig-out/bin/spike fullrun <log_size> <check|cpu|metal> data/headers.bin [from] [to]
+    # HC-FULLRUN: every segment's witness is checked against the AIR (check) or proven and
+    # verified (cpu/metal); consecutive segments' public outputs must equal the next inputs
 ```
 
 - Header files are one 80-byte header per line, as hex. `headers` takes

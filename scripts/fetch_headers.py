@@ -18,6 +18,28 @@ OUT = Path(__file__).resolve().parent.parent / "data" / "headers.bin"
 GENESIS = "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f"
 SOURCES = [("https://mempool.space/api/v1/blocks/{}", 15), ("https://blockstream.info/api/blocks/{}", 10)]
 
+COOLDOWN = {}  # source index -> time it may be used again
+
+
+def get_any(height_top):
+    """Fetches a block list ending at `height_top` from whichever source is not cooling down."""
+    while True:
+        now = time.time()
+        order = sorted(range(len(SOURCES)), key=lambda i: COOLDOWN.get(i, 0))
+        i = order[0]
+        wait = COOLDOWN.get(i, 0) - now
+        if wait > 0:
+            time.sleep(wait)
+        url, _ = SOURCES[i]
+        try:
+            req = urllib.request.Request(url.format(height_top), headers={"User-Agent": "starked-bitcoin-header-index"})
+            return json.loads(urllib.request.urlopen(req, timeout=30).read())
+        except Exception as e:
+            code = getattr(e, "code", None)
+            COOLDOWN[i] = time.time() + (300 if code == 429 else 30)
+            print(f"source {i} failed ({code or e}); cooling down", flush=True)
+
+
 def get(url):
     for attempt in range(8):
         try:
@@ -26,6 +48,7 @@ def get(url):
         except Exception as e:
             time.sleep(min(120, 5 * 2 ** attempt))
     raise RuntimeError(f"giving up on {url}")
+
 
 def header(b):
     return (struct.pack("<i", b["version"]) + bytes.fromhex(b["previousblockhash"] or "00" * 32)[::-1] +
@@ -51,10 +74,9 @@ def main():
     turn, t0, h0 = 0, time.time(), h
     with out.open("ab") as f:
         while h <= tip:
-            url, per = SOURCES[turn % len(SOURCES)]
             turn += 1
-            top = min(h + per - 1, tip)
-            blocks = sorted((b for b in get(url.format(top)) if b["height"] >= h), key=lambda b: b["height"])
+            top = min(h + 9, tip)  # 10 = the smaller page size, valid for both sources
+            blocks = sorted((b for b in get_any(top) if b["height"] >= h), key=lambda b: b["height"])
             if not blocks or blocks[0]["height"] != h:
                 raise RuntimeError(f"unexpected response at height {h}")
             for b in blocks:
