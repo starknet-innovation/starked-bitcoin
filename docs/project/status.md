@@ -4,39 +4,39 @@ Rewritten at the end of every session; see [README.md](README.md#ending-a-sessio
 If `HEAD at last update` doesn't match `git log -1`, this file is stale:
 follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work).
 
-- **Updated:** 2026-10-07
-- **HEAD at last update:** a1a0320 (plus this status commit)
-- **Current milestone:** M1 (finish before M2, D-019). Remaining: `HC-FULLRUN`.
-- **Current item:** `HC-FULLRUN`, in progress (header download running)
+- **Updated:** 2026-10-08
+- **HEAD at last update:** 9cc5f7a (plus this status commit)
+- **Current milestones:** M1 (`HC-FULLRUN`) and M2 (`AGG` full-chain run), both waiting on long runs.
+- **Current item:** the two runs below.
 
 ## State in one paragraph
 
-`header_chain_sound` proves that any accepted segment satisfies `SegmentValid`:
-every Bitcoin Core mainnet header rule except wall-clock `time-too-new`
-(audited against Core, 2026-10-07). It uses standard axioms only. Z3
-independently confirms four gadgets. Mainnet heights 0–2047 pass the full
-pipeline: witness, AIR check, Metal proof and verification, segment chaining,
-exact chainwork.
+Segments are proven (`header_chain_sound`), wrapped into leaf circuit proofs,
+and folded by our node circuit, which checks the chain link in-circuit (D-025).
+`verifyRoot` checks the root against the node circuit identity, the expected
+identity key and genesis. Lean proves the pub-level composition
+(`leaf_valid`, `pub_compose`, `chain_from_genesis`). A 1,024- and an
+8,192-header tree from genesis verify at production parameters. All 970,348
+mainnet headers are in `data/headers.bin`.
 
 ## Next step (concrete)
 
-1. **Wait for the download.** Four workers fill `data/chunk_{0..3}.bin`
-   (logs in `data/chunk_*.log`). They are resumable; if one dies, re-run the
-   same command shown at the top of its log.
-2. **Merge:**
-   `python3 -I scripts/fetch_headers.py --merge data/chunk_0.bin data/chunk_1.bin data/chunk_2.bin data/chunk_3.bin`.
-   This appends to `data/headers.bin` (heights 0..2619 are already there) and
-   checks every link.
-3. **Completeness on all headers:** `zig-out/bin/spike fullrun 16 check data/headers.bin`
-   (build ReleaseFast first). Every failure is a header the AIR cannot express:
-   investigate each one.
-4. **Measure full-chain proving:** `zig-out/bin/spike fullrun 20 metal data/headers.bin`.
-   The plan and the 10k sample results (231 headers/s, about 70 min extrapolated) are in
-   [the sample report](../reports/2026-10-07-fullrun-sample.md). Then close M1.
+1. **Full-chain completeness check:** `data/fullrun_check.log`
+   (`spike fullrun 16 check data/headers.bin`). Every `FAIL` is a header the AIR
+   cannot express: investigate each one.
+2. **Whole chain to one root:** `data/chain_full.log`
+   (`spike chain 20 70 26 data/headers.bin`, about 5.5 h on CPU). Success line:
+   `chain ROOT VERIFIED`. Compare the printed tip with a public explorer
+   (block 970347 hash; state words are SHA-256 state order) and the chainwork
+   with `getblockheader … chainwork`.
+3. Write the report (`docs/reports/`), then close M1 (`HC-FULLRUN`) and M2 (`AGG`).
+   A separate `fullrun 20 metal` timing run is optional (the chain run proves every segment);
+   the Metal plan and 10k sample are in [the sample report](../reports/2026-10-07-fullrun-sample.md).
 
 ## In flight
 
-- Four `fetch_headers.py` workers (background, about 4–5 h from 2026-10-07).
+- `spike fullrun 16 check` and `spike chain 20 …` (background, started 2026-10-08).
+  If a run dies, re-run the same command; neither resumes partially.
 
 ## Needs owner
 
@@ -50,7 +50,7 @@ Run from the repo root. All must pass before new work starts.
 
 ```sh
 git status --short                      # expect: clean, or explained under "In flight"
-zig build test --summary all 2>&1 | grep "tests passed"   # expect: 27/27 tests passed
+zig build test --summary all 2>&1 | grep "tests passed"   # expect: 32/32 tests passed (about 16 min in Debug)
 (cd lean && lake build)                 # expect: "Build completed successfully"
 grep -rnE "\bsorry\b|native_decide|bv_decide" lean/StarkedAir   # expect: no matches
 
@@ -59,6 +59,8 @@ import StarkedAir
 open StarkedAir.HeaderChain StarkedAir.Spec.Bitcoin
 #print axioms header_chain_sound
 #print axioms StarkedAir.Sha256.compress_sound_air
+#print axioms pub_compose
+#print axioms chain_from_genesis
 EOS
 (cd lean && lake env lean /tmp/ax.lean)  # expect: propext, Classical.choice, Quot.sound
 

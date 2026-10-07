@@ -21,6 +21,31 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-10-07 — M2: plain in-circuit verifier, leaf, node, aggregation (Lean + Zig); headers downloaded
+Who: Claude (agent, Opus 5.5), with the owner (Q-MASK choice B)
+Roadmap: REC-PROFILE, REC-COMPOSE, REC-MASK, REC-LEAF, REC-FOLD → done; AGG → in-progress (full-chain run); HC-FULLRUN → in-progress (check running)
+Done:
+- REC-PROFILE (84bfad4), REC-COMPOSE `segment_compose` (f32b6be), `dag_correct` (38f27df).
+- D-024 plain in-circuit verifier for multi-offset, no-LogUp proofs (fa7b33d).
+- REC-LEAF (1142c8f): leaf circuit, proved and verified natively.
+- AGG-LEAN (8c8f662): `pub_compose`, `leaf_valid`, `chain_from_genesis`.
+- REC-FOLD (7df4a99, D-025): node circuit with in-circuit `PubLink` and identity key.
+- AGG (3233bcd, 7b5b400): fold driver, node identity from topology, `verifyRoot`, `spike chain`.
+- All 970,348 mainnet headers (0..970347) downloaded and merged, every link checked.
+Evidence:
+- `zig build test`: 32/32. Lean builds; new theorems use standard axioms only.
+- `spike agg 16 4 70 26`: 1,024 headers → one root proof (0.98 MB), verified in 0.23 s.
+- `spike agg 20 2 70 26`: 8,192 headers; leaf 31–33 s + 33 s segment, node 24 s, 13.3 GB peak.
+- `spike chain 12 3 10 … 40`: mixed leaf sizes and an odd carry; chainwork 40 × 0x100010001.
+Problems / lessons:
+- `verifyProofBytes` returns the verifier circuit's own output, not the proven circuit's
+  digest; the proven digest is `request.output_digest`, bound by acceptance.
+- Adding a package that a dependency already imports creates a duplicate module; use the
+  dependency's re-export (`circuit_cpu.verify.Request`).
+- Zero component sizes are not a valid padding target; start the fixpoint from a leaf's padded sizes.
+Next: finish `spike chain 20 70 26 data/headers.bin` (data/chain_full.log) and `fullrun 16 check`
+(data/fullrun_check.log); write the report; close M1 and M2.
+
 ## 2026-10-07 (session 4) — HC-V6 proven, Core audit, full-chain tooling; download running
 Who: Claude (agent), with the owner
 Roadmap: HC-V6, HC-AUDIT → done; HC-FULLRUN → in-progress. Decision D-022 (owner): defer GPU/H200.
