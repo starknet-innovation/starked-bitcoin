@@ -14,6 +14,7 @@ import StarkedAir.Gadgets.StateSound
 import StarkedAir.Gadgets.Retarget
 import StarkedAir.Gadgets.Mtp
 import StarkedAir.Gadgets.Work
+import StarkedAir.Gadgets.Version
 import StarkedAir.Spec.RetargetMath
 import StarkedAir.Spec.MtpMath
 import StarkedAir.Spec.Chain
@@ -21,4 +22,5 @@ import StarkedAir.Gadgets.RetargetSound
 import StarkedAir.Gadgets.RetargetDiv
 import StarkedAir.Gadgets.MtpSound
 import StarkedAir.Gadgets.WorkSound
+import StarkedAir.Gadgets.VersionSound
 import StarkedAir.Gadgets.TopSound

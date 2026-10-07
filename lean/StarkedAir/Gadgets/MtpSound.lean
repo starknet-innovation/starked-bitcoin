@@ -27,7 +27,7 @@ include hsat hj
 
 theorem mtp_sat {c : Expr} (hc : c ∈ mtpCs) {q : ℕ} (hq : q < 256) :
     c.eval (2 ^ logSize) preCols pub main (256 * j + q) = 0 :=
-  hsat _ (by omega) c (by show c ∈ constraints; simp only [constraints, List.mem_append]; left; right; exact hc)
+  hsat _ (by omega) c (by show c ∈ constraints; simp only [constraints, List.mem_append]; tauto)
 
 omit hsat in
 theorem ev_sel {k q : ℕ} (hk : k < 12) (hq : q < 256) :

@@ -27,16 +27,38 @@ is built from.
 | Height counter, nBits constant inside a period, period-start time | `state_sound` | v3a+ |
 | Difficulty retarget at positive multiples of 2016 (Core `GetNextWorkRequired`, mainnet, including the powLimit cap) | `retarget_sound` | v3b |
 | Exact chainwork: per-header `q = GetBlockProof(nBits)`; `W_j = W_{j−1} + q_j`; last `W` public | `work_q`, `work_step`, `work_out` | v5 |
+| Minimum block version (Core "bad-version", BIP34/66/65 heights) | `version_sound` | v6 |
 | Median time past: ≥ 6 of the 11 window times are below the header's time; the window shifts along the chain and is public at segment ends; equals Core's `GetMedianTimePast` rule given the window form | `mtp_count`, `mtp_window`, `mtp_out`, `mtp_core` (with `mtpOk_iff_count`, `sentinel_sound`) | v4 |
+
+## Coverage audit against Bitcoin Core (2026-10-07)
+
+Bitcoin Core `master`, fetched 2026-10-07:
+- `CheckBlockHeader` (`validation.cpp`) checks `CheckProofOfWork` →
+  covered (`powOk`; `DeriveTarget` rejects negative, zero, overflow and
+  `> powLimit`).
+- `ContextualCheckBlockHeader` checks, in order:
+  - `bad-diffbits` (`GetNextWorkRequired`, `pow.cpp`): mainnet has
+    `fPowAllowMinDifficultyBlocks = false` and `enforce_BIP94 = false` →
+    covered (continuity plus `nextWork`);
+  - `time-too-old` (MTP) → covered;
+  - `time-timewarp-attack` (BIP94) → testnet4/regtest only, not mainnet;
+  - `time-too-new` → out of scope (wall-clock time);
+  - `bad-version` → covered (v6).
+- `AcceptBlockHeader` adds only `duplicate-invalid`, `prev-blk-not-found`
+  and `bad-prevblk` (chain structure, covered by linkage plus validity of
+  every earlier header in the chain), and `too-little-chainwork` (anti-DoS,
+  not validity).
+- `GetBlockProof` / `GetBitsProof` (`chain.cpp`): `(~T / (T+1)) + 1`, or 0 for
+  a negative, overflowing or zero target → matches `blockProof`.
+
+Result: `SegmentValid` covers every mainnet header-validity rule except
+`time-too-new`.
 
 ## Not yet constrained (header chain)
 
 - Wall-clock time: `time ≤ now + 2h` is out of scope by design.
-- **Minimum block version** (Core "bad-version": nVersion ≥ 2, 3, 4 from
-  heights 227931, 363725, 388381). Not enforced yet; roadmap `HC-V6`.
-  (An earlier version of this file wrongly said version rules never affect
-  header validity.)
-- Other version-bit signalling (BIP9) does not affect header validity.
+- Version-bit signalling (BIP9) does not affect header validity. (The
+  minimum-version rule does, and is enforced; see the table above.)
 - Testnet and regtest rules: the specs are mainnet only.
 
 **Independent check:** Z3 witness-uniqueness on four gadget windows (MTP flag,

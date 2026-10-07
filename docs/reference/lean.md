@@ -33,7 +33,7 @@ them.
 | `Gadgets/HeaderChain.lean` | Header-chain AIR: SHA256d layout, `powCs` (row 216), chain-state constraints (rows 218–219), 40 preprocessed columns |
 | `Gadgets/Retarget.lean` | Retarget constraints (rows 220–228) |
 | `Gadgets/Mtp.lean` | Median-time-past constraints (rows 229–240) |
-| `Gadgets/Work.lean` | Chainwork constraints (rows 241–253), and the final `constraints` / `air` (`header_chain_v5`) |
+| `Gadgets/Work.lean` | Chainwork constraints (rows 241–253) |
 | `Gadgets/HeaderChainSound.lean` | `ChainSat`, `headerWord`, `hashAt`, `pubWord`, `chain_sound` (v1) |
 | `Gadgets/PowSound.lean` | `compactTarget_of`, `header_pow_ex`, `header_pow`, `chain_sound_v2` (v2) |
 | `Gadgets/StateSound.lean` | `heightAt`, `pstAt`, `state_row`, `state_sound` (v3a) |
@@ -41,6 +41,8 @@ them.
 | `Gadgets/RetargetDiv.lean` | `rt_divq`, `rt_rem`, `rt_cap`, `retarget_sound` (v3b) |
 | `Spec/Chain.lean` | `SegIn`, `SegOut`, `pstOf`, `prevTimes`, `SegmentValid`: the whole-segment statement over Bitcoin objects |
 | `Gadgets/TopSound.lean` | `pubWindow`, `decodeIn`, `decodeOut`, `out_time`, `pst_eq`, `win_eq`, `work_eq`, **`header_chain_sound`** |
+| `Gadgets/Version.lean` | Minimum-version constraints (rows 254–255) and the final `constraints` / `air` (`header_chain_v6`) |
+| `Gadgets/VersionSound.lean` | `ver_flag`, `version_sound` (v6) |
 | `Gadgets/WorkSound.lean` | `carry_chain`, `shift_sum`, `cauchy` (generic column arithmetic), `workQ`, `workAt`, `pubWork`, `work_q`, `work_step`, `work_out` (v5) |
 | `Gadgets/MtpSound.lean` | `winAt`, `mtp_window`, `mtp_cmp`, `mtp_count`, `mtp_out`, `mtp_core` (v4) |
 

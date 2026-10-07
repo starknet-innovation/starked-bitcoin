@@ -47,7 +47,8 @@ def pstOf (h0 prevPst : ℕ) (hs : ℕ → ℕ → Word) : ℕ → ℕ
 def prevTimes (hs : ℕ → ℕ → Word) (w : List ℕ) (j : ℕ) : List ℕ :=
   ((List.range j).reverse.map fun i => timeOf (hs i)) ++ w
 
-/-- **A valid segment** (Bitcoin Core mainnet header rules, except wall-clock time). -/
+/-- **A valid segment**: Bitcoin Core's mainnet header rules (`CheckBlockHeader`,
+`ContextualCheckBlockHeader`), except `time-too-new`, which depends on wall-clock time. -/
 def SegmentValid (H : ℕ) (hs : ℕ → ℕ → Word) (i : SegIn) (o : SegOut) : Prop :=
   0 < H ∧
   -- Proof of work and linkage.
@@ -66,6 +67,8 @@ def SegmentValid (H : ℕ) (hs : ℕ → ℕ → Word) (i : SegIn) (o : SegOut) 
       (if j = 0 then i.prevPst else pstOf i.height i.prevPst hs (j - 1))) ∧
   -- Median time past.
   (∀ j < H, mtpOk (timeOf (hs j)) (prevTimes hs i.window j) = true) ∧
+  -- Minimum block version (BIP34/66/65).
+  (∀ j < H, versionOk (i.height + j) (versionOf (hs j)) = true) ∧
   -- Outputs for the next segment.
   o.nBits = nBitsOf (hs (H - 1)) ∧ o.time = timeOf (hs (H - 1)) ∧
   o.pst = pstOf i.height i.prevPst hs (H - 1) ∧

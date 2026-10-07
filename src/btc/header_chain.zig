@@ -3,7 +3,7 @@
 //!
 //! One header per 256 rows: compressions at rows 0, 72 and 144 (SHA256d over 80 bytes),
 //! proof-of-work scratch in rows 216..217, chain state 218..219, retarget 220..228, median time
-//! past 229..240, chainwork 241..253, rows 254..255 idle. Layout and public inputs: docs/airs/header-chain.md.
+//! past 229..240, chainwork 241..253, block version 254..255. Layout and public inputs: docs/airs/header-chain.md.
 
 const std = @import("std");
 const spec = @import("../sha256/spec.zig");
@@ -230,6 +230,34 @@ pub fn generateFrom(allocator: std.mem.Allocator, log_size: u32, headers: []cons
         work = ws.work;
     }
 
+    // Minimum block version (rows 254, 255): Core "bad-version" (BIP34/66/65 heights).
+    const ver_t = [3]u32{ 227931, 363725, 388381 };
+    var ver_bits = try allocator.alloc([4]u32, headers.len);
+    defer allocator.free(ver_bits);
+    for (headers, 0..) |*header, i| {
+        const base = i * PERIOD;
+        const height = start.height + @as(u32, @intCast(i));
+        var f: [3]u32 = undefined;
+        var d: [3]u32 = undefined;
+        for (0..3) |k| {
+            f[k] = @intFromBool(height >= ver_t[k]);
+            d[k] = if (f[k] == 1) height - ver_t[k] else ver_t[k] - 1 - height;
+        }
+        words.a[base + 254] = d[0];
+        words.e[base + 254] = d[1];
+        words.w[base + 254] = d[2];
+        var c: u32 = 0;
+        if (f[0] == 1) {
+            const v = retarget.le(headerWordAt(header, 0));
+            const m = 1 + f[0] + f[1] + f[2];
+            if (v >= 1 << 31 or v < m) return error.BadVersion;
+            const e = v - m;
+            words.a[base + 255] = e;
+            c = (m + (e & 0xffff)) >> 16;
+        }
+        ver_bits[i] = .{ f[0], f[1], f[2], c };
+    }
+
     var pubs: [N_PUB]M31 = undefined;
     const first = spec.blockFromBytes(headers[0][0..64]);
     wordsPubs(pubs[0..16], first[1..9].*);
@@ -253,6 +281,10 @@ pub fn generateFrom(allocator: std.mem.Allocator, log_size: u32, headers: []cons
     for (v32s, mid_carries, 0..) |v, c, i| {
         main[sha.CA_LO][i * PERIOD + 222] = M31.fromCanonical(v);
         main[sha.CE_LO][i * PERIOD + 222] = M31.fromCanonical(c);
+    }
+    for (ver_bits, 0..) |vb, i| {
+        for (0..3) |k| main[sha.CA_LO + k][i * PERIOD + 254] = M31.fromCanonical(vb[k]);
+        main[sha.CA_LO][i * PERIOD + 255] = M31.fromCanonical(vb[3]);
     }
     for (bits, 0..) |slots, i| for (slots, 0..) |bc, k| {
         main[sha.CA_LO][i * PERIOD + 229 + k] = M31.fromCanonical(bc[0]);
@@ -584,5 +616,35 @@ test "chainwork: exact Core values, chained through public inputs, tamper-eviden
         var bad = wit;
         bad.pubs[90] = bad.pubs[90].add(M31.one());
         try std.testing.expect(try checkSatisfied(a, air, 15, bad) != null);
+    }
+}
+
+test "block version: BIP34/66/65 minimums enforced on a real segment at height 400000" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const air = (try ir.Air.parseJson(a, lean_json)).value;
+    const hs = try loadHeaders(a, @embedFile("testdata:mainnet_headers_400000_400064"));
+    const p399168 = (try loadHeaders(a, @embedFile("testdata:mainnet_header_399168")))[0];
+    const pre = try loadHeaders(a, @embedFile("testdata:mainnet_headers_399989_400000"));
+    // The input chainwork is arbitrary here (only consistency is checked).
+    const start = ChainStart{ .work = 1 << 80, .height = 400000, .prev_nbits_word = headerWordAt(&pre[10], 18),
+        .prev_pst_word = headerWordAt(&p399168, 17), .window = try windowOf(a, @embedFile("testdata:mainnet_headers_399989_400000")) };
+    const wit = try generateFrom(a, 14, hs, start);
+    try std.testing.expectEqual(null, try checkSatisfied(a, air, 14, wit));
+    // Tampering is caught: a height flag, a version-slack bit, the carry.
+    const r = 9 * PERIOD;
+    for ([_][2]usize{ .{ sha.CA_LO + 2, r + 254 }, .{ sha.A + 3, r + 255 }, .{ sha.A + 5, r + 254 } }) |cell| {
+        const w = try generateFrom(a, 14, hs, start);
+        w.main[cell[0]][cell[1]] = M31.one().sub(w.main[cell[0]][cell[1]]);
+        try std.testing.expect(try checkSatisfied(a, air, 14, w) != null);
+    }
+    // A version-3 header after BIP65 is refused. Changing the version also changes the hash, so
+    // the refusal may come from PoW rather than the version rule; the tamper checks above are
+    // the evidence that the version constraints themselves are enforced.
+    {
+        const bad = try a.dupe(Header, hs);
+        std.mem.writeInt(u32, bad[0][0..4], 3, .little);
+        try std.testing.expect(std.meta.isError(generateFrom(a, 14, bad, start)));
     }
 }

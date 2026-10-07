@@ -192,7 +192,7 @@ theorem slotsOkPrev (hj1 : 1 ≤ j) {L : List (ℕ × ℕ)}
 
 theorem work_sat {c : Expr} (hc : c ∈ workCs) :
     c.eval (2 ^ logSize) preCols pub main (256 * j + 248) = 0 :=
-  hsat _ (by omega) c (by show c ∈ constraints; simp only [constraints, List.mem_append]; right; exact hc)
+  hsat _ (by omega) c (by show c ∈ constraints; simp only [constraints, List.mem_append]; tauto)
 
 omit hsat in
 theorem ev_workSel : workSel.eval (2 ^ logSize) preCols pub main (256 * j + 248) = 1 := by

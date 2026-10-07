@@ -123,6 +123,31 @@ def timeOf (hw : ℕ → Word) : ℕ :=
 #guard nextWork 0x1d00ffff 1233061996 1231006505 == 0x1d00ffff
 #guard getCompact (0xffff * 2 ^ 208) == 0x1d00ffff
 
+/-! ## Minimum block version (Bitcoin Core `ContextualCheckBlockHeader`, "bad-version") -/
+
+/-- `nVersion` as an unsigned 32-bit value: header bytes 0..3, little-endian. -/
+def versionOf (hw : ℕ → Word) : ℕ :=
+  let w := (hw 0).toNat
+  (w / 2 ^ 24) % 256 + 256 * ((w / 2 ^ 16) % 256) + 65536 * ((w / 2 ^ 8) % 256) + 2 ^ 24 * (w % 256)
+
+/-- `nVersion` is a signed `int32_t`. -/
+def versionInt (v : ℕ) : ℤ := if v < 2 ^ 31 then v else (v : ℤ) - 2 ^ 32
+
+/-- Mainnet buried deployments: BIP34 (227931), BIP66 (363725), BIP65 (388381). A block at
+`height` must have `nVersion ≥ 2, 3, 4` respectively once each is active. -/
+def versionOk (height v : ℕ) : Bool :=
+  (decide (height < 227931) || decide (2 ≤ versionInt v)) &&
+  (decide (height < 363725) || decide (3 ≤ versionInt v)) &&
+  (decide (height < 388381) || decide (4 ≤ versionInt v))
+
+#guard versionOk 0 1                    -- genesis
+#guard !versionOk 227931 1              -- version 1 rejected once BIP34 is active
+#guard versionOk 227930 1
+#guard versionOk 363724 2 && !versionOk 363725 2
+#guard versionOk 388381 4 && !versionOk 388381 3
+#guard versionOk 700000 0x20000000     -- BIP9 version bits
+#guard !versionOk 400000 0x80000000    -- negative as int32
+
 /-! ## Chainwork (Bitcoin Core `GetBlockProof`, `nChainWork`) -/
 
 /-- `GetBlockProof`: `(~target / (target + 1)) + 1` over 256-bit integers, or 0 for an invalid

@@ -30,6 +30,29 @@ Obligations on the public inputs, checked by the verifier or aggregator:
 - for a segment starting at genesis: an empty real window, input work 0, and
   prev-hash 0.
 
+## v6 (2026-10-07): minimum block version — proven sound
+
+Roadmap `HC-V6`. Core `ContextualCheckBlockHeader` "bad-version": `nVersion`
+(int32) must be ≥ 2, 3, 4 from heights 227931 (BIP34), 363725 (BIP66) and
+388381 (BIP65). These heights were checked against Core's `chainparams.cpp`
+on 2026-10-07. Spec: `versionOf`, `versionInt`, `versionOk` in
+`Spec/Bitcoin.lean`, with `#guard`s.
+
+- **Layout:** rows 254–255, with constraints at row 254 (selector `VER`,
+  preprocessed column 53).
+  - Exact flags `f_k = [h ≥ T_k]`: each comes with a 30-bit difference
+    (`h = T_k + d` or `h + 1 + d = T_k`).
+  - When `f_1 = 1`: `nVersion = m + e` over two 16-bit limbs, with
+    `m = 1 + f_1 + f_2 + f_3`, and the int32 sign bit equal to 0.
+  - Definition: `lean/StarkedAir/Gadgets/Version.lean` (`header_chain_v6`,
+    520 constraints, 54 preprocessed columns).
+- **Proof:** `version_sound` (`Gadgets/VersionSound.lean`). It is part of
+  `SegmentValid` and `header_chain_sound`.
+- **Tests:**
+  - a real segment at heights 400000..400063 (versions 4 and 0x30000000)
+    satisfies v6;
+  - tampering with a flag, the slack or the difference is caught.
+
 ## v5 (2026-10-07): exact chainwork — proven sound
 
 Roadmap `HC-V5`. Decisions: D-020 (exact), D-021 (`s ≥ 16`). Spec: `blockProof` in

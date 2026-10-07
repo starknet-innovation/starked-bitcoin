@@ -4,7 +4,7 @@
 verifier obligations on the inputs: the window inputs are the real predecessor times padded
 with the sentinel, and the input-work limbs are 16-bit.
 -/
-import StarkedAir.Gadgets.WorkSound
+import StarkedAir.Gadgets.VersionSound
 import StarkedAir.Spec.Chain
 
 namespace StarkedAir.HeaderChain
@@ -185,7 +185,7 @@ theorem header_chain_sound (hlog : 8 ≤ logSize) (realWindow : List ℕ)
   unfold SegmentValid
   dsimp only [decodeIn, decodeOut]
   refine ⟨hH, fun j hj => ?_, hfirst, fun j hj h1 => ?_, ?_, ?_, ?_, fun j hj hm => ?_, fun j hj hm hpos => ?_,
-    fun j hj => ?_, ?_, ?_, ?_, ?_, ?_⟩
+    fun j hj => ?_, fun j hj => ?_, ?_, ?_, ?_, ?_, ?_⟩
   · rw [(hhash j hj).1]; exact (hhash j hj).2
   · rw [hlink j hj h1, (hhash (j - 1) (by omega)).1]
   · rw [← htip, (hhash _ hHl).1]
@@ -203,6 +203,7 @@ theorem header_chain_sound (hlog : 8 ≤ logSize) (realWindow : List ℕ)
     show winNum main j = _
     rw [win_eq hsat hlog j hj, hwin, take_append_take _ _ 11 11 (by omega), ← List.append_assoc]
     rfl
+  · rw [← hh j hj]; exact version_sound hsat (hj_of hlog hj)
   · rw [← hout_nb, nBitsOf_eq]
   · rw [← out_time hsat (hj_of hlog hHl) hlast, timeOf_eq]
   · rw [← hout_pst, pst_eq hsat hlog _ hHl]

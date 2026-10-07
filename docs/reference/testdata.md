@@ -15,6 +15,8 @@ file.**
 | `mainnet_header_30240.hex` | The header at height 30240, the start of the period that ends at 32255 | Same | v3b tests (period-start time) |
 | `mainnet_headers_1973_1984.hex` | Heights 1973..1983: the median-time-past window before the 1984 segment | mempool.space Esplora API (same endpoints); hash-links into `mainnet_headers_1984_2048.hex` | v4 tests |
 | `mainnet_headers_32181_32192.hex` | Heights 32181..32191: the window before the 32192 segment | mempool.space Esplora API; hash-links into `mainnet_headers_32192_32320.hex` | v4 tests |
+| `mainnet_headers_399989_400000.hex`, `mainnet_headers_400000_400064.hex`, `mainnet_header_399168.hex` | The v6 test segment at heights 400000..400063, its 11-block pre-history, and its period start | mempool.space `/api/v1/blocks/<h>` fields, rebuilt into headers; each hash and link checked | v6 tests |
+| `data/headers.bin` (not committed) | All mainnet headers, 80 bytes each, by height | `scripts/fetch_headers.py`: rebuilt from mempool.space and Blockstream block lists, every hash and link checked, genesis pinned | HC-FULLRUN |
 | `airs/probe_oracle.json` | Lean-computed `Expr.eval` values on a fixed trace | `lake env lean --run Export.lean probe_oracle` | `interp.zig` differential test |
 
 ## Rules

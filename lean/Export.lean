@@ -3,7 +3,7 @@ import StarkedAir.Gadgets.Add32Chain
 import StarkedAir.Testing.Probe
 import StarkedAir.Gadgets.Sha256
 import StarkedAir.Gadgets.HeaderChain
-import StarkedAir.Gadgets.Work
+import StarkedAir.Gadgets.Version
 
 /-- `lake env lean --run Export.lean <name>` prints canonical JSON. -/
 def main (args : List String) : IO Unit := do

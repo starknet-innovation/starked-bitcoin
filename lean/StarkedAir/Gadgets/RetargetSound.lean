@@ -36,9 +36,8 @@ theorem copy_sat {h : ℕ} (hh : h ≤ 1) :
     ∀ c ∈ copyFam h, c.eval (2 ^ logSize) preCols pub main (256 * j + 220) = 0 :=
   fun c hc => hsat _ (by omega) c (by
     show c ∈ constraints
-    simp only [constraints, List.mem_append]
-    left; left; left; right
-    exact List.mem_flatMap.mpr ⟨h, by rcases (by omega : h = 0 ∨ h = 1) with rfl | rfl <;> simp, hc⟩)
+    have hc' : c ∈ copyCs := List.mem_flatMap.mpr ⟨h, by rcases (by omega : h = 0 ∨ h = 1) with rfl | rfl <;> simp, hc⟩
+    simp only [constraints, List.mem_append]; tauto)
 
 theorem ev_copySel :
     copySelNF.eval (2 ^ logSize) preCols pub main (256 * j + 220) = (if j = 0 then 0 else 1) ∧
@@ -160,7 +159,7 @@ include hsat hj
 
 theorem rt_sat : ∀ c ∈ retargetCs, c.eval (2 ^ logSize) preCols pub main (256 * j + 221) = 0 :=
   fun c hc => hsat _ (by omega) c (by
-    show c ∈ constraints; simp only [constraints, List.mem_append]; left; left; right; exact hc)
+    show c ∈ constraints; simp only [constraints, List.mem_append]; tauto)
 
 theorem ev_rtSel : rtSel.eval (2 ^ logSize) preCols pub main (256 * j + 221) = 1 := by
   show (pre RT).eval _ _ _ _ _ = 1

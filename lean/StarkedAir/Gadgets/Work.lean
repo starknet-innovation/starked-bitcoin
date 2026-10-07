@@ -1,5 +1,5 @@
 /-
-Chainwork constraints (header chain v5) and the complete header-chain AIR.
+Chainwork constraints (header chain v5).
 
 Per header, with target `T = mant · 256^s` from the proof-of-work row (216) and header word 18:
 `q = ⌊2^256 / (T + 1)⌋` (Core `GetBlockProof`), enforced exactly by
@@ -111,10 +111,5 @@ def workFam (l : ℕ) : List Expr :=
 def workCs : List Expr :=
   sMin :: (List.range 18).map prodCol ++ (List.range 42).map mainCol ++ (List.range 29).map rsCol ++
     (List.range 10).flatMap workFam
-
-def constraints : List Expr :=
-  baseConstraints ++ powCs ++ stateCs ++ copyCs ++ retargetCs ++ mtpCs ++ workCs
-
-def air : Air := { name := "header_chain_v5", nMain := Sha256.N_MAIN, pre := preCols, constraints }
 
 end StarkedAir.HeaderChain

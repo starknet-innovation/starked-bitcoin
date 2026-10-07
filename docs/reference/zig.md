@@ -65,6 +65,7 @@ zig-out/bin/spike headers <log_size> <cpu|metal> <file>  # header chain over a .
 
 | File | Purpose |
 |---|---|
+| `scripts/fetch_headers.py` | Downloads all mainnet headers into `data/headers.bin` (verified hashes and links; chunk and merge modes for parallel runs) |
 | `scripts/air_z3.py` | Z3 witness-uniqueness checks on exported AIRs (`list`, `check <preset>`, `all`, `--bv`). Needs `.venv-fv` (see the [Z3 report](../reports/2026-10-07-z3-uniqueness.md)). |
 
 ## Dependency on stwo-zig
