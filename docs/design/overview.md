@@ -1,7 +1,11 @@
 # starked-bitcoin — design
 
-Status: draft, 2026-10-06. This records the decisions made so far. Sections marked
-**OPEN** are still being worked out.
+Status: current · Updated: 2026-10-07
+
+This records the architecture and the decisions made so far. Sections marked
+**OPEN** are still being worked out. The decision rationale is in
+[project/decisions.md](../project/decisions.md); progress against the
+milestones below is in [project/roadmap.md](../project/roadmap.md).
 
 ## Goal
 
@@ -106,11 +110,11 @@ affect completeness only. Plan:
   3. CUDA and Metal kernels;
   4. a Lean export.
 - The program's digest is bound into the proof statement.
-- **Decided (spike, 2026-10-06; see `docs/spike-results.md`):**
+- **Decided (spike, 2026-10-06; see `docs/reports/2026-10-06-lean-first-spike.md`):**
   - AIRs are defined in Lean (`lean/StarkedAir/`), where their soundness is
     proven.
   - They are exported to canonical JSON (`airs/*.json`, schema
-    `starked-air-v0`).
+    `starked-air-v1`, see [reference/ir.md](../reference/ir.md)).
   - Zig consumes that JSON verbatim. Zig-side builders are for tests only.
   - Preprocessed columns are defined by the AIR, and the verifier pins their
     commitment root.

@@ -1,5 +1,10 @@
 # Header-chain AIR
 
+Status: current · Updated: 2026-10-07 · Owner files: `lean/StarkedAir/Gadgets/{HeaderChain,Retarget,*Sound,RetargetDiv}.lean`, `src/btc/`
+
+Versions are listed newest first. The guarantees as a whole are in
+[reference/verification.md](../reference/verification.md).
+
 ## v3b (2026-10-07): difficulty retarget — proven sound
 
 - **Spec:** `nextWork` (Core `GetNextWorkRequired`, mainnet) and `getCompact`
@@ -80,7 +85,7 @@
     inherited otherwise;
   - the last header's height, nBits and period-start time are public.
 - **Not yet constrained:** the retarget value at a boundary (v3b), median
-  time past (v4) and chainwork (v5). See `docs/consensus-rules.md`.
+  time past (v4) and chainwork (v5). See `docs/design/consensus-rules.md`.
 
 
 ## v2 (2026-10-06): + proof of work — proven sound

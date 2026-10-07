@@ -55,7 +55,7 @@ pub fn powScratch(header: *const Header, hash: spec.State) !PowScratch {
     };
 }
 
-/// State before the segment's first header (see docs/consensus-rules.md).
+/// State before the segment's first header (see docs/design/consensus-rules.md).
 pub const ChainStart = struct {
     /// Height of the segment's first header (< 2^30).
     height: u32,

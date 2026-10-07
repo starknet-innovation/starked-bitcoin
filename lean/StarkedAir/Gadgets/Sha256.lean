@@ -1,5 +1,5 @@
 /-
-SHA-256 compression AIR (layout v1). See `docs/sha256-air.md`.
+SHA-256 compression AIR (layout v1). See `docs/airs/sha256.md`.
 
 One compression occupies a 72-row period:
 
