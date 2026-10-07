@@ -35,10 +35,11 @@ them.
 | `Gadgets/Mtp.lean` | Median-time-past constraints (rows 229–240) |
 | `Gadgets/Work.lean` | Chainwork constraints (rows 241–253), and the final `constraints` / `air` (`header_chain_v5`) |
 | `Gadgets/HeaderChainSound.lean` | `ChainSat`, `headerWord`, `hashAt`, `pubWord`, `chain_sound` (v1) |
-| `Gadgets/PowSound.lean` | `header_pow_ex`, `header_pow`, `chain_sound_v2` (v2) |
+| `Gadgets/PowSound.lean` | `compactTarget_of`, `header_pow_ex`, `header_pow`, `chain_sound_v2` (v2) |
 | `Gadgets/StateSound.lean` | `heightAt`, `pstAt`, `state_row`, `state_sound` (v3a) |
 | `Gadgets/RetargetSound.lean` | Copies (`copy_facts`), evaluation helpers, `rt_core`, `rt_span`, `rt_p0`, `rt_dhead` |
 | `Gadgets/RetargetDiv.lean` | `rt_divq`, `rt_rem`, `rt_cap`, `retarget_sound` (v3b) |
+| `Gadgets/WorkSound.lean` | `carry_chain`, `shift_sum`, `cauchy` (generic column arithmetic), `workQ`, `workAt`, `pubWork`, `work_q`, `work_step`, `work_out` (v5) |
 | `Gadgets/MtpSound.lean` | `winAt`, `mtp_window`, `mtp_cmp`, `mtp_count`, `mtp_out`, `mtp_core` (v4) |
 
 ## Main theorems
@@ -54,6 +55,7 @@ Every theorem below depends only on `propext`, `Classical.choice` and
 | `HeaderChain.chain_sound_v2` | The above, plus `powOk hash nBits` for every header | same |
 | `HeaderChain.state_sound` | Height increments from the public start; nBits is constant inside a period; the period-start time is tracked; output public inputs are correct | same |
 | `HeaderChain.retarget_sound` | At heights that are positive multiples of 2016: `nBits = nextWork(prev nBits, prev time, period start)` | same |
+| `HeaderChain.work_q` / `work_step` / `work_out` | Each header's work is Core's `GetBlockProof`; chainwork accumulates from the public input to the public output | same |
 | `HeaderChain.mtp_count` / `mtp_core` | At least 6 of 11 window times are below the header's time; with a sentinel-padded real window, this is Core's median-time-past rule | same |
 
 > There is no single top-level theorem combining these yet. The roadmap

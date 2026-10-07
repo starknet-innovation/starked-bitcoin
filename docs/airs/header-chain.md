@@ -5,7 +5,7 @@ Status: current · Updated: 2026-10-07 · Owner files: `lean/StarkedAir/Gadgets/
 Versions are listed newest first. The guarantees as a whole are in
 [reference/verification.md](../reference/verification.md).
 
-## v5 (2026-10-07): exact chainwork — implemented and tested; proof pending
+## v5 (2026-10-07): exact chainwork — proven sound
 
 Roadmap `HC-V5`. Decisions: D-020 (exact), D-021 (`s ≥ 16`). Spec: `blockProof` in
 `lean/StarkedAir/Spec/Bitcoin.lean`, with Core's formula
@@ -18,6 +18,16 @@ Roadmap `HC-V5`. Decisions: D-020 (exact), D-021 (`s ≥ 16`). Spec: `blockProof
 - `W_j = W_{j−1} + q_j`, as 16-bit limbs.
 - The first header takes `W_{−1}` from public inputs 88..97; the last
   header's `W` is public inputs 98..107.
+
+**Statement proven** (`lean/StarkedAir/Gadgets/WorkSound.lean`, standard axioms only):
+- `work_q`: each header's `q` digits (`workQ`) equal `blockProof (nBitsOf header)`
+  (Core `GetBlockProof`).
+- `work_step`: `workAt j = (j = 0 ? pubWork pub 88 : workAt (j−1)) + blockProof(nBits_j)`.
+  It assumes the input-work public limbs are 16-bit (a verifier obligation).
+- `work_out`: the last header's `workAt` = `pubWork pub 98`.
+- The proof rests on three generic column-arithmetic lemmas: `carry_chain`
+  (column sums with carries), `shift_sum` (shift by the one-hot exponent)
+  and `cauchy` (schoolbook product).
 
 **Layout:** rows 241..253, with all constraints at row 248 (selector
 `WORK`, preprocessed column 52). The row map is in the header comment of

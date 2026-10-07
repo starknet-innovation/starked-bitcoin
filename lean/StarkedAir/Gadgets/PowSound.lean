@@ -263,6 +263,39 @@ theorem eval_prefixE {s : ℕ} (hs : s ≤ 32) : (prefixE s).eval (2 ^ logSize) 
 
 end Trace
 
+/-- The target an `nBits` word encodes, for a canonical encoding with exponent `s0 + 3`. -/
+theorem compactTarget_of (hw : ℕ → Word) {s0 mant : ℕ}
+    (hexp : (hw 18).toNat % 256 = s0 + 3)
+    (hmant : mant = (hw 18).toNat / 2 ^ 24 % 256 + 256 * ((hw 18).toNat / 2 ^ 16 % 256) +
+      65536 * ((hw 18).toNat / 2 ^ 8 % 128))
+    (hsign : (hw 18).toNat / 2 ^ 8 % 256 / 128 = 0) (hm1 : 1 ≤ mant) (hs26 : s0 ≤ 26) :
+    compactTarget (nBitsOf hw) = some (mant * 256 ^ s0) := by
+  set w := (hw 18).toNat
+  have hb2' : w / 2 ^ 8 % 128 = w / 2 ^ 8 % 256 := by omega
+  rw [hb2'] at hmant
+  have hn : nBitsOf hw = mant + 2 ^ 24 * (s0 + 3) := by
+    have : nBitsOf hw = w / 2 ^ 24 % 256 + 256 * (w / 2 ^ 16 % 256) + 65536 * (w / 2 ^ 8 % 256) +
+      2 ^ 24 * (w % 256) := rfl
+    rw [this, hmant, ← hexp]
+  have hmlt : mant < 2 ^ 23 := by omega
+  have hsize : nBitsOf hw / 2 ^ 24 = s0 + 3 := by rw [hn]; omega
+  have hword : nBitsOf hw % 2 ^ 23 = mant := by rw [hn]; omega
+  have hneg : nBitsOf hw / 2 ^ 23 % 2 = 0 := by rw [hn]; omega
+  have htarget : (if s0 + 3 ≤ 3 then mant / 256 ^ (3 - (s0 + 3)) else mant * 256 ^ (s0 + 3 - 3)) =
+      mant * 256 ^ s0 := by
+    by_cases h3 : s0 + 3 ≤ 3
+    · rw [if_pos h3, show s0 = 0 by omega]; simp
+    · rw [if_neg h3, show s0 + 3 - 3 = s0 by omega]
+  have hpos : mant * 256 ^ s0 ≠ 0 := Nat.mul_ne_zero (by omega) (by positivity)
+  unfold compactTarget
+  simp only [hsize, hword, hneg]
+  rw [htarget, if_neg]
+  intro hc
+  rcases hc with ⟨_, h⟩ | ⟨_, h⟩ | h
+  · omega
+  · omega
+  · exact hpos h
+
 /-- Spec bridge: the facts the PoW constraints establish imply `CheckProofOfWork`. -/
 theorem powOk_intro (H : State) (hw : ℕ → Word) {s0 mant : ℕ}
     (hexp : (hw 18).toNat % 256 = s0 + 3)

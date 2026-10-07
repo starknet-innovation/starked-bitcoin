@@ -4,7 +4,7 @@ Status: current · Updated: 2026-10-07
 
 Design for the header rules beyond SHA256d and proof of work. v3a and v3b
 are implemented and proven (see [airs/header-chain.md](../airs/header-chain.md)).
-v4 is implemented and proven; v5 is planned (roadmap `HC-V5`).
+v4 and v5 are implemented and proven.
 
 Bitcoin Core's contextual header checks are in `ContextualCheckBlockHeader`
 and `GetNextWorkRequired`. For mainnet:
