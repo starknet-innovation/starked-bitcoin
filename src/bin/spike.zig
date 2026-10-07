@@ -3,6 +3,8 @@
 //!   spike sha <log_size> <cpu|metal>      SHA-256 compressions (Lean-exported)
 //!   spike headers <log_size> <cpu|metal> <headers.hex>   header chain v2 (Lean-exported)
 //!   spike leaf <log_size> <n_queries> <pow_bits> <headers.bin>   REC-LEAF: wrap one segment (CPU)
+//!   spike agg <log_size> <n_leaves> <n_queries> <pow_bits> <headers.bin>   AGG: leaves from genesis,
+//!       folded to one root, checked by the outer verifier (CPU)
 
 const std = @import("std");
 const sb = @import("starked_bitcoin");
@@ -29,6 +31,15 @@ pub fn main() !void {
         try std.fmt.parseInt(u32, args[3], 10),
         try std.fmt.parseInt(u32, args[4], 10),
         args[5],
+    );
+    if (args.len == 7 and std.mem.eql(u8, args[1], "agg")) return agg(
+        gpa.allocator(),
+        a,
+        try std.fmt.parseInt(u32, args[2], 10),
+        try std.fmt.parseInt(usize, args[3], 10),
+        try std.fmt.parseInt(u32, args[4], 10),
+        try std.fmt.parseInt(u32, args[5], 10),
+        args[6],
     );
     if (args.len >= 5 and std.mem.eql(u8, args[1], "fullrun")) return fullrun(
         gpa.allocator(),
@@ -164,6 +175,47 @@ fn leaf(gpa: std.mem.Allocator, a: std.mem.Allocator, log_size: u32, n_queries: 
         }
     }.f;
     std.debug.print("leaf log={d} headers={d} queries={d} pow={d}: segment {d:.2}s, circuit {d} vars built {d:.2}s, leaf prove {d:.2}s, verify {d:.2}s, proof {d} bytes\n", .{ log_size, n, n_queries, pow_bits, s(t.segment_ns), t.n_vars, s(t.build_ns), s(t.prove_ns), s(t.verify_ns), r.proof.bytes.len });
+}
+
+fn secs(ns: u64) f64 {
+    return @as(f64, @floatFromInt(ns)) / 1e9;
+}
+
+fn agg(gpa: std.mem.Allocator, a: std.mem.Allocator, log_size: u32, n_leaves: usize, n_queries: u32, pow_bits: u32, path: []const u8) !void {
+    const H = sb.header_chain;
+    const L = sb.recursion.leaf;
+    const N = sb.recursion.node;
+    const raw = try std.fs.cwd().readFileAlloc(a, path, 1 << 31);
+    const all: []const H.Header = @as([*]const H.Header, @ptrCast(raw.ptr))[0 .. raw.len / 80];
+    const per = @as(usize, 1) << @intCast(log_size - 8);
+    if (all.len < per * n_leaves) return error.BadHeaderFile;
+    const fri = try @import("stwo_core").pcs.config_v2.FriConfigV2.init(pow_bits, 0, 1, n_queries, 1);
+    const tables = try L.Tables.init(gpa);
+    defer tables.deinit(gpa);
+    var timer = try std.time.Timer.start();
+
+    var first = try L.buildSegmentLeaf(gpa, a, log_size, all[0..per], H.genesis_start);
+    var shape = try N.Shape.init(gpa, &tables.table, first.paddedSizes(), fri);
+    defer shape.deinit(gpa);
+    const node_id = try N.nodeIdentity(gpa, &tables.table, &shape);
+    std.debug.print("shape and node identity: {d:.1}s\n", .{secs(timer.lap())});
+
+    const items = try a.alloc(N.Proved, n_leaves);
+    const leaf_hashes = try a.alloc([8]u32, n_leaves);
+    for (items, leaf_hashes, 0..) |*it, *lh, i| {
+        const h0 = i * per;
+        var sl = if (i == 0) first else try L.buildSegmentLeaf(gpa, a, log_size, all[h0 .. h0 + per], sb.segments.startAt(all, h0, sb.segments.workBefore(all, h0)));
+        const lf = try L.proveSegmentLeaf(gpa, a, tables, &sl, shape.target, fri);
+        it.* = .{ .proof = lf.proof, .key = L.zero_key, .pubs = lf.pubs };
+        lh.* = lf.proof.circuit_hash;
+        std.debug.print("leaf {d}: segment {d:.1}s, leaf prove {d:.1}s\n", .{ i, secs(lf.timings.segment_ns), secs(lf.timings.prove_ns) });
+    }
+    const t_leaves = timer.lap();
+    var root = try N.foldAll(gpa, a, tables, &shape, items);
+    defer root.proof.deinit();
+    const t_fold = timer.lap();
+    try N.verifyRoot(gpa, a, tables, .{ .node = node_id, .leaf_hashes = leaf_hashes }, &root.proof, root.pubs);
+    std.debug.print("agg log={d} leaves={d} headers={d} queries={d} pow={d}: leaves {d:.1}s, fold {d} nodes {d:.1}s, root verified {d:.2}s, root proof {d} bytes, tip height {d}\n", .{ log_size, n_leaves, per * n_leaves, n_queries, pow_bits, secs(t_leaves), n_leaves - 1, secs(t_fold), secs(timer.lap()), root.proof.bytes.len, root.pubs[38].toU32() | (root.pubs[39].toU32() << 16) });
 }
 
 fn fullrun(gpa: std.mem.Allocator, log_size: u32, mode: []const u8, path: []const u8, from: usize, to_req: usize) !void {

@@ -220,6 +220,86 @@ pub fn proveNode(
     return node;
 }
 
+/// A circuit's identity: preprocessed root and circuit hash (as the in-circuit statement
+/// computes it), both as 8 words.
+pub const Identity = struct { root: [8]u32, hash: [8]u32 };
+
+/// The node circuit's identity, derived from its topology alone (no proof needed).
+pub fn nodeIdentity(gpa: std.mem.Allocator, table: *const circuit.air_eval.component_table.Table, shape: *const Shape) !Identity {
+    var ctx = try buildTopology(gpa, table, &shape.shared);
+    defer ctx.deinit();
+    try finalize.padToTargets(NoValue, &ctx, shape.target);
+    var pp = try circuit.common.preprocessed.PreprocessedCircuit.fromBuilderCircuit(gpa, &ctx.circuit);
+    defer pp.deinit(gpa);
+    const id = try circuit_cpu.recursion.circuit_params.identity(gpa, &pp, shape.fri.log_blowup_factor);
+    return .{
+        .root = core.vcs.blake2_hash.digestToU32s(id.preprocessed_root),
+        .hash = core.vcs.blake2_hash.digestToU32s(id.circuit_hash),
+    };
+}
+
+/// Folds `items` (in chain order, consumed) into one root: each layer pairs entries left to
+/// right and carries an unpaired last entry up unchanged.
+pub fn foldAll(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const leaf.Tables, shape: *const Shape, items: []Proved) !Proved {
+    if (items.len == 0) return error.NothingToFold;
+    var layer = items;
+    while (layer.len > 1) {
+        const next = try a.alloc(Proved, (layer.len + 1) / 2);
+        for (next, 0..) |*n, i| {
+            if (2 * i + 1 < layer.len) {
+                n.* = try proveNode(gpa, a, tables, shape, &layer[2 * i], &layer[2 * i + 1]);
+                layer[2 * i].proof.deinit();
+                layer[2 * i + 1].proof.deinit();
+            } else n.* = layer[2 * i];
+        }
+        layer = next;
+    }
+    return layer[0];
+}
+
+/// The root's identity and key for the tree `foldAll` builds over leaves with circuit hashes
+/// `leaf_hashes`, given the node circuit hash.
+pub fn expectedRoot(a: std.mem.Allocator, leaf_hashes: []const [8]u32, node_hash: [8]u32) !struct { hash: [8]u32, key: Key } {
+    if (leaf_hashes.len == 0) return error.NothingToFold;
+    const E = struct { hash: [8]u32, key: Key };
+    var layer = try a.alloc(E, leaf_hashes.len);
+    for (layer, leaf_hashes) |*e, h| e.* = .{ .hash = h, .key = leaf.zero_key };
+    while (layer.len > 1) {
+        const next = try a.alloc(E, (layer.len + 1) / 2);
+        for (next, 0..) |*n, i| n.* = if (2 * i + 1 < layer.len)
+            .{ .hash = node_hash, .key = nodeKey(layer[2 * i].hash, layer[2 * i].key, layer[2 * i + 1].hash, layer[2 * i + 1].key) }
+        else
+            layer[2 * i];
+        layer = next;
+    }
+    return .{ .hash = layer[0].hash, .key = layer[0].key };
+}
+
+/// What the outer verifier trusts: the node circuit's identity and each leaf's circuit hash
+/// (by segment, in chain order; a leaf's hash depends only on its log size).
+pub const Vk = struct { node: Identity, leaf_hashes: []const [8]u32 };
+
+/// **The outer verifier.** Accepts `proof` as the root of a tree over `vk.leaf_hashes.len >= 2`
+/// segments with public inputs `pubs`, starting at genesis. On success, `chain_from_genesis`
+/// (Aggregate.lean) applies: the headers form a valid chain from genesis to the tip in
+/// `pubs[16..32]`, at height `pubs[38..40]`, with chainwork `pubs[98..108]`.
+pub fn verifyRoot(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const leaf.Tables, vk: Vk, proof: *const leaf.CircuitProof, pubs: [N_PUB]M31) !void {
+    if (vk.leaf_hashes.len < 2) return error.RootIsNotANode;
+    const expected = try expectedRoot(a, vk.leaf_hashes, vk.node.hash);
+    if (!std.mem.eql(u32, &proof.request.preprocessed_root, &vk.node.root)) return error.WrongRootCircuit;
+    const out = try leaf.verifyCircuit(gpa, tables, proof);
+    if (!std.mem.eql(u32, &out, &leaf.pubsDigest(expected.key, &pubs))) return error.WrongRootDigest;
+    // Genesis input state: prev-hash 0, height 0, sentinel window, work 0.
+    const H = @import("../btc/header_chain.zig");
+    for (0..16) |k| if (pubs[k].toU32() != 0) return error.NotFromGenesis;
+    if (pubs[32].toU32() != 0 or pubs[33].toU32() != 0) return error.NotFromGenesis;
+    for (H.SENTINEL, 0..) |w, k| {
+        const at: usize = if (k == 0) 44 else 48 + 2 * (k - 1);
+        if (pubs[at].toU32() != (w & 0xffff) or pubs[at + 1].toU32() != (w >> 16)) return error.NotFromGenesis;
+    }
+    for (88..98) |k| if (pubs[k].toU32() != 0) return error.NotFromGenesis;
+}
+
 test "two chained segments fold into one node proof; a non-chained pair is rejected" {
     const H = @import("../btc/header_chain.zig");
     const segments = @import("../btc/segments.zig");
@@ -250,6 +330,22 @@ test "two chained segments fold into one node proof; a non-chained pair is rejec
     std.debug.print("node: proved and verified in {d:.1}s, {d} bytes\n", .{ @as(f64, @floatFromInt(timer.read())) / 1e9, n.proof.bytes.len });
     try std.testing.expectEqual(@as(u32, 0), n.pubs[32].toU32());
     try std.testing.expectEqual(@as(u32, 31), n.pubs[38].toU32());
+
+    // Circuit identities: a leaf's depends only on its log size; the node's comes from topology.
+    try std.testing.expectEqualSlices(u32, &l0.proof.circuit_hash, &l1.proof.circuit_hash);
+    const node_id = try nodeIdentity(gpa, &tables.table, &shape);
+    try std.testing.expectEqualSlices(u32, &node_id.root, &n.proof.request.preprocessed_root);
+    try std.testing.expectEqualSlices(u32, &node_id.hash, &n.proof.circuit_hash);
+
+    // The outer verifier accepts the root, and rejects other public inputs or a wrong VK.
+    const vk: Vk = .{ .node = node_id, .leaf_hashes = &.{ l0.proof.circuit_hash, l1.proof.circuit_hash } };
+    try verifyRoot(gpa, a, tables, vk, &n.proof, n.pubs);
+    var other = n.pubs;
+    other[38] = M31.fromCanonical(32);
+    try std.testing.expectError(error.WrongRootDigest, verifyRoot(gpa, a, tables, vk, &n.proof, other));
+    var bad_vk = vk;
+    bad_vk.leaf_hashes = &.{ l0.proof.circuit_hash, node_id.hash };
+    try std.testing.expectError(error.WrongRootDigest, verifyRoot(gpa, a, tables, bad_vk, &n.proof, n.pubs));
 
     // Not chained: the node circuit is unsatisfiable.
     try std.testing.expectError(error.CircuitUnsatisfied, proveNode(gpa, a, tables, &shape, &p1, &p0));
