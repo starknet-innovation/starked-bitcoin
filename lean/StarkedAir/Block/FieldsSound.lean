@@ -76,6 +76,12 @@ theorem u8_eq {a b : ℕ} (h : a % 256 = b % 256) : UInt8.ofNat a = UInt8.ofNat 
 
 theorem lt_P {m : ℕ} (h : m ≤ 2 ^ 30) : m < P := lt_of_le_of_lt h (by unfold P; norm_num)
 
+theorem one_add_one_ne : (1 : F) + 1 ≠ 0 := by
+  intro e
+  have := natCast_inj_of_lt (a := 2) (b := 0) (by unfold P; norm_num) (by unfold P; norm_num)
+    (by push_cast; linear_combination e)
+  omega
+
 section Rows
 
 variable {n : ℕ} {pub : ℕ → F} {M : ℕ → ℕ → F}
@@ -716,6 +722,29 @@ theorem slice_eq_map {R : Spec.Block.Bytes} {a b : ℕ} (h : a + b ≤ R.length)
 
 theorem slice_zero {R : Spec.Block.Bytes} : slice R 0 R.length = R := by simp [slice]
 
+/-- The block's bytes, read from the byte table. -/
+def blockBytes (Mb : ℕ → ℕ → F) (len : ℕ) : Spec.Block.Bytes := (List.range len).map fun i => UInt8.ofNat (Mb BYTE i).val
+
+theorem blockBytes_length (Mb : ℕ → ℕ → F) (len : ℕ) : (blockBytes Mb len).length = len := by simp [blockBytes]
+
+theorem blockBytes_get {Mb : ℕ → ℕ → F} {len i : ℕ} (h : i < len) :
+    (blockBytes Mb len).getD i 0 = UInt8.ofNat (Mb BYTE i).val := by
+  rw [List.getD_eq_getElem _ _ (by simp [blockBytes]; exact h)]; simp [blockBytes]
+
+/-- Row `r`'s token, from its columns and the block bytes `R`. -/
+def tokOf (M : ℕ → ℕ → F) (R : Spec.Block.Bytes) (r : ℕ) : Spec.Block.Tok :=
+  let s := (M START r).val
+  let v := (M VAL r).val
+  let p := prefOf M r
+  if M K_BLK r = 1 then .blk (slice R s 80) v
+  else if M K_TXH r = 1 then .txh (slice R s 4) (decide (M SEG r = 1)) v
+  else if M K_IN r = 1 then .inp (slice R s 32) (slice R (s + 32) 4) (slice R (s + 36 + p) v) (slice R (s + 36 + p + v) 4)
+  else if M K_NOUT r = 1 then .nout v
+  else if M K_OUT r = 1 then .out (slice R s 8) (slice R (s + 8 + p) v)
+  else if M K_WCNT r = 1 then .wcnt v
+  else if M K_WITEM r = 1 then .witem (slice R (s + p) v)
+  else .lock (slice R s 4)
+
 /-! ### The block system: bytes (component 0) and fields (component 1) -/
 
 def blockSys : System := ⟨2, fun i => if i = 0 then bytes else fields⟩
@@ -848,6 +877,45 @@ theorem marker_read {r : ℕ} (hr : r < 2 ^ L) (hT : (inst 1).main K_TXH r = 1) 
   have p5 : ((inst 1).main START r).val + 5 = r5 := natCast_inj_of_lt (lt_P (by omega)) (lt_P (by omega))
     (by push_cast; rw [← v5.1, ZMod.natCast_zmod_val])
   refine ⟨by omega, by rw [p4]; exact v4.2.symm, by rw [p5]; exact v5.2.symm⟩
+
+theorem len_le : (pub 0).val ≤ 2 ^ 25 := by
+  have := rows_lt_P h0L h1L hL hsat
+  have hb := bytes_rows (n := 2 ^ L) (pub := pub) (main := (inst 0).main)
+    (by have := bytes_sat h0L h1L hL hsat; exact this) this (by positivity)
+  have : 2 ^ L ≤ 2 ^ 25 := Nat.pow_le_pow_right (by norm_num) hL
+  omega
+
+/-- **A row's CompactSize is the block's bytes at its offset.** -/
+theorem compact_slice {r : ℕ} (hr : r < 2 ^ L)
+    (hLP : (inst 1).main K_LOCK r + (inst 1).main K_PAD r = 0) {o : ℕ} (ho : (inst 1).main OFF r = (o : F))
+    (hoP : o ≤ 86) :
+    ((inst 1).main START r).val + o + prefOf (inst 1).main r ≤ (pub 0).val ∧
+      ((inst 1).main VAL r).val ≤ MAXS ∧
+      Spec.Block.serCompact ((inst 1).main VAL r).val =
+        slice (blockBytes (inst 0).main (pub 0).val) (((inst 1).main START r).val + o) (prefOf (inst 1).main r) := by
+  have fs := fields_sat h0L h1L hL hsat
+  have rd := fun j (hj : j < prefOf (inst 1).main r) => compact_read h0L h1L hL hsat hr hLP ho hoP hj
+  have hp1 : 1 ≤ prefOf (inst 1).main r := by unfold prefOf; split_ifs <;> omega
+  have bnd : ((inst 1).main START r).val + o + prefOf (inst 1).main r ≤ (pub 0).val := by
+    have := (rd (prefOf (inst 1).main r - 1) (by omega)).1; omega
+  have hbytes := bytes_rows (n := 2 ^ L) (pub := pub) (main := (inst 0).main)
+    (by have := bytes_sat h0L h1L hL hsat; exact this) (rows_lt_P h0L h1L hL hsat) (by positivity)
+  have b256 : ∀ j < prefOf (inst 1).main r, ((inst 1).main (CB j) r).val < 256 := fun j hj => by
+    rw [(rd j hj).2]
+    exact (hbytes.1 _ (by have := (rd j hj).1; have := hbytes.2.1; omega)).2
+  have hLk : (inst 1).main K_LOCK r = 0 := by
+    rcases kind_bool fs (c := K_LOCK) (by simp [kinds]) hr with h | h
+    · exact h
+    · exfalso; rcases kind_bool fs (c := K_PAD) (by simp [kinds]) hr with g | g <;> rw [h, g] at hLP
+      · simp at hLP
+      · exact absurd hLP one_add_one_ne
+  have hPk : (inst 1).main K_PAD r = 0 := by rw [hLk, zero_add] at hLP; exact hLP
+  obtain ⟨hv, hser⟩ := compact_ser fs hr hLk hPk b256
+  refine ⟨bnd, hv, ?_⟩
+  rw [← hser, slice_eq_map (by rw [blockBytes_length]; omega)]
+  refine List.map_congr_left (fun j hj => ?_)
+  have hj' := List.mem_range.mp hj
+  rw [blockBytes_get (by have := (rd j hj').1; omega), ← (rd j hj').2]
 
 end System
 
