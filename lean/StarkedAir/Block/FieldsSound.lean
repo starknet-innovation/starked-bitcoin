@@ -570,6 +570,76 @@ theorem row_sets {r : ℕ} (hr : r < n) :
   · have := sg (.mul (k K_LOCK) (.mul (k SEG) (k Z2))) (by simp [segC])
     simpa [Expr.eval, ev, h, hs] using this
 
+/-- Rows without a CompactSize have every form bit 0. -/
+theorem no_compact {r : ℕ} (hr : r < n) (h : M K_LOCK r + M K_PAD r = 1) :
+    M CP1 r = 0 ∧ M CP3 r = 0 ∧ M CP5 r = 0 := by
+  obtain ⟨-, -, hc, -⟩ := compact_eqs hsat hr
+  rw [h, sub_self] at hc
+  have v1 := bool_val (cp_bool hsat (c := CP1) (by simp) hr)
+  have v3 := bool_val (cp_bool hsat (c := CP3) (by simp) hr)
+  have v5 := bool_val (cp_bool hsat (c := CP5) (by simp) hr)
+  have hs : (M CP1 r).val + (M CP3 r).val + (M CP5 r).val = 0 := by
+    refine natCast_inj_of_lt ?_ (by unfold P; norm_num) ?_
+    · have := v1.2; have := v3.2; have := v5.2; exact lt_P (by omega)
+    · push_cast; rw [← v1.1, ← v3.1, ← v5.1]; linear_combination hc
+  exact ⟨(ZMod.val_eq_zero _).mp (by omega), (ZMod.val_eq_zero _).mp (by omega), (ZMod.val_eq_zero _).mp (by omega)⟩
+
+theorem lock_pad {r : ℕ} (hr : r < n) : M K_LOCK r + M K_PAD r = 0 ∨ M K_LOCK r + M K_PAD r = 1 := by
+  have hs := kind_sumN hsat hr
+  have := Finset.add_le_sum (f := fun c => (M c r).val) (fun _ _ => Nat.zero_le _)
+    (Finset.mem_range.mpr (show K_LOCK < 9 by simp [K_LOCK])) (Finset.mem_range.mpr (show K_PAD < 9 by simp [K_PAD]))
+    (by simp [K_LOCK, K_PAD])
+  have bl := kind_bool hsat (c := K_LOCK) (by simp [kinds]) hr
+  have bp := kind_bool hsat (c := K_PAD) (by simp [kinds]) hr
+  have one_val : (1 : F).val = 1 := ZMod.val_one P
+  rcases bl with h1 | h1 <;> rcases bp with h2 | h2
+  · left; rw [h1, h2]; ring
+  · right; rw [h1, h2]; ring
+  · right; rw [h1, h2]; ring
+  · exfalso; rw [h1, h2, one_val] at this; omega
+
+theorem cp35 {r : ℕ} (hr : r < n) :
+    (M K_LOCK r + M K_PAD r = 1 → M CP1 r = 0 ∧ M CP3 r = 0 ∧ M CP5 r = 0) ∧
+    (M K_LOCK r + M K_PAD r = 0 → (M CP1 r = 1 ∧ M CP3 r = 0 ∧ M CP5 r = 0) ∨ (M CP1 r = 0 ∧ M CP3 r = 1 ∧ M CP5 r = 0) ∨
+      (M CP1 r = 0 ∧ M CP3 r = 0 ∧ M CP5 r = 1)) := by
+  refine ⟨no_compact hsat hr, fun h => ?_⟩
+  have bl := kind_bool hsat (c := K_LOCK) (by simp [kinds]) hr
+  have bp := kind_bool hsat (c := K_PAD) (by simp [kinds]) hr
+  have two : (1 : F) + 1 ≠ 0 := by
+    intro e; have := natCast_inj_of_lt (a := 2) (b := 0) (by unfold P; norm_num) (by unfold P; norm_num)
+      (by push_cast; linear_combination e)
+    omega
+  have hL : M K_LOCK r = 0 := by
+    rcases bl with h1 | h1
+    · exact h1
+    · exfalso
+      rcases bp with h2 | h2 <;> rw [h1, h2] at h
+      · simp at h
+      · exact two h
+  have hP : M K_PAD r = 0 := by rw [hL, zero_add] at h; exact h
+  exact compact_form hsat hr hL hP
+
+/-- Every lookup's multiplicity is `−1` or `0`. -/
+theorem mult_vals {r : ℕ} (hr : r < n) {kk : ℕ} (hk : kk < 7) :
+    ((lookups.getD kk ⟨0, .const 0, []⟩).mult.eval n preCols pub M r = -1 ∨
+     (lookups.getD kk ⟨0, .const 0, []⟩).mult.eval n preCols pub M r = 0) := by
+  have sb := seg_bool hsat hr
+  have tb := kind_bool hsat (c := K_TXH) (by simp [kinds]) hr
+  obtain ⟨c1, c2⟩ := cp35 hsat hr
+  have txs : M K_TXH r * M SEG r = 0 ∨ M K_TXH r * M SEG r = 1 := by
+    rcases tb with h | h <;> rcases sb with g | g <;> simp [h, g]
+  rcases lock_pad hsat hr with hc | hc
+  · rcases c2 hc with ⟨f1, f3, f5⟩ | ⟨f1, f3, f5⟩ | ⟨f1, f3, f5⟩ <;>
+    interval_cases kk <;>
+      simp only [lookups, List.getD_cons_succ, List.getD_cons_zero, Expr.eval, ev_k hr, hasC, oneMinus, one,
+        eval_cst, Nat.cast_one, f1, f3, f5, hc] <;>
+      rcases txs with ht | ht <;> simp [ht]
+  · obtain ⟨f1, f3, f5⟩ := c1 hc
+    interval_cases kk <;>
+      simp only [lookups, List.getD_cons_succ, List.getD_cons_zero, Expr.eval, ev_k hr, hasC, oneMinus, one,
+        eval_cst, Nat.cast_one, f1, f3, f5, hc] <;>
+      rcases txs with ht | ht <;> simp [ht]
+
 end Rows
 
 end StarkedAir.Block.Fields
