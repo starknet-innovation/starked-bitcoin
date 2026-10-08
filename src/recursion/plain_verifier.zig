@@ -699,7 +699,7 @@ test "plain in-circuit verifier accepts a LogUp system proof, rejects unbalanced
             const pb = try system.prove(E_, al, cfg_, parts_, mains);
             // Proving is deterministic: one copy is consumed by the native verifier.
             var capture: core.verifier.ProofCapture(prove_rec.Hasher) = undefined;
-            try system.verifyCapture(al, cfg_, parts_, pa, &capture);
+            try system.verifyCapture(al, cfg_, parts_, &.{}, pa, &capture);
             return fromCapture(al, prove_rec.Hasher, &pb.stark, &capture, config_, pb.claimed_sums);
         }
     }.f;

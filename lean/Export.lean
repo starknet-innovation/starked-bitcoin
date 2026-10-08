@@ -6,6 +6,7 @@ import StarkedAir.Gadgets.HeaderChain
 import StarkedAir.Gadgets.Version
 import StarkedAir.Testing.ByteLookup
 import StarkedAir.Gadgets.Blake2s
+import StarkedAir.Gadgets.HeaderTree
 
 /-- `lake env lean --run Export.lean <name>` prints canonical JSON. -/
 def main (args : List String) : IO Unit := do
@@ -14,6 +15,8 @@ def main (args : List String) : IO Unit := do
   | ["sha256_compress"] => IO.println StarkedAir.Sha256.air.toJson
   | ["header_chain"] => IO.println StarkedAir.HeaderChain.air.toJson
   | ["blake2s_compress"] => IO.println StarkedAir.Blake2s.air.toJson
+  | ["blake2s_tree"] => IO.println StarkedAir.HeaderTree.tree.toJson
+  | ["header_chain_v7"] => IO.println StarkedAir.HeaderTree.headers.toJson
   | ["byte_table"] => IO.println StarkedAir.ByteLookup.table.toJson
   | ["byte_user"] => IO.println StarkedAir.ByteLookup.user.toJson
   | ["probe_oracle"] => IO.println (StarkedAir.Probe.oracleJson 4 2024)

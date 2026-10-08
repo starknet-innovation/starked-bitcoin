@@ -7,6 +7,7 @@ pub const header_chain = @import("btc/header_chain.zig");
 pub const retarget = @import("btc/retarget.zig");
 pub const work = @import("btc/work.zig");
 pub const segments = @import("btc/segments.zig");
+pub const header_tree = @import("btc/header_tree.zig");
 pub const recursion = struct {
     pub const plain_verifier = @import("recursion/plain_verifier.zig");
     pub const leaf = @import("recursion/leaf.zig");

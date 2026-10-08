@@ -32,6 +32,13 @@ pub const Part = struct {
     pubs: []const M31 = &.{},
 };
 
+/// A lookup entry the verifier contributes (e.g. a public root consumed with multiplicity −1).
+pub const PubEntry = struct {
+    rel: u32,
+    vals: []const M31,
+    mult: M31,
+};
+
 pub const Proof = struct {
     stark: rec.Proof,
     /// Claimed LogUp sums of the components with lookups, in component order.
@@ -198,15 +205,33 @@ pub fn prove(comptime E: type, a: std.mem.Allocator, cfg: rec.Config, parts: []c
 
 /// Verifies a system proof. `a` should be an arena.
 pub fn verify(a: std.mem.Allocator, cfg: rec.Config, parts: []const Part, proof: Proof) !void {
-    return verifyImpl(a, cfg, parts, proof, null);
+    return verifyImpl(a, cfg, parts, &.{}, proof, null);
+}
+
+/// `verify` with public lookup entries: the relations balance with them included.
+pub fn verifyExt(a: std.mem.Allocator, cfg: rec.Config, parts: []const Part, ext: []const PubEntry, proof: Proof) !void {
+    return verifyImpl(a, cfg, parts, ext, proof, null);
 }
 
 /// `verify`, also capturing what the in-circuit verifier needs (`plain_verifier.fromCapture`).
-pub fn verifyCapture(a: std.mem.Allocator, cfg: rec.Config, parts: []const Part, proof: Proof, capture: *core.verifier.ProofCapture(rec.Hasher)) !void {
-    return verifyImpl(a, cfg, parts, proof, capture);
+pub fn verifyCapture(a: std.mem.Allocator, cfg: rec.Config, parts: []const Part, ext: []const PubEntry, proof: Proof, capture: *core.verifier.ProofCapture(rec.Hasher)) !void {
+    return verifyImpl(a, cfg, parts, ext, proof, capture);
 }
 
-fn verifyImpl(a: std.mem.Allocator, cfg: rec.Config, parts: []const Part, proof: Proof, capture: ?*core.verifier.ProofCapture(rec.Hasher)) !void {
+/// `Σ mult / (Σ eᵢ αⁱ − z)` over public entries.
+pub fn extSum(ext: []const PubEntry, el: lookup_transcript.LookupElements) !QM31 {
+    var sum = QM31.zero();
+    var vals: [component_mod.MAX_LOOKUP_VALS]QM31 = undefined;
+    for (ext) |e| {
+        if (e.vals.len > vals.len) return error.LookupTooWide;
+        for (e.vals, 0..) |v, i| vals[i] = QM31.fromBase(v);
+        const d = component_mod.denominator(e.rel, vals[0..e.vals.len], el.z, el.alpha);
+        sum = sum.add(QM31.fromBase(e.mult).mul(try d.inv()));
+    }
+    return sum;
+}
+
+fn verifyImpl(a: std.mem.Allocator, cfg: rec.Config, parts: []const Part, ext: []const PubEntry, proof: Proof, capture: ?*core.verifier.ProofCapture(rec.Hasher)) !void {
     _ = try checkSizes(parts);
     const lookups = hasLookups(parts);
     const n_trees: usize = if (lookups) 3 else 2;
@@ -239,8 +264,8 @@ fn verifyImpl(a: std.mem.Allocator, cfg: rec.Config, parts: []const Part, proof:
             if (p.air.lookups.len != 0) n_with += 1;
         }
         if (proof.claimed_sums.len != n_with) return error.InvalidProofShape;
-        // The relations balance: the claimed sums add to zero.
-        var total = QM31.zero();
+        // The relations balance: the claimed sums and the public entries add to zero.
+        var total = try extSum(ext, el);
         for (proof.claimed_sums) |s| total = total.add(s);
         if (!total.isZero()) return error.LookupsUnbalanced;
         var k: usize = 0;

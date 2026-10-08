@@ -10,7 +10,7 @@ pub const lean_json = @embedFile("air:blake2s_compress");
 pub const PERIOD: usize = 88;
 pub const N_MAIN: usize = 300;
 
-const IV = [8]u32{ 0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A, 0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19 };
+pub const IV = [8]u32{ 0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A, 0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19 };
 const SIGMA = [10][16]u8{
     .{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 },
     .{ 14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3 },
@@ -23,7 +23,7 @@ const SIGMA = [10][16]u8{
     .{ 6, 15, 14, 9, 11, 3, 0, 8, 12, 2, 13, 7, 1, 4, 10, 5 },
     .{ 10, 2, 8, 4, 7, 6, 1, 5, 15, 11, 9, 14, 3, 12, 13, 0 },
 };
-const G_IDX = [8][4]u8{ .{ 0, 4, 8, 12 }, .{ 1, 5, 9, 13 }, .{ 2, 6, 10, 14 }, .{ 3, 7, 11, 15 }, .{ 0, 5, 10, 15 }, .{ 1, 6, 11, 12 }, .{ 2, 7, 8, 13 }, .{ 3, 4, 9, 14 } };
+pub const G_IDX = [8][4]u8{ .{ 0, 4, 8, 12 }, .{ 1, 5, 9, 13 }, .{ 2, 6, 10, 14 }, .{ 3, 7, 11, 15 }, .{ 0, 5, 10, 15 }, .{ 1, 6, 11, 12 }, .{ 2, 7, 8, 13 }, .{ 3, 4, 9, 14 } };
 /// Output word slot of role a, b, c, d.
 const OUT_W = [4]usize{ 4, 7, 6, 5 };
 
@@ -90,7 +90,7 @@ fn carries(terms: []const u32) [2]u32 {
 }
 
 /// Fills one period starting at `base` (rows past `n` are skipped).
-fn fillPeriod(cols: [][]M31, base: usize, n: usize, in: Input) void {
+pub fn fillPeriod(cols: [][]M31, base: usize, n: usize, in: Input) void {
     const put = struct {
         fn word(c: [][]M31, nn: usize, row: usize, slot: usize, w: u32) void {
             if (row < nn) setWord(c, row, slot, w);

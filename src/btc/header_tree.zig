@@ -1,0 +1,200 @@
+//! Header commitment tree (HC-HASHTREE, D-033): witnesses for the `header_chain_v7` and
+//! `blake2s_tree` components (Lean: `Gadgets/HeaderTree.lean`) and the native tree functions.
+//! A segment of `2^K` headers commits to the perfect Blake2s tree over its block hashes; the
+//! verifier contributes the public entry `node(K, 0, root)`.
+
+const std = @import("std");
+const M31 = @import("stwo_core").fields.m31.M31;
+const H = @import("header_chain.zig");
+const B = @import("../hash/blake2s_air.zig");
+const system = @import("../air/system.zig");
+
+pub const header_json = @embedFile("air:header_chain_v7");
+pub const tree_json = @embedFile("air:blake2s_tree");
+pub const REL_NODE: u32 = 2;
+pub const TREE_N_MAIN: usize = 309;
+const LVL = 300;
+const LVLB = 301;
+const LVL_INV = 306;
+const POS = 307;
+const TMULT = 308;
+const HMULT = 124;
+
+pub const Words = [8]u32;
+
+/// The standard Blake2s-256 chaining value (IV with the parameter block).
+pub fn h0() Words {
+    var h = B.IV;
+    h[0] ^= 0x01010020;
+    return h;
+}
+
+/// A tree node: Blake2s of `l ‖ r` (one 64-byte block, final).
+pub fn node(l: Words, r: Words) Words {
+    var m: [16]u32 = undefined;
+    @memcpy(m[0..8], &l);
+    @memcpy(m[8..16], &r);
+    return B.compress(.{ .h = h0(), .m = m, .t = 64, .f = true });
+}
+
+/// Root of the perfect tree over `leaves` (a power of two).
+pub fn root(leaves: []const Words) Words {
+    if (leaves.len == 1) return leaves[0];
+    const half = leaves.len / 2;
+    return node(root(leaves[0..half]), root(leaves[half..]));
+}
+
+/// The 16 limbs of a word tuple, lo/hi interleaved (the lookups' encoding).
+pub fn limbs(w: Words) [16]M31 {
+    var out: [16]M31 = undefined;
+    for (w, 0..) |x, i| {
+        out[2 * i] = M31.fromCanonical(x & 0xffff);
+        out[2 * i + 1] = M31.fromCanonical(x >> 16);
+    }
+    return out;
+}
+
+/// The public entry for a segment of `2^k` headers with root `r`.
+pub fn rootEntry(a: std.mem.Allocator, k: u32, r: Words) !system.PubEntry {
+    const vals = try a.alloc(M31, 18);
+    vals[0] = M31.fromCanonical(k);
+    vals[1] = M31.zero();
+    @memcpy(vals[2..], &limbs(r));
+    return .{ .rel = REL_NODE, .vals = vals, .mult = M31.zero().sub(M31.one()) };
+}
+
+pub const Witness = struct {
+    header_main: [][]M31,
+    tree_main: [][]M31,
+    root: Words,
+};
+
+/// Witnesses for a segment: the header-chain witness `hw` (2^log_size rows) gains the leaf
+/// multiplicity column; the tree component computes every node, then repeats the root.
+pub fn generate(a: std.mem.Allocator, log_size: u32, hw: H.Witness) !Witness {
+    const n = @as(usize, 1) << @intCast(log_size);
+    const n_leaves = hw.hashes.len;
+    const k: u32 = std.math.log2_int(usize, n_leaves);
+    if (@as(usize, 1) << @intCast(k) != n_leaves) return error.NotAPowerOfTwo;
+    const leaves = try a.alloc(Words, n_leaves);
+    for (leaves, hw.hashes) |*l, h| l.* = h;
+
+    // Nodes by level: level 0 = leaves.
+    const levels = try a.alloc([]Words, k + 1);
+    levels[0] = leaves;
+    for (1..k + 1) |l| {
+        levels[l] = try a.alloc(Words, levels[l - 1].len / 2);
+        for (levels[l], 0..) |*x, p| x.* = node(levels[l - 1][2 * p], levels[l - 1][2 * p + 1]);
+    }
+    const r = levels[k][0];
+
+    // Tree periods: every internal node once, then the root repeated (K = 0: no internal node,
+    // the periods still need a consistent node, so they recompute nothing and are inactive in
+    // lookups only through multiplicity 0 — see below).
+    const n_periods = (n + B.PERIOD - 1) / B.PERIOD;
+    const Item = struct { l: u32, p: u32 };
+    var items = std.ArrayList(Item).empty;
+    for (1..k + 1) |l| for (0..levels[l].len) |p| try items.append(a, .{ .l = @intCast(l), .p = @intCast(p) });
+    if (items.items.len == 0) return error.SegmentTooSmall; // a 1-header segment needs no tree; not supported yet
+    const inputs = try a.alloc(B.Input, n_periods);
+    const per = try a.alloc(Item, n_periods);
+    for (inputs, per, 0..) |*in, *it, i| {
+        it.* = items.items[@min(i, items.items.len - 1)];
+        var m: [16]u32 = undefined;
+        @memcpy(m[0..8], &levels[it.l - 1][2 * it.p]);
+        @memcpy(m[8..16], &levels[it.l - 1][2 * it.p + 1]);
+        in.* = .{ .h = h0(), .m = m, .t = 64, .f = true };
+    }
+    const tree = try a.alloc([]M31, TREE_N_MAIN);
+    for (tree) |*c| {
+        c.* = try a.alloc(M31, n);
+        @memset(c.*, M31.zero());
+    }
+    for (0..n_periods) |i| B.fillPeriod(tree[0..B.N_MAIN], i * B.PERIOD, n, inputs[i]);
+
+    // Uses per (level, position): the children of every period whose row 0 is in the trace,
+    // and the public root entry. Yields: the first period computing a node carries its count.
+    var uses = std.AutoHashMap(u64, u32).init(a);
+    const key = struct {
+        fn f(l: u32, p: u32) u64 {
+            return (@as(u64, l) << 32) | p;
+        }
+    }.f;
+    for (per) |it| {
+        (try uses.getOrPutValue(key(it.l - 1, 2 * it.p), 0)).value_ptr.* += 1;
+        (try uses.getOrPutValue(key(it.l - 1, 2 * it.p + 1), 0)).value_ptr.* += 1;
+    }
+    (try uses.getOrPutValue(key(k, 0), 0)).value_ptr.* += 1;
+    var yielded = std.AutoHashMap(u64, void).init(a);
+    for (per, 0..) |it, i| {
+        const base = i * B.PERIOD;
+        for (0..B.PERIOD) |q| {
+            const row = base + q;
+            if (row >= n) break;
+            tree[LVL][row] = M31.fromCanonical(it.l);
+            for (0..5) |b| tree[LVLB + b][row] = M31.fromCanonical((it.l >> @intCast(b)) & 1);
+            tree[LVL_INV][row] = try M31.fromCanonical(it.l).inv();
+            tree[POS][row] = M31.fromCanonical(it.p);
+        }
+        if (base + 87 < n) {
+            const kk = key(it.l, it.p);
+            if (!yielded.contains(kk)) {
+                try yielded.put(kk, {});
+                tree[TMULT][base + 87] = M31.fromCanonical(uses.get(kk) orelse 0);
+            }
+        }
+    }
+
+    // Header component: the header witness plus the leaf multiplicities (at row 215 of each header).
+    const hm = try a.alloc([]M31, HMULT + 1);
+    @memcpy(hm[0..HMULT], hw.main);
+    hm[HMULT] = try a.alloc(M31, n);
+    @memset(hm[HMULT], M31.zero());
+    for (0..n_leaves) |j| hm[HMULT][256 * j + 215] = M31.fromCanonical(uses.get(key(0, @intCast(j))) orelse 0);
+    return .{ .header_main = hm, .tree_main = tree, .root = r };
+}
+
+test "header tree: a 16-header segment proves with its Blake2s root; a wrong root is rejected" {
+    const ir = @import("../air/ir.zig");
+    const rec = @import("../air/prove_rec.zig");
+    const interp = @import("../air/interp.zig");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const headers_air = (try ir.Air.parseJson(a, header_json)).value;
+    const tree_air = (try ir.Air.parseJson(a, tree_json)).value;
+    const hdrs = try H.loadHeaders(a, @embedFile("testdata:mainnet_headers_0_16"));
+    const log_size: u32 = 12;
+    const hw = try H.generate(a, log_size, hdrs);
+    const w = try generate(a, log_size, hw);
+
+    // The root equals Blake2s over the leaves' words (little-endian bytes), recomputed with std.
+    var lb: [64]u8 = undefined;
+    for (hw.hashes[0], 0..) |x, i| std.mem.writeInt(u32, lb[4 * i ..][0..4], x, .little);
+    for (hw.hashes[1], 0..) |x, i| std.mem.writeInt(u32, lb[32 + 4 * i ..][0..4], x, .little);
+    var d: [32]u8 = undefined;
+    std.crypto.hash.blake2.Blake2s256.hash(&lb, &d, .{});
+    const n01 = node(hw.hashes[0], hw.hashes[1]);
+    for (n01, 0..) |x, i| try std.testing.expectEqual(std.mem.readInt(u32, d[4 * i ..][0..4], .little), x);
+
+    // Each component's constraints hold.
+    const tt = interp.RowTrace{ .log_size = log_size, .preprocessed = @ptrCast(try tree_air.genPreprocessed(a, log_size)), .main = @ptrCast(w.tree_main) };
+    try std.testing.expect(try interp.firstViolation(a, tree_air, tt) == null);
+    const ht = interp.RowTrace{ .log_size = log_size, .pubs = &hw.pubs, .preprocessed = @ptrCast(try headers_air.genPreprocessed(a, log_size)), .main = @ptrCast(w.header_main) };
+    try std.testing.expect(try interp.firstViolation(a, headers_air, ht) == null);
+
+    const parts = [_]system.Part{
+        .{ .air = &headers_air, .log_size = log_size, .pubs = &hw.pubs },
+        .{ .air = &tree_air, .log_size = log_size },
+    };
+    const cfg = rec.Config.fromFriAndTraceSize(try @import("stwo_core").pcs.config_v2.FriConfigV2.init(10, 0, 1, 3, 1), log_size);
+    const E = rec.Engine(@import("stwo_cpu_backend").CpuBackend);
+    const mains = [_][]const []const M31{ @ptrCast(w.header_main), @ptrCast(w.tree_main) };
+    const ext = [_]system.PubEntry{try rootEntry(a, 4, w.root)};
+    try system.verifyExt(a, cfg, &parts, &ext, try system.prove(E, a, cfg, &parts, &mains));
+
+    var bad_root = w.root;
+    bad_root[0] ^= 1;
+    const bad = [_]system.PubEntry{try rootEntry(a, 4, bad_root)};
+    try std.testing.expectError(error.LookupsUnbalanced, system.verifyExt(a, cfg, &parts, &bad, try system.prove(E, a, cfg, &parts, &mains)));
+}

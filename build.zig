@@ -53,6 +53,8 @@ pub fn build(b: *std.Build) void {
     lib.addAnonymousImport("air:byte_table", .{ .root_source_file = b.path("airs/byte_table.json") });
     lib.addAnonymousImport("air:byte_user", .{ .root_source_file = b.path("airs/byte_user.json") });
     lib.addAnonymousImport("air:blake2s_compress", .{ .root_source_file = b.path("airs/blake2s_compress.json") });
+    lib.addAnonymousImport("air:blake2s_tree", .{ .root_source_file = b.path("airs/blake2s_tree.json") });
+    lib.addAnonymousImport("air:header_chain_v7", .{ .root_source_file = b.path("airs/header_chain_v7.json") });
 
     // `zig build test -Dtest-filter=<substring>` runs only matching tests (the full suite takes ~16 min).
     const test_filters = b.option([]const []const u8, "test-filter", "Only run tests whose names contain this") orelse &.{};
