@@ -640,6 +640,51 @@ theorem mult_vals {r : ℕ} (hr : r < n) {kk : ℕ} (hk : kk < 7) :
         eval_cst, Nat.cast_one, f1, f3, f5, hc] <;>
       rcases txs with ht | ht <;> simp [ht]
 
+/-- The CompactSize offset of kind `a` (`seg` for transaction heads). -/
+def offN (a seg : ℕ) : ℕ :=
+  if a = K_BLK then 80 else if a = K_TXH then 4 + 2 * seg else if a = K_IN then 36 else if a = K_OUT then 8 else 0
+
+/-- The row length of kind `a` with CompactSize length `p` and value `v`. -/
+def lenN (a seg p v : ℕ) : ℕ :=
+  if a = K_BLK then 80 + p else if a = K_TXH then 4 + 2 * seg + p else if a = K_IN then 40 + p + v
+  else if a = K_NOUT then p else if a = K_OUT then 8 + p + v else if a = K_WCNT then p
+  else if a = K_WITEM then p + v else if a = K_LOCK then 4 else 0
+
+theorem pref_cast {r : ℕ} (hr : r < n) :
+    M CP1 r + (3 * M CP3 r + 5 * M CP5 r) =
+      ((if M K_LOCK r + M K_PAD r = 0 then prefOf M r else 0 : ℕ) : F) := by
+  rcases lock_pad hsat hr with hc | hc
+  · rw [if_pos hc]
+    rcases (cp35 hsat hr).2 hc with ⟨f1, f3, f5⟩ | ⟨f1, f3, f5⟩ | ⟨f1, f3, f5⟩ <;>
+      simp [prefOf, f1, f3, f5] <;> norm_num
+  · rw [if_neg (by rw [hc]; exact one_ne_zero)]
+    obtain ⟨f1, f3, f5⟩ := (cp35 hsat hr).1 hc
+    simp [f1, f3, f5]
+
+/-- **Offsets and lengths by kind**, as naturals. -/
+theorem kind_vals {r : ℕ} (hr : r < n) {a : ℕ} (ha : a < 9) (h : M a r = 1) :
+    M OFF r = ((offN a (M SEG r).val : ℕ) : F) ∧
+    M LEN r = ((lenN a (M SEG r).val (if a = K_LOCK ∨ a = K_PAD then 0 else prefOf M r) (M VAL r).val : ℕ) : F) := by
+  have ka := kinds_at hsat hr ha h
+  have sv := (bool_val (seg_bool hsat hr)).1
+  have pc := pref_cast hsat hr
+  rw [off_eq hsat hr, len_eq hsat hr, pc]
+  have hLP : M K_LOCK r + M K_PAD r = if a = K_LOCK ∨ a = K_PAD then 1 else 0 := by
+    rw [ka K_LOCK (by simp [K_LOCK]), ka K_PAD (by simp [K_PAD])]
+    by_cases h7 : a = K_LOCK
+    · subst h7; simp [K_LOCK, K_PAD]
+    · by_cases h8 : a = K_PAD
+      · subst h8; simp [K_LOCK, K_PAD]
+      · simp [Ne.symm h7, Ne.symm h8, h7, h8]
+  rw [hLP]
+  rw [ka K_BLK (by simp [K_BLK]), ka K_TXH (by simp [K_TXH]), ka K_IN (by simp [K_IN]), ka K_NOUT (by simp [K_NOUT]),
+    ka K_OUT (by simp [K_OUT]), ka K_WCNT (by simp [K_WCNT]), ka K_WITEM (by simp [K_WITEM]),
+    ka K_LOCK (by simp [K_LOCK])]
+  conv_lhs => skip
+  interval_cases a <;>
+    simp [offN, lenN, K_BLK, K_TXH, K_IN, K_NOUT, K_OUT, K_WCNT, K_WITEM, K_LOCK, K_PAD] <;>
+    rw [sv] <;> push_cast <;> ring_nf <;> simp
+
 end Rows
 
 end StarkedAir.Block.Fields
@@ -648,6 +693,28 @@ namespace StarkedAir.Block.Fields
 
 open StarkedAir
 open StarkedAir.Sha256 (col pre cst boolC sumPow eval_col eval_cst wrap_back)
+
+/-! ### Slices -/
+
+/-- Bytes `[a, a + b)` of `R`. -/
+def slice (R : Spec.Block.Bytes) (a b : ℕ) : Spec.Block.Bytes := (R.drop a).take b
+
+theorem slice_length {R : Spec.Block.Bytes} {a b : ℕ} (h : a + b ≤ R.length) : (slice R a b).length = b := by
+  simp [slice]; omega
+
+theorem slice_append {R : Spec.Block.Bytes} {a b c : ℕ} (h : a + b + c ≤ R.length) :
+    slice R a b ++ slice R (a + b) c = slice R a (b + c) := by
+  unfold slice
+  rw [List.take_add, List.drop_drop]
+
+theorem slice_eq_map {R : Spec.Block.Bytes} {a b : ℕ} (h : a + b ≤ R.length) :
+    slice R a b = (List.range b).map (fun j => R.getD (a + j) 0) := by
+  apply List.ext_getElem (by rw [slice_length h]; simp)
+  intro j h1 h2
+  simp only [slice, List.getElem_take, List.getElem_drop, List.getElem_map, List.getElem_range]
+  rw [List.getD_eq_getElem _ _ (by simp at h2; omega)]
+
+theorem slice_zero {R : Spec.Block.Bytes} : slice R 0 R.length = R := by simp [slice]
 
 /-! ### The block system: bytes (component 0) and fields (component 1) -/
 
