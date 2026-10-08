@@ -646,6 +646,62 @@ theorem init_d {s : ℕ} (hs : s % PERIOD = 0) (hn : s + PERIOD ≤ n) :
       · simp only [hf, if_true, BitVec.getLsbD_allOnes, hi, decide_true]
         cases ivBit 6 i <;> rfl)
 
+theorem final_mem {k : ℕ} (hk : k < 4) {c : Expr} :
+    (c ∈ bitsEq (pre (P_FIN k)) 2 (fun i => xor2 (col (WB (outW 0) i) (-84)) (col (WB (outW 0) i) (-4))) ∨
+     c ∈ bitsEq (pre (P_FIN k)) 0 (fun i => xor2 (col (WB 2 i)) (col (WB (outW 2) i) (finOff k))) ∨
+     c ∈ bitsEq (pre (P_FIN k)) 3 (fun i => xor2 (col (WB (outW 1) i) (-84)) (col (WB (outW 1) i) (-4))) ∨
+     c ∈ bitsEq (pre (P_FIN k)) 1 (fun i => xor2 (col (WB 3 i)) (col (WB (outW 3) i) (finOff k)))) → c ∈ final := by
+  intro hc
+  simp only [final, List.mem_flatMap, List.mem_range, List.mem_append]
+  exact ⟨k, hk, by tauto⟩
+
+/-- An xor of two bit words, read at offsets landing on rows `r1`, `r2`. -/
+theorem xor_word {s k w wx wy r1 r2 : ℕ} {ox oy : ℤ} (hs : s % PERIOD = 0) (hn : s + PERIOD ≤ n) (hk : k < 4)
+    (hw : w < 8) (hwx : wx < 8) (hwy : wy < 8) (h1 : wrap n (s + 84 + k) ox = r1) (h2 : wrap n (s + 84 + k) oy = r2)
+    (hr1 : r1 < n) (hr2 : r2 < n)
+    (hall : ∀ c ∈ bitsEq (pre (P_FIN k)) w (fun i => xor2 (col (WB wx i) ox) (col (WB wy i) oy)), c ∈ final) :
+    word main (32 * w) (s + 84 + k) = word main (32 * wx) r1 ^^^ word main (32 * wy) r2 := by
+  have hP : PERIOD = 88 := rfl
+  refine bitsEq_word (by omega) (fun c hc => hsat _ (by omega) c (mem_final (hall c hc)))
+    (by rw [show s + 84 + k = s + (84 + k) by ring, pre_at hs (by omega) (by omega) (by simp [P_FIN]; omega),
+      bPre_FIN hk (by omega), if_pos rfl]) (word_bits hsat (by omega) hw) (fun i hi => ?_)
+  rw [eval_xor2 (eval_bitcol h1 (word_bits hsat hr1 hwx) hi) (eval_bitcol h2 (word_bits hsat hr2 hwy) hi),
+    BitVec.getLsbD_xor]
+
+/-- `b(4+k)`: the second word final row `k` outputs. -/
+def bOf (k : ℕ) : ℕ := [5, 6, 7, 4].getD k 0
+
+theorem final_out {s k : ℕ} (hs : s % PERIOD = 0) (hn : s + PERIOD ≤ n) (hk : k < 4) :
+    word main (32 * 0) (s + 84 + k) = diagSlot main s k ^^^ diagSlot main (s + 80) k ^^^ diagSlot main (s + 80) (k + 8) ∧
+    word main (32 * 1) (s + 84 + k) =
+      diagSlot main s (bOf k) ^^^ diagSlot main (s + 80) (bOf k) ^^^ diagSlot main (s + 80) (bOf k + 8) := by
+  have hP : PERIOD = 88 := rfl
+  have back : ∀ d : ℕ, d ≤ s + 84 + k → wrap n (s + 84 + k) (-(d : ℤ)) = s + 84 + k - d :=
+    fun d hd => wrap_back hd (by omega)
+  have W2 := xor_word hsat (k := k) (w := 2) (wx := 4) (wy := 4) hs hn hk (by norm_num) (by norm_num) (by norm_num)
+    (back 84 (by omega)) (back 4 (by omega)) (by omega) (by omega)
+    (fun c hc => final_mem hsat hk (Or.inl (by simpa [outW] using hc)))
+  have W3 := xor_word hsat (k := k) (w := 3) (wx := 7) (wy := 7) hs hn hk (by norm_num) (by norm_num) (by norm_num)
+    (back 84 (by omega)) (back 4 (by omega)) (by omega) (by omega)
+    (fun c hc => final_mem hsat hk (Or.inr (Or.inr (Or.inl (by simpa [outW] using hc)))))
+  have hfo : finOff k = -((if k < 2 then 2 else 6 : ℕ) : ℤ) := by unfold finOff; split_ifs <;> simp
+  have W0 := xor_word hsat (k := k) (w := 0) (wx := 2) (wy := 6) (ox := 0) (oy := finOff k)
+    (r2 := s + 84 + k - (if k < 2 then 2 else 6)) hs hn hk (by norm_num) (by norm_num) (by norm_num)
+    (wrap_zero (by omega)) (by rw [hfo]; exact back _ (by split_ifs <;> omega)) (by omega) (by split_ifs <;> omega)
+    (fun c hc => final_mem hsat hk (Or.inr (Or.inl (by simpa [outW] using hc))))
+  have W1 := xor_word hsat (k := k) (w := 1) (wx := 3) (wy := 5) (ox := 0) (oy := finOff k)
+    (r2 := s + 84 + k - (if k < 2 then 2 else 6)) hs hn hk (by norm_num) (by norm_num) (by norm_num)
+    (wrap_zero (by omega)) (by rw [hfo]; exact back _ (by split_ifs <;> omega)) (by omega) (by split_ifs <;> omega)
+    (fun c hc => final_mem hsat hk (Or.inr (Or.inr (Or.inr (by simpa [outW] using hc)))))
+  rw [show 32 * 2 = 32 * 2 from rfl] at W0
+  constructor
+  · rw [W0, W2]
+    interval_cases k <;> simp [diagSlot, rw4, outW, show s + 84 + 0 - 84 = s by omega, show s + 84 + 1 - 84 = s + 1 by omega,
+      show s + 84 + 2 - 84 = s + 2 by omega, show s + 84 + 3 - 84 = s + 3 by omega] <;> congr 2 <;> omega
+  · rw [W1, W3]
+    interval_cases k <;> simp [diagSlot, rw4, outW, bOf, show s + 84 + 0 - 84 = s by omega, show s + 84 + 1 - 84 = s + 1 by omega,
+      show s + 84 + 2 - 84 = s + 2 by omega, show s + 84 + 3 - 84 = s + 3 by omega] <;> congr 2 <;> omega
+
 end Init
 
 end StarkedAir.Blake2s
