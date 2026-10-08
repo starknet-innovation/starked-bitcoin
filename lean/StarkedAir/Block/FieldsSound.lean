@@ -1269,6 +1269,55 @@ theorem items_sim : ∀ c r, r < m → M K_WITEM r = 1 → (M ITEML r).val = c +
     rw [if_pos (by rw [slice_length (by omega)]; exact hv), hitems, show r + 1 + c + 1 = r + (c + 1) + 1 by ring]
     simp
 
+/-- The end of a witness stack that starts at row `r`: the stack is read, its last row ends it
+(`Z1 = 1`), the stacks-left counter is unchanged, and the witness flag rose iff it is non-empty. -/
+theorem stack_sim {r : ℕ} (hr : r < m) (hw : M K_WCNT r = 1) :
+    ∃ items re, Spec.Block.itemsT (M VAL r).val (toksFrom M R m (r + 1)) = some (items, toksFrom M R m (re + 1)) ∧
+      r ≤ re ∧ re < m ∧ (M K_WCNT re = 1 ∨ M K_WITEM re = 1) ∧ M Z1 re = 1 ∧ M WINL re = M WINL r ∧
+      M SEG re = M SEG r ∧ M NIN re = M NIN r ∧ M TXL re = M TXL r ∧
+      (items = [] → M HASW re = M HASW r) ∧ (M VAL r).val ≤ MAXS := by
+  have hrn : r < n := by omega
+  have ka := kinds_at hsat hrn (a := K_WCNT) (by simp [K_WCNT]) hw
+  obtain ⟨hv, -, -, -, -⟩ := row_info hsat R hcs hmn hpad hfit hr (a := K_WCNT) (by simp [K_WCNT]) hw
+    (by simp [K_WCNT, K_LOCK]) (by simp [K_WCNT, K_PAD])
+  have he : M E1C r = M VAL r := by
+    rw [e1_eq hsat hrn, ka K_BLK (by simp [K_BLK]), ka K_TXH (by simp [K_TXH]), ka K_IN (by simp [K_IN]),
+      ka K_NOUT (by simp [K_NOUT]), ka K_OUT (by simp [K_OUT]), ka K_WITEM (by simp [K_WITEM]),
+      ka K_LOCK (by simp [K_LOCK]), hw]
+    simp [K_BLK, K_TXH, K_IN, K_NOUT, K_OUT, K_WCNT, K_WITEM, K_LOCK]
+  have zi := z1_iff_val0 hsat hrn he (ZMod.val_lt _)
+  rcases Nat.eq_zero_or_pos (M VAL r).val with hc | hc
+  · -- Empty stack.
+    refine ⟨[], r, by rw [hc]; rfl, le_rfl, hr, Or.inl hw, zi.mpr hc, rfl, rfl, rfl, rfl, fun _ => rfl, hv⟩
+  · -- Items follow.
+    have hr1 : r + 1 < n := by omega
+    have hz : M Z1 r = 0 := by
+      rcases (z1_spec hsat hrn).1 with h | h
+      · exact h
+      · exact absurd (zi.mp h) (by omega)
+    have hit1 : M K_WITEM (r + 1) = 1 := (next_kind hsat hr1).2.2.2.2.2.2.2.1 (Or.inl hw) hz
+    have kz1 := fun {c' : ℕ} (hc : c' < 9) (hne : c' ≠ K_WITEM) =>
+      kz_of hsat R hcs hmn hpad hfit hr1 (a := K_WITEM) (by simp [K_WITEM]) hit1 hc hne
+    obtain ⟨c1, -, c3, -, -, c6, c7, c8, c9⟩ := counters hsat hr1
+    have heoc : M EOC r = 0 := by
+      rw [eoc_eq hsat hrn, ka K_NOUT (by simp [K_NOUT]), ka K_OUT (by simp [K_OUT])]; simp [K_NOUT, K_OUT, K_WCNT]
+    have hesc : M ESC r = 0 := by rw [esc_eq hsat hrn, hz, mul_zero]
+    obtain ⟨c', hc'⟩ : ∃ c', (M VAL r).val = c' + 1 := ⟨(M VAL r).val - 1, by omega⟩
+    have hitl1 : (M ITEML (r + 1)).val = c' + 1 := by
+      rw [c7 (kz1 (by simp [K_WCNT]) (by simp [K_WCNT, K_WITEM])), ka K_WITEM (by simp [K_WITEM]),
+        (row_sets hsat hrn).2.2.2.1 hw]
+      simp [K_WITEM, K_WCNT, hc']
+    have hr1m : r + 1 < m := lt_m hsat R hcs hmn hpad hfit hr1 (kz1 (by simp [K_PAD]) (by simp [K_PAD, K_WITEM]))
+    obtain ⟨items, hitems, hlt, hi, hz', w1, i1, i2, i3, -⟩ := items_sim hsat R hcs hmn hpad hfit c' (r + 1) hr1m hit1 hitl1
+    have nT := kz1 (c' := K_TXH) (by simp [K_TXH]) (by simp [K_TXH, K_WITEM])
+    refine ⟨items, r + 1 + c', by rw [hc', hitems], by omega, hlt, Or.inr hi, hz',
+      by rw [w1, c6 heoc, hesc, sub_zero], by rw [i1, c8 nT], by rw [i2, c3 nT],
+      by rw [i3, c1, ka K_LOCK (by simp [K_LOCK])]; simp [K_LOCK, K_WCNT], fun h => ?_, hv⟩
+    -- A non-empty stack: the item list is not empty.
+    exfalso
+    have := (Spec.Block.itemsT_sound _ _ _ _ hitems).1
+    rw [h] at this; simp at this
+
 end Grammar
 
 /-! ### The block system: bytes (component 0) and fields (component 1) -/
