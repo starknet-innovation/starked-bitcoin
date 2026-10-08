@@ -58,8 +58,8 @@ Done 2026-10-08 (CPU, laptop): heights 0..970,347 in one root proof; [report](..
 |---|---|---|---|
 | BLOCK-SAMPLES | Sample blocks from public APIs, bound to the proven header file | done (21b747b; 11 blocks in `testdata/blocks/`) | `scripts/fetch_blocks.py` |
 | BLOCK-SPEC | Lean spec of Core's UTXO-independent block checks (`Spec/Block.lean`) | done (21b747b): 11 samples valid, 9 mutations rejected with Core's reason | [block-data.md](../design/block-data.md) |
-| BLOCK-AUDIT **(next)** | Audit `Spec/Block.lean` against Core's source | in-progress | |
-| BLOCK-AIR | Block-data AIR (components + LogUp) | design draft for owner review | [block-data.md § Decisions](../design/block-data.md#decisions-for-the-owner) |
+| BLOCK-AUDIT | Audit `Spec/Block.lean` against Core's source | done (2026-10-08): no accept/reject discrepancy; nTime now read from the header | [block-data.md](../design/block-data.md) |
+| BLOCK-AIR **(next, after owner review)** | Block-data AIR (components + LogUp) | design draft for owner review | [block-data.md § Decisions](../design/block-data.md#decisions-for-the-owner) |
 | IR-LOGUP | LogUp / interaction terms in the IR (Lean semantics, export, interpreter, in-circuit verifier) | todo | Needed for variable-length data and tree wiring (block data, HC-HASHTREE) |
 | HC-HASHTREE | Header chain exposes a Merkle tree over all block hashes, indexed by height (aligned subtrees per segment, siblings hashed in nodes) | todo | So block proofs attach to the header chain at each height |
 | BLOCK-DATA | Per-block proof: raw block ↔ Merkle root; Blake2s commitment to the canonical encoding, including spent outputs | todo | [overview.md § Architecture](../design/overview.md) |

@@ -5,9 +5,9 @@ If `HEAD at last update` doesn't match `git log -1`, this file is stale:
 follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work).
 
 - **Updated:** 2026-10-08
-- **HEAD at last update:** 6f0a5bd (plus this status commit)
+- **HEAD at last update:** 7c25aa1 (plus this status commit)
 - **Current milestone:** M1 and M2 done; M3 not started (waiting on owner decisions).
-- **Current item:** M3a `BLOCK-SAMPLES`, then `BLOCK-SPEC` (VERIFIER-LEAN parked).
+- **Current item:** M3a `BLOCK-AIR`: waiting for owner review of [block-data.md § Decisions](../design/block-data.md#decisions-for-the-owner). BLOCK-SAMPLES, BLOCK-SPEC, BLOCK-AUDIT done.
 
 ## State in one paragraph
 

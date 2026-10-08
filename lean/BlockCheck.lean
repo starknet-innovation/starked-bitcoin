@@ -34,7 +34,7 @@ def negatives (hs : ByteArray) : IO Nat := do
     match parseBlock raw with
     | some b => pure b
     | none => throw (IO.userError s!"{h}: unparsed")
-  let ctx (h : Nat) : Ctx := ⟨h, timeAt hs h, prevMtp hs h⟩
+  let ctx (h : Nat) : Ctx := ⟨h, prevMtp hs h⟩
   let b170 ← load 170
   let b774 ← load 774628
   let b481 ← load 481824
@@ -68,8 +68,10 @@ def main (args : List String) : IO UInt32 := do
   for a in args do
     let h := a.toNat!
     let raw := (← IO.FS.readBinFile s!"../testdata/blocks/{h}.bin").toList
+    if raw.take 80 != ((hs.extract (80 * h) (80 * h + 80)).toList) then
+      IO.println s!"{h}: header differs from ../data/headers.bin"; fails := fails + 1; continue
     let t0 ← IO.monoMsNow
-    let c : Ctx := ⟨h, timeAt hs h, prevMtp hs h⟩
+    let c : Ctx := ⟨h, prevMtp hs h⟩
     let r := checkBlock c raw
     let info := match parseBlock raw with
       | some b => s!"{b.txs.length} txs, weight {weight b}, merkle {hex (merkleRoot (b.txs.map txid)).1}"

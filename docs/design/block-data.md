@@ -22,7 +22,24 @@ Awaiting owner review of the decisions at the end.
   with Core's reason (CVE-2012-2459 duplicate, tampered witness with the txid
   unchanged, value, negative value, non-final, witness before segwit, second
   coinbase, BIP34 height, empty block).
-- **Audit against Core's source:** in progress (`BLOCK-AUDIT`).
+- **Audit against Core's source (2026-10-08, bitcoin/bitcoin master):** no
+  discrepancy changes accept or reject for a canonically serialized block.
+  Each rule matches, including check order, boundaries, constants and edge cases:
+  - deserialization: `ReadCompactSize`, `UnserializeTransaction`;
+  - `CheckTransaction`, `ComputeMerkleRoot`, `CheckBlock`, `ContextualCheckBlock`;
+  - `IsFinalTx`, `GetSigOpCount`, `push_int64`/`CScriptNum`;
+  - the witness-commitment index, `GetBlockWeight`, and the mainnet activation heights.
+  
+  Follow-ups applied: the pre-CSV finality cutoff now reads the block's own
+  `nTime` from its header, where `Ctx.time` used to come from outside;
+  `BlockCheck` checks each sample's header against the proven header file.
+  Documented differences:
+  - the spec rejects trailing bytes after a block (Core ignores them; stricter, so sound);
+  - every parse failure maps to the single reason `deserialize`.
+  
+  `ContextualCheckBlockHeader` (`bad-diffbits`, `time-too-old`, `bad-version`)
+  is proven by the header chain. `time-too-new` depends on the node's clock and
+  can't be proven.
 
 ## What the block proof must establish
 

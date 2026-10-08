@@ -158,7 +158,8 @@ structure Blk where
   txs : List Tx
   deriving Repr
 
-/-- A block's bytes; all of them must be consumed. -/
+/-- A block's bytes; all of them must be consumed. Core's stream deserialization ignores trailing
+bytes; this spec is stricter (sound), and the proven input is always the canonical serialization. -/
 def parseBlock (b : Bytes) : Option Blk :=
   match (do let h ← take 80; let txs ← vec tx; pure (Blk.mk h txs) : Parser Blk) b with
   | some (blk, []) => some blk
@@ -317,12 +318,14 @@ def BIP34_HEIGHT : ℕ := 227931
 def CSV_HEIGHT : ℕ := 419328
 def SEGWIT_HEIGHT : ℕ := 481824
 
-/-- The context from the header chain: the block's height, its own time, and the median time
-past of its predecessor. -/
+/-- The context from the header chain: the block's height and the median time past of its
+predecessor. (The block's own time is read from its header.) -/
 structure Ctx where
   height : ℕ
-  time : ℕ
   prevMtp : ℕ
+
+/-- The header's `nTime` (bytes 68..71, little-endian). -/
+def Blk.time (b : Blk) : ℕ := le ((b.header.drop 68).take 4)
 
 /-- `IsFinalTx`. -/
 def isFinal (t : Tx) (height cutoff : ℕ) : Bool :=
@@ -347,7 +350,7 @@ def commitmentIndex (cb : Tx) : Option ℕ :=
     if s.length ≥ 38 ∧ s.take 6 = [0x6a, 0x24, 0xaa, 0x21, 0xa9, 0xed] then some o else acc) none
 
 def checkBlockContextual (c : Ctx) (b : Blk) : Option String :=
-  let cutoff := if c.height ≥ CSV_HEIGHT then c.prevMtp else c.time
+  let cutoff := if c.height ≥ CSV_HEIGHT then c.prevMtp else b.time
   if !b.txs.all (fun t => isFinal t c.height cutoff) then some "bad-txns-nonfinal"
   else
   let cb := b.txs.headD ⟨0, [], [], 0⟩
