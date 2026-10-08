@@ -5,9 +5,9 @@ If `HEAD at last update` doesn't match `git log -1`, this file is stale:
 follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work).
 
 - **Updated:** 2026-10-08
-- **HEAD at last update:** 06a6bc8 (plus this status commit)
+- **HEAD at last update:** 40aa518 (plus this status commit)
 - **Current milestone:** M1 and M2 done; M3 not started (waiting on owner decisions).
-- **Current item:** M3a `BLOCK-AIR`, starting with M3a.1 `BLK-BYTES` (plan in [block-data.md § Plan](../design/block-data.md#plan-decided-structure-d-028-sub-milestones)). IR-LOGUP done.
+- **Current item:** `HC-HASHTREE` (design: [header-tree.md](../design/header-tree.md)); BLAKE2S done (`compress_sound_air`). Then M3a.
 
 ## State in one paragraph
 

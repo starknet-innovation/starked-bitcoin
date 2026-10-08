@@ -12,7 +12,7 @@ short inclusion proof (D-032: Blake2s throughout).
   in height order.
 - Internal node: Blake2s-256 of `left ‖ right` (16 words, one compression with
   `t = 64`, final).
-- A segment of `2^k` headers starts at a multiple of `2^k` (our segmentation from
+- A segment of `2^k` headers starts at a multiple of `2^k` (the segmentation from
   genesis guarantees this), so its leaves form a perfect subtree; the segment
   proves that subtree's root.
 - The recursion fold runs in **MMR order**: segments left to right, merging the
@@ -21,7 +21,7 @@ short inclusion proof (D-032: Blake2s throughout).
   adjacent height ranges, so the chain link check (`PubLink`) applies unchanged.
 - `T` is the MMR root: canonical for a given tip and append-friendly. An inclusion
   proof for height `h` is the sibling path inside the peak plus the bagging path,
-  about `log2(N)` hashes (≈ 20–22 for today's chain, under 1 KB).
+  about `log2(N)` hashes (about 20–22 for the 2026-10 chain, under 1 KB).
 
 ## Inside a segment
 
@@ -67,12 +67,3 @@ short inclusion proof (D-032: Blake2s throughout).
 6. Zig: system-based header proving, node circuit computing `T`, MMR fold,
    outer verifier, inclusion-proof generator and checker.
 7. Re-prove the whole chain.
-EOF
-python3 - <<'EOF'
-p='/Users/henri/Workshop/starked-bitcoin/README.md'; s=open(p).read()
-s=s.replace('| Understand the M3a block-data proof','| Understand the header commitment tree (MMR over block hashes, HC-HASHTREE) | [docs/design/header-tree.md](docs/design/header-tree.md) |\n| Understand the M3a block-data proof')
-open(p,'w').write(s)
-EOF
-cd /Users/henri/Workshop/starked-bitcoin && python3 ~/.claude/skills/document/scripts/check_docs.py . 2>&1 | tail -1; git add -A docs README.md && git commit -qm "HC-HASHTREE design: MMR over block hashes, tree component, aggregation
-
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" && git log --oneline -1
