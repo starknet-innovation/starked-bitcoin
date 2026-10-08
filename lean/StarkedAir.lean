@@ -29,3 +29,5 @@ import StarkedAir.Gadgets.TopSound
 import StarkedAir.Gadgets.Aggregate
 import StarkedAir.Spec.Sha256Fast
 import StarkedAir.Spec.Block
+import StarkedAir.Lookup
+import StarkedAir.LogUp
