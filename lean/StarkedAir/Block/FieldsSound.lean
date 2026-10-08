@@ -892,7 +892,8 @@ theorem start_val_succ {r : ℕ} (hr : r + 1 < n) :
 /-- **Tiling.** With `m` the first padding row, the tokens of rows `0 … m−1` serialize to exactly
 the block's bytes. -/
 theorem tiling (hn : 0 < n) (hRl : R.length = (pub 0).val) :
-    ∃ m, m < n ∧ M K_PAD m = 1 ∧ (∀ r < m, M K_PAD r = 0) ∧
+    ∃ m, m < n ∧ M K_PAD m = 1 ∧ (∀ r < m, M K_PAD r = 0) ∧ (∀ r < n, m ≤ r → M K_PAD r = 1) ∧
+      (∀ r < m, (M START r).val + (M LEN r).val ≤ R.length) ∧
       ((List.range m).flatMap fun r => Spec.Block.Tok.bytes (tokOf M R r)) = R := by
   classical
   have hex : ∃ r, r < n ∧ M K_PAD r = 1 := ⟨n - 1, by omega, last_pad hsat hn⟩
@@ -925,10 +926,120 @@ theorem tiling (hn : 0 < n) (hRl : R.length = (pub 0).val) :
       rw [Nat.zero_add] at ap
       rw [List.range_succ, List.flatMap_append, ih (by omega), List.flatMap_singleton,
         tok_bytes hsat R hcs hmk (show k < n by omega) (hmin k (by omega)) hfit, ap, hs]
-  refine ⟨m, hm.1, hm.2, hmin, ?_⟩
-  rw [cat m le_rfl, hSm, slice_zero]
+  have suffix : ∀ j, m + j < n → M K_PAD (m + j) = 1 := by
+    intro j
+    induction j with
+    | zero => intro _; exact hm.2
+    | succ j ih =>
+      intro hj
+      exact (next_kind hsat (r := m + j) (by omega)).2.2.2.2.2.2.2.2.2.2.2.2 (ih (by omega))
+  refine ⟨m, hm.1, hm.2, hmin, fun r hr hmr => ?_, fun r hr => ?_, ?_⟩
+  · have := suffix (r - m) (by omega); rwa [Nat.add_sub_cancel' hmr] at this
+  · rw [← start_val_succ hsat R hcs hmk (show r + 1 < n by omega), ← hSm]; exact mono _ _ (by omega) le_rfl
+  · rw [cat m le_rfl, hSm, slice_zero]
 
 end Tokens
+
+/-! ### The grammar, row by row -/
+
+/-- The tokens of rows `r … m−1`. -/
+def toksFrom (M : ℕ → ℕ → F) (R : Spec.Block.Bytes) (m r : ℕ) : List Spec.Block.Tok :=
+  (List.range (m - r)).map fun i => tokOf M R (r + i)
+
+theorem toksFrom_cons {M : ℕ → ℕ → F} {R : Spec.Block.Bytes} {m r : ℕ} (h : r < m) :
+    toksFrom M R m r = tokOf M R r :: toksFrom M R m (r + 1) := by
+  unfold toksFrom
+  rw [show m - r = (m - (r + 1)) + 1 by omega, List.range_succ_eq_map]
+  simp only [List.map_cons, List.map_map, Nat.add_zero]
+  congr 1
+  apply List.map_congr_left; intro i _; simp [Function.comp]; ring_nf
+
+theorem toksFrom_end {M : ℕ → ℕ → F} {R : Spec.Block.Bytes} {m : ℕ} : toksFrom M R m m = [] := by
+  simp [toksFrom]
+
+section Grammar
+
+variable {n : ℕ} {pub : ℕ → F} {M : ℕ → ℕ → F}
+  (hsat : ∀ r < n, ∀ c ∈ constraints, c.eval n preCols pub M r = 0) (R : Spec.Block.Bytes)
+  (hcs : ∀ r < n, M K_LOCK r + M K_PAD r = 0 → ∀ o : ℕ, M OFF r = (o : F) → o ≤ 86 →
+    (M START r).val + o + prefOf M r ≤ R.length ∧ (M VAL r).val ≤ MAXS ∧
+    Spec.Block.serCompact (M VAL r).val = slice R ((M START r).val + o) (prefOf M r))
+  {m : ℕ} (hmn : m < n) (hpad : ∀ r < n, m ≤ r → M K_PAD r = 1)
+  (hfit : ∀ r < m, (M START r).val + (M LEN r).val ≤ R.length)
+include hsat hcs hmn hpad hfit
+
+theorem lt_m {r : ℕ} (hr : r < n) (h : M K_PAD r = 0) : r < m := by
+  by_contra hc; have := hpad r hr (by omega); rw [h] at this; exact zero_ne_one this
+
+/-- Per-row facts for a row of kind `a` with a CompactSize (before the padding). -/
+theorem row_info {r : ℕ} (hr : r < m) {a : ℕ} (ha : a < 9) (h : M a r = 1) (hnl : a ≠ K_LOCK) (hnp : a ≠ K_PAD) :
+    (M VAL r).val ≤ MAXS ∧ (M LEN r).val = lenN a (M SEG r).val (prefOf M r) (M VAL r).val ∧
+    1 ≤ prefOf M r ∧ prefOf M r ≤ 5 ∧ (M START r).val + (M LEN r).val ≤ R.length := by
+  have hrn : r < n := by omega
+  have ka := kinds_at hsat hrn ha h
+  obtain ⟨hoff, hlen⟩ := kind_vals hsat hrn ha h
+  rw [if_neg (by tauto)] at hlen
+  have hLP : M K_LOCK r + M K_PAD r = 0 := by
+    rw [ka K_LOCK (by simp [K_LOCK]), ka K_PAD (by simp [K_PAD]), if_neg (Ne.symm hnl), if_neg (Ne.symm hnp)]; simp
+  have sv := (bool_val (seg_bool hsat hrn)).2
+  have ho : offN a (M SEG r).val ≤ 86 := by unfold offN; split_ifs <;> omega
+  have hv := (hcs r hrn hLP _ hoff ho).2.1
+  have pb : 1 ≤ prefOf M r ∧ prefOf M r ≤ 5 := by unfold prefOf; split_ifs <;> omega
+  refine ⟨hv, val_lt_of_eq_cast hlen (lt_P (by unfold MAXS at hv; unfold lenN; split_ifs <;> omega)), pb.1, pb.2,
+    hfit r hr⟩
+
+theorem kz_of {r : ℕ} (hr : r < n) {a : ℕ} (ha : a < 9) (h : M a r = 1) {c : ℕ} (hc : c < 9) (hne : c ≠ a) :
+    M c r = 0 := by
+  rw [kinds_at hsat hr ha h c hc, if_neg hne]
+
+theorem tok_blk {r : ℕ} (hr : r < n) (h : M K_BLK r = 1) :
+    tokOf M R r = .blk (slice R (M START r).val 80) (M VAL r).val := by
+  simp only [tokOf, h, if_true]
+
+theorem tok_txh {r : ℕ} (hr : r < n) (h : M K_TXH r = 1) :
+    tokOf M R r = .txh (slice R (M START r).val 4) (decide (M SEG r = 1)) (M VAL r).val := by
+  have z := fun c hc hne => kz_of hsat R hcs hmn hpad hfit hr (a := K_TXH) (by simp [K_TXH]) h (c := c) hc hne
+  simp [tokOf, h, z K_BLK (by simp [K_BLK]) (by simp [K_BLK, K_TXH])]
+
+theorem tok_in {r : ℕ} (hr : r < n) (h : M K_IN r = 1) :
+    tokOf M R r = .inp (slice R (M START r).val 32) (slice R ((M START r).val + 32) 4)
+      (slice R ((M START r).val + 36 + prefOf M r) (M VAL r).val)
+      (slice R ((M START r).val + 36 + prefOf M r + (M VAL r).val) 4) := by
+  have z := fun c hc hne => kz_of hsat R hcs hmn hpad hfit hr (a := K_IN) (by simp [K_IN]) h (c := c) hc hne
+  simp [tokOf, h, z K_BLK (by simp [K_BLK]) (by simp [K_BLK, K_IN]), z K_TXH (by simp [K_TXH]) (by simp [K_TXH, K_IN])]
+
+theorem tok_nout {r : ℕ} (hr : r < n) (h : M K_NOUT r = 1) : tokOf M R r = .nout (M VAL r).val := by
+  have z := fun c hc hne => kz_of hsat R hcs hmn hpad hfit hr (a := K_NOUT) (by simp [K_NOUT]) h (c := c) hc hne
+  simp [tokOf, h, z K_BLK (by simp [K_BLK]) (by simp [K_BLK, K_NOUT]), z K_TXH (by simp [K_TXH]) (by simp [K_TXH, K_NOUT]),
+    z K_IN (by simp [K_IN]) (by simp [K_IN, K_NOUT])]
+
+theorem tok_out {r : ℕ} (hr : r < n) (h : M K_OUT r = 1) :
+    tokOf M R r = .out (slice R (M START r).val 8) (slice R ((M START r).val + 8 + prefOf M r) (M VAL r).val) := by
+  have z := fun c hc hne => kz_of hsat R hcs hmn hpad hfit hr (a := K_OUT) (by simp [K_OUT]) h (c := c) hc hne
+  simp [tokOf, h, z K_BLK (by simp [K_BLK]) (by simp [K_BLK, K_OUT]), z K_TXH (by simp [K_TXH]) (by simp [K_TXH, K_OUT]),
+    z K_IN (by simp [K_IN]) (by simp [K_IN, K_OUT]), z K_NOUT (by simp [K_NOUT]) (by simp [K_NOUT, K_OUT])]
+
+theorem tok_wcnt {r : ℕ} (hr : r < n) (h : M K_WCNT r = 1) : tokOf M R r = .wcnt (M VAL r).val := by
+  have z := fun c hc hne => kz_of hsat R hcs hmn hpad hfit hr (a := K_WCNT) (by simp [K_WCNT]) h (c := c) hc hne
+  simp [tokOf, h, z K_BLK (by simp [K_BLK]) (by simp [K_BLK, K_WCNT]), z K_TXH (by simp [K_TXH]) (by simp [K_TXH, K_WCNT]),
+    z K_IN (by simp [K_IN]) (by simp [K_IN, K_WCNT]), z K_NOUT (by simp [K_NOUT]) (by simp [K_NOUT, K_WCNT]),
+    z K_OUT (by simp [K_OUT]) (by simp [K_OUT, K_WCNT])]
+
+theorem tok_witem {r : ℕ} (hr : r < n) (h : M K_WITEM r = 1) :
+    tokOf M R r = .witem (slice R ((M START r).val + prefOf M r) (M VAL r).val) := by
+  have z := fun c hc hne => kz_of hsat R hcs hmn hpad hfit hr (a := K_WITEM) (by simp [K_WITEM]) h (c := c) hc hne
+  simp [tokOf, h, z K_BLK (by simp [K_BLK]) (by simp [K_BLK, K_WITEM]), z K_TXH (by simp [K_TXH]) (by simp [K_TXH, K_WITEM]),
+    z K_IN (by simp [K_IN]) (by simp [K_IN, K_WITEM]), z K_NOUT (by simp [K_NOUT]) (by simp [K_NOUT, K_WITEM]),
+    z K_OUT (by simp [K_OUT]) (by simp [K_OUT, K_WITEM]), z K_WCNT (by simp [K_WCNT]) (by simp [K_WCNT, K_WITEM])]
+
+theorem tok_lock {r : ℕ} (hr : r < n) (h : M K_LOCK r = 1) : tokOf M R r = .lock (slice R (M START r).val 4) := by
+  have z := fun c hc hne => kz_of hsat R hcs hmn hpad hfit hr (a := K_LOCK) (by simp [K_LOCK]) h (c := c) hc hne
+  simp [tokOf, z K_BLK (by simp [K_BLK]) (by simp [K_BLK, K_LOCK]), z K_TXH (by simp [K_TXH]) (by simp [K_TXH, K_LOCK]),
+    z K_IN (by simp [K_IN]) (by simp [K_IN, K_LOCK]), z K_NOUT (by simp [K_NOUT]) (by simp [K_NOUT, K_LOCK]),
+    z K_OUT (by simp [K_OUT]) (by simp [K_OUT, K_LOCK]), z K_WCNT (by simp [K_WCNT]) (by simp [K_WCNT, K_LOCK]),
+    z K_WITEM (by simp [K_WITEM]) (by simp [K_WITEM, K_LOCK])]
+
+end Grammar
 
 /-! ### The block system: bytes (component 0) and fields (component 1) -/
 
