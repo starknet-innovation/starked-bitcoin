@@ -82,6 +82,11 @@ theorem one_add_one_ne : (1 : F) + 1 ≠ 0 := by
     (by push_cast; linear_combination e)
   omega
 
+theorem val_pred {x : F} {k : ℕ} (hx : x.val = k + 1) : (x - 1).val = k := by
+  have e : x = ((k + 1 : ℕ) : F) := by rw [← hx, ZMod.natCast_zmod_val]
+  rw [e, show ((k + 1 : ℕ) : F) - 1 = ((k : ℕ) : F) by push_cast; ring]
+  exact val_lt_of_eq_cast rfl (by have := ZMod.val_lt x; omega)
+
 section Rows
 
 variable {n : ℕ} {pub : ℕ → F} {M : ℕ → ℕ → F}
@@ -691,6 +696,17 @@ theorem kind_vals {r : ℕ} (hr : r < n) {a : ℕ} (ha : a < 9) (h : M a r = 1) 
     simp [offN, lenN, K_BLK, K_TXH, K_IN, K_NOUT, K_OUT, K_WCNT, K_WITEM, K_LOCK, K_PAD] <;>
     rw [sv] <;> push_cast <;> ring_nf <;> simp
 
+theorem z1_iff_val {r : ℕ} (hr : r < n) {x : F} {k : ℕ} (he : M E1C r = x - 1) (hx : x.val = k + 1) :
+    (M Z1 r = 1 ↔ k = 0) := by
+  rw [(z1_spec hsat hr).2, he]
+  constructor
+  · intro h; have := val_pred hx; rw [h, ZMod.val_zero] at this; omega
+  · intro h; subst h; rw [← ZMod.natCast_zmod_val x, hx]; simp
+
+theorem z1_iff_val0 {r : ℕ} (hr : r < n) {x : F} (he : M E1C r = x) (hx : x.val < P) :
+    (M Z1 r = 1 ↔ x.val = 0) := by
+  rw [(z1_spec hsat hr).2, he, ZMod.val_eq_zero]
+
 end Rows
 
 end StarkedAir.Block.Fields
@@ -1038,6 +1054,76 @@ theorem tok_lock {r : ℕ} (hr : r < n) (h : M K_LOCK r = 1) : tokOf M R r = .lo
     z K_IN (by simp [K_IN]) (by simp [K_IN, K_LOCK]), z K_NOUT (by simp [K_NOUT]) (by simp [K_NOUT, K_LOCK]),
     z K_OUT (by simp [K_OUT]) (by simp [K_OUT, K_LOCK]), z K_WCNT (by simp [K_WCNT]) (by simp [K_WCNT, K_LOCK]),
     z K_WITEM (by simp [K_WITEM]) (by simp [K_WITEM, K_LOCK])]
+
+/-- **Inputs.** From an input row with `k + 1` inputs left (this one included), `insT` reads them and
+stops at the output count. -/
+theorem ins_sim : ∀ k r, r < m → M K_IN r = 1 → (M INL r).val = k + 1 →
+    ∃ ins, Spec.Block.insT (k + 1) (toksFrom M R m r) = some (ins, toksFrom M R m (r + k + 1)) ∧
+      r + k + 1 < m ∧ M K_NOUT (r + k + 1) = 1 := by
+  intro k
+  induction k with
+  | zero =>
+    intro r hr hin hinl
+    have hrn : r < n := by omega
+    have hr1 : r + 1 < n := by omega
+    obtain ⟨hv, hlen, p1, p5, hft⟩ := row_info hsat R hcs hmn hpad hfit hr (a := K_IN) (by simp [K_IN]) hin
+      (by simp [K_IN, K_LOCK]) (by simp [K_IN, K_PAD])
+    simp only [lenN, K_BLK, K_TXH, K_IN, if_false, if_true, show (2 : ℕ) ≠ 0 by norm_num,
+      show (2 : ℕ) ≠ 1 by norm_num] at hlen
+    have ka := kinds_at hsat hrn (a := K_IN) (by simp [K_IN]) hin
+    have he : M E1C r = M INL r - 1 := by
+      rw [e1_eq hsat hrn, ka K_BLK (by simp [K_BLK]), ka K_TXH (by simp [K_TXH]), ka K_NOUT (by simp [K_NOUT]),
+        ka K_OUT (by simp [K_OUT]), ka K_WCNT (by simp [K_WCNT]), ka K_WITEM (by simp [K_WITEM]),
+        ka K_LOCK (by simp [K_LOCK]), hin]
+      simp [K_BLK, K_TXH, K_IN, K_NOUT, K_OUT, K_WCNT, K_WITEM, K_LOCK]
+    have hz : M Z1 r = 1 := (z1_iff_val hsat hrn he hinl).2 rfl
+    have hnout : M K_NOUT (r + 1) = 1 := (next_kind hsat hr1).2.2.2.1 hin hz
+    have hr1m : r + 1 < m := lt_m hsat R hcs hmn hpad hfit hr1
+      (kz_of hsat R hcs hmn hpad hfit hr1 (a := K_NOUT) (by simp [K_NOUT]) hnout (c := K_PAD) (by simp [K_PAD])
+        (by simp [K_PAD, K_NOUT]))
+    refine ⟨[(⟨⟨slice R (M START r).val 32, Spec.Block.le (slice R ((M START r).val + 32) 4)⟩,
+      slice R ((M START r).val + 36 + prefOf M r) (M VAL r).val,
+      Spec.Block.le (slice R ((M START r).val + 36 + prefOf M r + (M VAL r).val) 4), []⟩ : Spec.Block.TxIn)], ?_, by simpa using hr1m, by simpa using hnout⟩
+    rw [toksFrom_cons hr, tok_in hsat R hcs hmn hpad hfit hrn hin]
+    simp only [Spec.Block.insT]
+    rw [if_pos ⟨slice_length (by omega), slice_length (by omega), by rw [slice_length (by omega)]; exact hv,
+      slice_length (by omega)⟩]
+    simp
+  | succ k ih =>
+    intro r hr hin hinl
+    have hrn : r < n := by omega
+    have hr1 : r + 1 < n := by omega
+    obtain ⟨hv, hlen, p1, p5, hft⟩ := row_info hsat R hcs hmn hpad hfit hr (a := K_IN) (by simp [K_IN]) hin
+      (by simp [K_IN, K_LOCK]) (by simp [K_IN, K_PAD])
+    simp only [lenN, K_BLK, K_TXH, K_IN, if_false, if_true, show (2 : ℕ) ≠ 0 by norm_num,
+      show (2 : ℕ) ≠ 1 by norm_num] at hlen
+    have ka := kinds_at hsat hrn (a := K_IN) (by simp [K_IN]) hin
+    have he : M E1C r = M INL r - 1 := by
+      rw [e1_eq hsat hrn, ka K_BLK (by simp [K_BLK]), ka K_TXH (by simp [K_TXH]), ka K_NOUT (by simp [K_NOUT]),
+        ka K_OUT (by simp [K_OUT]), ka K_WCNT (by simp [K_WCNT]), ka K_WITEM (by simp [K_WITEM]),
+        ka K_LOCK (by simp [K_LOCK]), hin]
+      simp [K_BLK, K_TXH, K_IN, K_NOUT, K_OUT, K_WCNT, K_WITEM, K_LOCK]
+    have hz : M Z1 r = 0 := by
+      rcases (z1_spec hsat hrn).1 with h | h
+      · exact h
+      · exact absurd ((z1_iff_val hsat hrn he hinl).1 h) (by omega)
+    have hin1 : M K_IN (r + 1) = 1 := (next_kind hsat hr1).2.2.1 hin hz
+    have ht1 : M K_TXH (r + 1) = 0 :=
+      kz_of hsat R hcs hmn hpad hfit hr1 (a := K_IN) (by simp [K_IN]) hin1 (c := K_TXH) (by simp [K_TXH]) (by simp [K_TXH, K_IN])
+    have hinl1 : (M INL (r + 1)).val = k + 1 := by
+      rw [(counters hsat hr1).2.1 ht1, hin]; exact val_pred hinl
+    have hr1m : r + 1 < m := lt_m hsat R hcs hmn hpad hfit hr1
+      (kz_of hsat R hcs hmn hpad hfit hr1 (a := K_IN) (by simp [K_IN]) hin1 (c := K_PAD) (by simp [K_PAD]) (by simp [K_PAD, K_IN]))
+    obtain ⟨ins, hins, hlt, hno⟩ := ih (r + 1) hr1m hin1 hinl1
+    refine ⟨(⟨⟨slice R (M START r).val 32, Spec.Block.le (slice R ((M START r).val + 32) 4)⟩,
+      slice R ((M START r).val + 36 + prefOf M r) (M VAL r).val,
+      Spec.Block.le (slice R ((M START r).val + 36 + prefOf M r + (M VAL r).val) 4), []⟩ : Spec.Block.TxIn) :: ins, ?_, by rw [show r + (k + 1) + 1 = r + 1 + k + 1 by ring]; exact hlt,
+      by rw [show r + (k + 1) + 1 = r + 1 + k + 1 by ring]; exact hno⟩
+    rw [toksFrom_cons hr, tok_in hsat R hcs hmn hpad hfit hrn hin]
+    simp only [Spec.Block.insT]
+    rw [if_pos ⟨slice_length (by omega), slice_length (by omega), by rw [slice_length (by omega)]; exact hv,
+      slice_length (by omega)⟩, hins, show r + 1 + k + 1 = r + (k + 1) + 1 by ring]
+    simp
 
 end Grammar
 
