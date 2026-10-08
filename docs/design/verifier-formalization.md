@@ -1,8 +1,10 @@
 # Formalizing our circuits in Lean (parked, 2026-10-08)
 
-**Status:** parked by the owner (2026-10-08). Resume from "Plan" below.
+Status: parked · Updated: 2026-10-08
+
+Parked by the owner on 2026-10-08. Resume from "Plan" below.
 **Goal:** everything *we* wrote is proven; only StarkWare-derived software is
-trusted. Today `src/recursion/plain_verifier.zig` (our in-circuit verifier for
+trusted. As of 2026-10-08, `src/recursion/plain_verifier.zig` (our in-circuit verifier for
 segment proofs) and `src/recursion/node.zig` (link checks, digests, key) are
 trusted code ([verification.md](../reference/verification.md)).
 

@@ -38,7 +38,7 @@ Done 2026-10-08 (CPU, laptop): heights 0..970,347 in one root proof; [report](..
 
 | ID | Item | Status | Notes |
 |---|---|---|---|
-| IR-LOGUP | LogUp / interaction terms in the IR (Lean semantics, export, interpreter) | moved to M3 (not needed for headers) | Port StarkWare's `tuple_inclusion` for the Lean side |
+| IR-LOGUP | (moved to M3, see there) | moved to M3 | |
 | VK | Verification key: node identity (from topology) and leaf identities per log size (from public data, `leafIdentity`), checked by `verifyRoot` | done (2026-10-08) | Per-AIR native VK (preprocessed roots per log size) still recomputed in O(n); not needed by the root verifier |
 | GPU-CODEGEN | Generate CUDA/Metal constraint kernels from the IR | deferred (D-022) | Affects completeness and speed only, not soundness. After the full pipeline works. |
 | RECURSION | Recursion via stwo-zig circuit recursion (D-023) | done (whole chain to one root, 2026-10-08) | Plan and as-built in [design/recursion.md](../design/recursion.md) |
