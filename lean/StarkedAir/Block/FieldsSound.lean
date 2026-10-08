@@ -1449,6 +1449,135 @@ theorem outputs_sim {rno : ℕ} (hr : rno < m) (hno : M K_NOUT rno = 1) :
     exact ⟨outs, rno + 1 + c', by rw [hc', houts], by omega, hlt, Or.inr ho, hz', i1.trans inv.1, i2.trans inv.2.1,
       i3.trans inv.2.2.1, i4.trans inv.2.2.2, hv⟩
 
+/-- **A transaction.** From a transaction-head row, `txT` reads the whole transaction and stops
+after its locktime row `r'`; the transactions-left counter is unchanged there. -/
+theorem tx_sim {r : ℕ} (hr : r < m) (ht : M K_TXH r = 1) :
+    ∃ tx r', Spec.Block.txT (toksFrom M R m r) = some (tx, toksFrom M R m (r' + 1)) ∧ r < r' ∧ r' < m ∧
+      M K_LOCK r' = 1 ∧ M TXL r' = M TXL r := by
+  have hrn : r < n := by omega
+  have hr1 : r + 1 < n := by omega
+  have ka := kinds_at hsat hrn (a := K_TXH) (by simp [K_TXH]) ht
+  obtain ⟨hv, hlen, -, -, hft⟩ := row_info hsat R hcs hmn hpad hfit hr (a := K_TXH) (by simp [K_TXH]) ht
+    (by simp [K_TXH, K_LOCK]) (by simp [K_TXH, K_PAD])
+  simp only [lenN, K_BLK, K_TXH, if_false, if_true, show (1 : ℕ) ≠ 0 by norm_num] at hlen
+  obtain ⟨-, htx, -, -, -⟩ := row_sets hsat hrn
+  obtain ⟨hinl, hnin, hhw, hz⟩ := htx ht
+  have he : M E1C r = M VAL r := by
+    rw [e1_eq hsat hrn, ka K_BLK (by simp [K_BLK]), ka K_IN (by simp [K_IN]), ka K_NOUT (by simp [K_NOUT]),
+      ka K_OUT (by simp [K_OUT]), ka K_WCNT (by simp [K_WCNT]), ka K_WITEM (by simp [K_WITEM]),
+      ka K_LOCK (by simp [K_LOCK]), ht]
+    simp [K_BLK, K_TXH, K_IN, K_NOUT, K_OUT, K_WCNT, K_WITEM, K_LOCK]
+  have hnin1 : 1 ≤ (M VAL r).val := by
+    by_contra h0
+    have := (z1_iff_val0 hsat hrn he (ZMod.val_lt _)).mpr (by omega)
+    rw [hz] at this; exact zero_ne_one this
+  obtain ⟨k0, hk0⟩ : ∃ k0, (M VAL r).val = k0 + 1 := ⟨(M VAL r).val - 1, by omega⟩
+  -- Inputs.
+  have hin1 : M K_IN (r + 1) = 1 := (next_kind hsat hr1).2.1 ht
+  have kz1 := fun {c' : ℕ} (hc : c' < 9) (hne : c' ≠ K_IN) =>
+    kz_of hsat R hcs hmn hpad hfit hr1 (a := K_IN) (by simp [K_IN]) hin1 hc hne
+  have hinl1 : (M INL (r + 1)).val = k0 + 1 := by
+    rw [(counters hsat hr1).2.1 (kz1 (by simp [K_TXH]) (by simp [K_TXH, K_IN])), ka K_IN (by simp [K_IN]), hinl]
+    simp [K_IN, K_TXH, hk0]
+  have inv1 := step_inv hsat hr1 (kz1 (by simp [K_TXH]) (by simp [K_TXH, K_IN]))
+    (by rw [ka K_LOCK (by simp [K_LOCK])]; simp [K_LOCK, K_TXH]) (by rw [ka K_WCNT (by simp [K_WCNT])]; simp [K_WCNT, K_TXH])
+  have hr1m : r + 1 < m := lt_m hsat R hcs hmn hpad hfit hr1 (kz1 (by simp [K_PAD]) (by simp [K_PAD, K_IN]))
+  obtain ⟨ins, hins, hnom, hno, a1, a2, a3, a4⟩ := ins_sim hsat R hcs hmn hpad hfit k0 (r + 1) hr1m hin1 hinl1
+  set rno := r + 1 + k0 + 1 with hrno
+  -- Outputs.
+  obtain ⟨outs, re, houts, hre, hrem, hk, hzre, b1, b2, b3, b4, hkv⟩ := outputs_sim hsat R hcs hmn hpad hfit hnom hno
+  have hren : re < n := by omega
+  have hre1 : re + 1 < n := by omega
+  have heoc : M EOC re = 1 := by
+    rw [eoc_eq hsat hren, hzre, mul_one]
+    rcases hk with h | h
+    · rw [h, kz_of hsat R hcs hmn hpad hfit hren (a := K_NOUT) (by simp [K_NOUT]) h (c := K_OUT) (by simp [K_OUT])
+        (by simp [K_OUT, K_NOUT])]; ring
+    · rw [h, kz_of hsat R hcs hmn hpad hfit hren (a := K_OUT) (by simp [K_OUT]) h (c := K_NOUT) (by simp [K_NOUT])
+        (by simp [K_OUT, K_NOUT])]; ring
+  have hseg : M SEG re = M SEG r := by rw [b1, a1, inv1.1]
+  have hnre : M K_LOCK re = 0 ∧ M K_WCNT re = 0 := by
+    rcases hk with h | h
+    · exact ⟨kz_of hsat R hcs hmn hpad hfit hren (a := K_NOUT) (by simp [K_NOUT]) h (by simp [K_LOCK]) (by simp [K_LOCK, K_NOUT]),
+        kz_of hsat R hcs hmn hpad hfit hren (a := K_NOUT) (by simp [K_NOUT]) h (by simp [K_WCNT]) (by simp [K_WCNT, K_NOUT])⟩
+    · exact ⟨kz_of hsat R hcs hmn hpad hfit hren (a := K_OUT) (by simp [K_OUT]) h (by simp [K_LOCK]) (by simp [K_LOCK, K_OUT]),
+        kz_of hsat R hcs hmn hpad hfit hren (a := K_OUT) (by simp [K_OUT]) h (by simp [K_WCNT]) (by simp [K_WCNT, K_OUT])⟩
+  -- The token head.
+  have htoks : toksFrom M R m r = tokOf M R r :: toksFrom M R m (r + 1) := toksFrom_cons hr
+  have hnoks : toksFrom M R m rno = .nout (M VAL rno).val :: toksFrom M R m (rno + 1) := by
+    rw [toksFrom_cons hnom, tok_nout hsat R hcs hmn hpad hfit (by omega) hno]
+  have hv4 : (slice R (M START r).val 4).length = 4 := slice_length (by have := hfit r hr; omega)
+  rcases seg_bool hsat hrn with sg | sg
+  · -- Legacy: the locktime follows the outputs.
+    have hl : M K_LOCK (re + 1) = 1 :=
+      (next_kind hsat hre1).2.2.2.2.2.2.1 hk hzre (by rw [hseg, sg])
+    have kzl := fun {c' : ℕ} (hc : c' < 9) (hne : c' ≠ K_LOCK) =>
+      kz_of hsat R hcs hmn hpad hfit hre1 (a := K_LOCK) (by simp [K_LOCK]) hl hc hne
+    have hlm : re + 1 < m := lt_m hsat R hcs hmn hpad hfit hre1 (kzl (by simp [K_PAD]) (by simp [K_PAD, K_LOCK]))
+    have invl := step_inv hsat hre1 (kzl (by simp [K_TXH]) (by simp [K_TXH, K_LOCK])) hnre.1 (by rw [hnre.2, zero_mul])
+    have hl4 : (slice R (M START (re + 1)).val 4).length = 4 := by
+      obtain ⟨-, hlen'⟩ := kind_vals hsat (by omega) (a := K_LOCK) (by simp [K_LOCK]) hl
+      simp [lenN, K_BLK, K_TXH, K_IN, K_NOUT, K_OUT, K_WCNT, K_WITEM, K_LOCK] at hlen'
+      have := hfit (re + 1) hlm
+      have h4 : (M LEN (re + 1)).val = 4 := val_lt_of_eq_cast (by exact_mod_cast hlen') (lt_P (by norm_num))
+      rw [h4] at this
+      exact slice_length this
+    refine ⟨⟨Spec.Block.le (slice R (M START r).val 4),
+      (ins.zip (List.replicate (k0 + 1) [])).map (fun p => { p.1 with witness := p.2 }), outs,
+      Spec.Block.le (slice R (M START (re + 1)).val 4)⟩, re + 1, ?_, by omega, hlm, hl,
+      by rw [invl.2.2.1, b3, a3, inv1.2.2.1]⟩
+    rw [htoks, tok_txh hsat R hcs hmn hpad hfit hrn ht]
+    simp only [Spec.Block.txT, sg, zero_ne_one, decide_false]
+    rw [if_pos ⟨hv4, by omega, by unfold Spec.Block.MAX_SIZE; unfold MAXS at hv; exact hv⟩, hk0, hins, hnoks]
+    simp only
+    rw [if_pos (by unfold Spec.Block.MAX_SIZE; unfold MAXS at hkv; exact hkv), houts]
+    simp only [Bool.false_eq_true, if_false]
+    rw [toksFrom_cons hlm, tok_lock hsat R hcs hmn hpad hfit (by omega) hl]
+    simp only
+    rw [if_pos ⟨hl4, by simp⟩]
+  · -- Segwit: the witness section, then the locktime.
+    have hw1 : M K_WCNT (re + 1) = 1 :=
+      (next_kind hsat hre1).2.2.2.2.2.1 hk hzre (by rw [hseg, sg])
+    have kzw := fun {c' : ℕ} (hc : c' < 9) (hne : c' ≠ K_WCNT) =>
+      kz_of hsat R hcs hmn hpad hfit hre1 (a := K_WCNT) (by simp [K_WCNT]) hw1 hc hne
+    have hwm : re + 1 < m := lt_m hsat R hcs hmn hpad hfit hre1 (kzw (by simp [K_PAD]) (by simp [K_PAD, K_WCNT]))
+    have invw := step_inv hsat hre1 (kzw (by simp [K_TXH]) (by simp [K_TXH, K_WCNT])) hnre.1 (by rw [hnre.2, zero_mul])
+    have hwl : (M WINL (re + 1)).val = k0 + 1 := by
+      rw [(counters hsat hre1).2.2.2.2.1 heoc, invw.2.1, b2, a2, inv1.2.1, hnin, hk0]
+    obtain ⟨ws, r', hws, hrr', hr'm, hl, c1, c2, c3, chw⟩ := wits_sim hsat R hcs hmn hpad hfit k0 (re + 1) hwm hw1 hwl
+    have hany : ws.any (fun w => !w.isEmpty) = true := by
+      by_contra hne
+      simp only [List.any_eq_true, not_exists, not_and, Bool.not_eq_true', List.isEmpty_eq_false_iff,
+        Bool.not_eq_false', List.isEmpty_iff] at hne
+      have h0 : M HASW r' = 0 := by rw [chw (fun x hx => by simpa using hne x hx), invw.2.2.2, b4, a4, inv1.2.2.2, hhw]
+      have hz2 := (row_sets hsat (show r' < n by omega)).2.2.2.2 hl (by rw [c1, invw.1, hseg, sg])
+      have he2 : M E2C r' = 0 := by
+        rw [e2_eq hsat (by omega), kz_of hsat R hcs hmn hpad hfit (show r' < n by omega) (a := K_LOCK) (by simp [K_LOCK]) hl
+          (c := K_WCNT) (by simp [K_WCNT]) (by simp [K_WCNT, K_LOCK]),
+          kz_of hsat R hcs hmn hpad hfit (show r' < n by omega) (a := K_LOCK) (by simp [K_LOCK]) hl
+          (c := K_WITEM) (by simp [K_WITEM]) (by simp [K_WITEM, K_LOCK]), hl, h0]; ring
+      have := (z2_spec hsat (show r' < n by omega)).2.mpr he2
+      rw [hz2] at this; exact zero_ne_one this
+    have hl4 : (slice R (M START r').val 4).length = 4 := by
+      obtain ⟨-, hlen'⟩ := kind_vals hsat (show r' < n by omega) (a := K_LOCK) (by simp [K_LOCK]) hl
+      simp [lenN, K_BLK, K_TXH, K_IN, K_NOUT, K_OUT, K_WCNT, K_WITEM, K_LOCK] at hlen'
+      have := hfit r' hr'm
+      have h4 : (M LEN r').val = 4 := val_lt_of_eq_cast (by exact_mod_cast hlen') (lt_P (by norm_num))
+      rw [h4] at this
+      exact slice_length this
+    refine ⟨⟨Spec.Block.le (slice R (M START r).val 4),
+      (ins.zip ws).map (fun p => { p.1 with witness := p.2 }), outs,
+      Spec.Block.le (slice R (M START r').val 4)⟩, r', ?_, by omega, hr'm, hl, by rw [c3, invw.2.2.1, b3, a3, inv1.2.2.1]⟩
+    rw [htoks, tok_txh hsat R hcs hmn hpad hfit hrn ht]
+    simp only [Spec.Block.txT, sg, decide_true]
+    rw [if_pos ⟨hv4, by omega, by unfold Spec.Block.MAX_SIZE; unfold MAXS at hv; exact hv⟩, hk0, hins, hnoks]
+    simp only
+    rw [if_pos (by unfold Spec.Block.MAX_SIZE; unfold MAXS at hkv; exact hkv), houts]
+    simp only [if_true]
+    rw [hws, toksFrom_cons hr'm, tok_lock hsat R hcs hmn hpad hfit (by omega) hl]
+    simp only
+    rw [if_pos ⟨hl4, fun _ => hany⟩]
+
 end Grammar
 
 /-! ### The block system: bytes (component 0) and fields (component 1) -/
