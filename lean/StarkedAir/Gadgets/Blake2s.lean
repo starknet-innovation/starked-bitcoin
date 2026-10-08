@@ -21,7 +21,7 @@ picked per row by preprocessed one-hot selectors (`XSEL`, `YSEL`, from `σ`). Ad
 Main columns (300): W0..W7 bits 0..255 · M (16 words × lo/hi) 256..287 · carries 288..299.
 Preprocessed (50): INIT₀₋₃, G₀₋₇, FIN₀₋₃, COPY, XSEL₀₋₁₅, YSEL₀₋₁₅, IS_G.
 -/
-import StarkedAir.IR
+import StarkedAir.Gadgets.Sha256
 import StarkedAir.Spec.Blake2s
 
 namespace StarkedAir.Blake2s
@@ -33,7 +33,7 @@ def PERIOD : ℕ := 88
 /-! ### Column layout -/
 
 /-- Bit `i` of word slot `w`. -/
-def WB (w i : ℕ) : ℕ := 32 * w + i
+abbrev WB (w i : ℕ) : ℕ := 32 * w + i
 def MSG : ℕ := 256
 /-- Limb `h` of message word `k`. -/
 def ML (k h : ℕ) : ℕ := MSG + 2 * k + h
@@ -59,16 +59,19 @@ def P_XSEL (k : ℕ) : ℕ := 17 + k
 def P_YSEL (k : ℕ) : ℕ := 33 + k
 def P_ISG : ℕ := 49
 
-/-- Row offset of the writer of input `role` for G position `g` (columns 0–3, diagonals 4–7). -/
-def srcOff : ℕ → ℕ → ℤ
-  | 0, 0 => -4 | 0, 1 => -1 | 0, 2 => -2 | 0, _ => -3
-  | 1, 0 => -4 | 1, 1 => -5 | 1, 2 => -2 | 1, _ => -3
-  | 2, 0 => -4 | 2, 1 => -5 | 2, 2 => -6 | 2, _ => -3
-  | 3, 0 => -4 | 3, 1 => -5 | 3, 2 => -6 | 3, _ => -7
-  | 4, 0 => -4 | 4, 1 => -3 | 4, 2 => -2 | 4, _ => -1
-  | 5, 0 => -4 | 5, 1 => -3 | 5, 2 => -2 | 5, _ => -5
-  | 6, 0 => -4 | 6, 1 => -3 | 6, 2 => -6 | 6, _ => -5
-  | _, 0 => -4 | _, 1 => -7 | _, 2 => -6 | _, _ => -5
+/-- Distance back to the writer of input `role` (0 = a … 3 = d) for G position `g`
+(columns 0–3, diagonals 4–7). -/
+def src : ℕ → ℕ → ℕ
+  | 0, 0 => 4 | 0, 1 => 1 | 0, 2 => 2 | 0, _ => 3
+  | 1, 0 => 4 | 1, 1 => 5 | 1, 2 => 2 | 1, _ => 3
+  | 2, 0 => 4 | 2, 1 => 5 | 2, 2 => 6 | 2, _ => 3
+  | 3, 0 => 4 | 3, 1 => 5 | 3, 2 => 6 | 3, _ => 7
+  | 4, 0 => 4 | 4, 1 => 3 | 4, 2 => 2 | 4, _ => 1
+  | 5, 0 => 4 | 5, 1 => 3 | 5, 2 => 2 | 5, _ => 5
+  | 6, 0 => 4 | 6, 1 => 3 | 6, 2 => 6 | 6, _ => 5
+  | _, 0 => 4 | _, 1 => 7 | _, 2 => 6 | _, _ => 5
+
+def srcOff (g role : ℕ) : ℤ := -((src g role : ℕ) : ℤ)
 
 /-- In final row `k`, the offset of the last diagonal row holding `v[k+8]` (role c) and
 `v[b(4+k)+8]` (role d): diagonal `(k+2) mod 4`. -/
@@ -88,32 +91,15 @@ def preCols : List PreCol :=
   (List.range 16).map (fun k => ind (fun r => isG r && Spec.Blake2s.sigma (rOf r) (2 * gOf r + 1) == k)) ++
   [ind isG]
 
-/-! ### Expression helpers -/
+/-! ### Expression helpers (shared with the SHA-256 AIR, so its evaluation lemmas apply) -/
 
-def col (i : ℕ) (off : ℤ := 0) : Expr := .col .main i off
-def pre (i : ℕ) : Expr := .col .pre i 0
-def cst (v : ℕ) : Expr := .const v
-
-def sumPow (f : ℕ → Expr) : ℕ → Expr
-  | 0 => cst 0
-  | k + 1 => .add (sumPow f k) (.mul (cst (2 ^ k)) (f k))
+export StarkedAir.Sha256 (col pre cst sumPow xor2 boolC bitsOf addC)
 
 /-- Limb `h` (16 bits) of word slot `w` at offset `off`. -/
-def limb (w h : ℕ) (off : ℤ := 0) : Expr := sumPow (fun j => col (WB w (16 * h + j)) off) 16
+abbrev limb (w h : ℕ) (off : ℤ := 0) : Expr := StarkedAir.Sha256.limb (32 * w) h off
 
-def xor2 (x y : Expr) : Expr := .sub (.add x y) (.mul (cst 2) (.mul x y))
-def xor3 (x y z : Expr) : Expr :=
-  .add (.sub (.add (.add x y) z) (.mul (cst 2) (.add (.add (.mul x y) (.mul y z)) (.mul z x))))
-    (.mul (cst 4) (.mul (.mul x y) z))
 /-- `x ⊕ c` for a constant bit `c`. -/
 def xorC (x : Expr) (c : Bool) : Expr := if c then .sub (cst 1) x else x
-
-def boolC (e : Expr) : Expr := .mul e (.sub e (cst 1))
-def bitsOf (base n : ℕ) : Expr := sumPow (fun j => col (base + j)) n
-
-/-- `sel · (Σ terms − result − 2^16·carry)`. -/
-def addC (sel : Expr) (terms : List Expr) (result carry : Expr) : Expr :=
-  .mul sel (.sub (.sub (terms.foldl .add (cst 0)) result) (.mul (cst 65536) carry))
 
 /-- Message limb `h` of the word picked by the selector family `base` (XSEL or YSEL). -/
 def msgLimb (base h : ℕ) : Expr :=
