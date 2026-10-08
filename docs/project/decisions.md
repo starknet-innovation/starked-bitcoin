@@ -152,3 +152,8 @@ Why: It keeps scope small, and Lean specs and AIRs can be built and tested on sa
 Date: 2026-10-08 · By: owner · Status: active
 Decision: Continues D-022 into M3: Lean proofs and circuits first; acceleration once a measured performance wall is hit.
 Why: Correctness and provability before speed.
+
+### D-028 — Block data as multiple components linked by LogUp; IR-LOGUP first
+Date: 2026-10-08 · By: owner · Status: active
+Decision: The M3a block-data proof uses several components (byte stream, parser, SHA-256, Merkle, checks) linked by LogUp lookups. Work order: `IR-LOGUP` first, then the parser, then hashing, Merkle and checks.
+Why: Variable-length data cannot be followed with fixed row offsets, and `HC-HASHTREE` needs lookups too. See [block-data.md](../design/block-data.md).
