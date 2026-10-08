@@ -1067,7 +1067,9 @@ theorem tok_lock {r : ℕ} (hr : r < n) (h : M K_LOCK r = 1) : tokOf M R r = .lo
 stops at the output count. -/
 theorem ins_sim : ∀ k r, r < m → M K_IN r = 1 → (M INL r).val = k + 1 →
     ∃ ins, Spec.Block.insT (k + 1) (toksFrom M R m r) = some (ins, toksFrom M R m (r + k + 1)) ∧
-      r + k + 1 < m ∧ M K_NOUT (r + k + 1) = 1 := by
+      r + k + 1 < m ∧ M K_NOUT (r + k + 1) = 1 ∧
+      M SEG (r + k + 1) = M SEG r ∧ M NIN (r + k + 1) = M NIN r ∧ M TXL (r + k + 1) = M TXL r ∧
+      M HASW (r + k + 1) = M HASW r := by
   intro k
   induction k with
   | zero =>
@@ -1089,9 +1091,14 @@ theorem ins_sim : ∀ k r, r < m → M K_IN r = 1 → (M INL r).val = k + 1 →
     have hr1m : r + 1 < m := lt_m hsat R hcs hmn hpad hfit hr1
       (kz_of hsat R hcs hmn hpad hfit hr1 (a := K_NOUT) (by simp [K_NOUT]) hnout (c := K_PAD) (by simp [K_PAD])
         (by simp [K_PAD, K_NOUT]))
+    have inv := step_inv hsat hr1
+      (kz_of hsat R hcs hmn hpad hfit hr1 (a := K_NOUT) (by simp [K_NOUT]) hnout (c := K_TXH) (by simp [K_TXH]) (by simp [K_TXH, K_NOUT]))
+      (by rw [ka K_LOCK (by simp [K_LOCK])]; simp [K_LOCK, K_IN]) (by rw [ka K_WCNT (by simp [K_WCNT])]; simp [K_WCNT, K_IN])
     refine ⟨[(⟨⟨slice R (M START r).val 32, Spec.Block.le (slice R ((M START r).val + 32) 4)⟩,
       slice R ((M START r).val + 36 + prefOf M r) (M VAL r).val,
-      Spec.Block.le (slice R ((M START r).val + 36 + prefOf M r + (M VAL r).val) 4), []⟩ : Spec.Block.TxIn)], ?_, by simpa using hr1m, by simpa using hnout⟩
+      Spec.Block.le (slice R ((M START r).val + 36 + prefOf M r + (M VAL r).val) 4), []⟩ : Spec.Block.TxIn)], ?_,
+      by simpa using hr1m, by simpa using hnout, by simpa using inv.1, by simpa using inv.2.1, by simpa using inv.2.2.1,
+      by simpa using inv.2.2.2⟩
     rw [toksFrom_cons hr, tok_in hsat R hcs hmn hpad hfit hrn hin]
     simp only [Spec.Block.insT]
     rw [if_pos ⟨slice_length (by omega), slice_length (by omega), by rw [slice_length (by omega)]; exact hv,
@@ -1122,15 +1129,19 @@ theorem ins_sim : ∀ k r, r < m → M K_IN r = 1 → (M INL r).val = k + 1 →
       rw [(counters hsat hr1).2.1 ht1, hin]; exact val_pred hinl
     have hr1m : r + 1 < m := lt_m hsat R hcs hmn hpad hfit hr1
       (kz_of hsat R hcs hmn hpad hfit hr1 (a := K_IN) (by simp [K_IN]) hin1 (c := K_PAD) (by simp [K_PAD]) (by simp [K_PAD, K_IN]))
-    obtain ⟨ins, hins, hlt, hno⟩ := ih (r + 1) hr1m hin1 hinl1
+    obtain ⟨ins, hins, hlt, hno, i1, i2, i3, i4⟩ := ih (r + 1) hr1m hin1 hinl1
+    have inv := step_inv hsat hr1 ht1 (by rw [ka K_LOCK (by simp [K_LOCK])]; simp [K_LOCK, K_IN])
+      (by rw [ka K_WCNT (by simp [K_WCNT])]; simp [K_WCNT, K_IN])
+    have e : r + 1 + k + 1 = r + (k + 1) + 1 := by ring
+    rw [e] at hlt hno i1 i2 i3 i4
     refine ⟨(⟨⟨slice R (M START r).val 32, Spec.Block.le (slice R ((M START r).val + 32) 4)⟩,
       slice R ((M START r).val + 36 + prefOf M r) (M VAL r).val,
-      Spec.Block.le (slice R ((M START r).val + 36 + prefOf M r + (M VAL r).val) 4), []⟩ : Spec.Block.TxIn) :: ins, ?_, by rw [show r + (k + 1) + 1 = r + 1 + k + 1 by ring]; exact hlt,
-      by rw [show r + (k + 1) + 1 = r + 1 + k + 1 by ring]; exact hno⟩
+      Spec.Block.le (slice R ((M START r).val + 36 + prefOf M r + (M VAL r).val) 4), []⟩ : Spec.Block.TxIn) :: ins, ?_,
+      hlt, hno, i1.trans inv.1, i2.trans inv.2.1, i3.trans inv.2.2.1, i4.trans inv.2.2.2⟩
     rw [toksFrom_cons hr, tok_in hsat R hcs hmn hpad hfit hrn hin]
     simp only [Spec.Block.insT]
     rw [if_pos ⟨slice_length (by omega), slice_length (by omega), by rw [slice_length (by omega)]; exact hv,
-      slice_length (by omega)⟩, hins, show r + 1 + k + 1 = r + (k + 1) + 1 by ring]
+      slice_length (by omega)⟩, hins, e]
     simp
 
 /-- **Outputs.** From an output row with `k + 1` outputs left, `outsT` reads them; the last one
