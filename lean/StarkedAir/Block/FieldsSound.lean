@@ -1578,6 +1578,95 @@ theorem tx_sim {r : ℕ} (hr : r < m) (ht : M K_TXH r = 1) :
     simp only
     rw [if_pos ⟨hl4, fun _ => hany⟩]
 
+/-- **Transactions.** From a transaction head with `t` more transactions after it, `txsT` reads all
+`t + 1` and reaches the padding. -/
+theorem txs_sim (hnp : ∀ r < m, M K_PAD r = 0) : ∀ t r, r < m → M K_TXH r = 1 → (M TXL r).val = t →
+    ∃ txs, Spec.Block.txsT (t + 1) (toksFrom M R m r) = some (txs, toksFrom M R m m) := by
+  intro t
+  induction t with
+  | zero =>
+    intro r hr ht htl
+    obtain ⟨tx, r', htx, hrr', hr'm, hl, htl'⟩ := tx_sim hsat R hcs hmn hpad hfit hr ht
+    have hr'n : r' < n := by omega
+    have he : M E1C r' = M TXL r' := by
+      have ka := kinds_at hsat hr'n (a := K_LOCK) (by simp [K_LOCK]) hl
+      rw [e1_eq hsat hr'n, ka K_BLK (by simp [K_BLK]), ka K_TXH (by simp [K_TXH]), ka K_IN (by simp [K_IN]),
+        ka K_NOUT (by simp [K_NOUT]), ka K_OUT (by simp [K_OUT]), ka K_WCNT (by simp [K_WCNT]),
+        ka K_WITEM (by simp [K_WITEM]), hl]
+      simp [K_BLK, K_TXH, K_IN, K_NOUT, K_OUT, K_WCNT, K_WITEM, K_LOCK]
+    have hz : M Z1 r' = 1 := (z1_iff_val0 hsat hr'n he (ZMod.val_lt _)).mpr (by rw [htl', htl])
+    have hp : M K_PAD (r' + 1) = 1 := (next_kind hsat (by omega)).2.2.2.2.2.2.2.2.2.2.2.1 hl hz
+    have hm' : r' + 1 = m := by
+      by_contra hne
+      have := hnp (r' + 1) (by omega); rw [hp] at this; exact one_ne_zero this
+    refine ⟨[tx], ?_⟩
+    simp only [Spec.Block.txsT]
+    rw [htx, ← hm']
+    simp [Spec.Block.txsT]
+  | succ t ih =>
+    intro r hr ht htl
+    obtain ⟨tx, r', htx, hrr', hr'm, hl, htl'⟩ := tx_sim hsat R hcs hmn hpad hfit hr ht
+    have hr'n : r' < n := by omega
+    have hr1 : r' + 1 < n := by omega
+    have ka := kinds_at hsat hr'n (a := K_LOCK) (by simp [K_LOCK]) hl
+    have he : M E1C r' = M TXL r' := by
+      rw [e1_eq hsat hr'n, ka K_BLK (by simp [K_BLK]), ka K_TXH (by simp [K_TXH]), ka K_IN (by simp [K_IN]),
+        ka K_NOUT (by simp [K_NOUT]), ka K_OUT (by simp [K_OUT]), ka K_WCNT (by simp [K_WCNT]),
+        ka K_WITEM (by simp [K_WITEM]), hl]
+      simp [K_BLK, K_TXH, K_IN, K_NOUT, K_OUT, K_WCNT, K_WITEM, K_LOCK]
+    have hz : M Z1 r' = 0 := by
+      rcases (z1_spec hsat hr'n).1 with h | h
+      · exact h
+      · have := (z1_iff_val0 hsat hr'n he (ZMod.val_lt _)).mp h; rw [htl', htl] at this; omega
+    have ht1 : M K_TXH (r' + 1) = 1 := (next_kind hsat hr1).2.2.2.2.2.2.2.2.2.2.1 hl hz
+    have htl1 : (M TXL (r' + 1)).val = t := by
+      rw [(counters hsat hr1).1, hl, htl']; exact val_pred htl
+    have hr1m : r' + 1 < m := lt_m hsat R hcs hmn hpad hfit hr1
+      (kz_of hsat R hcs hmn hpad hfit hr1 (a := K_TXH) (by simp [K_TXH]) ht1 (c := K_PAD) (by simp [K_PAD]) (by simp [K_PAD, K_TXH]))
+    obtain ⟨txs, htxs⟩ := ih (r' + 1) hr1m ht1 htl1
+    refine ⟨tx :: txs, ?_⟩
+    rw [Spec.Block.txsT, htx]
+    simp only
+    rw [htxs]
+    rfl
+
+/-- **The block.** The rows' tokens are accepted by the block grammar. -/
+theorem block_sim (hnp : ∀ r < m, M K_PAD r = 0) : ∃ b, Spec.Block.toksBlock (toksFrom M R m 0) = some b := by
+  have hn : 0 < n := by omega
+  have hb0 := first_blk hsat hn
+  have h0m : 0 < m := lt_m hsat R hcs hmn hpad hfit hn
+    (kz_of hsat R hcs hmn hpad hfit hn (a := K_BLK) (by simp [K_BLK]) hb0 (c := K_PAD) (by simp [K_PAD]) (by simp [K_PAD, K_BLK]))
+  have h1n : 1 < n := by omega
+  have ka := kinds_at hsat hn (a := K_BLK) (by simp [K_BLK]) hb0
+  obtain ⟨hv, hlen, -, -, hft⟩ := row_info hsat R hcs hmn hpad hfit h0m (a := K_BLK) (by simp [K_BLK]) hb0
+    (by simp [K_BLK, K_LOCK]) (by simp [K_BLK, K_PAD])
+  simp only [lenN, if_true] at hlen
+  obtain ⟨hbl, -, -, -, -⟩ := row_sets hsat hn
+  obtain ⟨htxl, hz⟩ := hbl hb0
+  have he : M E1C 0 = M VAL 0 := by
+    rw [e1_eq hsat hn, ka K_TXH (by simp [K_TXH]), ka K_IN (by simp [K_IN]), ka K_NOUT (by simp [K_NOUT]),
+      ka K_OUT (by simp [K_OUT]), ka K_WCNT (by simp [K_WCNT]), ka K_WITEM (by simp [K_WITEM]),
+      ka K_LOCK (by simp [K_LOCK]), hb0]
+    simp [K_BLK, K_TXH, K_IN, K_NOUT, K_OUT, K_WCNT, K_WITEM, K_LOCK]
+  have hntx : 1 ≤ (M VAL 0).val := by
+    by_contra h0
+    have := (z1_iff_val0 hsat hn he (ZMod.val_lt _)).mpr (by omega)
+    rw [hz] at this; exact zero_ne_one this
+  obtain ⟨t0, ht0⟩ : ∃ t0, (M VAL 0).val = t0 + 1 := ⟨(M VAL 0).val - 1, by omega⟩
+  have ht1 : M K_TXH (0 + 1) = 1 := (next_kind hsat h1n).1 hb0
+  have htl1 : (M TXL (0 + 1)).val = t0 := by
+    rw [(counters hsat h1n).1, ka K_LOCK (by simp [K_LOCK]), htxl]
+    simp only [K_LOCK, K_BLK, show (7 : ℕ) ≠ 0 by norm_num, if_false, sub_zero]
+    exact val_pred ht0
+  have h1m : 0 + 1 < m := lt_m hsat R hcs hmn hpad hfit h1n
+    (kz_of hsat R hcs hmn hpad hfit h1n (a := K_TXH) (by simp [K_TXH]) ht1 (c := K_PAD) (by simp [K_PAD]) (by simp [K_PAD, K_TXH]))
+  obtain ⟨txs, htxs⟩ := txs_sim hsat R hcs hmn hpad hfit hnp t0 (0 + 1) h1m ht1 htl1
+  refine ⟨⟨slice R (M START 0).val 80, txs⟩, ?_⟩
+  rw [toksFrom_cons h0m, tok_blk hsat R hcs hmn hpad hfit hn hb0]
+  simp only [Spec.Block.toksBlock]
+  rw [if_pos ⟨slice_length (by omega), hntx, by unfold Spec.Block.MAX_SIZE; unfold MAXS at hv; exact hv⟩, ht0, htxs,
+    toksFrom_end]
+
 end Grammar
 
 /-! ### The block system: bytes (component 0) and fields (component 1) -/
