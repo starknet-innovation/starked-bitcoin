@@ -157,3 +157,13 @@ Why: Correctness and provability before speed.
 Date: 2026-10-08 · By: owner · Status: active
 Decision: The M3a block-data proof uses several components (byte stream, parser, SHA-256, Merkle, checks) linked by LogUp lookups. Work order: `IR-LOGUP` first, then the parser, then hashing, Merkle and checks.
 Why: Variable-length data cannot be followed with fixed row offsets, and `HC-HASHTREE` needs lookups too. See [block-data.md](../design/block-data.md).
+
+### D-029 — The block commitment reserves spent-output slots from day one
+Date: 2026-10-08 · By: owner · Status: active
+Decision: The canonical block encoding committed by the M3a block proof includes, for every input, the spent output (amount, scriptPubKey, creation height, coinbase flag), filled by the prover from undo data. M3a commits to these slots without checking them; M3b proves they equal the coins removed from the UTXO set.
+Why: M3a block proofs stay valid when M3b (and M3c, whose Taproot sighash needs spent amounts and scripts) arrive; re-proving every block would cost months of CPU.
+
+### D-030 — Blake2s for the block commitment
+Date: 2026-10-08 · By: owner · Status: active
+Decision: The block-data commitment uses Blake2s-256.
+Why: Mature, native in the recursion circuit (Blake gate), easy for anyone to recompute. Cost inside AIRs is higher than Poseidon2 (bit operations); revisit only if hashing becomes the measured bottleneck (D-027). Both are post-quantum in the usual sense for hashes (about 128-bit preimage security under Grover at 256-bit output); to be reviewed.
