@@ -534,4 +534,118 @@ theorem bPre_FIN {k p : ℕ} (hk : k < 4) (hp : p < PERIOD) : bPre (P_FIN k) p =
   rw [bPre_eq (by simp [P_FIN]; omega) hp]
   simp [preQ, P_FIN, show ¬ 12 + k < 4 by omega, show ¬ 12 + k < 12 by omega, show 12 + k < 16 by omega]
 
+/-! ## Message limbs over a period -/
+
+section Period
+
+variable {n : ℕ} {pub : ℕ → F} {main : ℕ → ℕ → F} (hsat : BlakeSat n preCols pub main)
+include hsat
+
+theorem msg_copy {s : ℕ} (hs : s % PERIOD = 0) (hn : s + PERIOD ≤ n) {k h : ℕ} (hk : k < 16) (hh : h ≤ 1) :
+    ∀ p < PERIOD, main (ML k h) (s + p) = main (ML k h) s := by
+  intro p hp
+  induction p with
+  | zero => rfl
+  | succ p ih =>
+    have hc : Expr.mul (pre P_COPY) (.sub (col (MSG + (2 * k + h))) (col (MSG + (2 * k + h)) (-1))) ∈ copy :=
+      List.mem_map.mpr ⟨2 * k + h, List.mem_range.mpr (by omega), rfl⟩
+    have := hsat (s + (p + 1)) (by omega) _ (mem_copy hc)
+    rw [show s + (p + 1) = s + (p + 1) from rfl] at this
+    simp only [Expr.eval] at this
+    have hP : PERIOD = 88 := rfl
+    have hw : wrap n (s + (p + 1)) (-1) = s + p := by
+      rw [show (-1 : ℤ) = -((1 : ℕ) : ℤ) by norm_num, wrap_back (by omega) (by omega)]; omega
+    rw [pre_at hs hp (by omega) (by simp [P_COPY]), bPre_COPY (by omega) hp, one_mul, sub_eq_zero, eval_col, eval_col,
+      wrap_zero (by omega), hw] at this
+    simp only [ML, MSG] at this ⊢
+    rw [show 256 + 2 * k + h = 256 + (2 * k + h) by ring, this, ← show 256 + 2 * k + h = 256 + (2 * k + h) by ring]
+    exact ih (by omega)
+
+theorem init_word {s k w : ℕ} (hs : s % PERIOD = 0) (hn : s + PERIOD ≤ n) (hk : k < 4) (hw : w < 8)
+    {val : ℕ → Expr} {Y : Word} (hmem : ∀ c ∈ bitsEq (pre (P_INIT k)) w val, c ∈ init)
+    (hval : ∀ i < 32, (val i).eval n preCols pub main (s + k) = ((Y.getLsbD i).toNat : F)) :
+    word main (32 * w) (s + k) = Y := by
+  have hP : PERIOD = 88 := rfl
+  exact bitsEq_word (by omega) (fun c hc => hsat (s + k) (by omega) c (mem_init (hmem c hc)))
+    (by rw [pre_at hs (by omega) (by omega) (by simp [P_INIT]; omega), bPre_INIT hk (by omega), if_pos rfl])
+    (word_bits hsat (by omega) hw) hval
+
+end Period
+
+theorem IV_getLsbD (k i : ℕ) (hi : i < 32) : (Spec.Blake2s.IV k).getLsbD i = ivBit k i := by
+  unfold Spec.Blake2s.IV ivBit
+  rw [BitVec.getLsbD_ofNat]
+  simp [hi]
+
+theorem eval_xorC {n : ℕ} {pc : List PreCol} {pub : ℕ → F} {main : ℕ → ℕ → F} {r : ℕ} {x : Expr} {a : Bool}
+    (hx : x.eval n pc pub main r = (a.toNat : F)) (c : Bool) :
+    (xorC x c).eval n pc pub main r = ((a ^^ c).toNat : F) := by
+  unfold xorC
+  cases c <;> cases a <;> simp_all [Expr.eval, eval_cst]
+
+/-- The d-role values of the init rows (as `init` writes them). -/
+def initD (k i : ℕ) : Expr :=
+  if k = 0 then cst (ivBit 7 i).toNat
+  else if k = 1 then xorC (col (WB 0 i) (-1)) (ivBit 4 i)
+  else if k = 2 then xorC (col (WB 1 i) (-2)) (ivBit 5 i)
+  else xorC (col (WB 2 0) (-3)) (ivBit 6 i)
+
+theorem init_mem_c {k : ℕ} (hk : k < 4) :
+    ∀ c ∈ bitsEq (pre (P_INIT k)) (outW 2) (fun i => cst (ivBit ([2, 3, 0, 1].getD k 0) i).toNat), c ∈ init := by
+  intro c hc
+  simp only [init, List.mem_append, List.mem_flatMap, List.mem_range]
+  exact Or.inl ⟨k, hk, Or.inl hc⟩
+
+theorem init_mem_d {k : ℕ} (hk : k < 4) : ∀ c ∈ bitsEq (pre (P_INIT k)) (outW 3) (initD k), c ∈ init := by
+  intro c hc
+  simp only [init, List.mem_append, List.mem_flatMap, List.mem_range]
+  exact Or.inl ⟨k, hk, Or.inr hc⟩
+
+/-- `t`'s low and high words and the final flag, as row 0 of the period holds them. -/
+def fBit (main : ℕ → ℕ → F) (s : ℕ) : Bool := bit main (32 * 2) s
+
+section Init
+
+variable {n : ℕ} {pub : ℕ → F} {main : ℕ → ℕ → F} (hsat : BlakeSat n preCols pub main)
+include hsat
+
+theorem init_c {s k : ℕ} (hs : s % PERIOD = 0) (hn : s + PERIOD ≤ n) (hk : k < 4) :
+    rw4 main (s + k) 2 = Spec.Blake2s.IV ([2, 3, 0, 1].getD k 0) :=
+  init_word hsat hs hn hk (by decide) (init_mem_c hk) (fun i hi => by rw [eval_cst, IV_getLsbD _ _ hi])
+
+theorem init_d {s : ℕ} (hs : s % PERIOD = 0) (hn : s + PERIOD ≤ n) :
+    rw4 main s 3 = Spec.Blake2s.IV 7 ∧
+    rw4 main (s + 1) 3 = Spec.Blake2s.IV 4 ^^^ word main (32 * 0) s ∧
+    rw4 main (s + 2) 3 = Spec.Blake2s.IV 5 ^^^ word main (32 * 1) s ∧
+    rw4 main (s + 3) 3 = Spec.Blake2s.IV 6 ^^^ (if fBit main s then BitVec.allOnes 32 else 0) := by
+  have hP : PERIOD = 88 := rfl
+  have wb := fun w (hw : w < 8) => word_bits hsat (r := s) (by omega) hw
+  refine ⟨?_, ?_, ?_, ?_⟩
+  · have := init_word hsat hs hn (k := 0) (by norm_num) (by decide) (init_mem_d (by norm_num))
+      (Y := Spec.Blake2s.IV 7) (fun i hi => by simp [initD, eval_cst, IV_getLsbD _ _ hi])
+    simpa [rw4] using this
+  · exact init_word hsat hs hn (k := 1) (by norm_num) (by decide) (init_mem_d (by norm_num)) (fun i hi => by
+      simp only [initD, show (1 : ℕ) ≠ 0 by decide, if_false, if_true]
+      rw [eval_xorC (eval_bitcol (show wrap n (s + 1) (-1) = s by
+        rw [show (-1 : ℤ) = -((1 : ℕ) : ℤ) by norm_num, wrap_back (by omega) (by omega)]; omega) (wb 0 (by norm_num)) hi)]
+      rw [BitVec.getLsbD_xor, IV_getLsbD _ _ hi, Bool.xor_comm])
+  · exact init_word hsat hs hn (k := 2) (by norm_num) (by decide) (init_mem_d (by norm_num)) (fun i hi => by
+      simp only [initD, show (2 : ℕ) ≠ 0 by decide, show (2 : ℕ) ≠ 1 by decide, if_false, if_true]
+      rw [eval_xorC (eval_bitcol (show wrap n (s + 2) (-2) = s by
+        rw [show (-2 : ℤ) = -((2 : ℕ) : ℤ) by norm_num, wrap_back (by omega) (by omega)]; omega) (wb 1 (by norm_num)) hi)]
+      rw [BitVec.getLsbD_xor, IV_getLsbD _ _ hi, Bool.xor_comm])
+  · exact init_word hsat hs hn (k := 3) (by norm_num) (by decide) (init_mem_d (by norm_num)) (fun i hi => by
+      simp only [initD, show (3 : ℕ) ≠ 0 by decide, show (3 : ℕ) ≠ 1 by decide, show (3 : ℕ) ≠ 2 by decide, if_false]
+      rw [eval_xorC (eval_bitcol (show wrap n (s + 3) (-3) = s by
+        rw [show (-3 : ℤ) = -((3 : ℕ) : ℤ) by norm_num, wrap_back (by omega) (by omega)]; omega) (wb 2 (by norm_num))
+        (show 0 < 32 by norm_num))]
+      rw [BitVec.getLsbD_xor, IV_getLsbD _ _ hi, word_getLsbD _ _ (show 0 < 32 by norm_num)]
+      unfold fBit
+      cases hf : bit main (32 * 2 + 0) s
+      · simp [hf]
+      · simp only [hf, if_true, BitVec.getLsbD_allOnes, hi, decide_true]
+        cases ivBit 6 i <;> rfl)
+
+end Init
+
 end StarkedAir.Blake2s
