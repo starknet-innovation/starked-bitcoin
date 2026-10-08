@@ -643,3 +643,84 @@ theorem mult_vals {r : ℕ} (hr : r < n) {kk : ℕ} (hk : kk < 7) :
 end Rows
 
 end StarkedAir.Block.Fields
+
+namespace StarkedAir.Block.Fields
+
+open StarkedAir
+
+/-! ### The block system: bytes (component 0) and fields (component 1) -/
+
+def blockSys : System := ⟨2, fun i => if i = 0 then bytes else fields⟩
+
+section System
+
+variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ}
+  (h0L : (inst 0).logSize = L) (h1L : (inst 1).logSize = L) (hL : L ≤ 25)
+  (hsat : blockSys.SatisfiedExt inst pub [])
+include h0L h1L hL hsat
+
+theorem fields_sat : ∀ r < 2 ^ L, ∀ c ∈ constraints, c.eval (2 ^ L) preCols pub (inst 1).main r = 0 := by
+  have := hsat.1 1 (by decide); rw [h1L] at this; exact this
+
+theorem bytes_sat : bytes.air.Satisfied L pub (inst 0).main := by
+  have := hsat.1 0 (by decide); rw [h0L] at this; exact this
+
+theorem rows_lt_P : 2 ^ L < P := lt_of_le_of_lt (Nat.pow_le_pow_right (by norm_num) hL) (by unfold P; norm_num)
+
+omit hL hsat in
+theorem sites_len : (sites blockSys inst).length = 8 * 2 ^ L := by
+  simp [sites, blockSys, h0L, h1L, List.length_flatMap, bytes, fields, lookups, List.sum_range_succ]
+  ring
+
+/-- **A fields read.** A lookup of fields row `r` with multiplicity `−1` reads the block byte at its
+position. -/
+theorem sys_read {r : ℕ} (hr : r < 2 ^ L) {kk : ℕ} (hk : kk < 7)
+    (hm : (lookups.getD kk ⟨0, .const 0, []⟩).mult.eval (2 ^ L) preCols pub (inst 1).main r = -1) :
+    ∃ r0, r0 < (pub 0).val ∧
+      ((lookups.getD kk ⟨0, .const 0, []⟩).vals.map (Expr.eval (2 ^ L) preCols pub (inst 1).main r)) =
+        [(r0 : F), (inst 0).main BYTE r0] := by
+  classical
+  have fs := fields_sat h0L h1L hL hsat
+  have hs1 : ((1, r, kk) : Site) ∈ sites blockSys inst := by
+    simp only [sites, List.mem_flatMap, List.mem_range, List.mem_map]
+    exact ⟨1, by decide, r, by rw [h1L]; exact hr, kk, by simp [blockSys, fields, lookups]; omega, rfl⟩
+  have hrel : siteRel blockSys ((1, r, kk) : Site) = REL_BYTE := by
+    simp only [siteRel, siteLookup, blockSys, fields]; interval_cases kk <;> rfl
+  have hmult : siteMult blockSys inst pub ((1, r, kk) : Site) = -1 := by
+    simpa [siteMult, siteEval, siteLookup, blockSys, fields, h1L] using hm
+  -- The tuple has two entries.
+  obtain ⟨p, b, hpb⟩ : ∃ p b, siteVals blockSys inst pub ((1, r, kk) : Site) = [p, b] := by
+    simp only [siteVals, siteLookup, blockSys, fields]
+    interval_cases kk <;> exact ⟨_, _, rfl⟩
+  obtain ⟨r0, hr0, hp, hb⟩ := read_byte hsat.2 (by rfl)
+    (by have := bytes_sat h0L h1L hL hsat; rw [h0L]; exact this) (by rw [h0L]; exact rows_lt_P h0L h1L hL hsat)
+    (fun s hs h0 hrel => by
+      obtain ⟨i, r', k'⟩ := s
+      have hm := (List.mem_flatMap.mp hs)
+      simp only [sites, List.mem_flatMap, List.mem_range, List.mem_map] at hs
+      obtain ⟨i', hi', r'', hr'', k'', hk'', e⟩ := hs
+      simp only [Prod.mk.injEq] at e
+      obtain ⟨rfl, rfl, rfl⟩ := e
+      simp only at h0
+      have hi1 : i' = 1 := by simp [blockSys] at hi'; omega
+      subst hi1
+      have hk7 : k'' < 7 := by simpa [blockSys, fields, lookups] using hk''
+      rw [h1L] at hr''
+      have := mult_vals fs hr'' hk7
+      simpa [siteMult, siteEval, siteLookup, blockSys, fields, h1L] using this)
+    (by
+      calc _ ≤ (sites blockSys inst).length := List.length_filter_le _ _
+        _ = 8 * 2 ^ L := sites_len h0L h1L
+        _ < P := by
+          have : 2 ^ L ≤ 2 ^ 25 := Nat.pow_le_pow_right (by norm_num) hL
+          unfold P; omega)
+    hs1 (by simp) hrel hmult hpb
+  refine ⟨r0, hr0, ?_⟩
+  have : siteVals blockSys inst pub ((1, r, kk) : Site) =
+      (lookups.getD kk ⟨0, .const 0, []⟩).vals.map (Expr.eval (2 ^ L) preCols pub (inst 1).main r) := by
+    simp [siteVals, siteEval, siteLookup, blockSys, fields, h1L]
+  rw [← this, hpb, hp, hb]
+
+end System
+
+end StarkedAir.Block.Fields
