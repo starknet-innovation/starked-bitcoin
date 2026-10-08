@@ -27,3 +27,5 @@ import StarkedAir.Gadgets.WorkSound
 import StarkedAir.Gadgets.VersionSound
 import StarkedAir.Gadgets.TopSound
 import StarkedAir.Gadgets.Aggregate
+import StarkedAir.Spec.Sha256Fast
+import StarkedAir.Spec.Block
