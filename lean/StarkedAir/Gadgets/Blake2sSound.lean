@@ -704,4 +704,126 @@ theorem final_out {s k : ℕ} (hs : s % PERIOD = 0) (hn : s + PERIOD ≤ n) (hk 
 
 end Init
 
+/-! ## The compression -/
+
+theorem sigma_lt (r i : ℕ) : Spec.Blake2s.sigma r i < 16 := by
+  have hall : ∀ l ∈ Spec.Blake2s.SIGMA, ∀ x ∈ l, x < 16 := by decide
+  unfold Spec.Blake2s.sigma
+  have h2 : ∀ l : List ℕ, (∀ x ∈ l, x < 16) → l.getD i 0 < 16 := by
+    intro l hl
+    by_cases hi : i < l.length
+    · rw [List.getD_eq_getElem _ _ hi]; exact hl _ (List.getElem_mem _)
+    · rw [List.getD_eq_default _ _ (by omega)]; norm_num
+  by_cases hr : r < Spec.Blake2s.SIGMA.length
+  · rw [List.getD_eq_getElem _ _ hr]; exact h2 _ (hall _ (List.getElem_mem _))
+  · rw [List.getD_eq_default Spec.Blake2s.SIGMA [] (by omega)]; simp
+
+theorem src_le {g : ℕ} (hg : g < 8) (role : ℕ) : src g role ≤ 4 + g := by
+  interval_cases g <;> rcases role with _ | _ | _ | role <;> simp [src]
+
+/-- The counter `t` a period reads: row 0's `W0` (low) and `W1` (high). -/
+def inT (main : ℕ → ℕ → F) (s : ℕ) : ℕ := (word main (32 * 0) s).toNat + 2 ^ 32 * (word main (32 * 1) s).toNat
+
+/-- Output word `i` of a period: final row `i` (`W0`) for `i < 4`, else final row `(i+3) mod 4` (`W1`). -/
+def outWord (main : ℕ → ℕ → F) (s i : ℕ) : Word :=
+  if i < 4 then word main (32 * 0) (s + 84 + i) else word main (32 * 1) (s + 84 + (i + 3) % 4)
+
+section Main
+
+variable {n : ℕ} {pub : ℕ → F} {main : ℕ → ℕ → F} (hsat : BlakeSat n preCols pub main)
+include hsat
+
+theorem init_state {s : ℕ} (hs : s % PERIOD = 0) (hn : s + PERIOD ≤ n) :
+    ∀ i < 16, (Spec.Blake2s.initV (diagSlot main s) (inT main s) (fBit main s)).getD i 0 = diagSlot main s i := by
+  obtain ⟨d0, d1, d2, d3⟩ := init_d hsat hs hn
+  have c0 := init_c hsat (k := 0) hs hn (by norm_num)
+  have c1 := init_c hsat (k := 1) hs hn (by norm_num)
+  have c2 := init_c hsat (k := 2) hs hn (by norm_num)
+  have c3 := init_c hsat (k := 3) hs hn (by norm_num)
+  have tlo : BitVec.ofNat 32 (inT main s) = word main (32 * 0) s := by
+    apply BitVec.eq_of_toNat_eq
+    simp only [inT, BitVec.toNat_ofNat]
+    have := (word main (32 * 0) s).isLt
+    omega
+  have thi : BitVec.ofNat 32 (inT main s / 2 ^ 32) = word main (32 * 1) s := by
+    apply BitVec.eq_of_toNat_eq
+    simp only [inT, BitVec.toNat_ofNat]
+    have := (word main (32 * 0) s).isLt
+    have := (word main (32 * 1) s).isLt
+    rw [show ((word main (32 * 0) s).toNat + 2 ^ 32 * (word main (32 * 1) s).toNat) / 2 ^ 32 =
+      (word main (32 * 1) s).toNat by omega]
+    omega
+  intro i hi
+  interval_cases i <;> simp_all [Spec.Blake2s.initV, diagSlot]
+
+theorem msgWord_copy {s : ℕ} (hs : s % PERIOD = 0) (hn : s + PERIOD ≤ n) {k p : ℕ} (hk : k < 16)
+    (hp : p < PERIOD) : msgWord main k (s + p) = msgWord main k s := by
+  unfold msgWord
+  rw [msg_copy hsat hs hn hk (by norm_num) p hp, msg_copy hsat hs hn hk (by norm_num) p hp]
+
+/-- Every G row of an aligned period computes `mix` on the period's message words. -/
+theorem g_rows {s : ℕ} (hs : s % PERIOD = 0) (hn : s + PERIOD ≤ n)
+    (hm : ∀ k < 16, ∀ h ≤ 1, (main (ML k h) s).val < 65536) :
+    ∀ ρ < 10, ∀ g < 8, GOK main (s + 4 + 8 * ρ + g) g (msgWord main (Spec.Blake2s.sigma ρ (2 * g)) s)
+      (msgWord main (Spec.Blake2s.sigma ρ (2 * g + 1)) s) := by
+  intro ρ hρ g hg
+  have hP : PERIOD = 88 := rfl
+  have hrow : s + 4 + 8 * ρ + g = s + (4 + (8 * ρ + g)) := by ring
+  have hj : 8 * ρ + g < 80 := by omega
+  have hj8 : (8 * ρ + g) / 8 = ρ := by omega
+  have hjm : (8 * ρ + g) % 8 = g := by omega
+  have pa := fun i (hi : i < 50) => pre_at (n := n) (pub := pub) (main := main) (s := s) (p := 4 + (8 * ρ + g)) hs
+    (by omega) (by omega) hi
+  have key := g_step hsat (r := s + (4 + (8 * ρ + g))) (κx := Spec.Blake2s.sigma ρ (2 * g))
+    (κy := Spec.Blake2s.sigma ρ (2 * g + 1)) (by omega) (fun role => by have := src_le hg role; omega) hg
+    (by rw [pa _ (by simp [P_G]; omega), bPre_G hg hj, if_pos hjm])
+    (by rw [pa _ (by simp [P_ISG]), bPre_ISG hj])
+    (fun k hk => by rw [pa _ (by simp [P_XSEL]; omega), bPre_X hk hj, hj8, hjm])
+    (sigma_lt _ _)
+    (fun k hk => by rw [pa _ (by simp [P_YSEL]; omega), bPre_Y hk hj, hj8, hjm])
+    (sigma_lt _ _)
+    (fun k hk h hh => by rw [msg_copy hsat hs hn hk hh _ (by omega)]; exact hm k hk h hh)
+  rw [msgWord_copy hsat hs hn (sigma_lt _ _) (by omega), msgWord_copy hsat hs hn (sigma_lt _ _) (by omega)] at key
+  unfold GOK
+  rw [hrow]
+  exact key
+
+omit hsat in
+theorem compress_eq (h m : ℕ → Word) (t : ℕ) (f : Bool) (i : ℕ) :
+    Spec.Blake2s.compress h m t f i =
+      h i ^^^ (Spec.Blake2s.steps m (Spec.Blake2s.initV h t f) 80).getD i 0 ^^^
+        (Spec.Blake2s.steps m (Spec.Blake2s.initV h t f) 80).getD (i + 8) 0 := rfl
+
+/-- **Blake2s compression soundness for `Blake2s.air`.** In any trace satisfying the AIR, every
+aligned 88-row period computes RFC 7693's `F(h, m, t, f)`: `h` is read from the init rows, `m`
+from the message limbs (which must be 16-bit), `t` and `f` from row 0, and the output from the
+final rows. -/
+theorem compress_sound {s : ℕ} (hs : s % PERIOD = 0) (hn : s + PERIOD ≤ n)
+    (hm : ∀ k < 16, ∀ h ≤ 1, (main (ML k h) s).val < 65536) :
+    ∀ i < 8, Spec.Blake2s.compress (diagSlot main s) (fun k => msgWord main k s) (inT main s) (fBit main s) i =
+      outWord main s i := by
+  intro i hi
+  have hlen : (Spec.Blake2s.initV (diagSlot main s) (inT main s) (fBit main s)).length = 16 := by
+    simp [Spec.Blake2s.initV]
+  have hst := steps_rounds (main := main) (m := fun k => msgWord main k s)
+    (v0 := Spec.Blake2s.initV (diagSlot main s) (inT main s) (fBit main s)) (s := s)
+    hlen (init_state hsat hs hn) (g_rows hsat hs hn hm) 10 le_rfl
+  rw [show 8 * 10 = 80 from rfl] at hst
+  rw [compress_eq, hst i (by omega), hst (i + 8) (by omega)]
+  unfold outWord
+  split_ifs with h4
+  · exact (final_out hsat hs hn h4).1.symm
+  · have := (final_out hsat hs hn (k := (i + 3) % 4) (by omega)).2
+    interval_cases i <;> simpa [bOf] using this.symm
+
+end Main
+
+/-- **Blake2s compression soundness for `Blake2s.air`**, as satisfaction of the exported AIR. -/
+theorem compress_sound_air {logSize : ℕ} {pub : ℕ → F} {main : ℕ → ℕ → F}
+    (hsat : air.Satisfied logSize pub main) {s : ℕ} (hs : s % PERIOD = 0) (hn : s + PERIOD ≤ 2 ^ logSize)
+    (hm : ∀ k < 16, ∀ h ≤ 1, (main (ML k h) s).val < 65536) :
+    ∀ i < 8, Spec.Blake2s.compress (diagSlot main s) (fun k => msgWord main k s) (inT main s) (fBit main s) i =
+      outWord main s i :=
+  compress_sound (fun r hr c hc => hsat r hr c hc) hs hn hm
+
 end StarkedAir.Blake2s

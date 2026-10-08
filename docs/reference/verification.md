@@ -21,6 +21,7 @@ is built from.
 | Property | Theorem | AIR version |
 |---|---|---|
 | SHA-256 compression = FIPS 180-4 | `Sha256.compress_sound_air` | sha256_compress v1 |
+| Blake2s compression = RFC 7693 `F` (message limbs 16-bit) | `Blake2s.compress_sound_air` | blake2s_compress v1 |
 | Header hash = SHA256d(header) | `HeaderChain.chain_sound` | header_chain v1+ |
 | prev-hash linkage; first prev-hash and tip hash = public inputs | `chain_sound` | v1+ |
 | Proof of work (Core `CheckProofOfWork`, mainnet; target ≤ powLimit) | `chain_sound_v2`, `header_pow` | v2+ |
