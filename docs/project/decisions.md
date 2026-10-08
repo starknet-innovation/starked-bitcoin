@@ -167,3 +167,13 @@ Why: M3a block proofs stay valid when M3b (and M3c, whose Taproot sighash needs 
 Date: 2026-10-08 · By: owner · Status: active
 Decision: The block-data commitment uses Blake2s-256.
 Why: Mature, native in the recursion circuit (Blake gate), easy for anyone to recompute. Cost inside AIRs is higher than Poseidon2 (bit operations); revisit only if hashing becomes the measured bottleneck (D-027). Both are post-quantum in the usual sense for hashes (about 128-bit preimage security under Grover at 256-bit output); to be reviewed.
+
+### D-031 — Duplicate inputs are excluded by M3b, as a named obligation
+Date: 2026-10-08 · By: owner · Status: active
+Decision: M3a does not prove Core's `bad-txns-inputs-duplicate` rule. M3b's UTXO update must reject a transaction listing the same outpoint twice (inputs removed one at a time, so a second removal fails), and M3b's soundness theorem must cover it explicitly.
+Why: A uniqueness argument inside M3a needs sorting. The rule exists in Core because "the UTXO step will catch it" was false for Core's check-then-spend design (CVE-2018-17144: the check was skipped in block validation, which allowed crashes and inflation). M3b must not repeat that assumption.
+
+### D-032 — Blake2s for the header tree; order: Blake2s AIR, header tree, then M3a
+Date: 2026-10-08 · By: owner · Status: active
+Decision: `HC-HASHTREE` hashes with Blake2s inside the AIRs and in the recursion nodes. Work order: a Blake2s compression component with its Lean proof (shared with the block commitment, D-030), then `HC-HASHTREE` (header AIR v7, node circuit, outer verifier, full-chain re-proof), then M3a.1–M3a.6.
+Why: One hash throughout keeps the verifier simple; Blake2s is native in the recursion circuit; the Blake2s AIR is needed for M3a anyway.
