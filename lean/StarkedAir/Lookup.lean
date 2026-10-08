@@ -120,4 +120,91 @@ theorem used_in_table {sys : System} {inst : ℕ → Inst} {pub : ℕ → F} (hb
   have := natCast_inj_of_lt (a := L.length) (b := 0) (by omega) (by unfold P; norm_num) (by simpa using h0)
   omega
 
+/-! ### Public entries and selector-gated uses -/
+
+/-- Entries the verifier contributes: `(relation, tuple, multiplicity)`. -/
+abbrev Ext := List (ℕ × List F × F)
+
+def extTotal (ext : Ext) (R : ℕ) (v : List F) : F :=
+  ((ext.filter fun e => e.1 = R ∧ e.2.1 = v).map (·.2.2)).sum
+
+section
+variable (sys : System) (inst : ℕ → Inst) (pub : ℕ → F)
+
+/-- Balance including public entries. -/
+def BalancedExt (ext : Ext) : Prop := ∀ R v, total sys inst pub R v + extTotal ext R v = 0
+
+def System.SatisfiedExt (ext : Ext) : Prop :=
+  (∀ i < sys.m, (sys.comp i).air.Satisfied (inst i).logSize pub (inst i).main) ∧ BalancedExt sys inst pub ext
+end
+
+theorem sum_neg_one_or_zero {α : Type} (l : List α) (f : α → F) (h : ∀ a ∈ l, f a = -1 ∨ f a = 0) :
+    (l.map f).sum = -(((l.filter fun a => f a = -1).length : ℕ) : F) := by
+  induction l with
+  | nil => simp
+  | cons a l ih =>
+    simp only [List.map_cons, List.sum_cons, List.filter_cons]
+    rw [ih (fun b hb => h b (List.mem_cons_of_mem _ hb))]
+    rcases h a (List.mem_cons_self ..) with ha | ha
+    · simp only [ha, if_true, decide_true, List.length_cons, Nat.cast_succ]; ring
+    · have : ¬ (0 : F) = -1 := fun h0 => one_ne_zero (neg_eq_zero.mp h0.symm)
+      simp [ha, this]
+
+/-- **Balance gives membership**, with public entries and selector-gated uses. Use sites
+(`use i k`) have multiplicity `−1` or `0` at every row; public entries have multiplicity `−1`. If
+fewer than `P` use sites and public entries take part, every tuple that a use site (with
+multiplicity `−1`) or a public entry looks up is emitted by some table site. -/
+theorem used_in_table_ext {sys : System} {inst : ℕ → Inst} {pub : ℕ → F} {ext : Ext}
+    (hb : BalancedExt sys inst pub ext)
+    (use : ℕ → ℕ → Prop) [DecidablePred fun s : Site => use s.1 s.2.2]
+    (huse : ∀ s ∈ sites sys inst, use s.1 s.2.2 → siteMult sys inst pub s = -1 ∨ siteMult sys inst pub s = 0)
+    (hext : ∀ e ∈ ext, e.2.2 = -1)
+    (hcount : ((sites sys inst).filter fun s => use s.1 s.2.2).length + ext.length < P)
+    {R : ℕ} {v : List F}
+    (h0 : (∃ s ∈ sites sys inst, use s.1 s.2.2 ∧ siteMult sys inst pub s = -1 ∧ siteRel sys s = R ∧
+        siteVals sys inst pub s = v) ∨ (R, v, -1) ∈ ext) :
+    ∃ s ∈ sites sys inst, ¬ use s.1 s.2.2 ∧ siteRel sys s = R ∧ siteVals sys inst pub s = v := by
+  by_contra hne
+  push Not at hne
+  obtain ⟨L, hL⟩ : ∃ L, L = (sites sys inst).filter fun s => siteRel sys s = R ∧ siteVals sys inst pub s = v :=
+    ⟨_, rfl⟩
+  have hall : ∀ s ∈ L, use s.1 s.2.2 := by
+    intro s hs
+    rw [hL, List.mem_filter] at hs
+    by_contra hn
+    have h2 : siteRel sys s = R ∧ siteVals sys inst pub s = v := by simpa using hs.2
+    exact hne s hs.1 hn h2.1 h2.2
+  have hsub : ∀ s ∈ L, siteMult sys inst pub s = -1 ∨ siteMult sys inst pub s = 0 :=
+    fun s hs => huse s (List.mem_filter.mp (hL ▸ hs)).1 (hall s hs)
+  set E := ext.filter fun e => e.1 = R ∧ e.2.1 = v
+  have htot : total sys inst pub R v = -(((L.filter fun s => siteMult sys inst pub s = -1).length : ℕ) : F) := by
+    unfold total; rw [← hL]; exact sum_neg_one_or_zero L _ hsub
+  have hext' : extTotal ext R v = -((E.length : ℕ) : F) := by
+    unfold extTotal
+    exact sum_neg_one (E) _ (fun e he => hext e (List.mem_filter.mp he).1)
+  set a := (L.filter fun s => siteMult sys inst pub s = -1).length
+  have hpos : 0 < a + E.length := by
+    rcases h0 with ⟨s, hs, hu, hm, hr, hv⟩ | he
+    · have : s ∈ L.filter fun s => siteMult sys inst pub s = -1 :=
+        List.mem_filter.mpr ⟨hL ▸ List.mem_filter.mpr ⟨hs, by simp [hr, hv]⟩, by simp [hm]⟩
+      have := List.length_pos_of_mem this; omega
+    · have : (R, v, (-1 : F)) ∈ E := List.mem_filter.mpr ⟨he, by simp⟩
+      have := List.length_pos_of_mem this; omega
+  have hle : a ≤ ((sites sys inst).filter fun s => use s.1 s.2.2).length := by
+    calc a ≤ L.length := List.length_filter_le _ _
+      _ ≤ _ := by
+        have e : L = L.filter fun s => decide (use s.1 s.2.2) :=
+          (List.filter_eq_self.mpr fun s hs => by simpa using hall s hs).symm
+        rw [e, hL, List.filter_filter]
+        apply List.Sublist.length_le
+        apply List.monotone_filter_right
+        intro x hx
+        simp only [Bool.and_eq_true, decide_eq_true_eq] at hx ⊢
+        exact hx.1
+  have hEle : E.length ≤ ext.length := List.length_filter_le _ _
+  have h0' := hb R v
+  rw [htot, hext', ← neg_add, neg_eq_zero, ← Nat.cast_add] at h0'
+  have := natCast_inj_of_lt (a := a + E.length) (b := 0) (by omega) (by unfold P; norm_num) (by simpa using h0')
+  omega
+
 end StarkedAir
