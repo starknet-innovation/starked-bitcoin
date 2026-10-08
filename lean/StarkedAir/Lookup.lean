@@ -123,18 +123,18 @@ theorem used_in_table {sys : System} {inst : ℕ → Inst} {pub : ℕ → F} (hb
 /-! ### Public entries and selector-gated uses -/
 
 /-- Entries the verifier contributes: `(relation, tuple, multiplicity)`. -/
-abbrev Ext := List (ℕ × List F × F)
+abbrev PubEntries := List (ℕ × List F × F)
 
-def extTotal (ext : Ext) (R : ℕ) (v : List F) : F :=
+def extTotal (ext : PubEntries) (R : ℕ) (v : List F) : F :=
   ((ext.filter fun e => e.1 = R ∧ e.2.1 = v).map (·.2.2)).sum
 
 section
 variable (sys : System) (inst : ℕ → Inst) (pub : ℕ → F)
 
 /-- Balance including public entries. -/
-def BalancedExt (ext : Ext) : Prop := ∀ R v, total sys inst pub R v + extTotal ext R v = 0
+def BalancedExt (ext : PubEntries) : Prop := ∀ R v, total sys inst pub R v + extTotal ext R v = 0
 
-def System.SatisfiedExt (ext : Ext) : Prop :=
+def System.SatisfiedExt (ext : PubEntries) : Prop :=
   (∀ i < sys.m, (sys.comp i).air.Satisfied (inst i).logSize pub (inst i).main) ∧ BalancedExt sys inst pub ext
 end
 
@@ -154,7 +154,7 @@ theorem sum_neg_one_or_zero {α : Type} (l : List α) (f : α → F) (h : ∀ a 
 (`use i k`) have multiplicity `−1` or `0` at every row; public entries have multiplicity `−1`. If
 fewer than `P` use sites and public entries take part, every tuple that a use site (with
 multiplicity `−1`) or a public entry looks up is emitted by some table site. -/
-theorem used_in_table_ext {sys : System} {inst : ℕ → Inst} {pub : ℕ → F} {ext : Ext}
+theorem used_in_table_ext {sys : System} {inst : ℕ → Inst} {pub : ℕ → F} {ext : PubEntries}
     (hb : BalancedExt sys inst pub ext)
     (use : ℕ → ℕ → Prop) [DecidablePred fun s : Site => use s.1 s.2.2]
     (huse : ∀ s ∈ sites sys inst, use s.1 s.2.2 → siteMult sys inst pub s = -1 ∨ siteMult sys inst pub s = 0)
