@@ -423,6 +423,74 @@ theorem compact_ser {r : ℕ} (hr : r < n) (hL : M K_LOCK r = 0) (hP : M K_PAD r
     simp only [List.cons.injEq, and_true]
     refine ⟨rfl, u8_eq (by simp; omega), u8_eq (by simp; omega), u8_eq (by simp; omega), u8_eq (by simp; omega)⟩
 
+/-! ### Row values and tiling -/
+
+theorem len_eq {r : ℕ} (hr : r < n) : M LEN r =
+    M K_BLK r * (80 + (M CP1 r + (3 * M CP3 r + 5 * M CP5 r))) +
+    (M K_TXH r * (4 + 2 * M SEG r + (M CP1 r + (3 * M CP3 r + 5 * M CP5 r))) +
+    (M K_IN r * (40 + (M CP1 r + (3 * M CP3 r + 5 * M CP5 r)) + M VAL r) +
+    (M K_NOUT r * (M CP1 r + (3 * M CP3 r + 5 * M CP5 r)) +
+    (M K_OUT r * (8 + (M CP1 r + (3 * M CP3 r + 5 * M CP5 r)) + M VAL r) +
+    (M K_WCNT r * (M CP1 r + (3 * M CP3 r + 5 * M CP5 r)) +
+    (M K_WITEM r * ((M CP1 r + (3 * M CP3 r + 5 * M CP5 r)) + M VAL r) +
+    M K_LOCK r * 4)))))) := by
+  rw [defn hsat (a := LEN) (e := lenE) (mem_tileC (by simp [tileC])) hr]
+  simp [lenE, pref, Expr.eval, ev_k hr, eval_cst]
+
+theorem off_eq {r : ℕ} (hr : r < n) : M OFF r =
+    M K_BLK r * 80 + (M K_TXH r * (4 + 2 * M SEG r) + (M K_IN r * 36 + M K_OUT r * 8)) := by
+  rw [defn hsat (a := OFF) (e := offE) (mem_compactC (by simp [compactC])) hr]
+  simp [offE, Expr.eval, ev_k hr, eval_cst]
+
+theorem e1_eq {r : ℕ} (hr : r < n) : M E1C r =
+    M K_BLK r * M VAL r + (M K_TXH r * M VAL r + (M K_IN r * (M INL r - 1) + (M K_NOUT r * M VAL r +
+    (M K_OUT r * (M OUTL r - 1) + (M K_WCNT r * M VAL r + (M K_WITEM r * (M ITEML r - 1) +
+    M K_LOCK r * M TXL r)))))) := by
+  rw [defn hsat (a := E1C) (e := e1) (mem_zeroC (by simp [zeroC])) hr]
+  simp [e1, one, Expr.eval, ev_k hr, eval_cst]
+
+theorem e2_eq {r : ℕ} (hr : r < n) : M E2C r =
+    (M K_WCNT r + M K_WITEM r) * (M WINL r - 1) + M K_LOCK r * M HASW r := by
+  rw [defn hsat (a := E2C) (e := e2) (mem_zeroC (by simp [zeroC])) hr]
+  simp [e2, one, Expr.eval, ev_k hr, eval_cst]
+
+theorem start_lt {r : ℕ} (hr : r < n) : (M START r).val < 2 ^ 25 := by
+  obtain ⟨m, hm, e⟩ := bits25 hsat (base := 72) (fun j hj => mem_bitC (by
+    simp only [bitC, List.mem_append, List.mem_flatMap, List.mem_range]; right; exact ⟨j, hj, by simp [RS]⟩)) hr
+  have := defn hsat (a := START) (e := sumPow (fun j => k (RS j)) 25) (mem_tileC (by simp [tileC])) hr
+  rw [show (fun j => k (RS j)) = (fun j => k (72 + j)) from rfl, e] at this
+  rw [val_lt_of_eq_cast this (lt_P (by omega))]; exact hm
+
+theorem start_zero (hn : 0 < n) : M START 0 = 0 := by
+  have := sat hsat (mem_tileC (c := .mul first (k START)) (by simp [tileC])) hn
+  simpa [Expr.eval, ev_first hn, ev_k hn] using this
+
+theorem start_succ {r : ℕ} (hr : r + 1 < n) : M START (r + 1) = M START r + M LEN r := by
+  have := sat hsat (mem_tileC (c := .mul notFirst (.sub (k START) (.add (kp START) (kp LEN))))
+    (by simp [tileC])) hr
+  simp only [Expr.eval, ev_notFirst hr, ev_k hr, ev_kp hr, one_mul, sub_eq_zero] at this
+  exact this
+
+theorem pad_start {r : ℕ} (hr : r < n) (h : M K_PAD r = 1) : M START r = pub 0 := by
+  have := sat hsat (mem_tileC (c := .mul (k K_PAD) (.sub (k START) LENPUB)) (by simp [tileC])) hr
+  simp only [Expr.eval, ev_k hr, LENPUB, h, one_mul, sub_eq_zero] at this
+  exact this
+
+theorem last_pad (hn : 0 < n) : M K_PAD (n - 1) = 1 := by
+  have hl : n - 1 < n := by omega
+  have := sat hsat (mem_kindC (c := .mul isLast (oneMinus (k K_PAD))) (by simp [kindC])) hl
+  simp only [Expr.eval, ev_last hl, show ¬ (n - 1 + 1 < n) by omega, if_false, one_mul, oneMinus, one, eval_cst,
+    ev_k hl, Nat.cast_one, sub_eq_zero] at this
+  exact this.symm
+
+theorem first_blk (hn : 0 < n) : M K_BLK 0 = 1 := by
+  have := defn hsat (a := K_BLK) (e := first) (mem_kindC (by simp [kindC])) hn
+  rw [this, ev_first hn]; simp
+
+theorem not_blk {r : ℕ} (hr : r + 1 < n) : M K_BLK (r + 1) = 0 := by
+  have := defn hsat (a := K_BLK) (e := first) (mem_kindC (by simp [kindC])) hr
+  rw [this, ev_first hr]; simp
+
 end Rows
 
 end StarkedAir.Block.Fields
