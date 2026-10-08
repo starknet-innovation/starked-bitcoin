@@ -22,9 +22,11 @@ def WorkOutOk (p : ℕ → F) : Prop := ∀ l < 10, (p (98 + l)).val < 65536
 /-- **Proven public inputs.** If the input-work limbs are 16-bit, the output-work limbs are too,
 and some headers form a valid segment from `p`'s input state to its output state, for every
 real window that matches `p`'s window inputs. -/
+def PubSeg (p : ℕ → F) (H : ℕ) (hs : ℕ → ℕ → Word) : Prop :=
+  ∀ w : List ℕ, pubWindow p = (w ++ sentinel).take 11 → SegmentValid H hs (decodeIn p w) (decodeOut p)
+
 def PubValid (p : ℕ → F) : Prop :=
-  WorkInOk p → WorkOutOk p ∧ ∃ H hs, ∀ w : List ℕ, pubWindow p = (w ++ sentinel).take 11 →
-    SegmentValid H hs (decodeIn p w) (decodeOut p)
+  WorkInOk p → WorkOutOk p ∧ ∃ H hs, PubSeg p H hs
 
 /-- The indices of the input state: prev-hash, height, prev nBits and pst, prev time, MTP
 window, work. All others are the output state. -/
@@ -124,15 +126,10 @@ theorem prevTimes_succ (g : ℕ → ℕ → Word) (v : List ℕ) (n : ℕ) :
 
 /-- **Composition.** A node over two proven children that passes the link checks has proven
 public inputs. -/
-theorem pub_compose {pL pR : ℕ → F} (vL : PubValid pL) (vR : PubValid pR) (l : PubLink pL pR) :
-    PubValid (combine pL pR) := by
+theorem seg_compose {pL pR : ℕ → F} {H1 H2 : ℕ} {hs1 hs2 : ℕ → ℕ → Word} (fL : PubSeg pL H1 hs1)
+    (fR : PubSeg pR H2 hs2) (l : PubLink pL pR) : PubSeg (combine pL pR) (H1 + H2) (catHs H1 hs1 hs2) := by
   obtain ⟨lhash, l34, l35, l36, l37, l44, l45, lwin, lwork, r32, r33, l38, l39, c, hc, h32, h33⟩ := l
-  intro hin
-  rw [workIn_combine] at hin
-  obtain ⟨outL, H1, hs1, fL⟩ := vL hin
-  have hinR : WorkInOk pR := fun k hk => by rw [lwork k hk]; exact outL k hk
-  obtain ⟨outR, H2, hs2, fR⟩ := vR hinR
-  refine ⟨workOut_combine.mpr outR, H1 + H2, catHs H1 hs1 hs2, fun w hw => ?_⟩
+  intro w hw
   rw [pubWindow_combine] at hw
   rw [decodeIn_combine, decodeOut_combine]
   have v1 := fL w hw
@@ -172,6 +169,15 @@ theorem pub_compose {pL pR : ℕ → F} (vL : PubValid pL) (vR : PubValid pR) (l
     unfold pubWork
     exact Finset.sum_congr rfl (fun k hk => by rw [lwork k (Finset.mem_range.mp hk)])
 
+theorem pub_compose {pL pR : ℕ → F} (vL : PubValid pL) (vR : PubValid pR) (l : PubLink pL pR) :
+    PubValid (combine pL pR) := by
+  intro hin
+  rw [workIn_combine] at hin
+  obtain ⟨outL, H1, hs1, fL⟩ := vL hin
+  have hinR : WorkInOk pR := fun k hk => by rw [l.2.2.2.2.2.2.2.2.1 k hk]; exact outL k hk
+  obtain ⟨outR, H2, hs2, fR⟩ := vR hinR
+  exact ⟨workOut_combine.mpr outR, H1 + H2, catHs H1 hs1 hs2, seg_compose fL fR l⟩
+
 section Leaf
 
 variable {logSize : ℕ} {pub : ℕ → F} {main : ℕ → ℕ → F} (hsat : air.Satisfied logSize pub main)
@@ -199,6 +205,25 @@ end Leaf
 
 /-- **The root.** Proven public inputs whose input state is genesis' (no previous block, height
 0, sentinel window, zero work) give a valid chain of headers from genesis to the decoded tip. -/
+theorem seg_from_genesis {p : ℕ → F} {H : ℕ} {hs : ℕ → ℕ → Word} (f : PubSeg p H hs)
+    (hh : p 32 = 0 ∧ p 33 = 0) (hwin : pubWindow p = sentinel) (hwork : ∀ l < 10, p (88 + l) = 0) :
+    SegmentValid H hs ⟨pubState p 0, 0, leN (pubWord p 34), leN (pubWord p 44), leN (pubWord p 36), [], 0⟩
+      (decodeOut p) := by
+  have := f [] (by rw [hwin]; rfl)
+  have e : decodeIn p [] = ⟨pubState p 0, 0, leN (pubWord p 34), leN (pubWord p 44), leN (pubWord p 36), [], 0⟩ := by
+    unfold decodeIn pubWork
+    congr 1
+    · unfold pubWord; rw [hh.1, hh.2]; rfl
+    · exact Finset.sum_eq_zero (fun l hl => by rw [hwork l (Finset.mem_range.mp hl)]; simp)
+  rwa [e] at this
+
+theorem genesis_prev {p : ℕ → F} (hhash : ∀ k < 16, p k = 0) : pubState p 0 = pubState (fun _ => 0) 0 := by
+  unfold pubState pubWord
+  simp only [hhash 0 (by norm_num), hhash 1 (by norm_num), hhash 2 (by norm_num), hhash 3 (by norm_num),
+    hhash 4 (by norm_num), hhash 5 (by norm_num), hhash 6 (by norm_num), hhash 7 (by norm_num),
+    hhash 8 (by norm_num), hhash 9 (by norm_num), hhash 10 (by norm_num), hhash 11 (by norm_num),
+    hhash 12 (by norm_num), hhash 13 (by norm_num), hhash 14 (by norm_num), hhash 15 (by norm_num)]
+
 theorem chain_from_genesis {p : ℕ → F} (v : PubValid p)
     (hhash : ∀ k < 16, p k = 0) (hh : p 32 = 0 ∧ p 33 = 0) (hwin : pubWindow p = sentinel)
     (hwork : ∀ l < 10, p (88 + l) = 0) :
@@ -206,18 +231,6 @@ theorem chain_from_genesis {p : ℕ → F} (v : PubValid p)
       ⟨pubState p 0, 0, leN (pubWord p 34), leN (pubWord p 44), leN (pubWord p 36), [], 0⟩
       (decodeOut p) ∧ pubState p 0 = pubState (fun _ => 0) 0 := by
   obtain ⟨-, H, hs, f⟩ := v (fun l hl => by rw [hwork l hl]; simp)
-  refine ⟨H, hs, ?_, ?_⟩
-  · have := f [] (by rw [hwin]; rfl)
-    have e : decodeIn p [] = ⟨pubState p 0, 0, leN (pubWord p 34), leN (pubWord p 44), leN (pubWord p 36), [], 0⟩ := by
-      unfold decodeIn pubWork
-      congr 1
-      · unfold pubWord; rw [hh.1, hh.2]; rfl
-      · exact Finset.sum_eq_zero (fun l hl => by rw [hwork l (Finset.mem_range.mp hl)]; simp)
-    rwa [e] at this
-  · unfold pubState pubWord
-    simp only [hhash 0 (by norm_num), hhash 1 (by norm_num), hhash 2 (by norm_num), hhash 3 (by norm_num),
-      hhash 4 (by norm_num), hhash 5 (by norm_num), hhash 6 (by norm_num), hhash 7 (by norm_num),
-      hhash 8 (by norm_num), hhash 9 (by norm_num), hhash 10 (by norm_num), hhash 11 (by norm_num),
-      hhash 12 (by norm_num), hhash 13 (by norm_num), hhash 14 (by norm_num), hhash 15 (by norm_num)]
+  exact ⟨H, hs, seg_from_genesis f hh hwin hwork, genesis_prev hhash⟩
 
 end StarkedAir.HeaderChain

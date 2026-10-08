@@ -424,12 +424,12 @@ theorem msgLimbs_eval {n : ℕ} {pub : ℕ → F} {M : ℕ → ℕ → F} {r hal
   simp [Sha256.eval_col, wrap_zero hr]
 
 /-- **Header tree soundness.** If the system (headers, tree) with `2^L` rows per component is
-satisfied and balanced together with the public entry `node(L − 8, 0, T)`, then `T` is the perfect
-Blake2s tree root over the segment's `2^(L−8)` block hashes, in order. -/
-theorem tree_root_sound {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ} {T : Spec.Sha256.State}
+satisfied and balanced together with the public entry `node(L − 8, 0, x)`, then `x` is the limbs of
+the perfect Blake2s tree root over the segment's `2^(L−8)` block hashes, in order. -/
+theorem tree_root_limbs {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ} {x : List F}
     (h0L : (inst 0).logSize = L) (h1L : (inst 1).logSize = L) (hL : 8 ≤ L) (hL28 : L ≤ 28)
-    (hsat : sys.SatisfiedExt inst pub [(REL_NODE, ((L - 8 : ℕ) : F) :: 0 :: limbsOf T, -1)]) :
-    T = rootAt (leafHash inst) (L - 8) 0 := by
+    (hsat : sys.SatisfiedExt inst pub [(REL_NODE, ((L - 8 : ℕ) : F) :: 0 :: x, -1)]) :
+    x = limbsOf (rootAt (leafHash inst) (L - 8) 0) := by
   obtain ⟨hcomp, hb⟩ := hsat
   have hh : HeaderChain.air.Satisfied L pub (inst 0).main := by
     have := hcomp 0 (by decide); rw [h0L] at this; exact this
@@ -458,7 +458,7 @@ theorem tree_root_sound {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ} {T : S
     simp only [Expr.eval, hinit r hr]
     split_ifs <;> simp
   have hcount : ((sites sys inst).filter fun s => s.1 = 1 ∧ s.2.2 < 2).length +
-      [(REL_NODE, ((L - 8 : ℕ) : F) :: 0 :: limbsOf T, (-1 : F))].length < P := by
+      [(REL_NODE, ((L - 8 : ℕ) : F) :: 0 :: x, (-1 : F))].length < P := by
     have := List.length_filter_le (fun s : Site => decide (s.1 = 1 ∧ s.2.2 < 2)) (sites sys inst)
     rw [sites_length h0L h1L] at this
     simp only [List.length_singleton]; omega
@@ -577,10 +577,16 @@ theorem tree_root_sound {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ} {T : S
         simp only [Nat.add_zero] at hyl
         rw [← hx, node_step ht hs0 hsn hyl.symm hyr.symm]
         rfl
-  obtain ⟨s, hs, hnu, hm, -, hv⟩ := mem (R := REL_NODE) (v := ((L - 8 : ℕ) : F) :: 0 :: limbsOf T)
+  obtain ⟨s, hs, hnu, hm, -, hv⟩ := mem (R := REL_NODE) (v := ((L - 8 : ℕ) : F) :: 0 :: x)
     (Or.inr (List.mem_singleton_self _))
-  have := claim K le_rfl 0 (by positivity) (limbsOf T) ⟨s, hs, hnu, hm, site_rel hs, by rw [hv]; simp [hKdef]⟩
-  exact limbsOf_inj this
+  exact claim K le_rfl 0 (by positivity) x ⟨s, hs, hnu, hm, site_rel hs, by rw [hv]; simp [hKdef]⟩
+
+/-- `tree_root_limbs` for an entry given as a root `T`. -/
+theorem tree_root_sound {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ} {T : Spec.Sha256.State}
+    (h0L : (inst 0).logSize = L) (h1L : (inst 1).logSize = L) (hL : 8 ≤ L) (hL28 : L ≤ 28)
+    (hsat : sys.SatisfiedExt inst pub [(REL_NODE, ((L - 8 : ℕ) : F) :: 0 :: limbsOf T, -1)]) :
+    T = rootAt (leafHash inst) (L - 8) 0 :=
+  limbsOf_inj (tree_root_limbs h0L h1L hL hL28 hsat)
 
 end System
 
