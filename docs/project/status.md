@@ -21,14 +21,14 @@ standard axioms only); the in-circuit verifiers and node code stay trusted
 
 ## Next step (concrete)
 
-1. Full-chain re-run with the tree: `zig build -Doptimize=ReleaseFast && ./zig-out/bin/spike chain 20 70 26 data/headers.bin`
-   (about 8 h or more); record `T`, timings, and proof size in a report.
+1. When the full-chain run finishes (see In flight), record `T`, timings and proof size in a report.
 2. M3a.1: block AIR per [block-data.md](../design/block-data.md).
 3. Proposed: REC-FUZZ (differential fuzzing of the plain verifier).
 
 ## In flight
 
-- Nothing (the full-chain re-run has not been started).
+- Full-chain re-run with the tree: `spike chain 20 70 26 data/headers.bin`, started 2026-10-08 ~16:40
+  (PID was 98247; log `data/chain_full_tree.log`, about 16 h). The glue work since does not change circuits.
 
 ## Needs owner
 
@@ -55,11 +55,12 @@ open StarkedAir.HeaderChain StarkedAir.Spec.Bitcoin
 #print axioms pub_compose
 #print axioms chain_from_genesis
 #print axioms StarkedAir.HeaderTree.chain_from_genesis_T
+#print axioms StarkedAir.Circuit.node_compose
 EOS
 (cd lean && lake env lean /tmp/ax.lean)  # expect: propext, Classical.choice, Quot.sound
 
 # JSON drift: committed AIRs must equal the Lean export
-(cd lean && for n in add32_chain sha256_compress header_chain probe_oracle; do
+(cd lean && for n in add32_chain sha256_compress header_chain probe_oracle byte_table byte_user blake2s_compress blake2s_tree header_chain_v7 node_glue leaf_glue; do
   lake env lean --run Export.lean $n | cmp -s - ../airs/$n.json && echo "$n ok" || echo "$n DRIFT"; done)
 
 python3 ~/.claude/skills/document/scripts/check_docs.py .   # expect: 0 errors

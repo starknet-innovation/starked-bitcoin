@@ -41,3 +41,5 @@ import StarkedAir.Gadgets.HeaderTree
 import StarkedAir.Gadgets.HeaderTreeSound
 import StarkedAir.Gadgets.AggregateTree
 import StarkedAir.Circuit.Gadgets
+import StarkedAir.Circuit.BlakeSound
+import StarkedAir.Circuit.NodeSound

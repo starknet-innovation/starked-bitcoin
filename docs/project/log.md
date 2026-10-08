@@ -22,6 +22,24 @@ Next: <the exact next step; must match status.md>
 ---
 
 
+## 2026-10-08 (session 3) — Prover race fixed; CIRCUIT-GLUE done
+Who: Claude (agent, Opus 5.5), with the owner
+Roadmap: CIRCUIT-GLUE → done; PROOF-STORE proposed; HC-HASHTREE full run in progress
+Done:
+- Fixed an intermittent `ConstraintsNotSatisfied` in multi-component proofs (fdd5a03): two components evaluate
+  concurrently and allocated from one arena; `system.prove` now wraps the allocator thread-safely.
+- Glue defined in Lean, exported, replayed (15b6496); proofs: `blake2s_sound`, `node_sound`, `node_compose`, digests, key.
+Evidence:
+- Before the fix about 1 in 4-5 runs of `spike chain 16` failed (ReleaseSafe: integer overflow in the accumulator
+  merge); after it, 10/10 pass.
+- `glue parity` tests: leaf, and node in topology and value mode, gate-identical to the hand-written builders; the
+  node proves and verifies.
+- `lake build` clean, no sorry; `#print axioms` of the new theorems: propext, Classical.choice, Quot.sound.
+Problems / lessons:
+- The first full run with the tree died at start (the race); restarted at fdd5a03, running.
+- A word-level Blake2s spec with the chaining value as a function evaluated exponentially (16^blocks); materialize lists.
+Next: let the full-chain run finish and write its report; then M3a.1.
+
 ## 2026-10-08 (session 2) — IR-LOGUP, BLAKE2S, M3a spec, HC-HASHTREE built and proven
 Who: Claude (agent, Opus 5.5), with the owner
 Roadmap: IR-LOGUP, BLAKE2S, BLOCK-SAMPLES, BLOCK-SPEC, BLOCK-AUDIT → done; HC-HASHTREE → built and proven, full-chain re-run todo

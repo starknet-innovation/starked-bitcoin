@@ -172,17 +172,23 @@ def child (n i : ℕ) : Out ChildRegs :=
   ⟨pubsOps ++ key.ops ++ dg.ops ++ root.ops ++ [.hook i (root.res ++ dg.res) ch],
    ⟨(n + ·), key.res, dg.res, ch⟩, root.next + 8⟩
 
+/-! The node program's parts, in order. -/
+
+def nodeC0 : Out ChildRegs := child 0 0
+def nodeC1 : Out ChildRegs := child nodeC0.next 1
+def nodeLink : Out Unit := linkChecks nodeC1.next nodeC0.res.pubs nodeC1.res.pubs
+/-- The node's key: Blake2s of `hL ‖ kL ‖ hR ‖ kR` (circuit hashes and keys). -/
+def nodeKey : Out (List ℕ) :=
+  blake2s nodeLink.next (nodeC0.res.chash ++ nodeC0.res.key ++ nodeC1.res.chash ++ nodeC1.res.key) 128
+def nodeTree : Out (List ℕ) := treeNode nodeKey.next nodeC0.res.pubs nodeC1.res.pubs
+/-- The node's public inputs: `combine` below `TB`, the tree root above. -/
+def nodeOuts : List ℕ := (List.range N_PUB).map fun k =>
+  if k < TB then (if isIn k then nodeC0.res.pubs k else nodeC1.res.pubs k) else nodeTree.res.getD (k - TB) 0
+def nodeDigest : Out (List ℕ) := pubsDigest nodeTree.next nodeKey.res nodeOuts
+
 /-- **The node program.** Results: the output digest's 8 words. -/
 def nodeProgram : Program :=
-  let c0 := child 0 0
-  let c1 := child c0.next 1
-  let L := linkChecks c1.next c0.res.pubs c1.res.pubs
-  let key := blake2s L.next (c0.res.chash ++ c0.res.key ++ c1.res.chash ++ c1.res.key) 128
-  let T := treeNode key.next c0.res.pubs c1.res.pubs
-  let outs := (List.range N_PUB).map fun k =>
-    if k < TB then (if isIn k then c0.res.pubs k else c1.res.pubs k) else T.res.getD (k - TB) 0
-  let dg := pubsDigest T.next key.res outs
-  ⟨"node_glue", c0.ops ++ c1.ops ++ L.ops ++ key.ops ++ T.ops ++ dg.ops, dg.res⟩
+  ⟨"node_glue", nodeC0.ops ++ nodeC1.ops ++ nodeLink.ops ++ nodeKey.ops ++ nodeTree.ops ++ nodeDigest.ops, nodeDigest.res⟩
 
 /-- **The leaf program**: the verifier hooks (0: proof guess; 1: the system statement with the
 public entry, args: the public inputs), the zero key, the digest. -/
