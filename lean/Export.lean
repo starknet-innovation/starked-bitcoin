@@ -7,6 +7,7 @@ import StarkedAir.Gadgets.Version
 import StarkedAir.Testing.ByteLookup
 import StarkedAir.Gadgets.Blake2s
 import StarkedAir.Gadgets.HeaderTree
+import StarkedAir.Circuit.Gadgets
 
 /-- `lake env lean --run Export.lean <name>` prints canonical JSON. -/
 def main (args : List String) : IO Unit := do
@@ -19,5 +20,7 @@ def main (args : List String) : IO Unit := do
   | ["header_chain_v7"] => IO.println StarkedAir.HeaderTree.headers.toJson
   | ["byte_table"] => IO.println StarkedAir.ByteLookup.table.toJson
   | ["byte_user"] => IO.println StarkedAir.ByteLookup.user.toJson
+  | ["node_glue"] => IO.println StarkedAir.Circuit.nodeProgram.toJson
+  | ["leaf_glue"] => IO.println StarkedAir.Circuit.leafProgram.toJson
   | ["probe_oracle"] => IO.println (StarkedAir.Probe.oracleJson 4 2024)
   | _ => throw <| IO.userError "usage: export-air add32_chain|probe_oracle"

@@ -18,6 +18,7 @@ const circuit = @import("stwo_circuit_frontend");
 const circuit_cpu = @import("stwo_circuit_cpu_integration");
 const leaf = @import("leaf.zig");
 const HT = @import("../btc/header_tree.zig");
+const glue = @import("glue.zig");
 
 const builder = circuit.builder;
 const finalize = circuit.common.finalize;
@@ -135,9 +136,9 @@ fn linkChecks(comptime V: type, ctx: *Context(V), pl: []const Var, pr: []const V
     try ctx.eq(pr[33], try ctx.add(pl[39], c));
 }
 
-/// The finalized (unpadded) node circuit over `children`, whose proofs share `shared`.
-/// `carry` is the height carry's value (`QM31` value mode) or `.{}` (topology mode).
-pub fn buildNodeCircuit(
+/// The hand-written node circuit the glue program replaced; kept as the parity reference
+/// (`glue parity` test). `carry` is the height carry's value or `.{}` (topology mode).
+pub fn buildNodeCircuitRef(
     comptime V: type,
     gpa: std.mem.Allocator,
     table: *const circuit.air_eval.component_table.Table,
@@ -170,6 +171,57 @@ pub fn buildNodeCircuit(
     for (&out, 0..) |*o, k| o.* = if (isIn(k)) pubs[0][k] else pubs[1][k];
     @memcpy(out[T..], &try treeNode(V, &ctx, &pubs[0], &pubs[1]));
     try leaf.finish(V, &ctx, try leaf.pubsDigestVars(V, &ctx, node_key.words, &out));
+    return ctx;
+}
+
+/// The finalized (unpadded) node circuit over `children`, whose proofs share `shared`: the
+/// Lean-defined glue program (`nodeProgram`, Circuit/Gadgets.lean) with the children's
+/// verifiers at its hooks.
+pub fn buildNodeCircuit(
+    comptime V: type,
+    gpa: std.mem.Allocator,
+    table: *const circuit.air_eval.component_table.Table,
+    children: [2]ChildInput(V),
+    shared: *const multiverifier.SharedConfig,
+) !Context(V) {
+    var ctx = try Context(V).init(gpa, component_list.N_RESERVED);
+    errdefer ctx.deinit();
+    const prog = try glue.parse(ctx.scratch(), glue.node_json);
+    // External values per child: public inputs, key words, preprocessed root.
+    const per = N_PUB + 16;
+    const ext = try ctx.scratch().alloc(V, 2 * per);
+    for (children, 0..) |child, i| {
+        @memcpy(ext[per * i ..][0..N_PUB], &child.pubs);
+        for (child.key.words, 0..) |w, k| ext[per * i + N_PUB + k] = w.get();
+        for (child.preprocessed_root.words, 0..) |w, k| ext[per * i + N_PUB + 8 + k] = w.get();
+    }
+    const Hooks = struct {
+        ctx: *Context(V),
+        table: *const circuit.air_eval.component_table.Table,
+        children: [2]ChildInput(V),
+        shared: *const multiverifier.SharedConfig,
+        /// Hook `i`: verify child `i` against (preprocessed root, digest); returns its circuit hash.
+        pub fn call(self: @This(), id: u32, args: []const Var) ![]const Var {
+            const config: circuit_statement.CircuitConfig = .{
+                .config = self.shared.pcs_config,
+                .preprocessed_column_log_sizes = self.shared.preprocessed_column_log_sizes,
+            };
+            var root: HashValue(Var) = undefined;
+            var digest: HashValue(Var) = undefined;
+            for (&root.words, args[0..8]) |*w, v| w.* = .newUnsafe(v);
+            for (&digest.words, args[8..16]) |*w, v| w.* = .newUnsafe(v);
+            const statement = try circuit_statement.CircuitStatement(V).init(self.ctx, self.table, &config, root, digest);
+            const proof_vars = try stark_proof.guess(V, self.ctx, self.children[id].proof);
+            try verify_mod.verify(V, self.ctx, &proof_vars, self.shared.proof_config, &statement, verify_mod.NoStages{});
+            const out = try self.ctx.scratch().alloc(Var, 8);
+            for (out, statement.circuit_hash.words) |*o, w| o.* = w.get();
+            return out;
+        }
+    };
+    const res = try glue.run(V, &ctx, &prog, ext, Hooks{ .ctx = &ctx, .table = table, .children = children, .shared = shared });
+    var digest: HashValue(Var) = undefined;
+    for (&digest.words, res) |*w, v| w.* = .newUnsafe(v);
+    try leaf.finish(V, &ctx, digest);
     return ctx;
 }
 
@@ -207,7 +259,7 @@ fn buildTopology(gpa: std.mem.Allocator, table: *const circuit.air_eval.componen
     var pubs: [N_PUB]NoValue = undefined;
     @memset(&pubs, .{});
     const child: ChildInput(NoValue) = .{ .proof = &empty, .preprocessed_root = undefined, .key = undefined, .pubs = pubs };
-    return buildNodeCircuit(NoValue, gpa, table, .{ child, child }, shared, .{});
+    return buildNodeCircuit(NoValue, gpa, table, .{ child, child }, shared);
 }
 
 /// A proved subtree: its proof, key and public inputs.
@@ -221,6 +273,23 @@ pub const Proved = struct {
     }
 };
 
+/// The node's view of two proved children (proof values stored in `values`).
+fn childInputs(a: std.mem.Allocator, children: [2]*const Proved, values: *[2]stark_proof.Proof(QM31)) ![2]ChildInput(QM31) {
+    var inputs: [2]ChildInput(QM31) = undefined;
+    for (children, &inputs, values) |child, *input, *v| {
+        v.* = try circuit_cpu.verifier_proof.circuitVerifierValues(a, &child.proof.prepared.proof, child.proof.prepared.config);
+        var pubs: [N_PUB]QM31 = undefined;
+        for (&pubs, child.pubs) |*p, x| p.* = QM31.fromBase(x);
+        input.* = .{
+            .proof = v,
+            .preprocessed_root = builder.blake.hashValue(QM31, child.proof.request.preprocessed_root),
+            .key = builder.blake.hashValue(QM31, child.key),
+            .pubs = pubs,
+        };
+    }
+    return inputs;
+}
+
 /// Proves the node over `left` and `right` (both proved under `shape`) and verifies it natively.
 pub fn proveNode(
     gpa: std.mem.Allocator,
@@ -233,21 +302,9 @@ pub fn proveNode(
     // The children's proof values live only while the circuit is built.
     var scratch = std.heap.ArenaAllocator.init(gpa);
     defer scratch.deinit();
-    var inputs: [2]ChildInput(QM31) = undefined;
     var values: [2]stark_proof.Proof(QM31) = undefined;
-    for ([_]*const Proved{ left, right }, &inputs, &values) |child, *input, *v| {
-        v.* = try circuit_cpu.verifier_proof.circuitVerifierValues(scratch.allocator(), &child.proof.prepared.proof, child.proof.prepared.config);
-        var pubs: [N_PUB]QM31 = undefined;
-        for (&pubs, child.pubs) |*p, x| p.* = QM31.fromBase(x);
-        input.* = .{
-            .proof = v,
-            .preprocessed_root = builder.blake.hashValue(QM31, child.proof.request.preprocessed_root),
-            .key = builder.blake.hashValue(QM31, child.key),
-            .pubs = pubs,
-        };
-    }
-    const carry: u32 = if (left.pubs[38].toU32() == 0xffff) 1 else 0;
-    var ctx = try buildNodeCircuit(QM31, gpa, &tables.table, inputs, &shape.shared, QM31.fromBase(M31.fromCanonical(carry)));
+    const inputs = try childInputs(scratch.allocator(), .{ left, right }, &values);
+    var ctx = try buildNodeCircuit(QM31, gpa, &tables.table, inputs, &shape.shared);
     defer ctx.deinit();
     var cp = try leaf.proveCircuit(gpa, a, &ctx, shape.target, shape.fri);
     errdefer cp.deinit();
@@ -373,6 +430,29 @@ test "two chained segments fold into one node proof; a non-chained pair is rejec
     defer l1.proof.deinit();
     const p0: Proved = .{ .proof = l0.proof, .key = leaf.zero_key, .pubs = l0.pubs };
     const p1: Proved = .{ .proof = l1.proof, .key = leaf.zero_key, .pubs = l1.pubs };
+
+    // Glue parity: the replayed node circuit equals the hand-written one, in topology and with
+    // values (both child orders: the carry hint and a failing link alike).
+    {
+        var topo = try buildTopology(gpa, &tables.table, &shape.shared);
+        defer topo.deinit();
+        const empty = try stark_proof.emptyProof(a, shape.shared.proof_config);
+        var pubs: [N_PUB]NoValue = undefined;
+        @memset(&pubs, .{});
+        const nc: ChildInput(NoValue) = .{ .proof = &empty, .preprocessed_root = undefined, .key = undefined, .pubs = pubs };
+        var topo_ref = try buildNodeCircuitRef(NoValue, gpa, &tables.table, .{ nc, nc }, &shape.shared, .{});
+        defer topo_ref.deinit();
+        try glue.expectSameCircuit(&topo_ref.circuit, &topo.circuit);
+        var values: [2]stark_proof.Proof(QM31) = undefined;
+        const inputs = try childInputs(a, .{ &p0, &p1 }, &values);
+        var new = try buildNodeCircuit(QM31, gpa, &tables.table, inputs, &shape.shared);
+        defer new.deinit();
+        const carry: u32 = if (p0.pubs[38].toU32() == 0xffff) 1 else 0;
+        var ref = try buildNodeCircuitRef(QM31, gpa, &tables.table, inputs, &shape.shared, QM31.fromBase(M31.fromCanonical(carry)));
+        defer ref.deinit();
+        try glue.expectSameCircuit(&ref.circuit, &new.circuit);
+        try std.testing.expectEqualSlices(QM31, ref.values(), new.values());
+    }
 
     var timer = try std.time.Timer.start();
     var n = try proveNode(gpa, a, tables, &shape, &p0, &p1);

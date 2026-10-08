@@ -14,6 +14,7 @@ const ir = @import("../air/ir.zig");
 const pv = @import("plain_verifier.zig");
 const H = @import("../btc/header_chain.zig");
 const HT = @import("../btc/header_tree.zig");
+const glue = @import("glue.zig");
 
 const builder = circuit.builder;
 const preprocessed = circuit.common.preprocessed;
@@ -74,10 +75,8 @@ pub fn finish(comptime V: type, ctx: *Context(V), digest: HashValue(Var)) !void 
     try ctx.finalize(false);
 }
 
-/// The finalized (unpadded) leaf circuit: verifies the (headers, tree) system proof `values` whose
-/// relations balance with the public entry `node(k, 0, T)`, and outputs `pubsDigest(0, pubs)`
-/// (`pubs` = the header chain's public inputs, then `T`'s limbs).
-pub fn buildLeafCircuit(
+/// The hand-written leaf circuit the glue program replaced; kept as the parity reference.
+pub fn buildLeafCircuitRef(
     gpa: std.mem.Allocator,
     values: *const pv.PlainProof(QM31),
     config: pv.PlainConfig,
@@ -105,6 +104,61 @@ pub fn buildLeafCircuit(
     var key: [8]U32Wrapper(Var) = undefined;
     for (&key) |*kk| kk.* = try builder.wrappers.constU32(QM31, &ctx, 0);
     try finish(QM31, &ctx, try pubsDigestVars(QM31, &ctx, key, pub_vars));
+    return ctx;
+}
+
+/// The finalized (unpadded) leaf circuit: verifies the (headers, tree) system proof `values` whose
+/// relations balance with the public entry `node(k, 0, T)`, and outputs `pubsDigest(0, pubs)`
+/// (`pubs` = the header chain's public inputs, then `T`'s limbs). The Lean-defined glue program
+/// (`leafProgram`, Circuit/Gadgets.lean) with the verifier at its hooks.
+pub fn buildLeafCircuit(
+    gpa: std.mem.Allocator,
+    values: *const pv.PlainProof(QM31),
+    config: pv.PlainConfig,
+    airs: [2]*const ir.Air,
+    digests: [2][32]u8,
+    pre_root: [32]u8,
+    k: u32,
+    pubs: []const M31,
+) !Context(QM31) {
+    var ctx = try Context(QM31).init(gpa, component_list.N_RESERVED);
+    errdefer ctx.deinit();
+    const prog = try glue.parse(ctx.scratch(), glue.leaf_json);
+    const ext = try ctx.scratch().alloc(QM31, pubs.len);
+    for (ext, pubs) |*e, v| e.* = QM31.fromBase(v);
+    const Hooks = struct {
+        ctx: *Context(QM31),
+        values: *const pv.PlainProof(QM31),
+        config: pv.PlainConfig,
+        airs: [2]*const ir.Air,
+        digests: [2][32]u8,
+        pre_root: [32]u8,
+        k: u32,
+        proof_vars: *pv.PlainProof(Var),
+        /// 0: guess the proof; 1: verify it, with the public entry `node(k, 0, pubs[T_BASE..])`.
+        pub fn call(self: @This(), id: u32, args: []const Var) ![]const Var {
+            if (id == 0) {
+                self.proof_vars.* = try pv.guess(QM31, self.ctx, self.values);
+                return &.{};
+            }
+            const entry_vals = try self.ctx.scratch().alloc(Var, 18);
+            entry_vals[0] = try self.ctx.constant(QM31.fromBase(M31.fromCanonical(self.k)));
+            entry_vals[1] = self.ctx.zero();
+            @memcpy(entry_vals[2..], args[T_BASE..]);
+            const st = pv.PlainStatement{
+                .parts = &.{ .{ .air = self.airs[0], .digest = self.digests[0], .pubs = args[0..T_BASE] }, .{ .air = self.airs[1], .digest = self.digests[1], .pubs = &.{} } },
+                .preprocessed_root = self.pre_root,
+                .ext = &.{.{ .rel = HT.REL_NODE, .vals = entry_vals, .mult = M31.zero().sub(M31.one()) }},
+            };
+            try pv.verifyPlain(QM31, self.ctx, self.proof_vars, self.config, &st);
+            return &.{};
+        }
+    };
+    var proof_vars: pv.PlainProof(Var) = undefined;
+    const res = try glue.run(QM31, &ctx, &prog, ext, Hooks{ .ctx = &ctx, .values = values, .config = config, .airs = airs, .digests = digests, .pre_root = pre_root, .k = k, .proof_vars = &proof_vars });
+    var digest: HashValue(Var) = undefined;
+    for (&digest.words, res) |*w, v| w.* = .newUnsafe(v);
+    try finish(QM31, &ctx, digest);
     return ctx;
 }
 
@@ -212,6 +266,11 @@ pub const SegmentLeaf = struct {
 };
 
 pub fn buildSegmentLeaf(gpa: std.mem.Allocator, a: std.mem.Allocator, log_size: u32, headers: []const H.Header, start: H.ChainStart) !SegmentLeaf {
+    return buildSegmentLeafWith(gpa, a, log_size, headers, start, false);
+}
+
+/// `reference`: build the circuit with the hand-written builder (glue parity test).
+fn buildSegmentLeafWith(gpa: std.mem.Allocator, a: std.mem.Allocator, log_size: u32, headers: []const H.Header, start: H.ChainStart, comptime reference: bool) !SegmentLeaf {
     const system = @import("../air/system.zig");
     const prove_rec = @import("../air/prove_rec.zig");
     var timer = try std.time.Timer.start();
@@ -241,7 +300,7 @@ pub fn buildSegmentLeaf(gpa: std.mem.Allocator, a: std.mem.Allocator, log_size: 
     @memcpy(pubs[T_BASE..], &HT.limbs(tw.root));
     var t: Timings = .{};
     t.segment_ns = timer.lap();
-    const ctx = try buildLeafCircuit(gpa, &values, config, .{ &hair, &tair }, .{ try hair.digest(a), try tair.digest(a) }, pre_root, k, &pubs);
+    const ctx = try (if (reference) buildLeafCircuitRef else buildLeafCircuit)(gpa, &values, config, .{ &hair, &tair }, .{ try hair.digest(a), try tair.digest(a) }, pre_root, k, &pubs);
     t.n_vars = ctx.circuit.n_vars;
     t.build_ns = timer.lap();
     return .{ .ctx = ctx, .pubs = pubs, .timings = t };
@@ -291,6 +350,20 @@ pub fn leafIdentity(gpa: std.mem.Allocator, log_size: u32, genesis_headers: []co
     defer pp.deinit(gpa);
     const id = try circuit_cpu.recursion.circuit_params.identity(gpa, &pp, log_blowup);
     return .{ .root = core.vcs.blake2_hash.digestToU32s(id.preprocessed_root), .hash = core.vcs.blake2_hash.digestToU32s(id.circuit_hash) };
+}
+
+test "glue parity: the replayed leaf circuit equals the hand-written one" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const headers = try H.loadHeaders(a, @embedFile("testdata:mainnet_headers_0_16"));
+    var new = try buildSegmentLeafWith(gpa, a, 12, headers, H.genesis_start, false);
+    defer new.ctx.deinit();
+    var ref = try buildSegmentLeafWith(gpa, a, 12, headers, H.genesis_start, true);
+    defer ref.ctx.deinit();
+    try glue.expectSameCircuit(&ref.ctx.circuit, &new.ctx.circuit);
+    try std.testing.expectEqualSlices(QM31, ref.ctx.values(), new.ctx.values());
 }
 
 test "a header-chain segment proof is wrapped into a verified leaf proof" {
