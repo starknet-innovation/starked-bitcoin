@@ -1,6 +1,6 @@
 # Formalizing our circuits in Lean (parked, 2026-10-08)
 
-Status: parked · Updated: 2026-10-08
+Status: draft · Updated: 2026-10-08
 
 Parked by the owner on 2026-10-08. Resume from "Plan" below.
 **Goal:** everything *we* wrote is proven; only StarkWare-derived software is
