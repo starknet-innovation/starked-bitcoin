@@ -745,6 +745,125 @@ def tokOf (M : ℕ → ℕ → F) (R : Spec.Block.Bytes) (r : ℕ) : Spec.Block.
   else if M K_WITEM r = 1 then .witem (slice R (s + p) v)
   else .lock (slice R s 4)
 
+/-! ### Tokens serialize to their slices -/
+
+section Tokens
+
+variable {n : ℕ} {pub : ℕ → F} {M : ℕ → ℕ → F}
+  (hsat : ∀ r < n, ∀ c ∈ constraints, c.eval n preCols pub M r = 0) (R : Spec.Block.Bytes)
+  (hcs : ∀ r < n, M K_LOCK r + M K_PAD r = 0 → ∀ o : ℕ, M OFF r = (o : F) → o ≤ 86 →
+    (M START r).val + o + prefOf M r ≤ R.length ∧ (M VAL r).val ≤ MAXS ∧
+    Spec.Block.serCompact (M VAL r).val = slice R ((M START r).val + o) (prefOf M r))
+  (hmk : ∀ r < n, M K_TXH r = 1 → M SEG r = 1 →
+    (M START r).val + 5 < R.length ∧ R.getD ((M START r).val + 4) 0 = 0 ∧ R.getD ((M START r).val + 5) 0 = 1)
+include hsat hcs hmk
+
+/-- **A row's token serializes to its slice of the block.** -/
+theorem tok_bytes {r : ℕ} (hr : r < n) (hnp : M K_PAD r = 0)
+    (hfit : (M START r).val + (M LEN r).val ≤ R.length) :
+    Spec.Block.Tok.bytes (tokOf M R r) = slice R (M START r).val (M LEN r).val := by
+  obtain ⟨a, ha, h1⟩ := kind_exists hsat hr
+  have ka := kinds_at hsat hr ha h1
+  obtain ⟨hoff, hlen⟩ := kind_vals hsat hr ha h1
+  have sb := seg_bool hsat hr
+  have hlenv : ∀ l : ℕ, M LEN r = (l : F) → l ≤ 2 ^ 27 → (M LEN r).val = l :=
+    fun l h hl => val_lt_of_eq_cast h (lt_P (by omega))
+  have pb : 1 ≤ prefOf M r ∧ prefOf M r ≤ 5 := by unfold prefOf; split_ifs <;> omega
+  have kz : ∀ c < 9, c ≠ a → M c r = 0 := fun c hc hne => by rw [ka c hc, if_neg hne]
+  interval_cases a <;>
+    simp only [offN, lenN, K_BLK, K_TXH, K_IN, K_NOUT, K_OUT, K_WCNT, K_WITEM, K_LOCK, K_PAD] at hoff hlen h1 kz ⊢ <;>
+    norm_num at hoff hlen
+  · -- BLK
+    have hLP : M 7 r + M 8 r = 0 := by rw [kz 7 (by norm_num) (by norm_num), kz 8 (by norm_num) (by norm_num)]; simp
+    obtain ⟨b1, -, b3⟩ := hcs r hr hLP 80 (by exact_mod_cast hoff) (by norm_num)
+    have hl := hlenv (80 + prefOf M r) (by rw [hlen]; push_cast [ZMod.natCast_zmod_val]; try ring) (by omega)
+    simp only [tokOf, K_BLK, h1, if_true, Spec.Block.Tok.bytes, hl]
+    rw [b3, slice_append (by omega)]
+  · -- TXH
+    have hLP : M 7 r + M 8 r = 0 := by rw [kz 7 (by norm_num) (by norm_num), kz 8 (by norm_num) (by norm_num)]; simp
+    have b0 : M 0 r = 0 := kz 0 (by norm_num) (by norm_num)
+    rcases sb with sg | sg
+    · obtain ⟨b1, -, b3⟩ := hcs r hr hLP 4 (by rw [hoff, sg]; norm_num) (by norm_num)
+      have hl := hlenv (4 + prefOf M r) (by rw [hlen, sg]; push_cast; ring) (by omega)
+      simp only [tokOf, K_BLK, K_TXH, b0, h1, zero_ne_one, if_false, if_true, Spec.Block.Tok.bytes, hl, sg,
+        decide_false, Bool.false_eq_true, List.append_nil]
+      rw [b3, slice_append (by omega)]
+    · obtain ⟨b1, -, b3⟩ := hcs r hr hLP 6 (by rw [hoff, sg]; norm_num) (by norm_num)
+      have hl := hlenv (6 + prefOf M r) (by rw [hlen, sg]; push_cast; ring) (by omega)
+      obtain ⟨m5, m0, m1⟩ := hmk r hr h1 sg
+      have mk : ([0, 1] : Spec.Block.Bytes) = slice R ((M START r).val + 4) 2 := by
+        rw [slice_eq_map (by omega)]
+        simp [List.range_succ, show (M START r).val + 4 + 1 = (M START r).val + 5 by ring]
+        exact ⟨by rw [← List.getD_eq_getElem?_getD, m0], by rw [← List.getD_eq_getElem?_getD, m1]⟩
+      simp only [tokOf, K_BLK, K_TXH, b0, h1, zero_ne_one, if_false, if_true, Spec.Block.Tok.bytes, hl, sg,
+        decide_true]
+      rw [mk, b3, slice_append (by omega), show (M START r).val + 4 + 2 = (M START r).val + 6 by ring,
+        slice_append (by omega)]
+  · -- IN
+    have hLP : M 7 r + M 8 r = 0 := by rw [kz 7 (by norm_num) (by norm_num), kz 8 (by norm_num) (by norm_num)]; simp
+    obtain ⟨c1, cv, c3⟩ := hcs r hr hLP 36 (by exact_mod_cast hoff) (by norm_num)
+    have hl := hlenv (40 + prefOf M r + (M VAL r).val) (by rw [hlen]; push_cast [ZMod.natCast_zmod_val]; try ring) (by unfold MAXS at cv; omega)
+    rw [hl] at hfit ⊢
+    simp only [tokOf, K_BLK, K_TXH, K_IN, kz 0 (by norm_num) (by norm_num), kz 1 (by norm_num) (by norm_num), h1,
+      zero_ne_one, if_false, if_true, Spec.Block.Tok.bytes, Spec.Block.serVarBytes,
+      slice_length (show (M START r).val + 36 + prefOf M r + (M VAL r).val ≤ R.length by omega)]
+    rw [c3]
+    set s0 := (M START r).val
+    set p0 := prefOf M r
+    set v0 := (M VAL r).val
+    rw [slice_append (a := s0 + 36) (b := p0) (c := v0) (by omega), slice_append (a := s0) (b := 32) (c := 4) (by omega),
+      show s0 + 36 = s0 + (32 + 4) by ring, slice_append (a := s0) (b := 32 + 4) (c := p0 + v0) (by omega),
+      show s0 + (32 + 4) + p0 + v0 = s0 + (32 + 4 + (p0 + v0)) by ring,
+      slice_append (a := s0) (b := 32 + 4 + (p0 + v0)) (c := 4) (by omega)]
+    congr 1; ring
+  · -- NOUT
+    have hLP : M 7 r + M 8 r = 0 := by rw [kz 7 (by norm_num) (by norm_num), kz 8 (by norm_num) (by norm_num)]; simp
+    obtain ⟨-, -, c3⟩ := hcs r hr hLP 0 (by exact_mod_cast hoff) (by norm_num)
+    have hl := hlenv (prefOf M r) (by rw [hlen]) (by omega)
+    simp only [tokOf, K_BLK, K_TXH, K_IN, K_NOUT, kz 0 (by norm_num) (by norm_num), kz 1 (by norm_num) (by norm_num),
+      kz 2 (by norm_num) (by norm_num), h1, zero_ne_one, if_false, if_true, Spec.Block.Tok.bytes, hl]
+    rw [c3, Nat.add_zero]
+  · -- OUT
+    have hLP : M 7 r + M 8 r = 0 := by rw [kz 7 (by norm_num) (by norm_num), kz 8 (by norm_num) (by norm_num)]; simp
+    obtain ⟨c1, cv, c3⟩ := hcs r hr hLP 8 (by exact_mod_cast hoff) (by norm_num)
+    have hl := hlenv (8 + prefOf M r + (M VAL r).val) (by rw [hlen]; push_cast [ZMod.natCast_zmod_val]; try ring) (by unfold MAXS at cv; omega)
+    rw [hl] at hfit ⊢
+    simp only [tokOf, K_BLK, K_TXH, K_IN, K_NOUT, K_OUT, kz 0 (by norm_num) (by norm_num),
+      kz 1 (by norm_num) (by norm_num), kz 2 (by norm_num) (by norm_num), kz 3 (by norm_num) (by norm_num), h1,
+      zero_ne_one, if_false, if_true, Spec.Block.Tok.bytes, Spec.Block.serVarBytes,
+      slice_length (show (M START r).val + 8 + prefOf M r + (M VAL r).val ≤ R.length by omega)]
+    rw [c3, slice_append (a := (M START r).val + 8) (by omega), slice_append (a := (M START r).val) (b := 8) (by omega)]
+    congr 1; ring
+  · -- WCNT
+    have hLP : M 7 r + M 8 r = 0 := by rw [kz 7 (by norm_num) (by norm_num), kz 8 (by norm_num) (by norm_num)]; simp
+    obtain ⟨-, -, c3⟩ := hcs r hr hLP 0 (by exact_mod_cast hoff) (by norm_num)
+    have hl := hlenv (prefOf M r) (by rw [hlen]) (by omega)
+    simp only [tokOf, K_BLK, K_TXH, K_IN, K_NOUT, K_OUT, K_WCNT, kz 0 (by norm_num) (by norm_num),
+      kz 1 (by norm_num) (by norm_num), kz 2 (by norm_num) (by norm_num), kz 3 (by norm_num) (by norm_num),
+      kz 4 (by norm_num) (by norm_num), h1, zero_ne_one, if_false, if_true, Spec.Block.Tok.bytes, hl]
+    rw [c3, Nat.add_zero]
+  · -- WITEM
+    have hLP : M 7 r + M 8 r = 0 := by rw [kz 7 (by norm_num) (by norm_num), kz 8 (by norm_num) (by norm_num)]; simp
+    obtain ⟨c1, cv, c3⟩ := hcs r hr hLP 0 (by exact_mod_cast hoff) (by norm_num)
+    have hl := hlenv (prefOf M r + (M VAL r).val) (by rw [hlen]; push_cast [ZMod.natCast_zmod_val]; try ring) (by unfold MAXS at cv; omega)
+    rw [hl] at hfit ⊢
+    simp only [tokOf, K_BLK, K_TXH, K_IN, K_NOUT, K_OUT, K_WCNT, K_WITEM, kz 0 (by norm_num) (by norm_num),
+      kz 1 (by norm_num) (by norm_num), kz 2 (by norm_num) (by norm_num), kz 3 (by norm_num) (by norm_num),
+      kz 4 (by norm_num) (by norm_num), kz 5 (by norm_num) (by norm_num), h1, zero_ne_one, if_false, if_true,
+      Spec.Block.Tok.bytes, Spec.Block.serVarBytes,
+      slice_length (show (M START r).val + prefOf M r + (M VAL r).val ≤ R.length by omega)]
+    rw [c3, Nat.add_zero, slice_append (by omega)]
+  · -- LOCK
+    have hl := hlenv (4) (by rw [hlen]; push_cast [ZMod.natCast_zmod_val]; try ring) (by norm_num)
+    simp only [tokOf, K_BLK, K_TXH, K_IN, K_NOUT, K_OUT, K_WCNT, K_WITEM, kz 0 (by norm_num) (by norm_num),
+      kz 1 (by norm_num) (by norm_num), kz 2 (by norm_num) (by norm_num), kz 3 (by norm_num) (by norm_num),
+      kz 4 (by norm_num) (by norm_num), kz 5 (by norm_num) (by norm_num), kz 6 (by norm_num) (by norm_num),
+      zero_ne_one, if_false, Spec.Block.Tok.bytes, hl]
+  · -- PAD: excluded
+    simp only [K_PAD] at hnp; rw [hnp] at h1; exact absurd h1 zero_ne_one
+
+end Tokens
+
 /-! ### The block system: bytes (component 0) and fields (component 1) -/
 
 def blockSys : System := ⟨2, fun i => if i = 0 then bytes else fields⟩
@@ -916,6 +1035,10 @@ theorem compact_slice {r : ℕ} (hr : r < 2 ^ L)
   refine List.map_congr_left (fun j hj => ?_)
   have hj' := List.mem_range.mp hj
   rw [blockBytes_get (by have := (rd j hj').1; omega), ← (rd j hj').2]
+
+theorem u8_get_eq {Mb : ℕ → ℕ → F} {len i : ℕ} (h : i < len) {b : ℕ} (hb : Mb BYTE i = (b : F)) (b256 : b < 256) :
+    (blockBytes Mb len).getD i 0 = UInt8.ofNat b := by
+  rw [blockBytes_get h, hb, ZMod.val_natCast, Nat.mod_eq_of_lt (lt_P (by omega))]
 
 end System
 
