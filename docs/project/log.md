@@ -38,12 +38,12 @@ Next: REC-FUZZ, then M3 after the owner's decisions (status.md, Needs owner).
 Who: Claude (agent, Opus 5.5), with the owner (Q-MASK choice B)
 Roadmap: REC-PROFILE, REC-COMPOSE, REC-MASK, REC-LEAF, REC-FOLD → done; AGG → in-progress (full-chain run); HC-FULLRUN → in-progress (check running)
 Done:
-- REC-PROFILE (84108f4), REC-COMPOSE `segment_compose` (62dcf31), `dag_correct` (78e59c8).
-- D-024 plain in-circuit verifier for multi-offset, no-LogUp proofs (748a340).
-- REC-LEAF (58065a7): leaf circuit, proved and verified natively.
-- AGG-LEAN (9a85d6e): `pub_compose`, `leaf_valid`, `chain_from_genesis`.
-- REC-FOLD (0947c77, D-025): node circuit with in-circuit `PubLink` and identity key.
-- AGG (f784acd, f2467b7): fold driver, node identity from topology, `verifyRoot`, `spike chain`.
+- REC-PROFILE (a9aed32), REC-COMPOSE `segment_compose` (4c0e023), `dag_correct` (23a329d).
+- D-024 plain in-circuit verifier for multi-offset, no-LogUp proofs (9acddc6).
+- REC-LEAF (a81c612): leaf circuit, proved and verified natively.
+- AGG-LEAN (07e7de5): `pub_compose`, `leaf_valid`, `chain_from_genesis`.
+- REC-FOLD (61d0933, D-025): node circuit with in-circuit `PubLink` and identity key.
+- AGG (aef7dbe, 92fe7b6): fold driver, node identity from topology, `verifyRoot`, `spike chain`.
 - All 970,348 mainnet headers (0..970347) downloaded and merged, every link checked.
 Evidence:
 - `zig build test`: 32/32. Lean builds; new theorems use standard axioms only.
@@ -64,10 +64,10 @@ Who: Claude (agent), with the owner
 Roadmap: HC-V6, HC-AUDIT → done; HC-FULLRUN → in-progress. Decision D-022 (owner): defer GPU/H200.
 Done:
 - HC-V6 minimum block version (BIP34/66/65; heights verified in Core `chainparams.cpp`): spec,
-  AIR v6, witness, real segment at 400000, `version_sound`, added to `SegmentValid` (1a068ab).
+  AIR v6, witness, real segment at 400000, `version_sound`, added to `SegmentValid` (e274fd0).
 - HC-AUDIT against Core master: `SegmentValid` covers every mainnet header rule except
   `time-too-new` (verification.md § Coverage audit).
-- `scripts/fetch_headers.py` (verified header download) and `spike fullrun` (fe27e60).
+- `scripts/fetch_headers.py` (verified header download) and `spike fullrun` (faeb840).
   Heights 0..2047: check mode OK, Metal prove+verify OK, chaining OK, chainwork exact.
 Evidence:
 - `lake build` OK (8733 jobs); `#print axioms header_chain_sound` → standard axioms only.
@@ -84,10 +84,10 @@ Who: Claude (agent), with the owner
 Roadmap: HC-V5, HC-TOP, BENCH-RAITO, FV-Z3 → done. New: HC-V6 (next), HC-AUDIT, HC-FULLRUN.
 Decisions: D-020 (exact chainwork, owner), D-021 (s ≥ 16, agent).
 Done:
-- HC-V5 exact chainwork: definition b99dbde, proof 5ab4729 (`work_q`, `work_step`, `work_out`,
+- HC-V5 exact chainwork: definition f3d2440, proof 2089ea0 (`work_q`, `work_step`, `work_out`,
   built on the generic `carry_chain`/`shift_sum`/`cauchy`).
-- HC-TOP: `Spec/Chain.lean` `SegmentValid` and `header_chain_sound` (a4ff1fd).
-- BENCH-RAITO: our SHA AIR is about 250× faster than Raito's Cairo SHA-256 under `scarb prove` (b65c2a5).
+- HC-TOP: `Spec/Chain.lean` `SegmentValid` and `header_chain_sound` (f836872).
+- BENCH-RAITO: our SHA AIR is about 250× faster than Raito's Cairo SHA-256 under `scarb prove` (1e5fb45).
 - FV-Z3: `scripts/air_z3.py`. Four windows unique, SHA round unknown, control behaves (this commit).
 Evidence:
 - `lake build` OK (8731 jobs). No sorry/native_decide/bv_decide. `#print axioms header_chain_sound`
@@ -108,7 +108,7 @@ Done:
 - Spec `mtpOk` (Core `GetMedianTimePast`) with `#guard`s, including mainnet height 101982 whose
   time is below two predecessors. Counting equivalence `mtpOk_iff_count` and `sentinel_sound` proven.
 - v4 AIR (`Mtp.lean`, rows 229–240, 394 constraints, 52 preprocessed, 88 pubs), Zig witness,
-  tests, real pre-history test data (d1a53c7, 2266898).
+  tests, real pre-history test data (14fcd9b, e34fa25).
 - Soundness (`MtpSound.lean`): `mtp_window`, `mtp_cmp`, `mtp_count`, `mtp_out`, `mtp_core`.
 Evidence:
 - `lake build`: OK, 8727 jobs. No sorry/native_decide/bv_decide. `#print axioms` on all 10 main
@@ -123,7 +123,7 @@ Problems / lessons:
   before the circuit.
 - The Blockstream API rate-limited after the timestamp scans. Fetched the new test data from
   mempool.space (same Esplora API) and recorded the source.
-- The doc-edit script aborted midway but the shell chain still committed. Fixed in 2266898.
+- The doc-edit script aborted midway but the shell chain still committed. Fixed in e34fa25.
   Run edit scripts so a failure stops the commit (`&&`, assertions).
 - `set` lesson again: facts obtained after `set x := e` mention `e`, not `x`; state them with
   the `set` name.
@@ -131,12 +131,12 @@ Next: HC-V5 (chainwork). Start with the design note in `docs/design/consensus-ru
 
 ## 2026-10-07 — v3b retarget proven; docs and PM process
 Who: Claude (agent), with the owner
-Roadmap: HC-V3B → done (e466a42); DOCS → done
+Roadmap: HC-V3B → done (208701f); DOCS → done
 Done:
-- `retarget_sound` proven (e466a42). The new file `RetargetDiv.lean` holds
+- `retarget_sound` proven (208701f). The new file `RetargetDiv.lean` holds
   `rt_divq`, `rt_rem`, `rt_cap` and the final assembly. `header_pow_ex`
   exports the PoW row's exponent and powLimit facts.
-- Documentation tree, README map and PM process (9fa0427). The old docs
+- Documentation tree, README map and PM process (ec86a9c). The old docs
   moved to `docs/design`, `docs/airs` and `docs/reports`.
 Evidence:
 - `lake build`: all 8724 jobs OK. No `sorry`, `native_decide` or `bv_decide`.
@@ -161,14 +161,14 @@ Next: HC-V4 (median time past). Start with the design section in
 Who: Claude (agent), with the owner
 Roadmap: SPIKE, STWO-225, SHA, IR-V1, HC-V1, HC-V2, HC-V3A → done; HC-V3B definition done
 Done:
-- Scaffold and Lean-first spike (b12e02e); Zig↔Lean differential test (b059a52).
+- Scaffold and Lean-first spike (53832d5); Zig↔Lean differential test (42d53dd).
 - Filed teddyjfpender/stwo-zig#225 (the verifier doesn't pin the
   preprocessed root; forgery reproduced).
-- SHA-256 compression AIR (8695b97) and its soundness proof (03d89b2,
-  9dbcffa, 94a80f8).
-- IR v1 (3706d91). Header chain v1 (2a3cc03, 007ae82), v2 (baba2bc,
-  4eb28ec), v3a (a262666, 51264b5), v3b definition and tests (9635390), and
-  the retarget proof groundwork (f6e46ed, 1e33bbc).
+- SHA-256 compression AIR (1277eae) and its soundness proof (83445f1,
+  dbfacb2, b91d916).
+- IR v1 (ca10348). Header chain v1 (216faa8, 9a4baf6), v2 (62a3fed,
+  382697b), v3a (38b1318, 5776c94), v3b definition and tests (547a5d7), and
+  the retarget proof groundwork (a819ad0, f31c303).
 Evidence:
 - The per-AIR docs list the tests, theorems and benchmarks.
 Problems / lessons:
