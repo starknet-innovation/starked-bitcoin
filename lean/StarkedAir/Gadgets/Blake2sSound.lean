@@ -1,0 +1,330 @@
+/-
+Soundness of the Blake2s compression AIR (`Gadgets/Blake2s.lean`) against RFC 7693
+(`Spec/Blake2s.lean`). Layers: row facts (booleans, words, message limbs); one G row computes
+`mix`; the period's init, half-round and final layouts; the compression.
+-/
+import StarkedAir.Gadgets.Blake2s
+import StarkedAir.Gadgets.Sha256Sound
+
+namespace StarkedAir.Blake2s
+
+open StarkedAir
+open StarkedAir.Sha256 (bit word eq_bit eval_col eval_cst eval_bitcol eval_limb half16 half16_lt half16_split
+  addC_nat eval_bitsOf eval_col0_val eval_xor2 rotr_getLsbD wrap_back word_getLsbD)
+
+abbrev Word := Spec.Blake2s.Word
+
+/-- Every Blake2s compression constraint holds on every row. -/
+def BlakeSat (n : ℕ) (pc : List PreCol) (pub : ℕ → F) (main : ℕ → ℕ → F) : Prop :=
+  ∀ r < n, ∀ c ∈ constraints, c.eval n pc pub main r = 0
+
+/-! ## Constraint families -/
+
+theorem mem_booleans {c : Expr} (h : c ∈ booleans) : c ∈ constraints := by
+  simp only [constraints, List.mem_append]; tauto
+theorem mem_gFirst {g : ℕ} (hg : g < 8) {c : Expr} (h : c ∈ gFirst g) : c ∈ constraints := by
+  simp only [constraints, List.mem_append, List.mem_flatMap, List.mem_range]
+  exact Or.inl (Or.inl (Or.inl (Or.inl (Or.inr ⟨g, hg, h⟩))))
+theorem mem_gSecond {c : Expr} (h : c ∈ gSecond) : c ∈ constraints := by
+  simp only [constraints, List.mem_append]; tauto
+theorem mem_init {c : Expr} (h : c ∈ init) : c ∈ constraints := by
+  simp only [constraints, List.mem_append]; tauto
+theorem mem_final {c : Expr} (h : c ∈ final) : c ∈ constraints := by
+  simp only [constraints, List.mem_append]; tauto
+theorem mem_copy {c : Expr} (h : c ∈ copy) : c ∈ constraints := by
+  simp only [constraints, List.mem_append]; tauto
+
+/-! ## Row facts -/
+
+section Row
+
+variable {n : ℕ} {pc : List PreCol} {pub : ℕ → F} {main : ℕ → ℕ → F} (hsat : BlakeSat n pc pub main)
+include hsat
+
+theorem bool_val {c r : ℕ} (hr : r < n) (hc : c < 256 ∨ (288 ≤ c ∧ c < 300)) : (main c r).val ≤ 1 := by
+  have hm : boolC (col c) ∈ booleans := by
+    simp only [booleans, List.mem_map, List.mem_append, List.mem_range, Function.comp]
+    rcases hc with hc | ⟨h1, h2⟩
+    · exact ⟨c, Or.inl hc, rfl⟩
+    · exact ⟨c, Or.inr ⟨c - 288, by omega, by simp only [CA1_LO]; omega⟩, rfl⟩
+  have := hsat r hr _ (mem_booleans hm)
+  simp only [boolC, Expr.eval, eval_col, eval_cst, wrap_zero hr, Nat.cast_one] at this
+  exact val_le_one_of_bool this
+
+theorem word_bits {w r : ℕ} (hr : r < n) (hw : w < 8) : ∀ i < 32, (main (32 * w + i) r).val ≤ 1 :=
+  fun i hi => bool_val hsat hr (Or.inl (by omega))
+
+end Row
+
+/-! ## Message limbs -/
+
+/-- The word of message slot `k` at row `r` (from its two 16-bit limbs). -/
+def msgWord (main : ℕ → ℕ → F) (k r : ℕ) : Word :=
+  BitVec.ofNat 32 ((main (ML k 0) r).val + 65536 * (main (ML k 1) r).val)
+
+theorem eval_msgLimb {n : ℕ} {pc : List PreCol} {pub : ℕ → F} {main : ℕ → ℕ → F} {r base κ : ℕ}
+    (hr : r < n) (hκ : κ < 16)
+    (hsel : ∀ k < 16, (pre (base + k)).eval n pc pub main r = if k = κ then 1 else 0) (h : ℕ) :
+    (msgLimb base h).eval n pc pub main r = main (ML κ h) r := by
+  have key : ∀ m ≤ 16, ((List.range m).foldl (fun acc k => Expr.add acc (.mul (pre (base + k)) (col (ML k h))))
+      (cst 0)).eval n pc pub main r = if κ < m then main (ML κ h) r else 0 := by
+    intro m hm
+    induction m with
+    | zero => simp [eval_cst]
+    | succ m ih =>
+      rw [List.range_succ, List.foldl_append, List.foldl_cons, List.foldl_nil]
+      simp only [Expr.eval]
+      rw [ih (by omega), hsel m (by omega), eval_col, wrap_zero hr]
+      by_cases hmk : m = κ
+      · subst hmk; simp
+      · by_cases hk : κ < m
+        · simp [hmk, hk, show κ < m + 1 by omega]
+        · simp [hmk, hk, show ¬ κ < m + 1 by omega]
+  unfold msgLimb
+  rw [key 16 le_rfl, if_pos hκ]
+
+/-! ## Bitwise -/
+
+section Bits
+
+variable {n : ℕ} {pc : List PreCol} {pub : ℕ → F} {main : ℕ → ℕ → F} {r : ℕ}
+
+theorem eval_rotXor {wx wy rx ry rr : ℕ} {ox oy : ℤ} (hwx : wrap n r ox = rx) (hwy : wrap n r oy = ry)
+    (hbx : ∀ i < 32, (main (32 * wx + i) rx).val ≤ 1) (hby : ∀ i < 32, (main (32 * wy + i) ry).val ≤ 1)
+    (hrr : rr < 32) {i : ℕ} (hi : i < 32) :
+    (rotXor wx ox wy oy rr i).eval n pc pub main r =
+      ((((word main (32 * wx) rx ^^^ word main (32 * wy) ry).rotateRight rr).getLsbD i).toNat : F) := by
+  unfold rotXor
+  rw [eval_xor2 (eval_bitcol hwx hbx (Nat.mod_lt _ (by norm_num))) (eval_bitcol hwy hby (Nat.mod_lt _ (by norm_num)))]
+  simp [rotr_getLsbD _ hrr hi, BitVec.getLsbD_xor]
+
+/-- `bitsEq sel w val` with the gate on and `val` the bits of `Y` pins word slot `w` to `Y`. -/
+theorem bitsEq_word {sel : Expr} {w : ℕ} {val : ℕ → Expr} {Y : Word} (hr : r < n)
+    (hall : ∀ c ∈ bitsEq sel w val, c.eval n pc pub main r = 0) (hsel : sel.eval n pc pub main r = 1)
+    (hbits : ∀ i < 32, (main (32 * w + i) r).val ≤ 1)
+    (hval : ∀ i < 32, (val i).eval n pc pub main r = ((Y.getLsbD i).toNat : F)) :
+    word main (32 * w) r = Y := by
+  apply BitVec.eq_of_getLsbD_eq
+  intro i hi
+  have hc := hall _ (List.mem_map.mpr ⟨i, List.mem_range.mpr hi, rfl⟩)
+  simp only [Expr.eval, hsel, one_mul, sub_eq_zero, hval i hi] at hc
+  rw [eval_col, wrap_zero hr, eq_bit (hbits i hi)] at hc
+  rw [word_getLsbD _ _ hi]
+  have := congrArg ZMod.val hc
+  cases hb : bit main (32 * w + i) r <;> cases hy : Y.getLsbD i <;> simp_all
+
+end Bits
+
+/-! ## Additions -/
+
+section Adds
+
+variable {n : ℕ} {pc : List PreCol} {pub : ℕ → F} {main : ℕ → ℕ → F} (hsat : BlakeSat n pc pub main)
+include hsat
+
+theorem limb_at {r w k : ℕ} (hr : r < n) (hk : k ≤ r) (hw : w < 8) {h : ℕ} (hh : h ≤ 1) :
+    (limb w h (-(k : ℤ))).eval n pc pub main r = ((half16 (word main (32 * w) (r - k)) h : ℕ) : F) :=
+  eval_limb (wrap_back hk hr) (word_bits hsat (by omega) hw) hh
+
+theorem limb_here {r w : ℕ} (hr : r < n) (hw : w < 8) {h : ℕ} (hh : h ≤ 1) :
+    (limb w h).eval n pc pub main r = ((half16 (word main (32 * w) r) h : ℕ) : F) := by
+  have := limb_at hsat hr (k := 0) (Nat.zero_le _) hw hh
+  simpa using this
+
+theorem carry_at {r base k : ℕ} (hr : r < n) (hb : 288 ≤ base) (hk : base + k ≤ 300) :
+    (bitsOf base k).eval n pc pub main r = ((ofBits (fun j => bit main (base + j) r) k : ℕ) : F) :=
+  eval_bitsOf hr (fun j hj => bool_val hsat (c := base + j) hr (Or.inr ⟨by omega, by omega⟩))
+
+end Adds
+
+/-- Two limb equations with carries give a word addition mod 2³². -/
+theorem add_words {R X Y Z : Word} {zl zh cl ch : ℕ}
+    (hl : half16 X 0 + half16 Y 0 + zl = half16 R 0 + 65536 * cl)
+    (hh : half16 X 1 + half16 Y 1 + zh + cl = half16 R 1 + 65536 * ch)
+    (hz : Z.toNat = zl + 65536 * zh) (hzl : zl < 65536) : R = X + Y + Z := by
+  apply BitVec.eq_of_toNat_eq
+  simp only [BitVec.toNat_add]
+  rw [half16_split R, half16_split X, half16_split Y, hz]
+  have := half16_lt R 0; have := half16_lt R 1; have := half16_lt X 0; have := half16_lt X 1
+  have := half16_lt Y 0; have := half16_lt Y 1
+  omega
+
+theorem add2_words {R X Y : Word} {cl ch : ℕ}
+    (hl : half16 X 0 + half16 Y 0 = half16 R 0 + 65536 * cl)
+    (hh : half16 X 1 + half16 Y 1 + cl = half16 R 1 + 65536 * ch) : R = X + Y := by
+  apply BitVec.eq_of_toNat_eq
+  simp only [BitVec.toNat_add]
+  rw [half16_split R, half16_split X, half16_split Y]
+  have := half16_lt R 0; have := half16_lt R 1; have := half16_lt X 0; have := half16_lt X 1
+  have := half16_lt Y 0; have := half16_lt Y 1
+  omega
+
+theorem msgWord_toNat {main : ℕ → ℕ → F} {k r : ℕ} (h0 : (main (ML k 0) r).val < 65536)
+    (h1 : (main (ML k 1) r).val < 65536) :
+    (msgWord main k r).toNat = (main (ML k 0) r).val + 65536 * (main (ML k 1) r).val := by
+  unfold msgWord; rw [BitVec.toNat_ofNat]; omega
+
+/-! ## One G row -/
+
+section GStep
+
+variable {n : ℕ} {pc : List PreCol} {pub : ℕ → F} {main : ℕ → ℕ → F} (hsat : BlakeSat n pc pub main)
+include hsat
+
+/-- **G step.** At a row of G position `g` (whose message selectors pick words `κx`, `κy`), the
+row's output words are `mix` of the inputs read at the distances `src g`. -/
+theorem g_step {r g κx κy : ℕ} (hr : r < n) (h7 : 7 ≤ r) (hg : g < 8)
+    (hG : (pre (P_G g)).eval n pc pub main r = 1) (hI : (pre P_ISG).eval n pc pub main r = 1)
+    (hx : ∀ k < 16, (pre (P_XSEL 0 + k)).eval n pc pub main r = if k = κx then 1 else 0) (hκx : κx < 16)
+    (hy : ∀ k < 16, (pre (P_YSEL 0 + k)).eval n pc pub main r = if k = κy then 1 else 0) (hκy : κy < 16)
+    (hm : ∀ k < 16, ∀ h ≤ 1, (main (ML k h) r).val < 65536) :
+    Spec.Blake2s.mix (word main (32 * 4) (r - src g 0)) (word main (32 * 7) (r - src g 1))
+        (word main (32 * 6) (r - src g 2)) (word main (32 * 5) (r - src g 3))
+        (msgWord main κx r) (msgWord main κy r) =
+      (word main (32 * 4) r, word main (32 * 7) r, word main (32 * 6) r, word main (32 * 5) r) := by
+  have hsrc : ∀ role, src g role ≤ 7 := by
+    intro role; interval_cases g <;> (rcases role with _ | _ | _ | role <;> simp [src])
+  -- Inputs and current-row words.
+  set A := word main (32 * 4) (r - src g 0)
+  set B := word main (32 * 7) (r - src g 1)
+  set C := word main (32 * 6) (r - src g 2)
+  set D := word main (32 * 5) (r - src g 3)
+  set X := msgWord main κx r
+  set Y := msgWord main κy r
+  have LA := fun h (hh : h ≤ 1) => limb_at hsat hr (k := src g 0) (by have := hsrc 0; omega) (w := 4) (by norm_num) hh
+  have LB := fun h (hh : h ≤ 1) => limb_at hsat hr (k := src g 1) (by have := hsrc 1; omega) (w := 7) (by norm_num) hh
+  have LC := fun h (hh : h ≤ 1) => limb_at hsat hr (k := src g 2) (by have := hsrc 2; omega) (w := 6) (by norm_num) hh
+  have L := fun w (hw : w < 8) h (hh : h ≤ 1) => limb_here hsat hr (w := w) hw (h := h) hh
+  have MX := fun h => eval_msgLimb (n := n) (pc := pc) (pub := pub) (main := main) hr hκx hx h
+  have MY := fun h => eval_msgLimb (n := n) (pc := pc) (pub := pub) (main := main) hr hκy hy h
+  have cv := fun i => (ZMod.natCast_zmod_val (main i r)).symm
+  have bc := fun base k => ofBits_lt (fun j => bit main (base + j) r) k
+  have hb := fun (y : Word) h => half16_lt y h
+  have hP : (2 : ℕ) ^ 20 < P := by norm_num [P]
+  -- First half.
+  have h1 : ∀ c ∈ gFirst g, c.eval n pc pub main r = 0 := fun c hc => hsat r hr c (mem_gFirst hg hc)
+  have h2 : ∀ c ∈ gSecond, c.eval n pc pub main r = 0 := fun c hc => hsat r hr c (mem_gSecond hc)
+  unfold gFirst at h1
+  unfold gSecond at h2
+  simp only [outW, srcOff, List.mem_append, List.mem_cons, List.not_mem_nil, or_false] at h1 h2
+  have eA0 := h1 _ (Or.inl (Or.inl (Or.inl rfl)))
+  have eA1 := h1 _ (Or.inl (Or.inl (Or.inr (Or.inl rfl))))
+  have eC0 := h1 _ (Or.inl (Or.inl (Or.inr (Or.inr (Or.inl rfl)))))
+  have eC1 := h1 _ (Or.inl (Or.inl (Or.inr (Or.inr (Or.inr rfl)))))
+  have eD := fun c hc => h1 c (Or.inl (Or.inr hc))
+  have eB := fun c hc => h1 c (Or.inr hc)
+  have fA0 := h2 _ (Or.inl (Or.inl (Or.inl rfl)))
+  have fA1 := h2 _ (Or.inl (Or.inl (Or.inr (Or.inl rfl))))
+  have fC0 := h2 _ (Or.inl (Or.inl (Or.inr (Or.inr (Or.inl rfl)))))
+  have fC1 := h2 _ (Or.inl (Or.inl (Or.inr (Or.inr (Or.inr rfl)))))
+  have fD := fun c hc => h2 c (Or.inl (Or.inr hc))
+  have fB := fun c hc => h2 c (Or.inr hc)
+  have xv := fun h (hh : h ≤ 1) => (ZMod.natCast_zmod_val (main (ML κx h) r)).symm
+  have yv := fun h (hh : h ≤ 1) => (ZMod.natCast_zmod_val (main (ML κy h) r)).symm
+  set W0 := word main (32 * 0) r
+  set W1 := word main (32 * 1) r
+  set W2 := word main (32 * 2) r
+  set W3 := word main (32 * 3) r
+  set W4 := word main (32 * 4) r
+  set W5 := word main (32 * 5) r
+  set W6 := word main (32 * 6) r
+  set W7 := word main (32 * 7) r
+  -- a₁ = a + b + x
+  set c1l := ofBits (fun j => bit main (CA1_LO + j) r) 2
+  set c1h := ofBits (fun j => bit main (CA1_HI + j) r) 2
+  have n0 := addC_nat eA0 hG (ts := [half16 A 0, half16 B 0, (main (ML κx 0) r).val])
+    (by simp only [List.map_cons, List.map_nil, LA 0 (by norm_num), LB 0 (by norm_num), MX 0, ZMod.natCast_zmod_val]; rfl)
+    (L 0 (by norm_num) 0 (by norm_num)) (carry_at hsat hr (by decide) (by decide))
+    (by simp only [List.sum_cons, List.sum_nil]; linarith [hb A 0, hb B 0, hm κx hκx 0 (by norm_num)])
+    (by linarith [hb W0 0, bc CA1_LO 2])
+  have n1 := addC_nat eA1 hG (ts := [half16 A 1, half16 B 1, (main (ML κx 1) r).val, c1l])
+    (by simp only [List.map_cons, List.map_nil, LA 1 (by norm_num), LB 1 (by norm_num), MX 1, ZMod.natCast_zmod_val,
+          carry_at hsat hr (base := CA1_LO) (k := 2) (by decide) (by decide)]; rfl)
+    (L 0 (by norm_num) 1 (by norm_num)) (carry_at hsat hr (by decide) (by decide))
+    (by simp only [List.sum_cons, List.sum_nil]; linarith [hb A 1, hb B 1, hm κx hκx 1 (by norm_num), bc CA1_LO 2])
+    (by linarith [hb W0 1, bc CA1_HI 2])
+  simp only [List.sum_cons, List.sum_nil, Nat.add_zero] at n0 n1
+  replace n0 : half16 A 0 + (half16 B 0 + (main (ML κx 0) r).val) = half16 W0 0 + 65536 * c1l := n0
+  replace n1 : half16 A 1 + (half16 B 1 + ((main (ML κx 1) r).val + c1l)) = half16 W0 1 + 65536 * c1h := n1
+  have hW0 : W0 = A + B + X := add_words (zl := (main (ML κx 0) r).val) (zh := (main (ML κx 1) r).val)
+    (cl := c1l) (ch := c1h) (by omega) (by omega) (msgWord_toNat (hm κx hκx 0 (by norm_num)) (hm κx hκx 1 (by norm_num)))
+    (hm κx hκx 0 (by norm_num))
+  -- d₁ = (d ⊕ a₁) ⋙ 16
+  have hW1 : W1 = (D ^^^ W0).rotateRight 16 :=
+    bitsEq_word hr eD hG (word_bits hsat hr (w := 1) (by norm_num)) (fun i hi =>
+      eval_rotXor (wrap_back (k := src g 3) (by have := hsrc 3; omega) hr) (wrap_zero hr)
+        (word_bits hsat (by omega) (w := 5) (by norm_num)) (word_bits hsat hr (w := 0) (by norm_num)) (by norm_num) hi)
+  have cc := fun i (hi : 288 ≤ i ∧ i < 300) => bool_val hsat hr (c := i) (Or.inr hi)
+  have c0 := fun i => eval_col0_val (n := n) (pc := pc) (pub := pub) (main := main) (i := i) hr
+  -- c₁ = c + d₁
+  have m0 := addC_nat eC0 hG (ts := [half16 C 0, half16 W1 0])
+    (by simp only [List.map_cons, List.map_nil, LC 0 (by norm_num), L 1 (by norm_num) 0 (by norm_num)]; rfl)
+    (L 2 (by norm_num) 0 (by norm_num)) (c0 CC1_LO)
+    (by simp only [List.sum_cons, List.sum_nil]; linarith [hb C 0, hb W1 0])
+    (by linarith [hb W2 0, cc CC1_LO (by decide)])
+  have m1 := addC_nat eC1 hG (ts := [half16 C 1, half16 W1 1, (main CC1_LO r).val])
+    (by simp only [List.map_cons, List.map_nil, LC 1 (by norm_num), L 1 (by norm_num) 1 (by norm_num), c0]; rfl)
+    (L 2 (by norm_num) 1 (by norm_num)) (c0 CC1_HI)
+    (by simp only [List.sum_cons, List.sum_nil]; linarith [hb C 1, hb W1 1, cc CC1_LO (by decide)])
+    (by linarith [hb W2 1, cc CC1_HI (by decide)])
+  simp only [List.sum_cons, List.sum_nil, Nat.add_zero] at m0 m1
+  replace m0 : half16 C 0 + half16 W1 0 = half16 W2 0 + 65536 * (main CC1_LO r).val := m0
+  replace m1 : half16 C 1 + (half16 W1 1 + (main CC1_LO r).val) = half16 W2 1 + 65536 * (main CC1_HI r).val := m1
+  have hW2 : W2 = C + W1 := add2_words (cl := (main CC1_LO r).val) (ch := (main CC1_HI r).val) (by omega) (by omega)
+  -- b₁ = (b ⊕ c₁) ⋙ 12
+  have hW3 : W3 = (B ^^^ W2).rotateRight 12 :=
+    bitsEq_word hr eB hG (word_bits hsat hr (w := 3) (by norm_num)) (fun i hi =>
+      eval_rotXor (wrap_back (k := src g 1) (by have := hsrc 1; omega) hr) (wrap_zero hr)
+        (word_bits hsat (by omega) (w := 7) (by norm_num)) (word_bits hsat hr (w := 2) (by norm_num)) (by norm_num) hi)
+  -- a₂ = a₁ + b₁ + y
+  set c2l := ofBits (fun j => bit main (CA2_LO + j) r) 2
+  set c2h := ofBits (fun j => bit main (CA2_HI + j) r) 2
+  have p0 := addC_nat fA0 hI (ts := [half16 W0 0, half16 W3 0, (main (ML κy 0) r).val])
+    (by simp only [List.map_cons, List.map_nil, L 0 (by norm_num) 0 (by norm_num), L 3 (by norm_num) 0 (by norm_num),
+          MY 0, ZMod.natCast_zmod_val]; rfl)
+    (L 4 (by norm_num) 0 (by norm_num)) (carry_at hsat hr (by decide) (by decide))
+    (by simp only [List.sum_cons, List.sum_nil]; linarith [hb W0 0, hb W3 0, hm κy hκy 0 (by norm_num)])
+    (by linarith [hb W4 0, bc CA2_LO 2])
+  have p1 := addC_nat fA1 hI (ts := [half16 W0 1, half16 W3 1, (main (ML κy 1) r).val, c2l])
+    (by simp only [List.map_cons, List.map_nil, L 0 (by norm_num) 1 (by norm_num), L 3 (by norm_num) 1 (by norm_num),
+          MY 1, ZMod.natCast_zmod_val, carry_at hsat hr (base := CA2_LO) (k := 2) (by decide) (by decide)]; rfl)
+    (L 4 (by norm_num) 1 (by norm_num)) (carry_at hsat hr (by decide) (by decide))
+    (by simp only [List.sum_cons, List.sum_nil]; linarith [hb W0 1, hb W3 1, hm κy hκy 1 (by norm_num), bc CA2_LO 2])
+    (by linarith [hb W4 1, bc CA2_HI 2])
+  simp only [List.sum_cons, List.sum_nil, Nat.add_zero] at p0 p1
+  replace p0 : half16 W0 0 + (half16 W3 0 + (main (ML κy 0) r).val) = half16 W4 0 + 65536 * c2l := p0
+  replace p1 : half16 W0 1 + (half16 W3 1 + ((main (ML κy 1) r).val + c2l)) = half16 W4 1 + 65536 * c2h := p1
+  have hW4 : W4 = W0 + W3 + Y := add_words (zl := (main (ML κy 0) r).val) (zh := (main (ML κy 1) r).val)
+    (cl := c2l) (ch := c2h) (by omega) (by omega) (msgWord_toNat (hm κy hκy 0 (by norm_num)) (hm κy hκy 1 (by norm_num)))
+    (hm κy hκy 0 (by norm_num))
+  -- d₂ = (d₁ ⊕ a₂) ⋙ 8
+  have hW5 : W5 = (W1 ^^^ W4).rotateRight 8 :=
+    bitsEq_word hr fD hI (word_bits hsat hr (w := 5) (by norm_num)) (fun i hi =>
+      eval_rotXor (wrap_zero hr) (wrap_zero hr)
+        (word_bits hsat hr (w := 1) (by norm_num)) (word_bits hsat hr (w := 4) (by norm_num)) (by norm_num) hi)
+  -- c₂ = c₁ + d₂
+  have q0 := addC_nat fC0 hI (ts := [half16 W2 0, half16 W5 0])
+    (by simp only [List.map_cons, List.map_nil, L 2 (by norm_num) 0 (by norm_num), L 5 (by norm_num) 0 (by norm_num)]; rfl)
+    (L 6 (by norm_num) 0 (by norm_num)) (c0 CC2_LO)
+    (by simp only [List.sum_cons, List.sum_nil]; linarith [hb W2 0, hb W5 0])
+    (by linarith [hb W6 0, cc CC2_LO (by decide)])
+  have q1 := addC_nat fC1 hI (ts := [half16 W2 1, half16 W5 1, (main CC2_LO r).val])
+    (by simp only [List.map_cons, List.map_nil, L 2 (by norm_num) 1 (by norm_num), L 5 (by norm_num) 1 (by norm_num), c0]; rfl)
+    (L 6 (by norm_num) 1 (by norm_num)) (c0 CC2_HI)
+    (by simp only [List.sum_cons, List.sum_nil]; linarith [hb W2 1, hb W5 1, cc CC2_LO (by decide)])
+    (by linarith [hb W6 1, cc CC2_HI (by decide)])
+  simp only [List.sum_cons, List.sum_nil, Nat.add_zero] at q0 q1
+  replace q0 : half16 W2 0 + half16 W5 0 = half16 W6 0 + 65536 * (main CC2_LO r).val := q0
+  replace q1 : half16 W2 1 + (half16 W5 1 + (main CC2_LO r).val) = half16 W6 1 + 65536 * (main CC2_HI r).val := q1
+  have hW6 : W6 = W2 + W5 := add2_words (cl := (main CC2_LO r).val) (ch := (main CC2_HI r).val) (by omega) (by omega)
+  -- b₂ = (b₁ ⊕ c₂) ⋙ 7
+  have hW7 : W7 = (W3 ^^^ W6).rotateRight 7 :=
+    bitsEq_word hr fB hI (word_bits hsat hr (w := 7) (by norm_num)) (fun i hi =>
+      eval_rotXor (wrap_zero hr) (wrap_zero hr)
+        (word_bits hsat hr (w := 3) (by norm_num)) (word_bits hsat hr (w := 6) (by norm_num)) (by norm_num) hi)
+  simp only [Spec.Blake2s.mix]
+  rw [hW7, hW6, hW5, hW4, hW3, hW2, hW1, hW0]
+
+end GStep
+
+end StarkedAir.Blake2s
