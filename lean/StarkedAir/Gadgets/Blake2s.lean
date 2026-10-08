@@ -77,19 +77,21 @@ def srcOff (g role : ℕ) : ℤ := -((src g role : ℕ) : ℤ)
 `v[b(4+k)+8]` (role d): diagonal `(k+2) mod 4`. -/
 def finOff (k : ℕ) : ℤ := if k < 2 then -2 else -6
 
+/-- Preprocessed column `i` is `1` at period row `r` iff `preQ i r`. -/
+def preQ (i r : ℕ) : Bool :=
+  let isG := 4 ≤ r && r < 84
+  let gOf := (r - 4) % 8
+  let rOf := (r - 4) / 8
+  if i < 4 then r == i
+  else if i < 12 then isG && gOf == i - 4
+  else if i < 16 then r == 84 + (i - 12)
+  else if i = 16 then 1 ≤ r
+  else if i < 33 then isG && Spec.Blake2s.sigma rOf (2 * gOf) == i - 17
+  else if i < 49 then isG && Spec.Blake2s.sigma rOf (2 * gOf + 1) == i - 33
+  else isG
+
 def preCols : List PreCol :=
-  let rows := List.range PERIOD
-  let ind (p : ℕ → Bool) : PreCol := .periodic (rows.map fun r => if p r then 1 else 0)
-  let isG (r : ℕ) : Bool := 4 ≤ r && r < 84
-  let gOf (r : ℕ) : ℕ := (r - 4) % 8
-  let rOf (r : ℕ) : ℕ := (r - 4) / 8
-  (List.range 4).map (fun k => ind (· == k)) ++
-  (List.range 8).map (fun g => ind (fun r => isG r && gOf r == g)) ++
-  (List.range 4).map (fun k => ind (· == 84 + k)) ++
-  [ind (fun r => 1 ≤ r)] ++
-  (List.range 16).map (fun k => ind (fun r => isG r && Spec.Blake2s.sigma (rOf r) (2 * gOf r) == k)) ++
-  (List.range 16).map (fun k => ind (fun r => isG r && Spec.Blake2s.sigma (rOf r) (2 * gOf r + 1) == k)) ++
-  [ind isG]
+  (List.range 50).map fun i => .periodic ((List.range PERIOD).map fun r => if preQ i r then 1 else 0)
 
 /-! ### Expression helpers (shared with the SHA-256 AIR, so its evaluation lemmas apply) -/
 

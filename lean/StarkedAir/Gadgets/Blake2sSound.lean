@@ -173,7 +173,7 @@ include hsat
 
 /-- **G step.** At a row of G position `g` (whose message selectors pick words `κx`, `κy`), the
 row's output words are `mix` of the inputs read at the distances `src g`. -/
-theorem g_step {r g κx κy : ℕ} (hr : r < n) (h7 : 7 ≤ r) (hg : g < 8)
+theorem g_step {r g κx κy : ℕ} (hr : r < n) (hsr : ∀ role, src g role ≤ r) (hg : g < 8)
     (hG : (pre (P_G g)).eval n pc pub main r = 1) (hI : (pre P_ISG).eval n pc pub main r = 1)
     (hx : ∀ k < 16, (pre (P_XSEL 0 + k)).eval n pc pub main r = if k = κx then 1 else 0) (hκx : κx < 16)
     (hy : ∀ k < 16, (pre (P_YSEL 0 + k)).eval n pc pub main r = if k = κy then 1 else 0) (hκy : κy < 16)
@@ -182,8 +182,6 @@ theorem g_step {r g κx κy : ℕ} (hr : r < n) (h7 : 7 ≤ r) (hg : g < 8)
         (word main (32 * 6) (r - src g 2)) (word main (32 * 5) (r - src g 3))
         (msgWord main κx r) (msgWord main κy r) =
       (word main (32 * 4) r, word main (32 * 7) r, word main (32 * 6) r, word main (32 * 5) r) := by
-  have hsrc : ∀ role, src g role ≤ 7 := by
-    intro role; interval_cases g <;> (rcases role with _ | _ | _ | role <;> simp [src])
   -- Inputs and current-row words.
   set A := word main (32 * 4) (r - src g 0)
   set B := word main (32 * 7) (r - src g 1)
@@ -191,9 +189,9 @@ theorem g_step {r g κx κy : ℕ} (hr : r < n) (h7 : 7 ≤ r) (hg : g < 8)
   set D := word main (32 * 5) (r - src g 3)
   set X := msgWord main κx r
   set Y := msgWord main κy r
-  have LA := fun h (hh : h ≤ 1) => limb_at hsat hr (k := src g 0) (by have := hsrc 0; omega) (w := 4) (by norm_num) hh
-  have LB := fun h (hh : h ≤ 1) => limb_at hsat hr (k := src g 1) (by have := hsrc 1; omega) (w := 7) (by norm_num) hh
-  have LC := fun h (hh : h ≤ 1) => limb_at hsat hr (k := src g 2) (by have := hsrc 2; omega) (w := 6) (by norm_num) hh
+  have LA := fun h (hh : h ≤ 1) => limb_at hsat hr (k := src g 0) (hsr 0) (w := 4) (by norm_num) hh
+  have LB := fun h (hh : h ≤ 1) => limb_at hsat hr (k := src g 1) (hsr 1) (w := 7) (by norm_num) hh
+  have LC := fun h (hh : h ≤ 1) => limb_at hsat hr (k := src g 2) (hsr 2) (w := 6) (by norm_num) hh
   have L := fun w (hw : w < 8) h (hh : h ≤ 1) => limb_here hsat hr (w := w) hw (h := h) hh
   have MX := fun h => eval_msgLimb (n := n) (pc := pc) (pub := pub) (main := main) hr hκx hx h
   have MY := fun h => eval_msgLimb (n := n) (pc := pc) (pub := pub) (main := main) hr hκy hy h
@@ -252,7 +250,7 @@ theorem g_step {r g κx κy : ℕ} (hr : r < n) (h7 : 7 ≤ r) (hg : g < 8)
   -- d₁ = (d ⊕ a₁) ⋙ 16
   have hW1 : W1 = (D ^^^ W0).rotateRight 16 :=
     bitsEq_word hr eD hG (word_bits hsat hr (w := 1) (by norm_num)) (fun i hi =>
-      eval_rotXor (wrap_back (k := src g 3) (by have := hsrc 3; omega) hr) (wrap_zero hr)
+      eval_rotXor (wrap_back (k := src g 3) (hsr 3) hr) (wrap_zero hr)
         (word_bits hsat (by omega) (w := 5) (by norm_num)) (word_bits hsat hr (w := 0) (by norm_num)) (by norm_num) hi)
   have cc := fun i (hi : 288 ≤ i ∧ i < 300) => bool_val hsat hr (c := i) (Or.inr hi)
   have c0 := fun i => eval_col0_val (n := n) (pc := pc) (pub := pub) (main := main) (i := i) hr
@@ -274,7 +272,7 @@ theorem g_step {r g κx κy : ℕ} (hr : r < n) (h7 : 7 ≤ r) (hg : g < 8)
   -- b₁ = (b ⊕ c₁) ⋙ 12
   have hW3 : W3 = (B ^^^ W2).rotateRight 12 :=
     bitsEq_word hr eB hG (word_bits hsat hr (w := 3) (by norm_num)) (fun i hi =>
-      eval_rotXor (wrap_back (k := src g 1) (by have := hsrc 1; omega) hr) (wrap_zero hr)
+      eval_rotXor (wrap_back (k := src g 1) (hsr 1) hr) (wrap_zero hr)
         (word_bits hsat (by omega) (w := 7) (by norm_num)) (word_bits hsat hr (w := 2) (by norm_num)) (by norm_num) hi)
   -- a₂ = a₁ + b₁ + y
   set c2l := ofBits (fun j => bit main (CA2_LO + j) r) 2
@@ -464,5 +462,76 @@ theorem steps_rounds {main : ℕ → ℕ → F} {m : ℕ → Word} {v0 : List Wo
         show 8 * ρ + 5 = 8 * ρ + 4 + 1 by ring, steps_succ' m v0 ρ 4 (by norm_num)]
     intro i hi
     rw [e8, half2 i hi, show s + 8 * ρ + 4 + 4 = s + 8 * (ρ + 1) by ring]
+
+/-! ## Preprocessed values at aligned rows -/
+
+/-- Preprocessed column `i` at row `p` of a period. -/
+def bPre (i p : ℕ) : F := (preCols.getD i (.periodic [0])).eval PERIOD p
+
+theorem ind_eval (q : ℕ → Bool) {p : ℕ} (hp : p < PERIOD) :
+    (PreCol.periodic ((List.range PERIOD).map fun r => if q r then 1 else 0)).eval PERIOD p =
+      if q p then 1 else 0 := by
+  simp only [PreCol.eval, List.length_map, List.length_range, Nat.mod_eq_of_lt hp]
+  rw [List.getD_eq_getElem _ _ (by simpa using hp)]
+  simp only [List.getElem_map, List.getElem_range]
+  split <;> simp
+
+theorem preCols_getD {i : ℕ} (hi : i < 50) :
+    preCols.getD i (.periodic [0]) = .periodic ((List.range PERIOD).map fun r => if preQ i r then 1 else 0) := by
+  unfold preCols
+  rw [List.getD_eq_getElem _ _ (by simpa using hi)]
+  simp
+
+theorem bPre_eq {i p : ℕ} (hi : i < 50) (hp : p < PERIOD) : bPre i p = if preQ i p then 1 else 0 := by
+  unfold bPre; rw [preCols_getD hi, ind_eval _ hp]
+
+/-- At an aligned row `s + p`, a preprocessed column takes its period value. -/
+theorem pre_at {n : ℕ} {pub : ℕ → F} {main : ℕ → ℕ → F} {s p i : ℕ} (hs : s % PERIOD = 0) (hp : p < PERIOD)
+    (hn : s + p < n) (hi : i < 50) : (pre i).eval n preCols pub main (s + p) = bPre i p := by
+  simp only [pre, Expr.eval, wrap_zero hn, bPre, preCols_getD hi, PreCol.eval, List.length_map, List.length_range]
+  rw [show (s + p) % PERIOD = p % PERIOD by simp only [PERIOD] at hs ⊢; omega]
+
+theorem bPre_G {g j : ℕ} (hg : g < 8) (hj : j < 80) : bPre (P_G g) (4 + j) = if j % 8 = g then 1 else 0 := by
+  rw [bPre_eq (by simp [P_G]; omega) (by simp [PERIOD]; omega)]
+  simp only [preQ, P_G]
+  by_cases h : j % 8 = g <;> simp [h, show ¬ 4 + g < 4 by omega, show 4 + g < 12 by omega, show 4 + j < 84 by omega] <;> omega
+
+theorem bPre_ISG {j : ℕ} (hj : j < 80) : bPre P_ISG (4 + j) = 1 := by
+  rw [bPre_eq (by simp [P_ISG]) (by simp [PERIOD]; omega)]
+  simp [preQ, P_ISG, show 4 + j < 84 by omega]
+
+theorem bPre_X {k j : ℕ} (hk : k < 16) (hj : j < 80) :
+    bPre (P_XSEL 0 + k) (4 + j) = if k = Spec.Blake2s.sigma (j / 8) (2 * (j % 8)) then 1 else 0 := by
+  rw [bPre_eq (by simp [P_XSEL]; omega) (by simp [PERIOD]; omega), show P_XSEL 0 + k = 17 + k by simp [P_XSEL]]
+  have hq : preQ (17 + k) (4 + j) = (Spec.Blake2s.sigma (j / 8) (2 * (j % 8)) == k) := by
+    simp only [preQ]
+    rw [if_neg (by omega), if_neg (by omega), if_neg (by omega), if_neg (by omega), if_pos (by omega)]
+    simp [show 4 ≤ 4 + j from by omega, show 4 + j < 84 from by omega]
+  simp only [hq, beq_iff_eq]
+  by_cases h : k = Spec.Blake2s.sigma (j / 8) (2 * (j % 8))
+  · simp [h]
+  · simp [h, Ne.symm h]
+
+theorem bPre_Y {k j : ℕ} (hk : k < 16) (hj : j < 80) :
+    bPre (P_YSEL 0 + k) (4 + j) = if k = Spec.Blake2s.sigma (j / 8) (2 * (j % 8) + 1) then 1 else 0 := by
+  rw [bPre_eq (by simp [P_YSEL]; omega) (by simp [PERIOD]; omega), show P_YSEL 0 + k = 33 + k by simp [P_YSEL]]
+  have hq : preQ (33 + k) (4 + j) = (Spec.Blake2s.sigma (j / 8) (2 * (j % 8) + 1) == k) := by
+    simp only [preQ]
+    rw [if_neg (by omega), if_neg (by omega), if_neg (by omega), if_neg (by omega), if_neg (by omega), if_pos (by omega)]
+    simp [show 4 ≤ 4 + j from by omega, show 4 + j < 84 from by omega]
+  simp only [hq, beq_iff_eq]
+  by_cases h : k = Spec.Blake2s.sigma (j / 8) (2 * (j % 8) + 1)
+  · simp [h]
+  · simp [h, Ne.symm h]
+
+theorem bPre_COPY {p : ℕ} (h1 : 1 ≤ p) (hp : p < PERIOD) : bPre P_COPY p = 1 := by
+  rw [bPre_eq (by simp [P_COPY]) hp]; simp [preQ, P_COPY, h1]
+
+theorem bPre_INIT {k p : ℕ} (hk : k < 4) (hp : p < PERIOD) : bPre (P_INIT k) p = if p = k then 1 else 0 := by
+  rw [bPre_eq (by simp [P_INIT]; omega) hp]; simp [preQ, P_INIT, hk]
+
+theorem bPre_FIN {k p : ℕ} (hk : k < 4) (hp : p < PERIOD) : bPre (P_FIN k) p = if p = 84 + k then 1 else 0 := by
+  rw [bPre_eq (by simp [P_FIN]; omega) hp]
+  simp [preQ, P_FIN, show ¬ 12 + k < 4 by omega, show ¬ 12 + k < 12 by omega, show 12 + k < 16 by omega]
 
 end StarkedAir.Blake2s
