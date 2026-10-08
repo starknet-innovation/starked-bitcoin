@@ -56,6 +56,10 @@ Done 2026-10-08 (CPU, laptop): heights 0..970,347 in one root proof; [report](..
 
 | ID | Item | Status | Notes |
 |---|---|---|---|
+| BLOCK-SAMPLES **(next)** | Sample blocks from public APIs (edge cases: genesis, 91842/91880, segwit 481824, taproot 709632, largest/heaviest) as test data | todo | No node needed (D-026) |
+| BLOCK-SPEC | Lean spec of block structure: tx serialization (legacy/segwit), txid/wtxid, Merkle root (incl. CVE-2012-2459 duplicate rule), witness commitment, weight/size, `CheckTransaction` | todo | M3a |
+| IR-LOGUP | LogUp / interaction terms in the IR (Lean semantics, export, interpreter, in-circuit verifier) | todo | Needed for variable-length data and tree wiring (block data, HC-HASHTREE) |
+| HC-HASHTREE | Header chain exposes a Merkle tree over all block hashes, indexed by height (aligned subtrees per segment, siblings hashed in nodes) | todo | So block proofs attach to the header chain at each height |
 | BLOCK-DATA | Per-block proof: raw block ↔ Merkle root; Blake2s commitment to the canonical encoding, including spent outputs | todo | [overview.md § Architecture](../design/overview.md) |
 | UTXO | State module: sorted Merkle tree (Blake2s), inclusion and non-inclusion, matching Core's UTXO set | todo | Open: one combined tree or two (`Q-TREE`) |
 | CATCHUP | Catch up from genesis | todo | |
@@ -73,6 +77,8 @@ history module · browser/phone verifier.
 | AIRSTMT | `AirStatement` carries a pointer and an allocator (prototype ergonomics) | `src/air/prove.zig` |
 | LIFT | Mixed trace sizes / lifting | Needed once components differ in size |
 | INTERP-PROOF | Prove the Zig interpreter ≡ Lean semantics, or generate it | Currently differential-tested only |
+| VERIFIER-LEAN | Prove our circuits (plain verifier, node) in Lean against a spec of the native verifier | **Parked** by the owner 2026-10-08; notes and plan in [verifier-formalization.md](../design/verifier-formalization.md) |
+| REC-FUZZ | Differential fuzzing of `plain_verifier.zig` against the native verifier | Cheap trust reduction while VERIFIER-LEAN is parked |
 | DRIFT-CI | Automate the JSON drift check and the sorry/axiom check in CI | Manual commands are in status.md for now |
 | LICENSE | Choose a license | Needs an owner decision (possibly legal) |
 | SIMP-LINT | Clean up unused-simp-argument warnings in the Lean files | Cosmetic |
