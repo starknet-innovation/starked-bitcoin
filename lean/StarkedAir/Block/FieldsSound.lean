@@ -1200,6 +1200,75 @@ theorem outs_sim : ∀ k r, r < m → M K_OUT r = 1 → (M OUTL r).val = k + 1 �
       show r + 1 + k + 1 = r + (k + 1) + 1 by ring]
     simp
 
+/-- **Witness items.** From an item row with `c + 1` items left, `itemsT` reads them; the last ends
+the stack (`Z1 = 1`), and the stacks-left counter is unchanged. -/
+theorem items_sim : ∀ c r, r < m → M K_WITEM r = 1 → (M ITEML r).val = c + 1 →
+    ∃ items, Spec.Block.itemsT (c + 1) (toksFrom M R m r) = some (items, toksFrom M R m (r + c + 1)) ∧
+      r + c < m ∧ M K_WITEM (r + c) = 1 ∧ M Z1 (r + c) = 1 ∧ M WINL (r + c) = M WINL r ∧
+      M SEG (r + c) = M SEG r ∧ M NIN (r + c) = M NIN r ∧ M TXL (r + c) = M TXL r ∧ M HASW (r + c) = M HASW r := by
+  intro c
+  induction c with
+  | zero =>
+    intro r hr hit hitl
+    have hrn : r < n := by omega
+    obtain ⟨hv, hlen, p1, p5, hft⟩ := row_info hsat R hcs hmn hpad hfit hr (a := K_WITEM) (by simp [K_WITEM]) hit
+      (by simp [K_WITEM, K_LOCK]) (by simp [K_WITEM, K_PAD])
+    simp only [lenN, K_BLK, K_TXH, K_IN, K_NOUT, K_OUT, K_WCNT, K_WITEM, if_false, if_true] at hlen
+    norm_num at hlen
+    have ka := kinds_at hsat hrn (a := K_WITEM) (by simp [K_WITEM]) hit
+    have he : M E1C r = M ITEML r - 1 := by
+      rw [e1_eq hsat hrn, ka K_BLK (by simp [K_BLK]), ka K_TXH (by simp [K_TXH]), ka K_IN (by simp [K_IN]),
+        ka K_NOUT (by simp [K_NOUT]), ka K_OUT (by simp [K_OUT]), ka K_WCNT (by simp [K_WCNT]),
+        ka K_LOCK (by simp [K_LOCK]), hit]
+      simp [K_BLK, K_TXH, K_IN, K_NOUT, K_OUT, K_WCNT, K_WITEM, K_LOCK]
+    have hz : M Z1 r = 1 := (z1_iff_val hsat hrn he hitl).2 rfl
+    refine ⟨[slice R ((M START r).val + prefOf M r) (M VAL r).val], ?_, by simpa using hr, by simpa using hit,
+      by simpa using hz, by simp, by simp, by simp, by simp, by simp⟩
+    rw [toksFrom_cons hr, tok_witem hsat R hcs hmn hpad hfit hrn hit]
+    simp only [Spec.Block.itemsT]
+    rw [if_pos (by rw [slice_length (by omega)]; exact hv)]
+    simp
+  | succ c ih =>
+    intro r hr hit hitl
+    have hrn : r < n := by omega
+    have hr1 : r + 1 < n := by omega
+    obtain ⟨hv, hlen, p1, p5, hft⟩ := row_info hsat R hcs hmn hpad hfit hr (a := K_WITEM) (by simp [K_WITEM]) hit
+      (by simp [K_WITEM, K_LOCK]) (by simp [K_WITEM, K_PAD])
+    simp only [lenN, K_BLK, K_TXH, K_IN, K_NOUT, K_OUT, K_WCNT, K_WITEM, if_false, if_true] at hlen
+    norm_num at hlen
+    have ka := kinds_at hsat hrn (a := K_WITEM) (by simp [K_WITEM]) hit
+    have he : M E1C r = M ITEML r - 1 := by
+      rw [e1_eq hsat hrn, ka K_BLK (by simp [K_BLK]), ka K_TXH (by simp [K_TXH]), ka K_IN (by simp [K_IN]),
+        ka K_NOUT (by simp [K_NOUT]), ka K_OUT (by simp [K_OUT]), ka K_WCNT (by simp [K_WCNT]),
+        ka K_LOCK (by simp [K_LOCK]), hit]
+      simp [K_BLK, K_TXH, K_IN, K_NOUT, K_OUT, K_WCNT, K_WITEM, K_LOCK]
+    have hz : M Z1 r = 0 := by
+      rcases (z1_spec hsat hrn).1 with h | h
+      · exact h
+      · exact absurd ((z1_iff_val hsat hrn he hitl).1 h) (by omega)
+    have hit1 : M K_WITEM (r + 1) = 1 := (next_kind hsat hr1).2.2.2.2.2.2.2.1 (Or.inr hit) hz
+    have kz1 := fun {c' : ℕ} (hc : c' < 9) (hne : c' ≠ K_WITEM) =>
+      kz_of hsat R hcs hmn hpad hfit hr1 (a := K_WITEM) (by simp [K_WITEM]) hit1 hc hne
+    obtain ⟨c1, -, -, -, c5, c6, c7, -, -⟩ := counters hsat hr1
+    have heoc : M EOC r = 0 := by
+      rw [eoc_eq hsat hrn, ka K_NOUT (by simp [K_NOUT]), ka K_OUT (by simp [K_OUT])]; simp [K_NOUT, K_OUT, K_WITEM]
+    have hesc : M ESC r = 0 := by rw [esc_eq hsat hrn, hz, mul_zero]
+    have hitl1 : (M ITEML (r + 1)).val = c + 1 := by
+      rw [c7 (kz1 (by simp [K_WCNT]) (by simp [K_WCNT, K_WITEM])), hit]; exact val_pred hitl
+    have hw1 : M WINL (r + 1) = M WINL r := by rw [c6 heoc, hesc, sub_zero]
+    have inv := step_inv hsat hr1 (kz1 (by simp [K_TXH]) (by simp [K_TXH, K_WITEM]))
+      (by rw [ka K_LOCK (by simp [K_LOCK])]; simp [K_LOCK, K_WITEM]) (by rw [ka K_WCNT (by simp [K_WCNT])]; simp [K_WCNT, K_WITEM])
+    have hr1m : r + 1 < m := lt_m hsat R hcs hmn hpad hfit hr1 (kz1 (by simp [K_PAD]) (by simp [K_PAD, K_WITEM]))
+    obtain ⟨items, hitems, hlt, hi, hz', w1, i1, i2, i3, i4⟩ := ih (r + 1) hr1m hit1 hitl1
+    have e : r + 1 + c = r + (c + 1) := by ring
+    rw [e] at hlt hi hz' w1 i1 i2 i3 i4
+    refine ⟨slice R ((M START r).val + prefOf M r) (M VAL r).val :: items, ?_, hlt, hi, hz', w1.trans hw1,
+      i1.trans inv.1, i2.trans inv.2.1, i3.trans inv.2.2.1, i4.trans inv.2.2.2⟩
+    rw [toksFrom_cons hr, tok_witem hsat R hcs hmn hpad hfit hrn hit]
+    simp only [Spec.Block.itemsT]
+    rw [if_pos (by rw [slice_length (by omega)]; exact hv), hitems, show r + 1 + c + 1 = r + (c + 1) + 1 by ring]
+    simp
+
 end Grammar
 
 /-! ### The block system: bytes (component 0) and fields (component 1) -/
