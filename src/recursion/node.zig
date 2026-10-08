@@ -334,8 +334,12 @@ test "two chained segments fold into one node proof; a non-chained pair is rejec
     try std.testing.expectEqual(@as(u32, 0), n.pubs[32].toU32());
     try std.testing.expectEqual(@as(u32, 31), n.pubs[38].toU32());
 
-    // Circuit identities: a leaf's depends only on its log size; the node's comes from topology.
+    // Circuit identities: a leaf's depends only on its log size and is derived from public
+    // data by the verifier; the node's comes from topology.
     try std.testing.expectEqualSlices(u32, &l0.proof.circuit_hash, &l1.proof.circuit_hash);
+    const leaf_id = try leaf.leafIdentity(gpa, 12, all, shape.target, fri.log_blowup_factor);
+    try std.testing.expectEqualSlices(u32, &leaf_id.hash, &l1.proof.circuit_hash);
+    try std.testing.expectEqualSlices(u32, &leaf_id.root, &l1.proof.request.preprocessed_root);
     const node_id = try nodeIdentity(gpa, &tables.table, &shape);
     try std.testing.expectEqualSlices(u32, &node_id.root, &n.proof.request.preprocessed_root);
     try std.testing.expectEqualSlices(u32, &node_id.hash, &n.proof.circuit_hash);

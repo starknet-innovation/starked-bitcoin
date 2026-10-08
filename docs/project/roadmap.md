@@ -32,22 +32,24 @@ Rules:
 | HC-FULLRUN | Generate (and satisfy-check) the witness for every mainnet header, genesis to tip | done (2026-10-08: heights 0..970,347, 0 failures; chainwork equals Core's; [report](../reports/2026-10-08-full-chain.md)) | Proves completeness on real data. |
 | FV-Z3 | Tier-1 formal verification: Z3 search for under-constrained witnesses (adapt stwo-zig `scripts/air_uniqueness_board.py`) | done (this commit; [report](../reports/2026-10-07-z3-uniqueness.md)) | Runs on each exported AIR; results recorded |
 
-## M2: full chain to the tip, on the H200
+## M2: full chain to the tip, one proof
+
+Done 2026-10-08 (CPU, laptop): heights 0..970,347 in one root proof; [report](../reports/2026-10-08-full-chain.md). GPU/H200 runs are deferred (D-022).
 
 | ID | Item | Status | Notes |
 |---|---|---|---|
-| IR-LOGUP | LogUp / interaction terms in the IR (Lean semantics, export, interpreter) | todo | Port StarkWare's `tuple_inclusion` for the Lean side |
-| VK | Verification key: preprocessed roots per (AIR, log_size), instead of recomputing in O(n) | todo | |
+| IR-LOGUP | LogUp / interaction terms in the IR (Lean semantics, export, interpreter) | moved to M3 (not needed for headers) | Port StarkWare's `tuple_inclusion` for the Lean side |
+| VK | Verification key: node identity (from topology) and leaf identities per log size (from public data, `leafIdentity`), checked by `verifyRoot` | done (2026-10-08) | Per-AIR native VK (preprocessed roots per log size) still recomputed in O(n); not needed by the root verifier |
 | GPU-CODEGEN | Generate CUDA/Metal constraint kernels from the IR | deferred (D-022) | Affects completeness and speed only, not soundness. After the full pipeline works. |
-| RECURSION | Recursion via stwo-zig circuit recursion (D-023) | in-progress | Plan in [design/recursion.md](../design/recursion.md) |
+| RECURSION | Recursion via stwo-zig circuit recursion (D-023) | done (whole chain to one root, 2026-10-08) | Plan and as-built in [design/recursion.md](../design/recursion.md) |
 | REC-PROFILE | Prove and verify a segment on the `proving_5a7c5ed` profile (Blake2sM31, `PcsConfigV2`) | done (this commit; `src/air/prove_rec.zig`) | Native verify passes; the proof shape is accepted by the in-circuit verifier's types |
 | REC-MASK | Multi-offset masks + optional interaction in the circuit verifier (D-024), on submodule branch `starked/multi-offset-masks` | done (this commit; `src/recursion/plain_verifier.zig`) | A circuit verifier accepts a native `prove_rec` proof of an IR AIR with offsets; differential tests against the native verifier (accept/reject agree); adversarial tests |
 | REC-SMOKE | Port StarkWare's `simple_statement` custom-AIR example to Zig and verify it in-circuit | dropped (superseded by REC-MASK: our own statement path is exercised end to end) | Exercises the `Statement` extension point |
 | REC-LEAF | Leaf-wrap one segment proof: the plain in-circuit verifier (D-024) as a circuit, proved by stwo-zig's circuit prover, output `Blake2s(0 ‖ pubs)` | done (1142c8f, refactor 7df4a99; `src/recursion/leaf.zig`) | 2^20 segment (4,096 headers), 70 queries: 6 s leaf prove, 5 GB peak, 0.86 MB proof |
-| REC-FOLD | Node circuit: verify two children in-circuit, check `PubLink`, output the combined digest under the identity key (D-025) | done (7df4a99; `src/recursion/node.zig`) | Debug, 3 queries: 128 s per node. Production numbers: [the aggregation report](../reports/) (pending) |
+| REC-FOLD | Node circuit: verify two children in-circuit, check `PubLink`, output the combined digest under the identity key (D-025) | done (7df4a99; `src/recursion/node.zig`) | 24 s per node at production parameters; peak 16.5 GB RSS over the full chain |
 | REC-COMPOSE | Lean: valid segments whose outputs equal the next inputs compose into a valid chain from genesis (pure spec theorem over `SegmentValid`) | done (this commit: `segment_compose`) | Provable now; no circuits involved |
-| REC-STMT-EQ | Lean + tests: the in-circuit evaluation of our IR (`BitcoinSegmentStatement`) equals `Expr.eval` | in-progress (the DAG half is proven: `dag_correct`; the in-circuit interpreter remains) | With REC-LEAF | Generic; candidate for upstreaming to stwo-zig |
-| AGG | Fold driver, node identity from topology, outer root verifier (`verifyRoot`); Lean `pub_compose`, `leaf_valid`, `chain_from_genesis` | in-progress (code and proofs done: 8c8f662, 3233bcd; full-chain run pending) | Remaining: one root proof for the whole chain |
+| REC-STMT-EQ | Lean + tests: the in-circuit evaluation of our IR equals `Expr.eval` | partly done: the DAG half is proven (`dag_correct`); the in-circuit interpreter is tested (accept + five tamper rejections) and trusted | A Lean model of the circuit builder would be needed to prove the rest; recorded in verification.md |
+| AGG | Fold driver, node identity from topology, outer root verifier (`verifyRoot`); Lean `pub_compose`, `leaf_valid`, `chain_from_genesis` | done (2026-10-08: heights 0..970,347 in one 0.98 MB root proof, verified in 0.26 s; [report](../reports/2026-10-08-full-chain.md)) | |
 | H200 | Run the full chain on the H200 | deferred (D-022) | Needs owner access |
 
 ## M3: block data and UTXO state

@@ -21,6 +21,19 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+
+## 2026-10-08 — M1 and M2 done: full chain checked and proven to one root
+Who: Claude (agent, Opus 5.5)
+Roadmap: HC-FULLRUN, AGG, RECURSION, VK → done; IR-LOGUP → moved to M3; REC-STMT-EQ → partly done
+Done:
+- `fullrun 16 check`: heights 0..970,347, 0 failures; chainwork equals Core's (blockchair).
+- `spike chain 20 70 26`: 243 leaves, 242 nodes, root verified; 8.2 h CPU wall.
+- `leafIdentity`: the verifier derives leaf identities from public data; drivers use it.
+Evidence: [report](../reports/2026-10-08-full-chain.md); `zig build test` 32/32.
+Problems / lessons:
+- The full run's VK used the leaf proofs' own hashes; fixed afterwards and checked at
+  every leaf size used, but the 8 h run was not repeated.
+Next: REC-FUZZ, then M3 after the owner's decisions (status.md, Needs owner).
 ## 2026-10-07 — M2: plain in-circuit verifier, leaf, node, aggregation (Lean + Zig); headers downloaded
 Who: Claude (agent, Opus 5.5), with the owner (Q-MASK choice B)
 Roadmap: REC-PROFILE, REC-COMPOSE, REC-MASK, REC-LEAF, REC-FOLD → done; AGG → in-progress (full-chain run); HC-FULLRUN → in-progress (check running)

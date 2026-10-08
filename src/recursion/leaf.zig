@@ -253,6 +253,23 @@ pub fn wrapSegment(
     return proveSegmentLeaf(gpa, a, tables, &sl, target, fri);
 }
 
+/// The identity (preprocessed root, circuit hash) of the leaf circuit for `2^log_size`-row
+/// segments, padded to `target`, derived by the verifier from public data alone: the circuit is
+/// built for the first segment from genesis (`genesis_headers`), and its topology does not
+/// depend on the segment (tested in node.zig). No prover input is used.
+pub fn leafIdentity(gpa: std.mem.Allocator, log_size: u32, genesis_headers: []const H.Header, target: ComponentSizes, log_blowup: u32) !struct { root: [8]u32, hash: [8]u32 } {
+    var tmp = std.heap.ArenaAllocator.init(gpa);
+    defer tmp.deinit();
+    const n = @as(usize, 1) << @intCast(log_size - 8);
+    var sl = try buildSegmentLeaf(gpa, tmp.allocator(), log_size, genesis_headers[0..n], H.genesis_start);
+    defer sl.ctx.deinit();
+    try finalize.padToTargets(QM31, &sl.ctx, target);
+    var pp = try preprocessed.PreprocessedCircuit.preprocessContext(QM31, gpa, &sl.ctx);
+    defer pp.deinit(gpa);
+    const id = try circuit_cpu.recursion.circuit_params.identity(gpa, &pp, log_blowup);
+    return .{ .root = core.vcs.blake2_hash.digestToU32s(id.preprocessed_root), .hash = core.vcs.blake2_hash.digestToU32s(id.circuit_hash) };
+}
+
 test "a header-chain segment proof is wrapped into a verified leaf proof" {
     const gpa = std.testing.allocator;
     var arena = std.heap.ArenaAllocator.init(gpa);

@@ -225,6 +225,11 @@ fn agg(gpa: std.mem.Allocator, a: std.mem.Allocator, log_size: u32, n_leaves: us
     var root = try N.foldAll(gpa, a, tables, &shape, items);
     defer root.proof.deinit();
     const t_fold = timer.lap();
+    const vk_leaf = (try L.leafIdentity(gpa, log_size, all, shape.target, fri.log_blowup_factor)).hash;
+    for (leaf_hashes) |*h| {
+        if (!std.mem.eql(u32, h, &vk_leaf)) return error.LeafIdentityMismatch;
+        h.* = vk_leaf;
+    }
     try N.verifyRoot(gpa, a, tables, .{ .node = node_id, .leaf_hashes = leaf_hashes }, &root.proof, root.pubs);
     std.debug.print("agg log={d} leaves={d} headers={d} queries={d} pow={d}: leaves {d:.1}s, fold {d} nodes {d:.1}s, root verified {d:.2}s, root proof {d} bytes, tip height {d}\n", .{ log_size, n_leaves, per * n_leaves, n_queries, pow_bits, secs(t_leaves), n_leaves - 1, secs(t_fold), secs(timer.lap()), root.proof.bytes.len, root.pubs[38].toU32() | (root.pubs[39].toU32() << 16) });
 }
@@ -286,7 +291,16 @@ fn chain(gpa: std.mem.Allocator, a: std.mem.Allocator, log_size: u32, n_queries:
     var shape = try N.Shape.init(gpa, &tables.table, start.?, fri);
     defer shape.deinit(gpa);
     const node_id = try N.nodeIdentity(gpa, &tables.table, &shape);
-    std.debug.print("chain: {d} headers in {d} segments; shape and node identity {d:.1}s\n", .{ to, segs.len, secs(timer.lap()) });
+    // The verifier's leaf identities, from public data (the first segment of each size).
+    var size_hash: [32][8]u32 = undefined;
+    @memset(&seen, false);
+    for (segs) |seg| if (!seen[seg[1]]) {
+        seen[seg[1]] = true;
+        size_hash[seg[1]] = (try L.leafIdentity(gpa, @intCast(seg[1]), all, shape.target, fri.log_blowup_factor)).hash;
+    };
+    const vk_leaf_hashes = try a.alloc([8]u32, segs.len);
+    for (segs, vk_leaf_hashes) |seg, *h| h.* = size_hash[seg[1]];
+    std.debug.print("chain: {d} headers in {d} segments; shape and VK (node + leaf identities) {d:.1}s\n", .{ to, segs.len, secs(timer.lap()) });
 
     const items = try a.alloc(N.Proved, segs.len);
     const leaf_hashes = try a.alloc([8]u32, segs.len);
@@ -305,7 +319,11 @@ fn chain(gpa: std.mem.Allocator, a: std.mem.Allocator, log_size: u32, n_queries:
     var root = try N.foldAll(gpa, a, tables, &shape, items);
     defer root.proof.deinit();
     const t_fold = timer.lap();
-    try N.verifyRoot(gpa, a, tables, .{ .node = node_id, .leaf_hashes = leaf_hashes }, &root.proof, root.pubs);
+    for (leaf_hashes, vk_leaf_hashes, 0..) |got, want, i| if (!std.mem.eql(u32, &got, &want)) {
+        std.debug.print("leaf {d}: circuit hash differs from the VK\n", .{i});
+        return error.LeafIdentityMismatch;
+    };
+    try N.verifyRoot(gpa, a, tables, .{ .node = node_id, .leaf_hashes = vk_leaf_hashes }, &root.proof, root.pubs);
     var tip: [8]u32 = undefined;
     for (&tip, 0..) |*w, k| w.* = root.pubs[16 + 2 * k].toU32() | (root.pubs[17 + 2 * k].toU32() << 16);
     var work: u256 = 0;
