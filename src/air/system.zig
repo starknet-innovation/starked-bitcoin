@@ -198,6 +198,15 @@ pub fn prove(comptime E: type, a: std.mem.Allocator, cfg: rec.Config, parts: []c
 
 /// Verifies a system proof. `a` should be an arena.
 pub fn verify(a: std.mem.Allocator, cfg: rec.Config, parts: []const Part, proof: Proof) !void {
+    return verifyImpl(a, cfg, parts, proof, null);
+}
+
+/// `verify`, also capturing what the in-circuit verifier needs (`plain_verifier.fromCapture`).
+pub fn verifyCapture(a: std.mem.Allocator, cfg: rec.Config, parts: []const Part, proof: Proof, capture: *core.verifier.ProofCapture(rec.Hasher)) !void {
+    return verifyImpl(a, cfg, parts, proof, capture);
+}
+
+fn verifyImpl(a: std.mem.Allocator, cfg: rec.Config, parts: []const Part, proof: Proof, capture: ?*core.verifier.ProofCapture(rec.Hasher)) !void {
     _ = try checkSizes(parts);
     const lookups = hasLookups(parts);
     const n_trees: usize = if (lookups) 3 else 2;
@@ -245,7 +254,10 @@ pub fn verify(a: std.mem.Allocator, cfg: rec.Config, parts: []const Part, proof:
     }
     const verifiers = try a.alloc(core.air.components.Component, comps.len);
     for (comps, verifiers) |*c, *v| v.* = c.asVerifierComponent();
-    try core.verifier.verify(rec.Hasher, rec.MerkleChannel, a, verifiers, &channel, &scheme, proof.stark);
+    if (capture) |c|
+        try core.verifier.verifyWithProofCapture(rec.Hasher, rec.MerkleChannel, a, verifiers, &channel, &scheme, proof.stark, c)
+    else
+        try core.verifier.verify(rec.Hasher, rec.MerkleChannel, a, verifiers, &channel, &scheme, proof.stark);
 }
 
 // ---------------------------------------------------------------- tests
@@ -253,7 +265,7 @@ pub fn verify(a: std.mem.Allocator, cfg: rec.Config, parts: []const Part, proof:
 /// Toy system from Lean (`Testing/ByteLookup.lean`, theorem `user_bytes`): a byte table
 /// (preprocessed 0..255, main multiplicity column) and a user whose main column is looked up with
 /// multiplicity −1.
-fn byteSystem(a: std.mem.Allocator) ![2]ir.Air {
+pub fn byteSystem(a: std.mem.Allocator) ![2]ir.Air {
     return .{
         (try ir.Air.parseJson(a, @embedFile("air:byte_table"))).value,
         (try ir.Air.parseJson(a, @embedFile("air:byte_user"))).value,

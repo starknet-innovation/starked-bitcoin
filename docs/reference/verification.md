@@ -30,6 +30,7 @@ is built from.
 | Minimum block version (Core "bad-version", BIP34/66/65 heights) | `version_sound` | v6 |
 | Median time past: ≥ 6 of the 11 window times are below the header's time; the window shifts along the chain and is public at segment ends; equals Core's `GetMedianTimePast` rule given the window form | `mtp_count`, `mtp_window`, `mtp_out`, `mtp_core` (with `mtpOk_iff_count`, `sentinel_sound`) | v4 |
 | Aggregation at the public-input level: every header-chain trace yields proven public inputs; a node over two proven children passing `PubLink` yields proven combined inputs; proven inputs with genesis input state give a valid chain from genesis to the decoded tip | `leaf_valid`, `pub_compose`, `chain_from_genesis` (`Gadgets/Aggregate.lean`) | v6, node circuit (D-025) |
+| Lookups: balance ⇒ every used tuple is in the table (fewer than `P` uses); LogUp formula ⇒ the fractions sum to the claimed sum; toy byte range check | `used_in_table` (`Lookup.lean`), `logup_sum` (`LogUp.lean`), `user_bytes` (`Testing/ByteLookup.lean`) | IR v2 |
 
 ## Coverage audit against Bitcoin Core (2026-10-07)
 
@@ -82,6 +83,8 @@ height decomposition, retarget clamp, PoW one-hot). See the
 | Committed `airs/*.json` equals the current Lean definitions | Drift check (regenerate and `cmp`) |
 | The specs in `Spec/*.lean` match Bitcoin Core | `#guard`s on real mainnet values, and Zig tests on mainnet headers. Not proven against Core's C++. |
 | Lean kernel, Mathlib, toolchain | Pinned versions |
+| LogUp soundness: fractions summing to zero for random `(z, α)` ⇒ the relations balance (Schwartz–Zippel over QM31) | Standard argument, trusted with Stwo. |
+| Our LogUp code (`component.zig`, `system.zig`, the plain verifier's LogUp) implements the formula of `logup_sum` | Tested: honest system proofs verify natively and in-circuit; out-of-range values, forged sums and tampered samples are rejected. Not proven (VERIFIER-LEAN, parked). |
 | **(M2)** Our plain in-circuit verifier path (`src/recursion/plain_verifier.zig`, D-024) correctly verifies our proofs | New code with no Rust parity oracle. Built from stwo-zig's audited-by-parity pieces; tested to accept honest proofs and to reject five kinds of tampering. To do: differential fuzzing against the native verifier, and review. |
 | **(M2, planned)** The recursive verifier circuit: stwo-zig's port of StarkWare's circuit recursion (PR #204) correctly implements Stwo verification in-circuit | Not formally verified anywhere, as of 2026-10-07; stwo-zig's Lean work is RISC-V-only. Byte-parity tests against StarkWare's Rust; audit; independent native check of the final root. The composition (`REC-COMPOSE`) and our in-circuit statement (`REC-STMT-EQ`) are to be proven in Lean. |
 | **(M2)** The node circuit (`src/recursion/node.zig`, D-025) implements `PubLink` and `combine` exactly, binds each child's digest to its verified proof, and computes the key `Blake2s(hL ‖ kL ‖ hR ‖ kR)` | Mirrors the Lean definitions line by line (same index lists). Tested: chained children fold; swapped (non-chained) children make the circuit unsatisfiable. 16-bit range checks use `m31ToU32(x) = x`, relying on stwo-zig's `m31_to_u32` component. |

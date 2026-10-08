@@ -87,7 +87,7 @@ pub fn buildLeafCircuit(
     const proof_vars = try pv.guess(QM31, &ctx, values);
     const pub_vars = try ctx.scratch().alloc(Var, pubs.len);
     for (pub_vars, pubs) |*w, v| w.* = try ctx.guessM31(QM31.fromBase(v));
-    const st = pv.PlainStatement{ .air = air, .digest = digest, .preprocessed_root = pre_root, .pubs = pub_vars };
+    const st = pv.PlainStatement{ .parts = &.{.{ .air = air, .digest = digest, .pubs = pub_vars }}, .preprocessed_root = pre_root };
     try pv.verifyPlain(QM31, &ctx, &proof_vars, config, &st);
     var key: [8]U32Wrapper(Var) = undefined;
     for (&key) |*k| k.* = try builder.wrappers.constU32(QM31, &ctx, 0);
@@ -213,9 +213,9 @@ pub fn buildSegmentLeaf(gpa: std.mem.Allocator, a: std.mem.Allocator, log_size: 
     const proof_b = try prove_rec.prove(E, a, cfg, statement, @ptrCast(wit.main));
     var capture: core.verifier.ProofCapture(prove_rec.Hasher) = undefined;
     try prove_rec.verifyCapture(a, cfg, air, log_size, &wit.pubs, proof_a, &capture);
-    const config = pv.PlainConfig{ .log_trace_size = log_size, .fri = cfg.fri_config, .n_preprocessed = air.n_preprocessed, .main_offsets = try pv.mainOffsets(a, air) };
+    const config = try pv.PlainConfig.single(log_size, cfg.fri_config, air.n_preprocessed, try pv.mainOffsets(a, air), a);
     const pre_root: [32]u8 = std.mem.toBytes(try prove_rec.preprocessedRoot(a, cfg, air, log_size));
-    const values = try pv.fromCapture(a, prove_rec.Hasher, &proof_b, &capture, config);
+    const values = try pv.fromCapture(a, prove_rec.Hasher, &proof_b, &capture, config, &.{});
     var t: Timings = .{};
     t.segment_ns = timer.lap();
     const ctx = try buildLeafCircuit(gpa, &values, config, &air, digest, pre_root, &wit.pubs);

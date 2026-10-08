@@ -91,6 +91,25 @@ lake env lean --run Export.lean probe_oracle    > ../airs/probe_oracle.json
   semantics" compares the interpreter against it (offsets −3…+5, every
   preprocessed kind, every operator).
 
+## Lookups (`starked-air-v2`, IR-LOGUP)
+
+- **Schema:** an AIR may carry `"lookups":[{"rel":R,"mult":id,"vals":[ids]}]`, whose
+  expressions are nodes of the same DAG as the constraints. AIRs without lookups keep the v1
+  bytes, so their digests are unchanged. Lean: `Comp` (`Lookup.lean`), exported by
+  `Comp.toJson`.
+- **Meaning:** at every row, a lookup emits `(R, vals)` with multiplicity `mult`. A *system* of
+  components is satisfied when every AIR is and every relation balances
+  (`System.Satisfied`). Tables emit with a multiplicity column; users emit with `−1`.
+  `used_in_table` turns balance into membership.
+- **Encoding (LogUp):** lookups are paired into batches. Each batch is a secure (QM31)
+  interaction column: 4 limbs, holding cumulative sums. The last batch is also sampled at the
+  previous row, and the last column is shifted by `claimed_sum / 2^log_size`. The denominator
+  is `Σ eᵢ αⁱ − z` over `e = (rel, vals…)`; `(z, α)` are drawn after the main commitment. The
+  formula is `component.logupConstraintValues`, and Lean proves it sound (`logup_sum`).
+- **Proving:** `src/air/system.zig` proves several components in one STARK and checks that the
+  claimed sums add to zero. `plain_verifier.zig` verifies the same proofs in-circuit.
+- **Example:** `Testing/ByteLookup.lean` (`byte_table`, `byte_user`; theorem `user_bytes`).
+
 ## Trust boundary
 
 | Link | How it is assured |
@@ -100,12 +119,15 @@ lake env lean --run Export.lean probe_oracle    > ../airs/probe_oracle.json
 | JSON → Zig `ir.Air` | Parser plus digest round-trip test |
 | Zig `interp` ≡ Lean `Expr.eval` | Differential test against `probe_oracle` (not proven) |
 | Zig `interp` inside Stwo | `component.zig` and `prove.zig`; Stwo soundness is assumed |
+| LogUp constraints and claimed-sum check ⇒ fractions sum to zero | Lean `logup_sum` for the formula; the Zig implementations (native, in-circuit) are tested, not proven |
+| Fractions sum to zero for random `(z, α)` ⇒ `Balanced` | LogUp soundness (Schwartz–Zippel over QM31), trusted with Stwo |
 
 The full trust base is in [verification.md](verification.md).
 
 ## Known limits
 
-- No LogUp or interaction terms yet.
-- Single trace size: no lifting, one `log_size` per proof.
+- Single trace size: no lifting. All components of a system share one `log_size`; pad smaller
+  components with inactive rows (selectors, multiplicity 0).
+- Lookups have at most 15 values; batch degrees must stay within 3.
 - The verifier recomputes the preprocessed root in O(n). Production needs a
   verification key holding the roots per `(AIR, log_size)`.

@@ -1,5 +1,6 @@
-//! In-circuit verifier for `prove_rec` proofs of an IR AIR: multi-offset masks, no LogUp phase
-//! (roadmap REC-MASK, decision D-024; docs/design/recursion.md).
+//! In-circuit verifier for `prove_rec` proofs of an IR AIR, and for `air/system.zig` proofs of
+//! several components with LogUp (roadmap REC-MASK, IR-LOGUP; decision D-024;
+//! docs/design/recursion.md).
 //!
 //! stwo-zig's circuit verifier (a byte-parity port of StarkWare's) supports one OODS sample per
 //! trace column and always runs an interaction phase. This is a parallel path built from its
@@ -12,8 +13,11 @@
 //! column, mask order) → composition check → DEEP coefficient → FRI commit → PoW → queries →
 //! Merkle decommitment (three trees) → DEEP quotients → FRI decommitment.
 //!
-//! Tree indices follow the circuit's four-tree layout with an empty interaction tree:
-//! 0 = preprocessed, 1 = main, 2 = (unused), 3 = composition.
+//! Tree indices follow the circuit's four-tree layout: 0 = preprocessed, 1 = main,
+//! 2 = interaction (empty without lookups), 3 = composition. With lookups (system proofs), after
+//! the main root: lookup elements `(z, α)`, the check that the claimed sums add to zero, the
+//! claimed sums and the interaction root are mixed, and each component's LogUp constraints
+//! (`component.logupConstraintValues`, Lean `logup_sum`) join its composition.
 //! The constraint evaluation runs the AIR's exported DAG (proven to evaluate to the constraints
 //! in any commutative ring: `dag_correct`, lean/StarkedAir/Dag.lean).
 
@@ -37,15 +41,33 @@ pub const FriConfig = core.pcs.config_v2.FriConfigV2;
 pub const N_COMPOSITION_COLUMNS: usize = 8;
 const TREE_PRE: usize = 0;
 const TREE_MAIN: usize = 1;
+const TREE_INTER: usize = 2;
 const TREE_COMPOSITION: usize = 3;
 
-/// Shape of a plain proof: trace size, FRI parameters, and the AIR's columns and offsets.
-pub const PlainConfig = struct {
-    log_trace_size: u32,
-    fri: FriConfig,
+/// One component's columns: preprocessed count, sorted main mask offsets, interaction columns.
+pub const PartConfig = struct {
     n_preprocessed: usize,
     /// Sorted mask offsets of every main column (as the native component samples them).
     main_offsets: []const []const i32,
+    /// `4 · nBatches`: LogUp cumulative-sum limbs (the last 4 sampled at the previous row too).
+    n_inter: usize = 0,
+};
+
+/// Shape of a plain proof: trace size, FRI parameters, and the components' columns.
+pub const PlainConfig = struct {
+    log_trace_size: u32,
+    fri: FriConfig,
+    parts: []const PartConfig,
+    /// A system proof (`air/system.zig`): the statement starts with the component count.
+    system: bool = false,
+
+    pub fn single(log_trace_size: u32, fri: FriConfig, n_preprocessed: usize, main_offsets: []const []const i32, a: std.mem.Allocator) !PlainConfig {
+        return .{ .log_trace_size = log_trace_size, .fri = fri, .parts = try a.dupe(PartConfig, &.{.{ .n_preprocessed = n_preprocessed, .main_offsets = main_offsets }}) };
+    }
+    pub fn hasLookups(self: PlainConfig) bool {
+        for (self.parts) |pc| if (pc.n_inter != 0) return true;
+        return false;
+    }
 
     pub fn logEvaluationDomainSize(self: PlainConfig) usize {
         return self.log_trace_size + self.fri.log_blowup_factor;
@@ -59,10 +81,17 @@ pub const PlainConfig = struct {
 pub fn PlainProof(comptime T: type) type {
     return struct {
         trace_root: HashValue(T),
+        /// Present iff the proof has lookups.
+        interaction_root: ?HashValue(T) = null,
         composition_root: HashValue(T),
+        /// All components' columns, in component order.
         preprocessed_at_oods: []T,
         /// Per main column, one value per mask offset (in `main_offsets` order).
         trace_at_oods: [][]T,
+        /// Per interaction column: one value, or `[prev, cur]` for a component's last 4 limbs.
+        interaction_at_oods: [][]T = &.{},
+        /// Claimed LogUp sums of the components with lookups.
+        claimed_sums: []T = &.{},
         composition_eval_at_oods: [N_COMPOSITION_COLUMNS]T,
         eval_domain_samples: sv.proof.EvalDomainSamples(T),
         eval_domain_auth_paths: sv.proof.AuthPaths(T),
@@ -81,32 +110,61 @@ pub fn fromCapture(
     proof: *const core.proof.StarkProof(H),
     capture: *const core.verifier.ProofCapture(H),
     config: PlainConfig,
+    claimed_sums: []const QM31,
 ) !PlainProof(QM31) {
     const stark = &proof.commitment_scheme_proof;
-    if (stark.commitments.items.len != 3 or stark.sampled_values.items.len != 3) return error.InvalidPlainProof;
+    const lookups = config.hasLookups();
+    const n_native: usize = if (lookups) 4 else 3;
+    if (stark.commitments.items.len != n_native or stark.sampled_values.items.len != n_native) return error.InvalidPlainProof;
+    var n_pre: usize = 0;
+    var n_main: usize = 0;
+    var n_inter: usize = 0;
+    for (config.parts) |pc| {
+        n_pre += pc.n_preprocessed;
+        n_main += pc.main_offsets.len;
+        n_inter += pc.n_inter;
+    }
     const n_queries = config.nQueries();
     const queries = capture.queries.raw;
     if (queries.len != n_queries) return error.InvalidPlainProof;
 
     var out: PlainProof(QM31) = undefined;
     out.trace_root = builder.blake.hashValueFromDigest(QM31, stark.commitments.items[1]);
-    out.composition_root = builder.blake.hashValueFromDigest(QM31, stark.commitments.items[2]);
+    out.interaction_root = if (lookups) builder.blake.hashValueFromDigest(QM31, stark.commitments.items[2]) else null;
+    out.composition_root = builder.blake.hashValueFromDigest(QM31, stark.commitments.items[n_native - 1]);
+    out.claimed_sums = try a.dupe(QM31, claimed_sums);
+    out.interaction_at_oods = &.{};
 
     const pre = stark.sampled_values.items[0];
-    if (pre.len != config.n_preprocessed) return error.InvalidPlainProof;
+    if (pre.len != n_pre) return error.InvalidPlainProof;
     out.preprocessed_at_oods = try a.alloc(QM31, pre.len);
     for (pre, out.preprocessed_at_oods) |samples, *v| {
         if (samples.len != 1) return error.InvalidPlainProof;
         v.* = samples[0];
     }
     const main = stark.sampled_values.items[1];
-    if (main.len != config.main_offsets.len) return error.InvalidPlainProof;
+    if (main.len != n_main) return error.InvalidPlainProof;
     out.trace_at_oods = try a.alloc([]QM31, main.len);
-    for (main, config.main_offsets, out.trace_at_oods) |samples, offsets, *v| {
-        if (samples.len != offsets.len) return error.InvalidPlainProof;
-        v.* = try a.dupe(QM31, samples);
+    {
+        var k: usize = 0;
+        for (config.parts) |pc| for (pc.main_offsets) |offsets| {
+            if (main[k].len != offsets.len) return error.InvalidPlainProof;
+            out.trace_at_oods[k] = try a.dupe(QM31, main[k]);
+            k += 1;
+        };
     }
-    const comp = stark.sampled_values.items[2];
+    if (lookups) {
+        const inter = stark.sampled_values.items[2];
+        if (inter.len != n_inter) return error.InvalidPlainProof;
+        out.interaction_at_oods = try a.alloc([]QM31, n_inter);
+        var k: usize = 0;
+        for (config.parts) |pc| for (0..pc.n_inter) |c| {
+            if (inter[k].len != (if (c + 4 >= pc.n_inter) @as(usize, 2) else 1)) return error.InvalidPlainProof;
+            out.interaction_at_oods[k] = try a.dupe(QM31, inter[k]);
+            k += 1;
+        };
+    }
+    const comp = stark.sampled_values.items[n_native - 1];
     if (comp.len != N_COMPOSITION_COLUMNS) return error.InvalidPlainProof;
     for (comp, &out.composition_eval_at_oods) |samples, *v| {
         if (samples.len != 1) return error.InvalidPlainProof;
@@ -125,7 +183,7 @@ pub fn fromCapture(
     }
     const unique = sorted[0..n_unique];
     out.eval_domain_samples.n_queries = n_queries;
-    const native_tree = [4]?usize{ 0, 1, null, 2 };
+    const native_tree: [4]?usize = if (lookups) .{ 0, 1, 2, 3 } else .{ 0, 1, null, 2 };
     for (native_tree, 0..) |nt, tree| {
         if (nt == null) {
             out.eval_domain_samples.data[tree] = &.{};
@@ -149,7 +207,7 @@ pub fn fromCapture(
 
     // Eval-domain authentication paths.
     const depth = config.logEvaluationDomainSize();
-    if (capture.trace_paths.len != 3) return error.InvalidPlainProof;
+    if (capture.trace_paths.len != n_native) return error.InvalidPlainProof;
     const trees = try a.alloc([]HashValue(QM31), 4);
     for (native_tree, 0..) |nt, tree| {
         if (nt == null) {
@@ -205,6 +263,14 @@ pub fn guess(comptime V: type, ctx: *Context(V), p: *const PlainProof(V)) !Plain
     const s = ctx.scratch();
     var out: PlainProof(Var) = undefined;
     out.trace_root = try builder.blake.guessHash(V, ctx, p.trace_root);
+    out.interaction_root = if (p.interaction_root) |r| try builder.blake.guessHash(V, ctx, r) else null;
+    out.interaction_at_oods = try s.alloc([]Var, p.interaction_at_oods.len);
+    for (out.interaction_at_oods, p.interaction_at_oods) |*ws, vs| {
+        ws.* = try s.alloc(Var, vs.len);
+        for (ws.*, vs) |*w, v| w.* = try ctx.guess(v);
+    }
+    out.claimed_sums = try s.alloc(Var, p.claimed_sums.len);
+    for (out.claimed_sums, p.claimed_sums) |*w, v| w.* = try ctx.guess(v);
     out.composition_root = try builder.blake.guessHash(V, ctx, p.composition_root);
     out.preprocessed_at_oods = try s.alloc(Var, p.preprocessed_at_oods.len);
     for (out.preprocessed_at_oods, p.preprocessed_at_oods) |*w, v| w.* = try ctx.guess(v);
@@ -245,17 +311,43 @@ fn guessPaths(comptime V: type, ctx: *Context(V), paths: sv.proof.AuthPaths(V)) 
 
 // ---------------------------------------------------------------- the statement
 
-/// What a plain proof claims: the AIR (its DAG, digest and preprocessed root) and its public
-/// inputs (circuit wires, so a leaf can expose them).
-pub const PlainStatement = struct {
+/// One component's claim: its AIR (DAG and digest) and public inputs (circuit wires, so a leaf
+/// can expose them).
+pub const PartStatement = struct {
     air: *const ir.Air,
     digest: [32]u8,
-    preprocessed_root: [32]u8,
     pubs: []const Var,
 };
 
-/// The AIR's constraint DAG at the OODS point, Horner-combined with `coeff` and divided by
-/// the trace domain's vanishing polynomial (as the native component does).
+/// What a plain proof claims: the components, in order, and the preprocessed root.
+pub const PlainStatement = struct {
+    parts: []const PartStatement,
+    preprocessed_root: [32]u8,
+};
+
+/// `Σ eᵢ αⁱ − z` over `e = (rel, vals…)`, in-circuit (`component.denominator`).
+fn denominatorVar(comptime V: type, ctx: *Context(V), rel: u32, vals: []const Var, z: Var, alpha: Var) !Var {
+    var acc = ctx.zero();
+    var i = vals.len;
+    while (i > 0) {
+        i -= 1;
+        acc = try ctx.add(try ctx.mul(acc, alpha), vals[i]);
+    }
+    acc = try ctx.add(try ctx.mul(acc, alpha), try ctx.constant(QM31.fromBase(M31.fromCanonical(rel))));
+    return ctx.sub(acc, z);
+}
+
+/// A secure column from its 4 limb samples (`QM31.fromPartialEvals`).
+fn secure(comptime V: type, ctx: *Context(V), limbs: [4]Var) !Var {
+    var out = limbs[0];
+    const basis = [3]QM31{ QM31.fromU32Unchecked(0, 1, 0, 0), QM31.fromU32Unchecked(0, 0, 1, 0), QM31.fromU32Unchecked(0, 0, 0, 1) };
+    for (basis, limbs[1..]) |e, l| out = try ctx.add(out, try ctx.mul(l, try ctx.constant(e)));
+    return out;
+}
+
+/// Every component's constraints (AIR DAG, then LogUp) at the OODS point, Horner-combined with
+/// `coeff` across components in order, divided by the trace domain's vanishing polynomial (all
+/// components share the trace size).
 fn compositionAtOods(
     comptime V: type,
     ctx: *Context(V),
@@ -264,30 +356,77 @@ fn compositionAtOods(
     p: *const PlainProof(Var),
     oods_x: Var,
     coeff: Var,
+    elements: ?[2]Var,
 ) !Var {
-    const air = st.air;
-    const vals = try ctx.scratch().alloc(Var, air.exprs.len);
-    for (air.exprs, 0..) |node, k| vals[k] = switch (node) {
-        .col => |c| switch (c.tree) {
-            .preprocessed => blk: {
-                if (c.offset != 0) return error.PreprocessedOffset;
-                break :blk p.preprocessed_at_oods[c.index];
-            },
-            .main => blk: {
-                const offs = config.main_offsets[c.index];
-                const at = std.mem.indexOfScalar(i32, offs, c.offset) orelse return error.UnknownMaskOffset;
-                break :blk p.trace_at_oods[c.index][at];
-            },
-        },
-        .constant => |v| try ctx.constant(QM31.fromBase(M31.fromCanonical(v))),
-        .add => |ab| try ctx.add(vals[ab[0]], vals[ab[1]]),
-        .sub => |ab| try ctx.sub(vals[ab[0]], vals[ab[1]]),
-        .mul => |ab| try ctx.mul(vals[ab[0]], vals[ab[1]]),
-        .neg => |x| try ctx.sub(ctx.zero(), vals[x]),
-        .@"pub" => |i| st.pubs[i],
-    };
     var acc = ctx.zero();
-    for (air.constraints) |root| acc = try ctx.add(try ctx.mul(acc, coeff), vals[root]);
+    var pre_at: usize = 0;
+    var main_at: usize = 0;
+    var inter_at: usize = 0;
+    var sum_at: usize = 0;
+    for (st.parts, config.parts) |part, pc| {
+        const air = part.air;
+        const vals = try ctx.scratch().alloc(Var, air.exprs.len);
+        for (air.exprs, 0..) |node, k| vals[k] = switch (node) {
+            .col => |c| switch (c.tree) {
+                .preprocessed => blk: {
+                    if (c.offset != 0) return error.PreprocessedOffset;
+                    break :blk p.preprocessed_at_oods[pre_at + c.index];
+                },
+                .main => blk: {
+                    const offs = pc.main_offsets[c.index];
+                    const at = std.mem.indexOfScalar(i32, offs, c.offset) orelse return error.UnknownMaskOffset;
+                    break :blk p.trace_at_oods[main_at + c.index][at];
+                },
+            },
+            .constant => |v| try ctx.constant(QM31.fromBase(M31.fromCanonical(v))),
+            .add => |ab| try ctx.add(vals[ab[0]], vals[ab[1]]),
+            .sub => |ab| try ctx.sub(vals[ab[0]], vals[ab[1]]),
+            .mul => |ab| try ctx.mul(vals[ab[0]], vals[ab[1]]),
+            .neg => |x| try ctx.sub(ctx.zero(), vals[x]),
+            .@"pub" => |i| part.pubs[i],
+        };
+        for (air.constraints) |root| acc = try ctx.add(try ctx.mul(acc, coeff), vals[root]);
+
+        if (air.lookups.len != 0) {
+            const el = elements orelse return error.MissingLookupElements;
+            const B = (air.lookups.len + 1) / 2;
+            if (pc.n_inter != 4 * B) return error.InvalidPlainProof;
+            const inter = p.interaction_at_oods[inter_at..][0 .. 4 * B];
+            const mults = try ctx.scratch().alloc(Var, air.lookups.len);
+            const dens = try ctx.scratch().alloc(Var, air.lookups.len);
+            for (air.lookups, mults, dens) |l, *m, *d| {
+                m.* = vals[l.mult];
+                const e = try ctx.scratch().alloc(Var, l.vals.len);
+                for (l.vals, e) |v, *x| x.* = vals[v];
+                d.* = try denominatorVar(V, ctx, l.rel, e, el[0], el[1]);
+            }
+            const S = try ctx.scratch().alloc(Var, B);
+            for (S, 0..) |*sv_, b| {
+                const at: usize = if (b + 1 == B) 1 else 0;
+                sv_.* = try secure(V, ctx, .{ inter[4 * b][at], inter[4 * b + 1][at], inter[4 * b + 2][at], inter[4 * b + 3][at] });
+            }
+            const last = 4 * (B - 1);
+            const s_prev = try secure(V, ctx, .{ inter[last][0], inter[last + 1][0], inter[last + 2][0], inter[last + 3][0] });
+            // shift = claimed_sum / 2^log_size
+            const n_inv = try ctx.constant(QM31.fromBase(try M31.fromU64(@as(u64, 1) << @intCast(config.log_trace_size)).inv()));
+            const shift = try ctx.mul(p.claimed_sums[sum_at], n_inv);
+            for (0..B) |b| {
+                const j = 2 * b;
+                const pair = j + 1 < mults.len;
+                const N = if (pair) try ctx.add(try ctx.mul(mults[j], dens[j + 1]), try ctx.mul(mults[j + 1], dens[j])) else mults[j];
+                const D = if (pair) try ctx.mul(dens[j], dens[j + 1]) else dens[j];
+                const diff = if (b + 1 < B)
+                    try ctx.sub(S[b], if (b == 0) ctx.zero() else S[b - 1])
+                else
+                    try ctx.add(try ctx.sub(try ctx.sub(S[b], s_prev), if (B == 1) ctx.zero() else S[B - 2]), shift);
+                acc = try ctx.add(try ctx.mul(acc, coeff), try ctx.sub(try ctx.mul(diff, D), N));
+            }
+            sum_at += 1;
+        }
+        pre_at += pc.n_preprocessed;
+        main_at += pc.main_offsets.len;
+        inter_at += pc.n_inter;
+    }
     return ctx.mul(acc, try sv.circle.denomInverse(V, ctx, oods_x, config.log_trace_size));
 }
 
@@ -313,15 +452,35 @@ pub fn verifyPlain(
     const pre_root = try builder.blake.constantHash(V, ctx, builder.blake.hashValueFromDigest(QM31, st.preprocessed_root));
     try channel.mixCommitment(V, ctx, pre_root);
 
-    // Statement: [log_size, digest (8 words), n_pubs], then one call per public input.
-    var words: [10]U32Wrapper(Var) = undefined;
-    words[0] = try builder.wrappers.constU32(V, ctx, log_trace);
-    for (0..8) |i| words[1 + i] = try builder.wrappers.constU32(V, ctx, std.mem.readInt(u32, st.digest[4 * i ..][0..4], .little));
-    words[9] = try builder.wrappers.constU32(V, ctx, @intCast(st.pubs.len));
-    try channel.mixU32s(V, ctx, &words);
-    for (st.pubs) |pv| try channel.mixU32s(V, ctx, &.{try builder.blake.m31ToU32(V, ctx, pv)});
+    if (st.parts.len != config.parts.len) return error.InvalidPlainProof;
+    // Statement (system proofs start with the component count); per component:
+    // [log_size, digest (8 words), n_pubs], then one call per public input.
+    if (config.system) try channel.mixU32s(V, ctx, &.{try builder.wrappers.constU32(V, ctx, @intCast(st.parts.len))});
+    for (st.parts) |part| {
+        var words: [10]U32Wrapper(Var) = undefined;
+        words[0] = try builder.wrappers.constU32(V, ctx, log_trace);
+        for (0..8) |i| words[1 + i] = try builder.wrappers.constU32(V, ctx, std.mem.readInt(u32, part.digest[4 * i ..][0..4], .little));
+        words[9] = try builder.wrappers.constU32(V, ctx, @intCast(part.pubs.len));
+        try channel.mixU32s(V, ctx, &words);
+        for (part.pubs) |pv| try channel.mixU32s(V, ctx, &.{try builder.blake.m31ToU32(V, ctx, pv)});
+    }
 
     try channel.mixCommitment(V, ctx, p.trace_root);
+    var elements: ?[2]Var = null;
+    if (config.hasLookups()) {
+        elements = try channel.drawTwoQm31s(V, ctx);
+        var n_with: usize = 0;
+        for (st.parts) |part| {
+            if (part.air.lookups.len != 0) n_with += 1;
+        }
+        if (p.claimed_sums.len != n_with) return error.InvalidPlainProof;
+        // The relations balance: the claimed sums add to zero.
+        var total = ctx.zero();
+        for (p.claimed_sums) |c| total = try ctx.add(total, c);
+        try ctx.eq(total, ctx.zero());
+        try channel.mixQm31s(V, ctx, p.claimed_sums);
+        try channel.mixCommitment(V, ctx, p.interaction_root orelse return error.InvalidPlainProof);
+    }
     const coeff = try channel.drawQm31(V, ctx);
     try channel.mixCommitment(V, ctx, p.composition_root);
     const oods = try channel.drawPoint(V, ctx);
@@ -330,10 +489,11 @@ pub fn verifyPlain(
     var values: std.ArrayListUnmanaged(Var) = .empty;
     try values.appendSlice(ctx.scratch(), p.preprocessed_at_oods);
     for (p.trace_at_oods) |col| try values.appendSlice(ctx.scratch(), col);
+    for (p.interaction_at_oods) |col| try values.appendSlice(ctx.scratch(), col);
     try values.appendSlice(ctx.scratch(), &p.composition_eval_at_oods);
     try channel.mixQm31s(V, ctx, values.items);
 
-    const computed = try compositionAtOods(V, ctx, st, config, p, oods.x, coeff);
+    const computed = try compositionAtOods(V, ctx, st, config, p, oods.x, coeff, elements);
     const expected = try sv.oods.extractExpectedCompositionEval(V, ctx, &p.composition_eval_at_oods, oods, log_trace + 1);
     try ctx.eq(computed, expected);
 
@@ -345,8 +505,8 @@ pub fn verifyPlain(
     const bits = try ctx.scratch().alloc([]const Var, queries.bits.len);
     for (bits, queries.bits) |*u, b| u.* = try builder.simd.unpack(V, ctx, b);
 
-    // Merkle decommitment of the three trees (all at the evaluation-domain height; no sorting).
-    const roots = [4]?HashValue(Var){ pre_root, p.trace_root, null, p.composition_root };
+    // Merkle decommitment (all trees at the evaluation-domain height; no sorting).
+    const roots = [4]?HashValue(Var){ pre_root, p.trace_root, p.interaction_root, p.composition_root };
     const bits_for_query = try ctx.scratch().alloc(Var, bits.len);
     for (roots, 0..) |maybe_root, tree| {
         const root = maybe_root orelse continue;
@@ -367,7 +527,9 @@ pub fn verifyPlain(
     for (p.preprocessed_at_oods, 0..) |v, c|
         try responses.append(ctx.scratch(), .{ .trace_idx = TREE_PRE, .column_idx = c, .pt = oods, .value = v });
     var shifted = std.AutoHashMapUnmanaged(i32, Point(Var)).empty;
-    for (config.main_offsets, p.trace_at_oods, 0..) |offs, vals, c| {
+    var all_offsets: std.ArrayListUnmanaged([]const i32) = .empty;
+    for (config.parts) |pc| try all_offsets.appendSlice(ctx.scratch(), pc.main_offsets);
+    for (all_offsets.items, p.trace_at_oods, 0..) |offs, vals, c| {
         const pts = try ctx.scratch().alloc(Point(Var), offs.len);
         for (offs, pts) |off, *pt| {
             if (off == 0) {
@@ -386,6 +548,18 @@ pub fn verifyPlain(
         }
         if (offs.len == 2) try responses.append(ctx.scratch(), .{ .trace_idx = TREE_MAIN, .column_idx = c, .pt = pts[1], .value = vals[1] });
         for (pts, vals) |pt, v| try responses.append(ctx.scratch(), .{ .trace_idx = TREE_MAIN, .column_idx = c, .pt = pt, .value = v });
+    }
+    if (p.interaction_at_oods.len != 0) {
+        const g = trace_gen.mulSigned(-1);
+        const prev = try sv.circle.addPoints(V, ctx, oods, .{ .x = try ctx.constant(QM31.fromBase(g.x)), .y = try ctx.constant(QM31.fromBase(g.y)) });
+        for (p.interaction_at_oods, 0..) |vals, c| {
+            if (vals.len == 2) {
+                // [prev, cur], preceded by the periodicity sample (as for two-offset main columns).
+                try responses.append(ctx.scratch(), .{ .trace_idx = TREE_INTER, .column_idx = c, .pt = oods, .value = vals[1] });
+                try responses.append(ctx.scratch(), .{ .trace_idx = TREE_INTER, .column_idx = c, .pt = prev, .value = vals[0] });
+                try responses.append(ctx.scratch(), .{ .trace_idx = TREE_INTER, .column_idx = c, .pt = oods, .value = vals[1] });
+            } else try responses.append(ctx.scratch(), .{ .trace_idx = TREE_INTER, .column_idx = c, .pt = oods, .value = vals[0] });
+        }
     }
     for (p.composition_eval_at_oods, 0..) |v, c|
         try responses.append(ctx.scratch(), .{ .trace_idx = TREE_COMPOSITION, .column_idx = c, .pt = oods, .value = v });
@@ -412,7 +586,7 @@ fn runCircuit(a: std.mem.Allocator, values: *const PlainProof(QM31), config: Pla
     const pv = try guess(QM31, &ctx, values);
     const pub_vars = try a.alloc(Var, pubs.len);
     for (pub_vars, pubs) |*w, v| w.* = try ctx.guess(QM31.fromBase(v));
-    const st = PlainStatement{ .air = air, .digest = digest, .preprocessed_root = pre_root, .pubs = pub_vars };
+    const st = PlainStatement{ .parts = &.{.{ .air = air, .digest = digest, .pubs = pub_vars }}, .preprocessed_root = pre_root };
     try verifyPlain(QM31, &ctx, &pv, config, &st);
     try ctx.finalizeGuessedVars();
     if (std.process.hasEnvVarConstant("PLAIN_VERIFIER_STATS"))
@@ -439,9 +613,9 @@ test "plain in-circuit verifier accepts a recursion-profile header-chain proof, 
     var capture: core.verifier.ProofCapture(prove_rec.Hasher) = undefined;
     try prove_rec.verifyCapture(a, cfg, air, log_size, &wit.pubs, proof_a, &capture);
 
-    const config = PlainConfig{ .log_trace_size = log_size, .fri = cfg.fri_config, .n_preprocessed = air.n_preprocessed, .main_offsets = try mainOffsets(a, air) };
+    const config = try PlainConfig.single(log_size, cfg.fri_config, air.n_preprocessed, try mainOffsets(a, air), a);
     const pre_root: [32]u8 = std.mem.toBytes(try prove_rec.preprocessedRoot(a, cfg, air, log_size));
-    var values = try fromCapture(a, prove_rec.Hasher, &proof_b, &capture, config);
+    var values = try fromCapture(a, prove_rec.Hasher, &proof_b, &capture, config, &.{});
     try std.testing.expect(try runCircuit(a, &values, config, &air, digest, pre_root, &wit.pubs));
 
     // A wrong public input, a tampered OODS sample, or a tampered decommitted value is rejected.
@@ -475,6 +649,84 @@ test "plain in-circuit verifier accepts a recursion-profile header-chain proof, 
     }
     // Still accepted after restoring everything.
     try std.testing.expect(try runCircuit(a, &values, config, &air, digest, pre_root, &wit.pubs));
+}
+
+test "plain in-circuit verifier accepts a LogUp system proof, rejects unbalanced or tampered ones" {
+    const system = @import("../air/system.zig");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const airs = try system.byteSystem(a);
+    const log_size: u32 = 8;
+    const parts = [_]system.Part{ .{ .air = &airs[0], .log_size = log_size }, .{ .air = &airs[1], .log_size = log_size } };
+    const cfg = prove_rec.Config.fromFriAndTraceSize(try FriConfig.init(10, 0, 1, 3, 1), log_size);
+    var prng = std.Random.DefaultPrng.init(11);
+    const x = try a.alloc(M31, 256);
+    const mult = try a.alloc(M31, 256);
+    @memset(mult, M31.zero());
+    for (x) |*v| {
+        const b = prng.random().int(u8);
+        v.* = M31.fromCanonical(b);
+        mult[b] = mult[b].add(M31.one());
+    }
+
+    const config = PlainConfig{ .log_trace_size = log_size, .fri = cfg.fri_config, .system = true, .parts = &.{
+        .{ .n_preprocessed = 1, .main_offsets = try mainOffsets(a, airs[0]), .n_inter = 4 },
+        .{ .n_preprocessed = 0, .main_offsets = try mainOffsets(a, airs[1]), .n_inter = 4 },
+    } };
+    const pre_root: [32]u8 = std.mem.toBytes(try system.preprocessedRoot(a, cfg, &parts));
+    const Run = struct {
+        fn run(al: std.mem.Allocator, airs_: *const [2]ir.Air, values: *const PlainProof(QM31), cfg_: PlainConfig, root: [32]u8) !bool {
+            var ctx = try Context(QM31).init(al, 0);
+            defer ctx.deinit();
+            const pv = try guess(QM31, &ctx, values);
+            const st = PlainStatement{ .preprocessed_root = root, .parts = &.{
+                .{ .air = &airs_[0], .digest = try airs_[0].digest(al), .pubs = &.{} },
+                .{ .air = &airs_[1], .digest = try airs_[1].digest(al), .pubs = &.{} },
+            } };
+            verifyPlain(QM31, &ctx, &pv, cfg_, &st) catch |e| switch (e) {
+                error.EqFailedOnEval => return false,
+                else => return e,
+            };
+            try ctx.finalizeGuessedVars();
+            return ctx.isCircuitValid();
+        }
+    };
+    const valuesFor = struct {
+        fn f(al: std.mem.Allocator, cfg_: prove_rec.Config, parts_: []const system.Part, mains: []const []const []const M31, config_: PlainConfig) !PlainProof(QM31) {
+            const E_ = prove_rec.Engine(@import("stwo_cpu_backend").CpuBackend);
+            const pa = try system.prove(E_, al, cfg_, parts_, mains);
+            const pb = try system.prove(E_, al, cfg_, parts_, mains);
+            // Proving is deterministic: one copy is consumed by the native verifier.
+            var capture: core.verifier.ProofCapture(prove_rec.Hasher) = undefined;
+            try system.verifyCapture(al, cfg_, parts_, pa, &capture);
+            return fromCapture(al, prove_rec.Hasher, &pb.stark, &capture, config_, pb.claimed_sums);
+        }
+    }.f;
+
+    const mains = [_][]const []const M31{ &.{mult}, &.{x} };
+    var values = try valuesFor(a, cfg, &parts, &mains, config);
+    try std.testing.expect(try Run.run(a, &airs, &values, config, pre_root));
+
+    // Claimed sums that do not add to zero are rejected.
+    {
+        const saved = values.claimed_sums[0];
+        values.claimed_sums[0] = saved.add(QM31.one());
+        try std.testing.expect(!try Run.run(a, &airs, &values, config, pre_root));
+        // Still adding to zero, but not the committed ones.
+        values.claimed_sums[1] = values.claimed_sums[1].sub(QM31.one());
+        try std.testing.expect(!try Run.run(a, &airs, &values, config, pre_root));
+        values.claimed_sums[0] = saved;
+        values.claimed_sums[1] = values.claimed_sums[1].add(QM31.one());
+    }
+    // A tampered cumulative-sum sample is rejected.
+    {
+        const saved = values.interaction_at_oods[3][1];
+        values.interaction_at_oods[3][1] = saved.add(QM31.one());
+        try std.testing.expect(!try Run.run(a, &airs, &values, config, pre_root));
+        values.interaction_at_oods[3][1] = saved;
+    }
+    try std.testing.expect(try Run.run(a, &airs, &values, config, pre_root));
 }
 
 test "plain verifier circuit size for one header-chain segment (2^12 rows)" {

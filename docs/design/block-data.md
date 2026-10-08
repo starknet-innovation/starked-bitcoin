@@ -74,6 +74,36 @@ between the components' emitted tuples; LogUp's cryptographic soundness
 (Schwartz–Zippel over QM31) is trusted with Stwo. This mirrors how the AIR
 proofs treat the STARK itself.
 
+## Plan (decided structure, D-028; sub-milestones)
+
+**Key idea: check serialization, not parsing.** The prover supplies the parsed fields. The AIR
+checks that serializing them reproduces the raw bytes exactly. Every field is one row claiming
+a span `[start, start + len)` of the byte stream; the spans tile the stream in order. Core's
+deserializer accepts exactly the canonical serializations (canonical CompactSize, flag rules),
+so this is equivalent. It costs rows per *field* (tens per transaction), not per byte, except
+where bytes must be hashed.
+
+**Hash inputs are a few contiguous ranges.** A legacy transaction's txid message is one
+contiguous range of the raw block. A segwit one is three: version; inputs and outputs; locktime.
+They skip the marker, the flag and the witness. A wtxid message is the whole transaction. A
+"message bytes" component walks these ranges byte by byte. Positions increase by one except at
+the known boundaries, and bytes come from the byte table by lookup. It feeds the existing SHA-256
+gadget word by word.
+
+| Sub-milestone | Content | Lean |
+|---|---|---|
+| M3a.1 `BLK-BYTES` | Byte table: `(pos, byte)` with range check; block length | membership lemma per position |
+| M3a.2 `BLK-FIELDS` | Field rows tiling the stream: header, tx count, per tx (version, marker/flag, vin/vout counts, outpoint, script length + span, sequence, value, witness counts and items, locktime); canonical CompactSize; segwit flag rules | serialization ⇔ `parseBlock` (Spec/Block.lean) |
+| M3a.3 `BLK-SHA` | Message-byte walker plus multi-message SHA-256 (reusing `compress_sound_air`): txid, wtxid, header hash | stream = `serNoWit` / `serWit` |
+| M3a.4 `BLK-MERKLE` | txid tree with the CVE-2012-2459 check, witness tree, witness commitment | `merkleRoot` |
+| M3a.5 `BLK-CHECKS` | `CheckTransaction` (values, MoneyRange, coinbase length, prevout-null), coinbase position, finality, BIP34 prefix, sigops (opcode walk over script spans), sizes and weight | `checkBlock = none` |
+| M3a.6 `BLK-COMMIT` | Canonical encoding (with spent-output slots, D-029) and its Blake2s commitment (D-030); needs a Blake2s AIR | encoding spec |
+
+**Duplicate inputs.** `bad-txns-inputs-duplicate` needs a uniqueness argument (sorting).
+Within a block, M3b's UTXO update rejects a second spend of the same coin, so M3a may leave this
+rule to M3b. The statement then says so explicitly: `BlockValid` minus duplicate inputs, plus
+M3b. Owner to confirm when M3a.5 starts.
+
 ## Cost (rough, to be measured)
 
 A 4 MB block is about 4 M parser rows plus about 2.5 passes of SHA-256 over
