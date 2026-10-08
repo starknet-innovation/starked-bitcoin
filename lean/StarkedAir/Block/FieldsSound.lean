@@ -862,6 +862,72 @@ theorem tok_bytes {r : ℕ} (hr : r < n) (hnp : M K_PAD r = 0)
   · -- PAD: excluded
     simp only [K_PAD] at hnp; rw [hnp] at h1; exact absurd h1 zero_ne_one
 
+/-- Row lengths are small. -/
+theorem len_small {r : ℕ} (hr : r < n) : (M LEN r).val ≤ 2 ^ 26 := by
+  obtain ⟨a, ha, h1⟩ := kind_exists hsat hr
+  have ka := kinds_at hsat hr ha h1
+  obtain ⟨hoff, hlen⟩ := kind_vals hsat hr ha h1
+  have pb : prefOf M r ≤ 5 := by unfold prefOf; split_ifs <;> omega
+  have sv := (bool_val (seg_bool hsat hr)).2
+  by_cases hlp : a = K_LOCK ∨ a = K_PAD
+  · rw [if_pos hlp] at hlen
+    rcases hlp with rfl | rfl <;>
+      simp [lenN, K_BLK, K_TXH, K_IN, K_NOUT, K_OUT, K_WCNT, K_WITEM, K_LOCK, K_PAD] at hlen <;> rw [hlen] <;>
+      norm_num [ZMod.val_ofNat] <;> exact le_trans (Nat.mod_le _ _) (by norm_num)
+  · rw [if_neg hlp] at hlen
+    have hLP : M K_LOCK r + M K_PAD r = 0 := by
+      rw [ka K_LOCK (by simp [K_LOCK]), ka K_PAD (by simp [K_PAD]), if_neg (by tauto), if_neg (by tauto)]; simp
+    have ho : offN a (M SEG r).val ≤ 86 := by unfold offN; split_ifs <;> omega
+    have hv := (hcs r hr hLP _ hoff ho).2.1
+    unfold MAXS at hv
+    rw [val_lt_of_eq_cast hlen (lt_P (by unfold lenN; split_ifs <;> omega))]
+    unfold lenN; split_ifs <;> omega
+
+theorem start_val_succ {r : ℕ} (hr : r + 1 < n) :
+    (M START (r + 1)).val = (M START r).val + (M LEN r).val := by
+  rw [start_succ hsat hr, ZMod.val_add_of_lt]
+  have := start_lt hsat (show r < n by omega); have := len_small hsat R hcs hmk (show r < n by omega)
+  exact lt_P (by omega)
+
+/-- **Tiling.** With `m` the first padding row, the tokens of rows `0 … m−1` serialize to exactly
+the block's bytes. -/
+theorem tiling (hn : 0 < n) (hRl : R.length = (pub 0).val) :
+    ∃ m, m < n ∧ M K_PAD m = 1 ∧ (∀ r < m, M K_PAD r = 0) ∧
+      ((List.range m).flatMap fun r => Spec.Block.Tok.bytes (tokOf M R r)) = R := by
+  classical
+  have hex : ∃ r, r < n ∧ M K_PAD r = 1 := ⟨n - 1, by omega, last_pad hsat hn⟩
+  set m := Nat.find hex with hmdef
+  have hm : m < n ∧ M K_PAD m = 1 := Nat.find_spec hex
+  have hmin : ∀ r < m, M K_PAD r = 0 := fun r hr => by
+    rcases kind_bool hsat (c := K_PAD) (by simp [kinds]) (show r < n by omega) with h | h
+    · exact h
+    · exact absurd ⟨by omega, h⟩ (Nat.find_min hex hr)
+  have hSm : (M START m).val = R.length := by rw [pad_start hsat hm.1 hm.2, hRl]
+  -- Starts increase.
+  have mono : ∀ k j, k ≤ j → j ≤ m → (M START k).val ≤ (M START j).val := by
+    intro k j hkj hjm
+    induction j, hkj using Nat.le_induction with
+    | base => exact le_rfl
+    | succ j hkj ih =>
+      rw [start_val_succ hsat R hcs hmk (show j + 1 < n by omega)]
+      have := ih (by omega); omega
+  have cat : ∀ k ≤ m, ((List.range k).flatMap fun r => Spec.Block.Tok.bytes (tokOf M R r)) =
+      slice R 0 (M START k).val := by
+    intro k
+    induction k with
+    | zero => intro _; rw [start_zero hsat hn]; simp [slice]
+    | succ k ih =>
+      intro hk
+      have hs := start_val_succ hsat R hcs hmk (show k + 1 < n by omega)
+      have hfit : (M START k).val + (M LEN k).val ≤ R.length := by
+        rw [← hs, ← hSm]; exact mono _ _ hk le_rfl
+      have ap := slice_append (R := R) (a := 0) (b := (M START k).val) (c := (M LEN k).val) (by omega)
+      rw [Nat.zero_add] at ap
+      rw [List.range_succ, List.flatMap_append, ih (by omega), List.flatMap_singleton,
+        tok_bytes hsat R hcs hmk (show k < n by omega) (hmin k (by omega)) hfit, ap, hs]
+  refine ⟨m, hm.1, hm.2, hmin, ?_⟩
+  rw [cat m le_rfl, hSm, slice_zero]
+
 end Tokens
 
 /-! ### The block system: bytes (component 0) and fields (component 1) -/
