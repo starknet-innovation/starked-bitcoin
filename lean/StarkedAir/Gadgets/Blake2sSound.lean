@@ -327,4 +327,92 @@ theorem g_step {r g κx κy : ℕ} (hr : r < n) (h7 : 7 ≤ r) (hg : g < 8)
 
 end GStep
 
+/-! ## Layouts and half-rounds -/
+
+/-- The output word of `role` at `row`. -/
+def rw4 (main : ℕ → ℕ → F) (row role : ℕ) : Word := word main (32 * outW role) row
+
+/-- A G row's facts, as `g_step` gives them. -/
+def GOK (main : ℕ → ℕ → F) (r g : ℕ) (X Y : Word) : Prop :=
+  Spec.Blake2s.mix (rw4 main (r - src g 0) 0) (rw4 main (r - src g 1) 1) (rw4 main (r - src g 2) 2)
+    (rw4 main (r - src g 3) 3) X Y = (rw4 main r 0, rw4 main r 1, rw4 main r 2, rw4 main r 3)
+
+/-- Slot `i` of the state held by four diagonal rows `b … b+3` (row `k` holds `gIdx (4+k)`). -/
+def diagSlot (main : ℕ → ℕ → F) (b : ℕ) : ℕ → Word
+  | 0 => rw4 main b 0 | 1 => rw4 main (b + 1) 0 | 2 => rw4 main (b + 2) 0 | 3 => rw4 main (b + 3) 0
+  | 4 => rw4 main (b + 3) 1 | 5 => rw4 main b 1 | 6 => rw4 main (b + 1) 1 | 7 => rw4 main (b + 2) 1
+  | 8 => rw4 main (b + 2) 2 | 9 => rw4 main (b + 3) 2 | 10 => rw4 main b 2 | 11 => rw4 main (b + 1) 2
+  | 12 => rw4 main (b + 1) 3 | 13 => rw4 main (b + 2) 3 | 14 => rw4 main (b + 3) 3 | _ => rw4 main b 3
+
+/-- Slot `i` of the state held by four column rows `b … b+3` (row `g` holds `gIdx g`). -/
+def colSlot (main : ℕ → ℕ → F) (b i : ℕ) : Word := rw4 main (b + i % 4) (i / 4)
+
+theorem getD_set (v : List Word) (i j : ℕ) (x : Word) (hi : i < v.length) :
+    (v.set i x).getD j 0 = if i = j then x else v.getD j 0 := by
+  simp only [List.getD_eq_getElem?_getD, List.getElem?_set]
+  split_ifs <;> simp_all
+
+theorem gStep_length (m : ℕ → Word) (v : List Word) (ρ g : ℕ) : (Spec.Blake2s.gStep m v ρ g).length = v.length := by
+  simp [Spec.Blake2s.gStep]
+
+/-- **Column half-round.** From the diagonal layout of rows `b … b+3`, G positions 0–3 (rows
+`b+4 … b+7`) produce the column layout of rows `b+4 … b+7`. -/
+theorem col_half {main : ℕ → ℕ → F} {m : ℕ → Word} {v : List Word} {b ρ : ℕ} (hlen : v.length = 16)
+    (hv : ∀ i < 16, v.getD i 0 = diagSlot main b i)
+    (hG : ∀ g < 4, GOK main (b + 4 + g) g (m (Spec.Blake2s.sigma ρ (2 * g))) (m (Spec.Blake2s.sigma ρ (2 * g + 1)))) :
+    ∀ i < 16, (Spec.Blake2s.gStep m (Spec.Blake2s.gStep m (Spec.Blake2s.gStep m (Spec.Blake2s.gStep m v ρ 0) ρ 1) ρ 2) ρ 3).getD i 0 =
+      colSlot main (b + 4) i := by
+  have G0 := hG 0 (by norm_num)
+  have G1 := hG 1 (by norm_num)
+  have G2 := hG 2 (by norm_num)
+  have G3 := hG 3 (by norm_num)
+  simp only [GOK, src, show b + 4 + 0 - 4 = b by omega, show b + 4 + 0 - 1 = b + 3 by omega,
+    show b + 4 + 0 - 2 = b + 2 by omega, show b + 4 + 0 - 3 = b + 1 by omega, show b + 4 + 1 - 4 = b + 1 by omega,
+    show b + 4 + 1 - 5 = b by omega, show b + 4 + 1 - 2 = b + 3 by omega, show b + 4 + 1 - 3 = b + 2 by omega,
+    show b + 4 + 2 - 4 = b + 2 by omega, show b + 4 + 2 - 5 = b + 1 by omega, show b + 4 + 2 - 6 = b by omega,
+    show b + 4 + 2 - 3 = b + 3 by omega, show b + 4 + 3 - 4 = b + 3 by omega, show b + 4 + 3 - 5 = b + 2 by omega,
+    show b + 4 + 3 - 6 = b + 1 by omega, show b + 4 + 3 - 7 = b by omega, Nat.add_zero, Nat.mul_zero, Nat.mul_one] at G0 G1 G2 G3
+  norm_num at G0 G1 G2 G3
+  have hvl : v = (List.range 16).map (diagSlot main b) := by
+    apply List.ext_getElem (by simp [hlen])
+    intro i h1 h2
+    have := hv i (by omega)
+    rw [List.getD_eq_getElem _ _ h1] at this
+    simpa using this
+  subst hvl
+  intro i hi
+  interval_cases i <;>
+    simp [Spec.Blake2s.gStep, Spec.Blake2s.gIdx, List.range_succ, diagSlot, colSlot, G0, G1, G2, G3]
+
+/-- **Diagonal half-round.** From the column layout of rows `b … b+3`, G positions 4–7 (rows
+`b+4 … b+7`) produce the diagonal layout of rows `b+4 … b+7`. -/
+theorem diag_half {main : ℕ → ℕ → F} {m : ℕ → Word} {v : List Word} {b ρ : ℕ} (hlen : v.length = 16)
+    (hv : ∀ i < 16, v.getD i 0 = colSlot main b i)
+    (hG : ∀ k < 4, GOK main (b + 4 + k) (4 + k) (m (Spec.Blake2s.sigma ρ (2 * (4 + k))))
+      (m (Spec.Blake2s.sigma ρ (2 * (4 + k) + 1)))) :
+    ∀ i < 16, (Spec.Blake2s.gStep m (Spec.Blake2s.gStep m (Spec.Blake2s.gStep m (Spec.Blake2s.gStep m v ρ 4) ρ 5) ρ 6) ρ 7).getD i 0 =
+      diagSlot main (b + 4) i := by
+  have G0 := hG 0 (by norm_num)
+  have G1 := hG 1 (by norm_num)
+  have G2 := hG 2 (by norm_num)
+  have G3 := hG 3 (by norm_num)
+  simp only [GOK, src, Nat.add_zero] at G0 G1 G2 G3
+  simp only [show b + 4 - 4 = b by omega, show b + 4 - 3 = b + 1 by omega, show b + 4 - 2 = b + 2 by omega,
+    show b + 4 - 1 = b + 3 by omega, show b + 4 + 1 - 4 = b + 1 by omega, show b + 4 + 1 - 3 = b + 2 by omega,
+    show b + 4 + 1 - 2 = b + 3 by omega, show b + 4 + 1 - 5 = b by omega, show b + 4 + 2 - 4 = b + 2 by omega,
+    show b + 4 + 2 - 3 = b + 3 by omega, show b + 4 + 2 - 6 = b by omega, show b + 4 + 2 - 5 = b + 1 by omega,
+    show b + 4 + 3 - 4 = b + 3 by omega, show b + 4 + 3 - 7 = b by omega, show b + 4 + 3 - 6 = b + 1 by omega,
+    show b + 4 + 3 - 5 = b + 2 by omega] at G0 G1 G2 G3
+  norm_num at G0 G1 G2 G3
+  have hvl : v = (List.range 16).map (colSlot main b) := by
+    apply List.ext_getElem (by simp [hlen])
+    intro i h1 h2
+    have := hv i (by omega)
+    rw [List.getD_eq_getElem _ _ h1] at this
+    simpa using this
+  subst hvl
+  intro i hi
+  interval_cases i <;>
+    simp [Spec.Blake2s.gStep, Spec.Blake2s.gIdx, List.range_succ, diagSlot, colSlot, G0, G1, G2, G3]
+
 end StarkedAir.Blake2s
