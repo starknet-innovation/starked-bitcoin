@@ -34,3 +34,4 @@ import StarkedAir.LogUp
 import StarkedAir.Testing.ByteLookup
 import StarkedAir.Spec.BlockSer
 import StarkedAir.Spec.Blake2s
+import StarkedAir.Gadgets.Blake2s
