@@ -647,6 +647,7 @@ end StarkedAir.Block.Fields
 namespace StarkedAir.Block.Fields
 
 open StarkedAir
+open StarkedAir.Sha256 (col pre cst boolC sumPow eval_col eval_cst wrap_back)
 
 /-! ### The block system: bytes (component 0) and fields (component 1) -/
 
@@ -720,6 +721,66 @@ theorem sys_read {r : ℕ} (hr : r < 2 ^ L) {kk : ℕ} (hk : kk < 7)
       (lookups.getD kk ⟨0, .const 0, []⟩).vals.map (Expr.eval (2 ^ L) preCols pub (inst 1).main r) := by
     simp [siteVals, siteEval, siteLookup, blockSys, fields, h1L]
   rw [← this, hpb, hp, hb]
+
+/-- **CompactSize bytes are the block's.** On a row with a CompactSize at offset `o`, byte `j`
+of the form is the block byte at `START + o + j`. -/
+theorem compact_read {r : ℕ} (hr : r < 2 ^ L)
+    (hLP : (inst 1).main K_LOCK r + (inst 1).main K_PAD r = 0) {o : ℕ} (ho : (inst 1).main OFF r = (o : F))
+    (hoP : o ≤ 86) {j : ℕ} (hj : j < prefOf (inst 1).main r) :
+    ((inst 1).main START r).val + o + j < (pub 0).val ∧
+      (inst 1).main (CB j) r = (inst 0).main BYTE (((inst 1).main START r).val + o + j) := by
+  have fs := fields_sat h0L h1L hL hsat
+  have forms := (cp35 fs hr).2 hLP
+  have hst := start_lt fs hr
+  have hj5 : j < 5 := by unfold prefOf at hj; split_ifs at hj <;> omega
+  have hm : (lookups.getD j ⟨0, .const 0, []⟩).mult.eval (2 ^ L) preCols pub (inst 1).main r = -1 := by
+    rcases forms with ⟨f1, f3, f5⟩ | ⟨f1, f3, f5⟩ | ⟨f1, f3, f5⟩ <;>
+      simp only [prefOf, f1, f3, f5, if_true, if_false, one_ne_zero, zero_ne_one] at hj <;>
+      interval_cases j <;>
+      simp [lookups, Expr.eval, ev_k hr, hasC, oneMinus, one, eval_cst, f1, f3, f5, hLP]
+  obtain ⟨r0, hr0, hv⟩ := sys_read h0L h1L hL hsat hr (by omega) hm
+  have e : ((inst 1).main START r + (inst 1).main OFF r + (j : F)) = (r0 : F) ∧
+      (inst 1).main (CB j) r = (inst 0).main BYTE r0 := by
+    interval_cases j <;> simpa [lookups, Expr.eval, ev_k hr, eval_cst] using hv
+  have hpos : ((inst 1).main START r).val + o + j = r0 := by
+    refine natCast_inj_of_lt (lt_P (by omega)) (lt_P (by
+      have := rows_lt_P h0L h1L hL hsat
+      have : (pub 0).val ≤ 2 ^ L := by
+        have hb := bytes_rows (n := 2 ^ L) (pub := pub) (main := (inst 0).main)
+          (by have := bytes_sat h0L h1L hL hsat; exact this) this (by positivity)
+        exact hb.2.1
+      have : 2 ^ L ≤ 2 ^ 25 := Nat.pow_le_pow_right (by norm_num) hL
+      omega)) ?_
+    push_cast
+    rw [← e.1, ho, ZMod.natCast_zmod_val]
+  refine ⟨by omega, ?_⟩
+  rw [hpos]; exact e.2
+
+/-- **The segwit marker and flag** of a segwit transaction head are the block's `00 01`. -/
+theorem marker_read {r : ℕ} (hr : r < 2 ^ L) (hT : (inst 1).main K_TXH r = 1) (hS : (inst 1).main SEG r = 1) :
+    ((inst 1).main START r).val + 5 < (pub 0).val ∧
+      (inst 0).main BYTE (((inst 1).main START r).val + 4) = 0 ∧
+      (inst 0).main BYTE (((inst 1).main START r).val + 5) = 1 := by
+  have fs := fields_sat h0L h1L hL hsat
+  have hst := start_lt fs hr
+  have hLb : (pub 0).val ≤ 2 ^ 25 := by
+    have := rows_lt_P h0L h1L hL hsat
+    have hb := bytes_rows (n := 2 ^ L) (pub := pub) (main := (inst 0).main)
+      (by have := bytes_sat h0L h1L hL hsat; exact this) this (by positivity)
+    have : 2 ^ L ≤ 2 ^ 25 := Nat.pow_le_pow_right (by norm_num) hL
+    omega
+  have rd : ∀ kk (hk : kk < 7), kk = 5 ∨ kk = 6 → ∃ r0, r0 < (pub 0).val ∧
+      ((lookups.getD kk ⟨0, .const 0, []⟩).vals.map (Expr.eval (2 ^ L) preCols pub (inst 1).main r)) =
+        [(r0 : F), (inst 0).main BYTE r0] := fun kk hk h56 =>
+    sys_read h0L h1L hL hsat hr hk (by rcases h56 with rfl | rfl <;> simp [lookups, Expr.eval, ev_k hr, hT, hS])
+  obtain ⟨r4, h4, v4⟩ := rd 5 (by norm_num) (Or.inl rfl)
+  obtain ⟨r5, h5, v5⟩ := rd 6 (by norm_num) (Or.inr rfl)
+  simp [lookups, Expr.eval, ev_k hr, eval_cst] at v4 v5
+  have p4 : ((inst 1).main START r).val + 4 = r4 := natCast_inj_of_lt (lt_P (by omega)) (lt_P (by omega))
+    (by push_cast; rw [← v4.1, ZMod.natCast_zmod_val])
+  have p5 : ((inst 1).main START r).val + 5 = r5 := natCast_inj_of_lt (lt_P (by omega)) (lt_P (by omega))
+    (by push_cast; rw [← v5.1, ZMod.natCast_zmod_val])
+  refine ⟨by omega, by rw [p4]; exact v4.2.symm, by rw [p5]; exact v5.2.symm⟩
 
 end System
 
