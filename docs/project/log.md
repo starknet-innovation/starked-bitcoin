@@ -22,6 +22,24 @@ Next: <the exact next step; must match status.md>
 ---
 
 
+## 2026-10-08 (session 2) — IR-LOGUP, BLAKE2S, M3a spec, HC-HASHTREE built and proven
+Who: Claude (agent, Opus 5.5), with the owner
+Roadmap: IR-LOGUP, BLAKE2S, BLOCK-SAMPLES, BLOCK-SPEC, BLOCK-AUDIT → done; HC-HASHTREE → built and proven, full-chain re-run todo
+Done:
+- Owner decisions D-027..D-033 (multi-component LogUp, spent-output slots, Blake2s commitments, duplicate inputs in M3b, header commitment = MMR).
+- Private repo starknet-innovation/starked-bitcoin created; authors rewritten to the GitHub noreply address. Nothing pushed.
+- IR-LOGUP (Lean semantics, system prover, in-circuit), BLAKE2S (`compress_sound_air`), block spec and serialization round trip.
+- HC-HASHTREE: tree + header-v7 components and `tree_root_sound` (a2066db); leaf over the system with the root entry (bb1a9c0);
+  Lean aggregation with `T` (b668b4e); node computes `T` in-circuit, MMR fold, VK sizes, inclusion proofs, native `T` check (this commit).
+Evidence:
+- `zig build -Dtest-filter=...`: leaf, node (T = perfect root over 32 hashes; node 229–328 s Debug), header tree (MMR, inclusion, blockHash) pass.
+- `spike chain 12 3 10 data/headers.bin 53`: 4 segments (16+16+16+4), 3 nodes, root verified; `T` equals the native MMR root over 52 hashes.
+- `lake build` clean; `#print axioms` for `pub_compose_T`, `leaf_valid_T`, `chain_from_genesis_T`: propext, Classical.choice, Quot.sound.
+Problems / lessons:
+- A first background chain run stopped silently after leaf 1 (exit status hidden by a pipe); the direct rerun completed. Not reproduced.
+- 1-header segments have no tree node: the plan now uses ≥ 2-header segments and leaves an odd last header out.
+Next: full-chain re-run with the tree (`spike chain 20 70 26 data/headers.bin`, about 8 h+), then M3a.1 (block AIR).
+
 ## 2026-10-08 — M1 and M2 done: full chain checked and proven to one root
 Who: Claude (agent, Opus 5.5)
 Roadmap: HC-FULLRUN, AGG, RECURSION, VK → done; IR-LOGUP → moved to M3; REC-STMT-EQ → partly done

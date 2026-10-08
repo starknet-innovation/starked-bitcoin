@@ -6,37 +6,34 @@ follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work)
 
 - **Updated:** 2026-10-08
 - **HEAD at last update:** fe6cc61 (plus this status commit)
-- **Current milestone:** M1 and M2 done; M3 not started (waiting on owner decisions).
-- **Current item:** `HC-HASHTREE` (design: [header-tree.md](../design/header-tree.md)); BLAKE2S done (`compress_sound_air`). Then M3a.
+- **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
+- **Current item:** `HC-HASHTREE` ([header-tree.md](../design/header-tree.md)): built and proven, full-chain re-run pending. Then M3a ([block-data.md](../design/block-data.md)).
 
 ## State in one paragraph
 
-All 970,348 mainnet headers (0..970,347) satisfy the AIR, and the whole chain
-is proven to one 0.98 MB root proof verified in 0.26 s, with chainwork equal
-to Core's ([report](../reports/2026-10-08-full-chain.md)). Lean proves the
-segment rules and the pub-level composition; the in-circuit verifiers and the
-node circuit's code are trusted (verification.md).
+All 970,348 mainnet headers are proven to one root (M1/M2, [report](../reports/2026-10-08-full-chain.md)),
+before the header tree. Now each segment proves a (headers, Blake2s tree) system;
+public inputs gain the tree root `T` (indices 108–123), nodes compute `T` in-circuit,
+and the fold runs in MMR order, so the root's `T` is the MMR over all block hashes.
+Lean proves it end to end at the public-input level (`chain_from_genesis_T`,
+standard axioms only); the in-circuit verifiers and node code stay trusted
+(verification.md). Tested end to end on 52 headers.
 
 ## Next step (concrete)
 
-1. **REC-FUZZ (proposed):** differential fuzzing of `plain_verifier.zig` against
-   the native verifier (mutate real proofs; both must agree on accept/reject).
-2. Optional: re-run `spike chain 20 70 26 data/headers.bin` with the independent
-   VK (about 8 h); the run in the report used the proofs' own leaf hashes.
-3. M3, once the owner decides the items below.
+1. Full-chain re-run with the tree: `zig build -Doptimize=ReleaseFast && ./zig-out/bin/spike chain 20 70 26 data/headers.bin`
+   (about 8 h or more); record `T`, timings, and proof size in a report.
+2. M3a.1: block AIR per [block-data.md](../design/block-data.md).
+3. Proposed: REC-FUZZ (differential fuzzing of the plain verifier).
 
 ## In flight
 
-- Nothing.
+- Nothing (the full-chain re-run has not been started).
 
 ## Needs owner
 
-- **M3 node:** where an archival (non-pruned) `bitcoind` runs (local SSD or a
-  cloud VM, about 1 TB), and who sets it up. Cloud spend needs approval.
-- **M3 scope:** start without script validation (M3a block structure + M3b UTXO
-  accumulator, `assumevalid`-style), or include scripts (M3c)?
-- **D-022:** lift it for M3 (GPU work now), given the data scale?
-- **Push / remote:** nothing has been pushed (D-016).
+- **Push / remote:** private repo starknet-innovation/starked-bitcoin exists; nothing pushed. Wait for the owner's go.
+- **M3 node:** the owner sets up `bitcoind`.
 - **LICENSE:** none chosen.
 - **STWO-225-FU:** follow up on stwo-zig#225 upstream? This is outward-facing.
 
@@ -57,6 +54,7 @@ open StarkedAir.HeaderChain StarkedAir.Spec.Bitcoin
 #print axioms StarkedAir.Sha256.compress_sound_air
 #print axioms pub_compose
 #print axioms chain_from_genesis
+#print axioms StarkedAir.HeaderTree.chain_from_genesis_T
 EOS
 (cd lean && lake env lean /tmp/ax.lean)  # expect: propext, Classical.choice, Quot.sound
 

@@ -230,17 +230,37 @@ fn agg(gpa: std.mem.Allocator, a: std.mem.Allocator, log_size: u32, n_leaves: us
         if (!std.mem.eql(u32, h, &vk_leaf)) return error.LeafIdentityMismatch;
         h.* = vk_leaf;
     }
-    try N.verifyRoot(gpa, a, tables, .{ .node = node_id, .leaf_hashes = leaf_hashes }, &root.proof, root.pubs);
+    const sizes = try a.alloc(usize, n_leaves);
+    @memset(sizes, per);
+    try N.verifyRoot(gpa, a, tables, .{ .node = node_id, .leaf_hashes = leaf_hashes, .sizes = sizes }, &root.proof, root.pubs);
+    try checkTreeRoot(a, all[0 .. per * n_leaves], root.pubs);
     std.debug.print("agg log={d} leaves={d} headers={d} queries={d} pow={d}: leaves {d:.1}s, fold {d} nodes {d:.1}s, root verified {d:.2}s, root proof {d} bytes, tip height {d}\n", .{ log_size, n_leaves, per * n_leaves, n_queries, pow_bits, secs(t_leaves), n_leaves - 1, secs(t_fold), secs(timer.lap()), root.proof.bytes.len, root.pubs[38].toU32() | (root.pubs[39].toU32() << 16) });
 }
 
 /// Segments of `all[0..to)`: `2^(log-8)` headers each, shrinking (by powers of two) at the end.
+/// The root's tree root `T` (pubs 108..124) equals the MMR root over `hdrs`' block hashes,
+/// recomputed natively; prints it.
+fn checkTreeRoot(a: std.mem.Allocator, hdrs: []const sb.header_chain.Header, pubs: anytype) !void {
+    const HT = sb.header_tree;
+    const hashes = try a.alloc(HT.Words, hdrs.len);
+    for (hashes, hdrs) |*h, *hd| h.* = HT.blockHash(hd);
+    const t = try HT.mmrRoot(a, hashes);
+    const want = HT.limbs(t);
+    for (want, pubs[108..124]) |x, y| if (x.toU32() != y.toU32()) return error.TreeRootMismatch;
+    std.debug.print("  header MMR root T over {d} block hashes:", .{hdrs.len});
+    for (t) |w| std.debug.print(" {x:0>8}", .{w});
+    std.debug.print("\n", .{});
+}
+
+/// Segments `[start, log_size]` covering `0..to`: greedy, largest first, so each is aligned and
+/// sizes never increase (the MMR fold relies on this). Segments have at least 2 headers (a 1-header
+/// segment has no tree node; `header_tree.generate` rejects it), so an odd last header is left out.
 fn plan(a: std.mem.Allocator, log_size: u32, to: usize) ![]const [2]usize {
     var segs: std.ArrayList([2]usize) = .empty;
     var h0: usize = 0;
     while (h0 < to) {
         var ls = log_size;
-        while (ls > 8 and (@as(usize, 1) << @intCast(ls - 8)) > to - h0) ls -= 1;
+        while (ls > 9 and (@as(usize, 1) << @intCast(ls - 8)) > to - h0) ls -= 1;
         const n = @as(usize, 1) << @intCast(ls - 8);
         if (n > to - h0) break;
         try segs.append(a, .{ h0, ls });
@@ -323,12 +343,16 @@ fn chain(gpa: std.mem.Allocator, a: std.mem.Allocator, log_size: u32, n_queries:
         std.debug.print("leaf {d}: circuit hash differs from the VK\n", .{i});
         return error.LeafIdentityMismatch;
     };
-    try N.verifyRoot(gpa, a, tables, .{ .node = node_id, .leaf_hashes = vk_leaf_hashes }, &root.proof, root.pubs);
+    const vk_sizes = try a.alloc(usize, segs.len);
+    for (segs, vk_sizes) |seg, *n| n.* = @as(usize, 1) << @intCast(seg[1] - 8);
+    try N.verifyRoot(gpa, a, tables, .{ .node = node_id, .leaf_hashes = vk_leaf_hashes, .sizes = vk_sizes }, &root.proof, root.pubs);
+    const proven = segs[segs.len - 1][0] + vk_sizes[segs.len - 1];
+    try checkTreeRoot(a, all[0..proven], root.pubs);
     var tip: [8]u32 = undefined;
     for (&tip, 0..) |*w, k| w.* = root.pubs[16 + 2 * k].toU32() | (root.pubs[17 + 2 * k].toU32() << 16);
     var work: u256 = 0;
     for (0..10) |l| work |= @as(u256, root.pubs[98 + l].toU32()) << @intCast(16 * l);
-    std.debug.print("chain ROOT VERIFIED: headers 0..{d}, {d} leaves, {d} nodes; leaves {d:.0}s, fold {d:.0}s, verify {d:.2}s; root proof {d} bytes\n", .{ to - 1, segs.len, segs.len - 1, secs(t_leaves), secs(t_fold), secs(timer.lap()), root.proof.bytes.len });
+    std.debug.print("chain ROOT VERIFIED: headers 0..{d}, {d} leaves, {d} nodes; leaves {d:.0}s, fold {d:.0}s, verify {d:.2}s; root proof {d} bytes\n", .{ proven - 1, segs.len, segs.len - 1, secs(t_leaves), secs(t_fold), secs(timer.lap()), root.proof.bytes.len });
     std.debug.print("  tip height {d}, chainwork 0x{x}, tip state words", .{ root.pubs[38].toU32() | (root.pubs[39].toU32() << 16), work });
     for (tip) |w| std.debug.print(" {x:0>8}", .{w});
     std.debug.print("\n", .{});
@@ -365,7 +389,7 @@ fn fullrun(gpa: std.mem.Allocator, log_size: u32, mode: []const u8, path: []cons
     var proof_bytes: usize = 0;
     while (h0 < to) {
         var ls = log_size;
-        while (ls > 8 and (@as(usize, 1) << @intCast(ls - 8)) > to - h0) ls -= 1;
+        while (ls > 9 and (@as(usize, 1) << @intCast(ls - 8)) > to - h0) ls -= 1;
         const n = @as(usize, 1) << @intCast(ls - 8);
         if (n > to - h0) break;
         var arena = std.heap.ArenaAllocator.init(gpa);

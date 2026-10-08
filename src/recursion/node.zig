@@ -17,6 +17,7 @@ const core = @import("stwo_core");
 const circuit = @import("stwo_circuit_frontend");
 const circuit_cpu = @import("stwo_circuit_cpu_integration");
 const leaf = @import("leaf.zig");
+const HT = @import("../btc/header_tree.zig");
 
 const builder = circuit.builder;
 const finalize = circuit.common.finalize;
@@ -42,10 +43,46 @@ pub fn isIn(k: usize) bool {
     return k < 16 or (32 <= k and k < 38) or k == 44 or k == 45 or (48 <= k and k < 68) or (88 <= k and k < 98);
 }
 
-/// The left child's input state and the right child's output state.
+const T = leaf.T_BASE;
+
+fn treeWords(p: [N_PUB]M31) HT.Words {
+    var w: HT.Words = undefined;
+    for (&w, 0..) |*x, i| x.* = p[T + 2 * i].toU32() | (p[T + 2 * i + 1].toU32() << 16);
+    return w;
+}
+
+/// The left child's input state, the right child's output state, and the tree root
+/// `node(T_L, T_R)`.
 pub fn combine(pl: [N_PUB]M31, pr: [N_PUB]M31) [N_PUB]M31 {
     var out: [N_PUB]M31 = undefined;
     for (&out, 0..) |*o, k| o.* = if (isIn(k)) pl[k] else pr[k];
+    @memcpy(out[T..], &HT.limbs(HT.node(treeWords(pl), treeWords(pr))));
+    return out;
+}
+
+/// In-circuit `node(T_L, T_R)` over the children's root limbs: each limb pair (range-checked) is
+/// packed as the u32 wire `lo + hi·i`, hashed (64 bytes), and each output word is split back
+/// into two guessed u16 limbs that recombine to it.
+fn treeNode(comptime V: type, ctx: *Context(V), pl: []const Var, pr: []const Var) ![16]Var {
+    const i_const = try ctx.constant(QM31.fromU32Unchecked(0, 1, 0, 0));
+    var msg: [16]U32Wrapper(Var) = undefined;
+    for ([_][]const Var{ pl, pr }, 0..) |p, c| for (0..8) |w| {
+        const lo = p[T + 2 * w];
+        const hi = p[T + 2 * w + 1];
+        try rangeCheck16(V, ctx, lo);
+        try rangeCheck16(V, ctx, hi);
+        msg[8 * c + w] = .newUnsafe(try ctx.add(lo, try ctx.mul(hi, i_const)));
+    };
+    const t = try builder.blake.blake2sU32s(V, ctx, &msg, 64);
+    var out: [16]Var = undefined;
+    for (t.words, 0..) |word, w| {
+        const x = builder.ivalue.unpackU32(V, ctx.get(word.get()));
+        const lo = try builder.wrappers.guessU16(V, ctx, .newUnsafe(builder.ivalue.fromQm31(V, QM31.fromU32Unchecked(x & 0xffff, 0, 0, 0))));
+        const hi = try builder.wrappers.guessU16(V, ctx, .newUnsafe(builder.ivalue.fromQm31(V, QM31.fromU32Unchecked(x >> 16, 0, 0, 0))));
+        try ctx.eq(try ctx.add(lo.get(), try ctx.mul(hi.get(), i_const)), word.get());
+        out[2 * w] = lo.get();
+        out[2 * w + 1] = hi.get();
+    }
     return out;
 }
 
@@ -131,6 +168,7 @@ pub fn buildNodeCircuit(
     const node_key = try builder.blake.blake2sU32s(V, &ctx, &key_words, 4 * key_words.len);
     var out: [N_PUB]Var = undefined;
     for (&out, 0..) |*o, k| o.* = if (isIn(k)) pubs[0][k] else pubs[1][k];
+    @memcpy(out[T..], &try treeNode(V, &ctx, &pubs[0], &pubs[1]));
     try leaf.finish(V, &ctx, try leaf.pubsDigestVars(V, &ctx, node_key.words, &out));
     return ctx;
 }
@@ -241,54 +279,63 @@ pub fn nodeIdentity(gpa: std.mem.Allocator, table: *const circuit.air_eval.compo
     };
 }
 
-/// Folds `items` (in chain order, consumed) into one root: each layer pairs entries left to
-/// right and carries an unpaired last entry up unchanged.
-pub fn foldAll(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const leaf.Tables, shape: *const Shape, items: []Proved) !Proved {
-    if (items.len == 0) return error.NothingToFold;
-    var layer = items;
-    while (layer.len > 1) {
-        const next = try a.alloc(Proved, (layer.len + 1) / 2);
-        for (next, 0..) |*n, i| {
-            if (2 * i + 1 < layer.len) {
-                n.* = try proveNode(gpa, a, tables, shape, &layer[2 * i], &layer[2 * i + 1]);
-                layer[2 * i].proof.deinit();
-                layer[2 * i + 1].proof.deinit();
-            } else n.* = layer[2 * i];
-        }
-        layer = next;
-    }
-    return layer[0];
+/// The number of headers a subtree with public inputs `p` covers.
+pub fn headerCount(p: [N_PUB]M31) usize {
+    const first = p[32].toU32() | (p[33].toU32() << 16);
+    const last = p[38].toU32() | (p[39].toU32() << 16);
+    return last - first + 1;
 }
 
-/// The root's identity and key for the tree `foldAll` builds over leaves with circuit hashes
-/// `leaf_hashes`, given the node circuit hash.
-pub fn expectedRoot(a: std.mem.Allocator, leaf_hashes: []const [8]u32, node_hash: [8]u32) !struct { hash: [8]u32, key: Key } {
-    if (leaf_hashes.len == 0) return error.NothingToFold;
+/// Folds `items` (in chain order, consumed) into one root, in MMR order (`HT.mmrFold`).
+pub fn foldAll(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const leaf.Tables, shape: *const Shape, items: []Proved) !Proved {
+    const sizes = try a.alloc(usize, items.len);
+    for (sizes, items) |*n, it| n.* = headerCount(it.pubs);
+    const Ctx = struct {
+        gpa: std.mem.Allocator,
+        a: std.mem.Allocator,
+        tables: *const leaf.Tables,
+        shape: *const Shape,
+        fn merge(c: @This(), l: Proved, r: Proved) anyerror!Proved {
+            const n = try proveNode(c.gpa, c.a, c.tables, c.shape, &l, &r);
+            var lp = l.proof;
+            var rp = r.proof;
+            lp.deinit();
+            rp.deinit();
+            return n;
+        }
+    };
+    return HT.mmrFold(Proved, a, items, sizes, Ctx{ .gpa = gpa, .a = a, .tables = tables, .shape = shape }, Ctx.merge);
+}
+
+/// The root's identity and key for the tree `foldAll` builds over segments of `sizes` headers
+/// with leaf circuit hashes `leaf_hashes`, given the node circuit hash.
+pub fn expectedRoot(a: std.mem.Allocator, leaf_hashes: []const [8]u32, sizes: []const usize, node_hash: [8]u32) !struct { hash: [8]u32, key: Key } {
     const E = struct { hash: [8]u32, key: Key };
-    var layer = try a.alloc(E, leaf_hashes.len);
-    for (layer, leaf_hashes) |*e, h| e.* = .{ .hash = h, .key = leaf.zero_key };
-    while (layer.len > 1) {
-        const next = try a.alloc(E, (layer.len + 1) / 2);
-        for (next, 0..) |*n, i| n.* = if (2 * i + 1 < layer.len)
-            .{ .hash = node_hash, .key = nodeKey(layer[2 * i].hash, layer[2 * i].key, layer[2 * i + 1].hash, layer[2 * i + 1].key) }
-        else
-            layer[2 * i];
-        layer = next;
-    }
-    return .{ .hash = layer[0].hash, .key = layer[0].key };
+    const items = try a.alloc(E, leaf_hashes.len);
+    for (items, leaf_hashes) |*e, h| e.* = .{ .hash = h, .key = leaf.zero_key };
+    const Ctx = struct {
+        node_hash: [8]u32,
+        fn merge(c: @This(), l: E, r: E) anyerror!E {
+            return .{ .hash = c.node_hash, .key = nodeKey(l.hash, l.key, r.hash, r.key) };
+        }
+    };
+    const root = try HT.mmrFold(E, a, items, sizes, Ctx{ .node_hash = node_hash }, Ctx.merge);
+    return .{ .hash = root.hash, .key = root.key };
 }
 
 /// What the outer verifier trusts: the node circuit's identity and each leaf's circuit hash
-/// (by segment, in chain order; a leaf's hash depends only on its log size).
-pub const Vk = struct { node: Identity, leaf_hashes: []const [8]u32 };
+/// and header count (by segment, in chain order; a leaf's hash depends only on its log size).
+pub const Vk = struct { node: Identity, leaf_hashes: []const [8]u32, sizes: []const usize };
 
 /// **The outer verifier.** Accepts `proof` as the root of a tree over `vk.leaf_hashes.len >= 2`
 /// segments with public inputs `pubs`, starting at genesis. On success, `chain_from_genesis`
 /// (Aggregate.lean) applies: the headers form a valid chain from genesis to the tip in
-/// `pubs[16..32]`, at height `pubs[38..40]`, with chainwork `pubs[98..108]`.
+/// `pubs[16..32]`, at height `pubs[38..40]`, with chainwork `pubs[98..108]`, and `pubs[108..124]`
+/// is the MMR root over their block hashes (`chain_from_genesis_T`, AggregateTree.lean).
 pub fn verifyRoot(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const leaf.Tables, vk: Vk, proof: *const leaf.CircuitProof, pubs: [N_PUB]M31) !void {
     if (vk.leaf_hashes.len < 2) return error.RootIsNotANode;
-    const expected = try expectedRoot(a, vk.leaf_hashes, vk.node.hash);
+    if (vk.sizes.len != vk.leaf_hashes.len) return error.BadVk;
+    const expected = try expectedRoot(a, vk.leaf_hashes, vk.sizes, vk.node.hash);
     if (!std.mem.eql(u32, &proof.request.preprocessed_root, &vk.node.root)) return error.WrongRootCircuit;
     const out = try leaf.verifyCircuit(gpa, tables, proof);
     if (!std.mem.eql(u32, &out, &leaf.pubsDigest(expected.key, &pubs))) return error.WrongRootDigest;
@@ -333,6 +380,9 @@ test "two chained segments fold into one node proof; a non-chained pair is rejec
     std.debug.print("node: proved and verified in {d:.1}s, {d} bytes\n", .{ @as(f64, @floatFromInt(timer.read())) / 1e9, n.proof.bytes.len });
     try std.testing.expectEqual(@as(u32, 0), n.pubs[32].toU32());
     try std.testing.expectEqual(@as(u32, 31), n.pubs[38].toU32());
+    // T is the perfect Blake2s tree root over the 32 block hashes.
+    const hw32 = try H.generate(a, 13, all[0..32]);
+    try std.testing.expectEqualSlices(u32, &HT.root(hw32.hashes), &treeWords(n.pubs));
 
     // Circuit identities: a leaf's depends only on its log size and is derived from public
     // data by the verifier; the node's comes from topology.
@@ -345,7 +395,7 @@ test "two chained segments fold into one node proof; a non-chained pair is rejec
     try std.testing.expectEqualSlices(u32, &node_id.hash, &n.proof.circuit_hash);
 
     // The outer verifier accepts the root, and rejects other public inputs or a wrong VK.
-    const vk: Vk = .{ .node = node_id, .leaf_hashes = &.{ l0.proof.circuit_hash, l1.proof.circuit_hash } };
+    const vk: Vk = .{ .node = node_id, .leaf_hashes = &.{ l0.proof.circuit_hash, l1.proof.circuit_hash }, .sizes = &.{ 16, 16 } };
     try verifyRoot(gpa, a, tables, vk, &n.proof, n.pubs);
     var other = n.pubs;
     other[38] = M31.fromCanonical(32);

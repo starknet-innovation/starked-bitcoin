@@ -44,6 +44,88 @@ pub fn root(leaves: []const Words) Words {
     return node(root(leaves[0..half]), root(leaves[half..]));
 }
 
+/// **MMR order** (D-033): `items` (with leaf counts `sizes`) left to right, merging the top two
+/// while their counts are equal, then the remaining peaks right to left ("bagging"). Every merge
+/// joins adjacent ranges, left before right.
+pub fn mmrFold(comptime E: type, a: std.mem.Allocator, items: []const E, sizes: []const usize, ctx: anytype, comptime merge: fn (@TypeOf(ctx), E, E) anyerror!E) !E {
+    if (items.len == 0) return error.NothingToFold;
+    const S = struct { e: E, n: usize };
+    var stack = std.ArrayList(S).empty;
+    defer stack.deinit(a);
+    for (items, sizes) |e, n| {
+        try stack.append(a, .{ .e = e, .n = n });
+        while (stack.items.len >= 2 and stack.items[stack.items.len - 1].n == stack.items[stack.items.len - 2].n) {
+            const r = stack.pop().?;
+            const l = stack.pop().?;
+            try stack.append(a, .{ .e = try merge(ctx, l.e, r.e), .n = l.n + r.n });
+        }
+    }
+    while (stack.items.len >= 2) {
+        const r = stack.pop().?;
+        const l = stack.pop().?;
+        try stack.append(a, .{ .e = try merge(ctx, l.e, r.e), .n = l.n + r.n });
+    }
+    return stack.items[0].e;
+}
+
+fn nodeMerge(_: void, l: Words, r: Words) anyerror!Words {
+    return node(l, r);
+}
+
+/// The MMR root over block hashes `leaves` (in height order).
+pub fn mmrRoot(a: std.mem.Allocator, leaves: []const Words) !Words {
+    const ones = try a.alloc(usize, leaves.len);
+    defer a.free(ones);
+    @memset(ones, 1);
+    return mmrFold(Words, a, leaves, ones, {}, nodeMerge);
+}
+
+/// One step of an inclusion proof: hash with `sibling`, which sits on the left if `left`.
+pub const Step = struct { sibling: Words, left: bool };
+
+/// The inclusion proof of leaf `h` in `mmrRoot(leaves)`, leaf to root.
+pub fn inclusionProof(a: std.mem.Allocator, leaves: []const Words, h: usize) ![]Step {
+    if (h >= leaves.len) return error.OutOfRange;
+    const E = struct { w: Words, has: bool };
+    const Ctx = struct {
+        a: std.mem.Allocator,
+        steps: *std.ArrayList(Step),
+        fn merge(c: @This(), l: E, r: E) anyerror!E {
+            if (l.has) try c.steps.append(c.a, .{ .sibling = r.w, .left = false });
+            if (r.has) try c.steps.append(c.a, .{ .sibling = l.w, .left = true });
+            return .{ .w = node(l.w, r.w), .has = l.has or r.has };
+        }
+    };
+    const items = try a.alloc(E, leaves.len);
+    defer a.free(items);
+    for (items, leaves, 0..) |*e, l, i| e.* = .{ .w = l, .has = i == h };
+    const ones = try a.alloc(usize, leaves.len);
+    defer a.free(ones);
+    @memset(ones, 1);
+    var steps = std.ArrayList(Step).empty;
+    errdefer steps.deinit(a);
+    _ = try mmrFold(E, a, items, ones, Ctx{ .a = a, .steps = &steps }, Ctx.merge);
+    return steps.toOwnedSlice(a);
+}
+
+/// Checks an inclusion proof of `leaf` against the root `t`.
+pub fn verifyInclusion(leaf: Words, steps: []const Step, t: Words) bool {
+    var x = leaf;
+    for (steps) |s| x = if (s.left) node(s.sibling, x) else node(x, s.sibling);
+    return std.mem.eql(u32, &x, &t);
+}
+
+/// A header's block hash (SHA256d) as the 8 SHA-256 state words (the leaves' encoding).
+pub fn blockHash(header: *const H.Header) Words {
+    const Sha = std.crypto.hash.sha2.Sha256;
+    var d: [32]u8 = undefined;
+    Sha.hash(std.mem.asBytes(header), &d, .{});
+    Sha.hash(&d, &d, .{});
+    var w: Words = undefined;
+    for (&w, 0..) |*x, i| x.* = std.mem.readInt(u32, d[4 * i ..][0..4], .big);
+    return w;
+}
+
 /// The 16 limbs of a word tuple, lo/hi interleaved (the lookups' encoding).
 pub fn limbs(w: Words) [16]M31 {
     var out: [16]M31 = undefined;
@@ -177,6 +259,9 @@ test "header tree: a 16-header segment proves with its Blake2s root; a wrong roo
     const n01 = node(hw.hashes[0], hw.hashes[1]);
     for (n01, 0..) |x, i| try std.testing.expectEqual(std.mem.readInt(u32, d[4 * i ..][0..4], .little), x);
 
+    for (hdrs, hw.hashes) |*hd, hh| try std.testing.expectEqualSlices(u32, &hh, &blockHash(hd));
+    try std.testing.expectEqualSlices(u32, &w.root, &try mmrRoot(a, hw.hashes));
+
     // Each component's constraints hold.
     const tt = interp.RowTrace{ .log_size = log_size, .preprocessed = @ptrCast(try tree_air.genPreprocessed(a, log_size)), .main = @ptrCast(w.tree_main) };
     try std.testing.expect(try interp.firstViolation(a, tree_air, tt) == null);
@@ -197,4 +282,23 @@ test "header tree: a 16-header segment proves with its Blake2s root; a wrong roo
     bad_root[0] ^= 1;
     const bad = [_]system.PubEntry{try rootEntry(a, 4, bad_root)};
     try std.testing.expectError(error.LookupsUnbalanced, system.verifyExt(a, cfg, &parts, &bad, try system.prove(E, a, cfg, &parts, &mains)));
+}
+
+test "header tree: MMR root and inclusion proofs" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var leaves: [13]Words = undefined;
+    for (&leaves, 0..) |*l, i| l.* = .{ @intCast(i), 1, 2, 3, 4, 5, 6, 7 };
+    // 13 = 8 + 4 + 1: peaks root(0..8), root(8..12), leaf 12, bagged right to left.
+    const t = try mmrRoot(a, &leaves);
+    try std.testing.expectEqualSlices(u32, &node(root(leaves[0..8]), node(root(leaves[8..12]), leaves[12])), &t);
+    for (0..13) |h| {
+        const steps = try inclusionProof(a, &leaves, h);
+        try std.testing.expect(verifyInclusion(leaves[h], steps, t));
+        try std.testing.expect(!verifyInclusion(leaves[(h + 1) % 13], steps, t));
+    }
+    // Segment-wise folding (aligned, non-increasing powers of two) gives the same root.
+    const segs = [_]Words{ root(leaves[0..4]), root(leaves[4..8]), root(leaves[8..12]), leaves[12] };
+    try std.testing.expectEqualSlices(u32, &t, &try mmrFold(Words, a, &segs, &.{ 4, 4, 4, 1 }, {}, nodeMerge));
 }
