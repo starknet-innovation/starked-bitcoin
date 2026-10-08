@@ -132,4 +132,137 @@ theorem hashLimbs_eval {j : ℕ} (hj : 256 * (j + 1) ≤ 2 ^ L) :
 
 end Headers
 
+/-! ## The tree component -/
+
+theorem compress_congr {h h' : ℕ → Spec.Blake2s.Word} (m : ℕ → Spec.Blake2s.Word) (t : ℕ) (f : Bool)
+    (e : ∀ i < 8, h i = h' i) {i : ℕ} (hi : i < 8) :
+    Spec.Blake2s.compress h m t f i = Spec.Blake2s.compress h' m t f i := by
+  have hv : Spec.Blake2s.initV h t f = Spec.Blake2s.initV h' t f := by
+    unfold Spec.Blake2s.initV
+    apply List.map_congr_left
+    intro k _
+    by_cases hk : k < 8
+    · simp [hk, e k hk]
+    · simp [hk]
+  unfold Spec.Blake2s.compress
+  rw [hv, e i hi]
+
+section Tree
+
+open StarkedAir.Blake2s (bPre pre_at PERIOD diagSlot rw4 inT fBit outWord msgWord BlakeSat P_COPY P_INIT P_FIN ML outW)
+open StarkedAir.Sha256 (col pre cst)
+
+variable {n : ℕ} {pub : ℕ → F} {M : ℕ → ℕ → F}
+  (ht : ∀ r < n, ∀ c ∈ treeConstraints, c.eval n Blake2s.preCols pub M r = 0)
+include ht
+
+theorem blakeSat : BlakeSat n Blake2s.preCols pub M :=
+  fun r hr c hc => ht r hr c (by unfold treeConstraints; simp [hc])
+
+theorem tree_pre {r i : ℕ} (hr : r < n) (hi : i < 50) :
+    (pre i).eval n Blake2s.preCols pub M r = bPre i (r % 88) := by
+  have := pre_at (n := n) (pub := pub) (main := M) (s := r - r % 88) (p := r % 88) (i := i)
+    (by simp only [PERIOD]; omega) (by simp only [PERIOD]; omega) (by omega) hi
+  rwa [show r - r % 88 + r % 88 = r by omega] at this
+
+theorem level_ne {r : ℕ} (hr : r < n) : M LVL r ≠ 0 := by
+  have := ht r hr (.sub (.mul (col LVL) (col LVL_INV)) (cst 1)) (by unfold treeConstraints levelCs; simp)
+  simp only [Expr.eval, Sha256.eval_col, wrap_zero hr, Sha256.eval_cst, Nat.cast_one, sub_eq_zero] at this
+  intro h0; rw [h0, zero_mul] at this; exact zero_ne_one this
+
+/-- `LVL` and `POS` are constant over an aligned period. -/
+theorem level_copy {s : ℕ} (hs : s % PERIOD = 0) (hn : s + PERIOD ≤ n) (c : ℕ) (hc : c = LVL ∨ c = POS) :
+    ∀ p < PERIOD, M c (s + p) = M c s := by
+  have hP : PERIOD = 88 := rfl
+  intro p hp
+  induction p with
+  | zero => rfl
+  | succ p ih =>
+    have mem : Expr.mul (pre P_COPY) (.sub (col c) (col c (-1))) ∈ treeConstraints := by
+      unfold treeConstraints levelCs; rcases hc with rfl | rfl <;> simp
+    have := ht (s + (p + 1)) (by omega) _ mem
+    have hw : wrap n (s + (p + 1)) (-1) = s + p := by
+      rw [show (-1 : ℤ) = -((1 : ℕ) : ℤ) by norm_num, Sha256.wrap_back (by omega) (by omega)]; omega
+    simp only [Expr.eval, Sha256.eval_col, wrap_zero (show s + (p + 1) < n by omega), hw] at this
+    rw [pre_at hs (by omega) (by omega) (by simp [P_COPY]), Blake2s.bPre_COPY (by omega) (by omega), one_mul,
+      sub_eq_zero] at this
+    rw [this]; exact ih (by omega)
+
+theorem const_word {s k w : ℕ} {c : ℕ → Bool} (hs : s % PERIOD = 0) (hn : s + PERIOD ≤ n) (hk : k < 4) (hw : w < 8)
+    (hmem : ∀ x ∈ bitsConst (pre (P_INIT k)) w c, x ∈ treeConstraints) :
+    Sha256.word M (32 * w) (s + k) = BitVec.ofNat 32 (ofBits c 32) := by
+  have hP : PERIOD = 88 := rfl
+  refine Blake2s.bitsEq_word (by omega) (fun x hx => ht _ (by omega) x (hmem x hx))
+    (by rw [pre_at hs (by omega) (by omega) (by simp [P_INIT]; omega), Blake2s.bPre_INIT hk (by omega), if_pos rfl])
+    (Blake2s.word_bits (blakeSat ht) (by omega) hw) (fun i hi => ?_)
+  rw [Sha256.eval_cst, BitVec.getLsbD_ofNat, testBit_ofBits]
+  simp [hi]
+
+omit ht in
+theorem ofBits_testBit (x : ℕ) (hx : x < 2 ^ 32) : ofBits (fun i => x.testBit i) 32 = x := by
+  apply Nat.eq_of_testBit_eq; intro i
+  rw [testBit_ofBits]
+  by_cases hi : i < 32
+  · simp [hi]
+  · simp only [hi, decide_false, Bool.false_and]
+    exact (Nat.testBit_eq_false_of_lt (lt_of_lt_of_le hx (Nat.pow_le_pow_right (by norm_num) (by omega)))).symm
+
+omit ht in
+theorem h0_word (k : ℕ) : BitVec.ofNat 32 (ofBits (fun i => (h0Nat k).testBit i) 32) = Spec.Blake2s.h0 k := by
+  rw [ofBits_testBit (h0Nat k) (by unfold h0Nat; exact (Spec.Blake2s.h0 k).isLt)]; simp [h0Nat]
+
+theorem tree_h {s : ℕ} (hs : s % PERIOD = 0) (hn : s + PERIOD ≤ n) : ∀ i < 8, diagSlot M s i = Spec.Blake2s.h0 i := by
+  have memA : ∀ k < 4, ∀ x ∈ bitsConst (pre (P_INIT k)) (outW 0) (fun i => (h0Nat k).testBit i), x ∈ treeConstraints :=
+    fun k hk x hx => by
+      unfold treeConstraints constIn
+      simp only [List.mem_append, List.mem_flatMap, List.mem_range]
+      exact Or.inl (Or.inr (Or.inl (Or.inl (Or.inl ⟨k, hk, Or.inl hx⟩))))
+  have memB : ∀ k < 4, ∀ x ∈ bitsConst (pre (P_INIT k)) (outW 1) (fun i => (h0Nat (bOf k)).testBit i), x ∈ treeConstraints :=
+    fun k hk x hx => by
+      unfold treeConstraints constIn
+      simp only [List.mem_append, List.mem_flatMap, List.mem_range]
+      exact Or.inl (Or.inr (Or.inl (Or.inl (Or.inl ⟨k, hk, Or.inr hx⟩))))
+  have WA := fun k (hk : k < 4) => (const_word ht hs hn hk (by decide) (memA k hk)).trans (h0_word k)
+  have WB := fun k (hk : k < 4) => (const_word ht hs hn hk (by decide) (memB k hk)).trans (h0_word (bOf k))
+  intro i hi
+  have a0 := WA 0 (by norm_num); have a1 := WA 1 (by norm_num); have a2 := WA 2 (by norm_num); have a3 := WA 3 (by norm_num)
+  have b0 := WB 0 (by norm_num); have b1 := WB 1 (by norm_num); have b2 := WB 2 (by norm_num); have b3 := WB 3 (by norm_num)
+  simp only [Nat.add_zero, outW, bOf] at a0 a1 a2 a3 b0 b1 b2 b3
+  interval_cases i <;> simp_all [diagSlot, rw4, outW]
+
+theorem tree_t {s : ℕ} (hs : s % PERIOD = 0) (hn : s + PERIOD ≤ n) : inT M s = 64 := by
+  have m64 : ∀ x ∈ bitsConst (pre (P_INIT 0)) 0 (fun i => (64 : ℕ).testBit i), x ∈ treeConstraints := fun x hx => by
+    unfold treeConstraints constIn; simp only [List.mem_append]; exact Or.inl (Or.inr (Or.inl (Or.inl (Or.inr hx))))
+  have m0 : ∀ x ∈ bitsConst (pre (P_INIT 0)) 1 (fun _ => false), x ∈ treeConstraints := fun x hx => by
+    unfold treeConstraints constIn; simp only [List.mem_append]; exact Or.inl (Or.inr (Or.inl (Or.inr hx)))
+  have w0 := const_word ht hs hn (k := 0) (by norm_num) (by norm_num) m64
+  have w1 := const_word ht hs hn (k := 0) (by norm_num) (by norm_num) m0
+  rw [ofBits_testBit 64 (by norm_num)] at w0
+  have : ofBits (fun _ => false) 32 = 0 := by
+    have := ofBits_testBit 0 (by norm_num); simpa using this
+  rw [this] at w1
+  simp only [Nat.add_zero] at w0 w1
+  unfold inT; rw [w0, w1]; rfl
+
+theorem tree_f {s : ℕ} (hs : s % PERIOD = 0) (hn : s + PERIOD ≤ n) : fBit M s = true := by
+  have hP : PERIOD = 88 := rfl
+  have := ht s (by omega) (.mul (pre (P_INIT 0)) (.sub (col (32 * 2)) (cst 1)))
+    (by unfold treeConstraints constIn; simp only [List.mem_append, List.mem_singleton]; simp)
+  have hpre := pre_at (n := n) (pub := pub) (main := M) (s := s) (p := 0) (i := P_INIT 0) hs (by omega) (by omega)
+    (by simp [P_INIT])
+  rw [Nat.add_zero, Blake2s.bPre_INIT (by norm_num) (by omega), if_pos rfl] at hpre
+  simp only [Expr.eval, hpre, one_mul, Sha256.eval_col, wrap_zero (show s < n by omega), Sha256.eval_cst, Nat.cast_one,
+    sub_eq_zero] at this
+  unfold fBit Sha256.bit; rw [this, ZMod.val_one]; rfl
+
+/-- **A tree period** computes `F(h₀, message, 64, final)`. -/
+theorem tree_period {s : ℕ} (hs : s % PERIOD = 0) (hn : s + PERIOD ≤ n)
+    (hm : ∀ k < 16, ∀ h ≤ 1, (M (ML k h) s).val < 65536) :
+    ∀ i < 8, outWord M s i = Spec.Blake2s.compress Spec.Blake2s.h0 (fun k => msgWord M k s) 64 true i := by
+  intro i hi
+  rw [← Blake2s.compress_sound (blakeSat ht) hs hn hm i hi, tree_t ht hs hn, tree_f ht hs hn]
+  exact compress_congr _ _ _ (tree_h ht hs hn) hi
+
+end Tree
+
 end StarkedAir.HeaderTree
