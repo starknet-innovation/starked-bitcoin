@@ -14,17 +14,17 @@ Rules:
 
 | ID | Item | Status | Done when / notes |
 |---|---|---|---|
-| SPIKE | Lean-first single-source spike (IR, exporter, interpreter, prove/verify) | done (85507f4, 542d834) | [report](../reports/2026-10-06-lean-first-spike.md) |
+| SPIKE | Lean-first single-source spike (IR, exporter, interpreter, prove/verify) | done (b12e02e, b059a52) | [report](../reports/2026-10-06-lean-first-spike.md) |
 | STWO-225 | Report the unpinned preprocessed root to stwo-zig | done (teddyjfpender/stwo-zig#225) | Follow-up: track the upstream fix (backlog `STWO-225-FU`) |
-| SHA | SHA-256 compression AIR plus soundness | done (7ba4a21, 9a446cc) | `compress_sound_air` |
-| IR-V1 | Public inputs and row-range preprocessed columns in the IR | done (66703fb) | |
-| HC-V1 | Header chain: SHA256d, linkage, endpoints | done (82baf06, 6594fd3) | `chain_sound` |
-| HC-V2 | Header chain: proof of work | done (fb5040e, 74df024) | `chain_sound_v2` |
-| HC-V3A | Header chain: height, period boundary, nBits continuity, period-start time | done (6a3250e, b1660b5) | `state_sound` |
-| HC-V3B | Header chain: difficulty retarget | done (c52ddcf, 9a03734) | `retarget_sound` |
-| DOCS | Project documentation and PM process | done (97dbca4) | README, docs/ tree, project/ |
-| HC-V4 | Median time past: `time > median(prev 11)` | done (35710cb, this commit) | Counting approach (D-018). Design: [consensus-rules.md](../design/consensus-rules.md). The first 11 headers of a segment need public inputs for earlier times. Done per [adding-an-air.md](../guides/adding-an-air.md). |
-| HC-V5 | Exact chainwork (D-020): per-header `⌊2^256/(T+1)⌋`, accumulated, public in/out | done (1250f02, this commit) | Needs 256-bit limb arithmetic in the scratch rows |
+| SHA | SHA-256 compression AIR plus soundness | done (8695b97, 94a80f8) | `compress_sound_air` |
+| IR-V1 | Public inputs and row-range preprocessed columns in the IR | done (3706d91) | |
+| HC-V1 | Header chain: SHA256d, linkage, endpoints | done (2a3cc03, 007ae82) | `chain_sound` |
+| HC-V2 | Header chain: proof of work | done (baba2bc, 4eb28ec) | `chain_sound_v2` |
+| HC-V3A | Header chain: height, period boundary, nBits continuity, period-start time | done (a262666, 51264b5) | `state_sound` |
+| HC-V3B | Header chain: difficulty retarget | done (9635390, e466a42) | `retarget_sound` |
+| DOCS | Project documentation and PM process | done (9fa0427) | README, docs/ tree, project/ |
+| HC-V4 | Median time past: `time > median(prev 11)` | done (d1a53c7, this commit) | Counting approach (D-018). Design: [consensus-rules.md](../design/consensus-rules.md). The first 11 headers of a segment need public inputs for earlier times. Done per [adding-an-air.md](../guides/adding-an-air.md). |
+| HC-V5 | Exact chainwork (D-020): per-header `⌊2^256/(T+1)⌋`, accumulated, public in/out | done (b99dbde, this commit) | Needs 256-bit limb arithmetic in the scratch rows |
 | HC-TOP | A single top-level theorem combining `chain_sound_v2`, `state_sound`, `retarget_sound`, the v4 MTP theorems (and v5) into one statement about the public inputs | done (this commit: `header_chain_sound`) | Must prove, by induction with `mtp_window`, that each window is the real predecessors' times padded with `sentinel`, given the genesis/segment public-input convention; then apply `mtp_core`. One theorem plus a doc paragraph in verification.md. |
 | BENCH-RAITO | Benchmark our SHA-256 AIR against Raito's Cairo SHA-256 | done (this commit) | Same machine, documented methodology, results in airs/sha256.md |
 | HC-V6 | Minimum block version (Core `ContextualCheckBlockHeader` "bad-version"): nVersion ≥ 2/3/4 from heights 227931/363725/388381 (BIP34/66/65) | done (this commit) | Found 2026-10-07: missing from `SegmentValid`. Done per [adding-an-air.md](../guides/adding-an-air.md); add to `SegmentValid` and `header_chain_sound`. |
@@ -45,8 +45,8 @@ Done 2026-10-08 (CPU, laptop): heights 0..970,347 in one root proof; [report](..
 | REC-PROFILE | Prove and verify a segment on the `proving_5a7c5ed` profile (Blake2sM31, `PcsConfigV2`) | done (this commit; `src/air/prove_rec.zig`) | Native verify passes; the proof shape is accepted by the in-circuit verifier's types |
 | REC-MASK | Multi-offset masks + optional interaction in the circuit verifier (D-024), on submodule branch `starked/multi-offset-masks` | done (this commit; `src/recursion/plain_verifier.zig`) | A circuit verifier accepts a native `prove_rec` proof of an IR AIR with offsets; differential tests against the native verifier (accept/reject agree); adversarial tests |
 | REC-SMOKE | Port StarkWare's `simple_statement` custom-AIR example to Zig and verify it in-circuit | dropped (superseded by REC-MASK: our own statement path is exercised end to end) | Exercises the `Statement` extension point |
-| REC-LEAF | Leaf-wrap one segment proof: the plain in-circuit verifier (D-024) as a circuit, proved by stwo-zig's circuit prover, output `Blake2s(0 ‖ pubs)` | done (1142c8f, refactor 7df4a99; `src/recursion/leaf.zig`) | 2^20 segment (4,096 headers), 70 queries: 6 s leaf prove, 5 GB peak, 0.86 MB proof |
-| REC-FOLD | Node circuit: verify two children in-circuit, check `PubLink`, output the combined digest under the identity key (D-025) | done (7df4a99; `src/recursion/node.zig`) | 24 s per node at production parameters; peak 16.5 GB RSS over the full chain |
+| REC-LEAF | Leaf-wrap one segment proof: the plain in-circuit verifier (D-024) as a circuit, proved by stwo-zig's circuit prover, output `Blake2s(0 ‖ pubs)` | done (58065a7, refactor 0947c77; `src/recursion/leaf.zig`) | 2^20 segment (4,096 headers), 70 queries: 6 s leaf prove, 5 GB peak, 0.86 MB proof |
+| REC-FOLD | Node circuit: verify two children in-circuit, check `PubLink`, output the combined digest under the identity key (D-025) | done (0947c77; `src/recursion/node.zig`) | 24 s per node at production parameters; peak 16.5 GB RSS over the full chain |
 | REC-COMPOSE | Lean: valid segments whose outputs equal the next inputs compose into a valid chain from genesis (pure spec theorem over `SegmentValid`) | done (this commit: `segment_compose`) | Provable now; no circuits involved |
 | REC-STMT-EQ | Lean + tests: the in-circuit evaluation of our IR equals `Expr.eval` | partly done: the DAG half is proven (`dag_correct`); the in-circuit interpreter is tested (accept + five tamper rejections) and trusted | A Lean model of the circuit builder would be needed to prove the rest; recorded in verification.md |
 | AGG | Fold driver, node identity from topology, outer root verifier (`verifyRoot`); Lean `pub_compose`, `leaf_valid`, `chain_from_genesis` | done (2026-10-08: heights 0..970,347 in one 0.98 MB root proof, verified in 0.26 s; [report](../reports/2026-10-08-full-chain.md)) | |
@@ -56,8 +56,8 @@ Done 2026-10-08 (CPU, laptop): heights 0..970,347 in one root proof; [report](..
 
 | ID | Item | Status | Notes |
 |---|---|---|---|
-| BLOCK-SAMPLES | Sample blocks from public APIs, bound to the proven header file | done (21b747b; 11 blocks in `testdata/blocks/`) | `scripts/fetch_blocks.py` |
-| BLOCK-SPEC | Lean spec of Core's UTXO-independent block checks (`Spec/Block.lean`) | done (21b747b): 11 samples valid, 9 mutations rejected with Core's reason | [block-data.md](../design/block-data.md) |
+| BLOCK-SAMPLES | Sample blocks from public APIs, bound to the proven header file | done (9cca8b5; 11 blocks in `testdata/blocks/`) | `scripts/fetch_blocks.py` |
+| BLOCK-SPEC | Lean spec of Core's UTXO-independent block checks (`Spec/Block.lean`) | done (9cca8b5): 11 samples valid, 9 mutations rejected with Core's reason | [block-data.md](../design/block-data.md) |
 | BLOCK-AUDIT | Audit `Spec/Block.lean` against Core's source | done (2026-10-08): no accept/reject discrepancy; nTime now read from the header | [block-data.md](../design/block-data.md) |
 | BLOCK-AIR **(next)** | Block-data AIR (components + LogUp) | design draft for owner review | [block-data.md § Decisions](../design/block-data.md#decisions-for-the-owner) |
 | IR-LOGUP | LogUp / lookups in the IR (Lean semantics, export, interpreter, system prover, in-circuit verifier) | done (2026-10-08): `Lookup.lean`, `LogUp.lean`, `system.zig`, plain verifier; toy `user_bytes` | Lifting (mixed sizes) not yet: pad components to one size |
