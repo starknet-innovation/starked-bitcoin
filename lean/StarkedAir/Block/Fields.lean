@@ -119,14 +119,16 @@ def isZero (z inv : ℕ) (e : Expr) : List Expr :=
 /-- `x` (an expression) equals `next` kind `c` at this row, from the previous row. -/
 def trans (c : ℕ) (from_ : Expr) : Expr := .sub (k c) from_
 
-def constraints : List Expr :=
-  -- Kinds: one-hot; the block row is row 0; the last row pads.
+/-- Kinds: one-hot; the block row is row 0; the last row pads. -/
+def kindC : List Expr :=
   kinds.map (fun c => boolC (k c)) ++
   [ .sub (kinds.foldr (fun c acc => .add (k c) acc) (cst 0)) one,
     .sub (k K_BLK) first,
-    .mul isLast (oneMinus (k K_PAD)),
-  -- Transitions (row 0's predecessor is the last row, a padding row: only `K_BLK` follows it).
-    trans K_TXH (.add (kp K_BLK) (.mul (kp K_LOCK) (oneMinus (kp Z1)))),
+    .mul isLast (oneMinus (k K_PAD)) ]
+
+/-- Transitions (row 0's predecessor is the last row, a padding row: only `K_BLK` follows it). -/
+def transC : List Expr :=
+  [ trans K_TXH (.add (kp K_BLK) (.mul (kp K_LOCK) (oneMinus (kp Z1)))),
     trans K_IN (.add (kp K_TXH) (.mul (kp K_IN) (oneMinus (kp Z1)))),
     trans K_NOUT (.mul (kp K_IN) (kp Z1)),
     trans K_OUT (.mul (.add (kp K_NOUT) (kp K_OUT)) (oneMinus (kp Z1))),
@@ -135,30 +137,35 @@ def constraints : List Expr :=
     trans K_LOCK (.add (.mul (kp EOC) (oneMinus (kp SEG))) (.mul (kp ESC) (kp Z2))),
     trans K_PAD (.add (.mul (kp K_LOCK) (kp Z1)) (.mul (kp K_PAD) notFirst)),
     .sub (k EOC) (.mul (.add (k K_NOUT) (k K_OUT)) (k Z1)),
-    .sub (k ESC) (.mul (.add (k K_WCNT) (k K_WITEM)) (k Z1)),
-  -- Tiling.
-    .mul first (k START),
+    .sub (k ESC) (.mul (.add (k K_WCNT) (k K_WITEM)) (k Z1)) ]
+
+def tileC : List Expr :=
+  [ .mul first (k START),
     .mul notFirst (.sub (k START) (.add (kp START) (kp LEN))),
     .mul (k K_PAD) (.sub (k START) LENPUB),
     .sub (k LEN) lenE,
-    .sub (k START) (sumPow (fun j => k (RS j)) 25),
-  -- CompactSize.
-    .sub (k OFF) offE,
+    .sub (k START) (sumPow (fun j => k (RS j)) 25) ]
+
+def compactC : List Expr :=
+  [ .sub (k OFF) offE,
     .sub (.add (k CP1) (.add (k CP3) (k CP5))) hasC,
     .sub (k VAL) valE,
     .sub (k (CB 0)) (.add (.mul (k CP1) (k VAL)) (.add (.mul (cst 253) (k CP3)) (.mul (cst 254) (k CP5)))),
     .sub (sumPow (fun j => k (RA j)) 25)
       (.add (.mul (k CP1) (.sub (cst 252) (k VAL))) (.add (.mul (k CP3) (.sub (k VAL) (cst 253)))
         (.mul (k CP5) (.sub (k VAL) (cst 65536))))),
-    .sub (sumPow (fun j => k (RB j)) 25) (.mul (k CP5) (.sub (cst MAXS) (k VAL))),
-  -- Segwit: constant within a transaction; at least one non-empty witness stack.
-    boolC (k SEG),
+    .sub (sumPow (fun j => k (RB j)) 25) (.mul (k CP5) (.sub (cst MAXS) (k VAL))) ]
+
+/-- Segwit: constant within a transaction; at least one non-empty witness stack. -/
+def segC : List Expr :=
+  [ boolC (k SEG),
     .mul (oneMinus (k K_TXH)) (.mul notFirst (.sub (k SEG) (kp SEG))),
     .mul (k K_TXH) (k HASW),
     .mul (oneMinus (k K_TXH)) (.sub (k HASW) (.add (kp HASW) (.mul (kp K_WCNT) (oneMinus (kp Z1))))),
-    .mul (k K_LOCK) (.mul (k SEG) (k Z2)),
-  -- Counters.
-    .mul (k K_BLK) (.add (.sub (k TXL) (k VAL)) one),
+    .mul (k K_LOCK) (.mul (k SEG) (k Z2)) ]
+
+def countC : List Expr :=
+  [ .mul (k K_BLK) (.add (.sub (k TXL) (k VAL)) one),
     .mul notFirst (.add (.sub (k TXL) (kp TXL)) (kp K_LOCK)),
     .mul (k K_TXH) (.sub (k INL) (k VAL)),
     .mul (oneMinus (k K_TXH)) (.mul notFirst (.add (.sub (k INL) (kp INL)) (kp K_IN))),
@@ -170,12 +177,18 @@ def constraints : List Expr :=
     .mul (oneMinus (kp EOC)) (.add (.sub (k WINL) (kp WINL)) (kp ESC)),
     .mul (k K_WCNT) (.sub (k ITEML) (k VAL)),
     .mul (oneMinus (k K_WCNT)) (.mul notFirst (.add (.sub (k ITEML) (kp ITEML)) (kp K_WITEM))),
-  -- The block and every transaction are non-empty.
+    -- The block and every transaction are non-empty.
     .mul (k K_BLK) (k Z1),
-    .mul (k K_TXH) (k Z1) ] ++
-  [.sub (k E1C) e1, .sub (k E2C) e2] ++ isZero Z1 INV1 (k E1C) ++ isZero Z2 INV2 (k E2C) ++
+    .mul (k K_TXH) (k Z1) ]
+
+def zeroC : List Expr :=
+  [.sub (k E1C) e1, .sub (k E2C) e2] ++ isZero Z1 INV1 (k E1C) ++ isZero Z2 INV2 (k E2C)
+
+def bitC : List Expr :=
   [CP1, CP3, CP5].map (fun c => boolC (k c)) ++
   (List.range 25).flatMap (fun j => [boolC (k (RA j)), boolC (k (RB j)), boolC (k (RS j))])
+
+def constraints : List Expr := kindC ++ transC ++ tileC ++ compactC ++ segC ++ countC ++ zeroC ++ bitC
 
 /-- Byte reads: the CompactSize's bytes, and a segwit head's marker and flag. -/
 def lookups : List Lookup :=
