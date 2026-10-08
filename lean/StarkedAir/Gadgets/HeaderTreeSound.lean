@@ -263,6 +263,96 @@ theorem tree_period {s : ℕ} (hs : s % PERIOD = 0) (hn : s + PERIOD ≤ n)
   rw [← Blake2s.compress_sound (blakeSat ht) hs hn hm i hi, tree_t ht hs hn, tree_f ht hs hn]
   exact compress_congr _ _ _ (tree_h ht hs hn) hi
 
+omit ht in
+theorem stWord_toState (w : ℕ → Spec.Blake2s.Word) {k : ℕ} (hk : k < 8) : stWord (toState w) k = w k := by
+  interval_cases k <;> rfl
+
+theorem outLimbs_eval {s : ℕ} (hs : s % PERIOD = 0) (hn : s + PERIOD ≤ n) :
+    outLimbs.map (·.eval n Blake2s.preCols pub M (s + 87)) = limbsOf (toState (outWord M s)) := by
+  have hP : PERIOD = 88 := rfl
+  have hw : ∀ a ≤ 87, wrap n (s + 87) ((a : ℕ) - (87 : ℤ)) = s + a := fun a ha => by
+    have h1 : (0 : ℤ) ≤ ((s + 87 : ℕ) : ℤ) + ((a : ℕ) - (87 : ℤ)) := by omega
+    have h2 : ((s + 87 : ℕ) : ℤ) + ((a : ℕ) - (87 : ℤ)) < (n : ℤ) := by
+      have : s + a < n := by omega
+      omega
+    rw [Sha256.wrap_eq h1 h2]; omega
+  have L := fun (w : ℕ) (hw8 : w < 8) (a : ℕ) (ha : a ≤ 87) (h : ℕ) (hh : h ≤ 1) =>
+    Sha256.eval_limb (n := n) (pc := Blake2s.preCols) (pub := pub) (main := M) (r := s + 87) (base := 32 * w)
+      (off := (a : ℕ) - (87 : ℤ)) (hw a ha) (Blake2s.word_bits (blakeSat ht) (r := s + a) (by omega) hw8) hh
+  unfold outLimbs limbsOf
+  rw [List.map_map]
+  apply List.map_congr_left
+  intro j hj
+  rw [List.mem_range] at hj
+  simp only [Function.comp]
+  rw [stWord_toState _ (by omega)]
+  unfold outWord
+  split_ifs with h4
+  · have := L 0 (by norm_num) (84 + j / 2) (by omega) (j % 2) (by omega)
+    rw [← Nat.add_assoc] at this; exact this
+  · have := L 1 (by norm_num) (84 + (j / 2 + 3) % 4) (by omega) (j % 2) (by omega)
+    rw [← Nat.add_assoc] at this; exact this
+
+omit ht in
+theorem limbsOf_get {X : Spec.Sha256.State} {j : ℕ} (hj : j < 16) :
+    (limbsOf X).getD j 0 = ((Sha256.half16 (stWord X (j / 2)) (j % 2) : ℕ) : F) := by
+  unfold limbsOf; rw [List.getD_eq_getElem _ _ (by simpa using hj)]; simp
+
+omit ht in
+/-- Message limbs that equal a state's limbs give 16-bit limbs and that state's words. -/
+theorem msg_from_limbs {s half : ℕ} {X : Spec.Sha256.State}
+    (h : (List.range 16).map (fun j => M (ML (8 * half + j / 2) (j % 2)) s) = limbsOf X) :
+    (∀ k < 8, ∀ hh ≤ 1, (M (ML (8 * half + k) hh) s).val < 65536) ∧
+      ∀ k < 8, msgWord M (8 * half + k) s = stWord X k := by
+  have get : ∀ k < 8, ∀ hh ≤ 1, M (ML (8 * half + k) hh) s = ((Sha256.half16 (stWord X k) hh : ℕ) : F) := by
+    intro k hk hh hh1
+    have := congrArg (fun l => l.getD (2 * k + hh) 0) h
+    rw [limbsOf_get (by omega), List.getD_eq_getElem _ _ (by simp; omega)] at this
+    simp only [List.getElem_map, List.getElem_range] at this
+    rwa [show (2 * k + hh) / 2 = k by omega, show (2 * k + hh) % 2 = hh by omega] at this
+  have hv : ∀ k < 8, ∀ hh ≤ 1, (M (ML (8 * half + k) hh) s).val = Sha256.half16 (stWord X k) hh := by
+    intro k hk hh hh1
+    rw [get k hk hh hh1, ZMod.val_natCast, Nat.mod_eq_of_lt (lt_trans (Sha256.half16_lt _ _) (by norm_num [P]))]
+  refine ⟨fun k hk hh hh1 => by rw [hv k hk hh hh1]; exact Sha256.half16_lt _ _, fun k hk => ?_⟩
+  unfold msgWord
+  rw [hv k hk 0 (by norm_num), hv k hk 1 (by norm_num), ← Sha256.half16_split]
+  simp
+
+omit ht in
+theorem steps_congr_m {m m' : ℕ → Spec.Blake2s.Word} (e : ∀ k < 16, m k = m' k) (v : List Spec.Blake2s.Word) :
+    ∀ k, Spec.Blake2s.steps m v k = Spec.Blake2s.steps m' v k
+  | 0 => rfl
+  | k + 1 => by
+    simp only [Spec.Blake2s.steps, Spec.Blake2s.gStep, steps_congr_m e v k,
+      e _ (Blake2s.sigma_lt _ _)]
+
+omit ht in
+theorem compress_congr_m {m m' : ℕ → Spec.Blake2s.Word} (h : ℕ → Spec.Blake2s.Word) (t : ℕ) (f : Bool)
+    (e : ∀ k < 16, m k = m' k) (i : ℕ) : Spec.Blake2s.compress h m t f i = Spec.Blake2s.compress h m' t f i := by
+  unfold Spec.Blake2s.compress; rw [steps_congr_m e]
+
+/-- **Node step.** A tree period whose message halves are the limbs of `l` and `r` outputs
+`hnode l r`. -/
+theorem node_step {s : ℕ} (hs : s % PERIOD = 0) (hn : s + PERIOD ≤ n) {l r : Spec.Sha256.State}
+    (hl : (List.range 16).map (fun j => M (ML (8 * 0 + j / 2) (j % 2)) s) = limbsOf l)
+    (hr : (List.range 16).map (fun j => M (ML (8 * 1 + j / 2) (j % 2)) s) = limbsOf r) :
+    toState (outWord M s) = hnode l r := by
+  obtain ⟨bl, wl⟩ := msg_from_limbs hl
+  obtain ⟨br, wr⟩ := msg_from_limbs hr
+  have hm : ∀ k < 16, ∀ h ≤ 1, (M (ML k h) s).val < 65536 := by
+    intro k hk h hh
+    by_cases k8 : k < 8
+    · have := bl k k8 h hh; simpa using this
+    · have := br (k - 8) (by omega) h hh; rwa [show 8 * 1 + (k - 8) = k by omega] at this
+  have hmsg : ∀ k < 16, msgWord M k s = (fun k => if k < 8 then stWord l k else stWord r (k - 8)) k := by
+    intro k hk
+    by_cases k8 : k < 8
+    · have := wl k k8; simp only [Nat.mul_zero, Nat.zero_add] at this; simp [k8, this]
+    · have := wr (k - 8) (by omega); rw [show 8 * 1 + (k - 8) = k by omega] at this; simp [k8, this]
+  have hp := tree_period ht hs hn hm
+  unfold hnode toState
+  congr 1 <;> rw [hp _ (by norm_num), compress_congr_m _ _ _ hmsg]
+
 end Tree
 
 end StarkedAir.HeaderTree
