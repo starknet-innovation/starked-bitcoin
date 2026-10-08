@@ -319,10 +319,19 @@ pub const PartStatement = struct {
     pubs: []const Var,
 };
 
-/// What a plain proof claims: the components, in order, and the preprocessed root.
+/// A public lookup entry, in-circuit: its values are wires (e.g. public inputs).
+pub const ExtEntry = struct {
+    rel: u32,
+    vals: []const Var,
+    mult: M31,
+};
+
+/// What a plain proof claims: the components, in order, the preprocessed root, and the public
+/// lookup entries the relations balance with.
 pub const PlainStatement = struct {
     parts: []const PartStatement,
     preprocessed_root: [32]u8,
+    ext: []const ExtEntry = &.{},
 };
 
 /// `Σ eᵢ αⁱ − z` over `e = (rel, vals…)`, in-circuit (`component.denominator`).
@@ -474,9 +483,13 @@ pub fn verifyPlain(
             if (part.air.lookups.len != 0) n_with += 1;
         }
         if (p.claimed_sums.len != n_with) return error.InvalidPlainProof;
-        // The relations balance: the claimed sums add to zero.
+        // The relations balance: the claimed sums and the public entries add to zero.
         var total = ctx.zero();
         for (p.claimed_sums) |c| total = try ctx.add(total, c);
+        for (st.ext) |e| {
+            const d = try denominatorVar(V, ctx, e.rel, e.vals, elements.?[0], elements.?[1]);
+            total = try ctx.add(total, try ctx.mul(try ctx.constant(QM31.fromBase(e.mult)), try ctx.inv(d)));
+        }
         try ctx.eq(total, ctx.zero());
         try channel.mixQm31s(V, ctx, p.claimed_sums);
         try channel.mixCommitment(V, ctx, p.interaction_root orelse return error.InvalidPlainProof);

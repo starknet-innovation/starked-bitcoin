@@ -13,6 +13,7 @@ const circuit_cpu = @import("stwo_circuit_cpu_integration");
 const ir = @import("../air/ir.zig");
 const pv = @import("plain_verifier.zig");
 const H = @import("../btc/header_chain.zig");
+const HT = @import("../btc/header_tree.zig");
 
 const builder = circuit.builder;
 const preprocessed = circuit.common.preprocessed;
@@ -31,7 +32,9 @@ pub const ComponentSizes = finalize.ComponentSizes;
 pub const bundle_bytes = @embedFile("circuit:air_programs");
 pub const constraints_bytes = @embedFile("circuit:compiled_constraints");
 
-pub const N_PUB = H.N_PUB;
+/// A leaf's public inputs: the header chain's 108, then the segment's tree root `T` (16 limbs).
+pub const T_BASE = H.N_PUB;
+pub const N_PUB = H.N_PUB + 16;
 pub const Key = [8]u32;
 pub const zero_key: Key = @splat(0);
 
@@ -71,15 +74,17 @@ pub fn finish(comptime V: type, ctx: *Context(V), digest: HashValue(Var)) !void 
     try ctx.finalize(false);
 }
 
-/// The finalized (unpadded) leaf circuit: verifies `values` against the AIR with public inputs
-/// `pubs`, and outputs `pubsDigest(zero_key, pubs)`.
+/// The finalized (unpadded) leaf circuit: verifies the (headers, tree) system proof `values` whose
+/// relations balance with the public entry `node(k, 0, T)`, and outputs `pubsDigest(0, pubs)`
+/// (`pubs` = the header chain's public inputs, then `T`'s limbs).
 pub fn buildLeafCircuit(
     gpa: std.mem.Allocator,
     values: *const pv.PlainProof(QM31),
     config: pv.PlainConfig,
-    air: *const ir.Air,
-    digest: [32]u8,
+    airs: [2]*const ir.Air,
+    digests: [2][32]u8,
     pre_root: [32]u8,
+    k: u32,
     pubs: []const M31,
 ) !Context(QM31) {
     var ctx = try Context(QM31).init(gpa, component_list.N_RESERVED);
@@ -87,10 +92,18 @@ pub fn buildLeafCircuit(
     const proof_vars = try pv.guess(QM31, &ctx, values);
     const pub_vars = try ctx.scratch().alloc(Var, pubs.len);
     for (pub_vars, pubs) |*w, v| w.* = try ctx.guessM31(QM31.fromBase(v));
-    const st = pv.PlainStatement{ .parts = &.{.{ .air = air, .digest = digest, .pubs = pub_vars }}, .preprocessed_root = pre_root };
+    const entry_vals = try ctx.scratch().alloc(Var, 18);
+    entry_vals[0] = try ctx.constant(QM31.fromBase(M31.fromCanonical(k)));
+    entry_vals[1] = ctx.zero();
+    @memcpy(entry_vals[2..], pub_vars[T_BASE..]);
+    const st = pv.PlainStatement{
+        .parts = &.{ .{ .air = airs[0], .digest = digests[0], .pubs = pub_vars[0..T_BASE] }, .{ .air = airs[1], .digest = digests[1], .pubs = &.{} } },
+        .preprocessed_root = pre_root,
+        .ext = &.{.{ .rel = HT.REL_NODE, .vals = entry_vals, .mult = M31.zero().sub(M31.one()) }},
+    };
     try pv.verifyPlain(QM31, &ctx, &proof_vars, config, &st);
     var key: [8]U32Wrapper(Var) = undefined;
-    for (&key) |*k| k.* = try builder.wrappers.constU32(QM31, &ctx, 0);
+    for (&key) |*kk| kk.* = try builder.wrappers.constU32(QM31, &ctx, 0);
     try finish(QM31, &ctx, try pubsDigestVars(QM31, &ctx, key, pub_vars));
     return ctx;
 }
@@ -199,29 +212,39 @@ pub const SegmentLeaf = struct {
 };
 
 pub fn buildSegmentLeaf(gpa: std.mem.Allocator, a: std.mem.Allocator, log_size: u32, headers: []const H.Header, start: H.ChainStart) !SegmentLeaf {
-    const prove_base = @import("../air/prove.zig");
+    const system = @import("../air/system.zig");
     const prove_rec = @import("../air/prove_rec.zig");
     var timer = try std.time.Timer.start();
-    const air = (try ir.Air.parseJson(a, H.lean_json)).value;
-    const wit = try H.generateFrom(a, log_size, headers, start);
+    const hair = (try ir.Air.parseJson(a, HT.header_json)).value;
+    const tair = (try ir.Air.parseJson(a, HT.tree_json)).value;
+    const hw = try H.generateFrom(a, log_size, headers, start);
+    const tw = try HT.generate(a, log_size, hw);
+    const k: u32 = log_size - 8;
+    const parts = [_]system.Part{ .{ .air = &hair, .log_size = log_size, .pubs = &hw.pubs }, .{ .air = &tair, .log_size = log_size } };
+    const mains = [_][]const []const M31{ @ptrCast(tw.header_main), @ptrCast(tw.tree_main) };
+    const ext = [_]system.PubEntry{try HT.rootEntry(a, k, tw.root)};
     const cfg = try prove_rec.config(log_size);
-    const digest = try air.digest(a);
-    const statement = prove_base.AirStatement{ .log_size = log_size, .digest = digest, .pubs = &wit.pubs, .air = &air, .allocator = a };
     const E = prove_rec.Engine(@import("stwo_cpu_backend").CpuBackend);
     // Proved twice: the capture consumes one copy (see plain_verifier tests).
-    const proof_a = try prove_rec.prove(E, a, cfg, statement, @ptrCast(wit.main));
-    const proof_b = try prove_rec.prove(E, a, cfg, statement, @ptrCast(wit.main));
+    const proof_a = try system.prove(E, a, cfg, &parts, &mains);
+    const proof_b = try system.prove(E, a, cfg, &parts, &mains);
     var capture: core.verifier.ProofCapture(prove_rec.Hasher) = undefined;
-    try prove_rec.verifyCapture(a, cfg, air, log_size, &wit.pubs, proof_a, &capture);
-    const config = try pv.PlainConfig.single(log_size, cfg.fri_config, air.n_preprocessed, try pv.mainOffsets(a, air), a);
-    const pre_root: [32]u8 = std.mem.toBytes(try prove_rec.preprocessedRoot(a, cfg, air, log_size));
-    const values = try pv.fromCapture(a, prove_rec.Hasher, &proof_b, &capture, config, &.{});
+    try system.verifyCapture(a, cfg, &parts, &ext, proof_a, &capture);
+    const config = pv.PlainConfig{ .log_trace_size = log_size, .fri = cfg.fri_config, .system = true, .parts = &.{
+        .{ .n_preprocessed = hair.n_preprocessed, .main_offsets = try pv.mainOffsets(a, hair), .n_inter = 4 },
+        .{ .n_preprocessed = tair.n_preprocessed, .main_offsets = try pv.mainOffsets(a, tair), .n_inter = 8 },
+    } };
+    const pre_root: [32]u8 = std.mem.toBytes(try system.preprocessedRoot(a, cfg, &parts));
+    const values = try pv.fromCapture(a, prove_rec.Hasher, &proof_b.stark, &capture, config, proof_b.claimed_sums);
+    var pubs: [N_PUB]M31 = undefined;
+    @memcpy(pubs[0..T_BASE], &hw.pubs);
+    @memcpy(pubs[T_BASE..], &HT.limbs(tw.root));
     var t: Timings = .{};
     t.segment_ns = timer.lap();
-    const ctx = try buildLeafCircuit(gpa, &values, config, &air, digest, pre_root, &wit.pubs);
+    const ctx = try buildLeafCircuit(gpa, &values, config, .{ &hair, &tair }, .{ try hair.digest(a), try tair.digest(a) }, pre_root, k, &pubs);
     t.n_vars = ctx.circuit.n_vars;
     t.build_ns = timer.lap();
-    return .{ .ctx = ctx, .pubs = wit.pubs, .timings = t };
+    return .{ .ctx = ctx, .pubs = pubs, .timings = t };
 }
 
 /// Proves a segment leaf (consumed) padded to `target` under `fri`, and verifies it natively.
