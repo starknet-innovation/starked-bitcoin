@@ -153,7 +153,8 @@ theorem sum_neg_one_or_zero {α : Type} (l : List α) (f : α → F) (h : ∀ a 
 /-- **Balance gives membership**, with public entries and selector-gated uses. Use sites
 (`use i k`) have multiplicity `−1` or `0` at every row; public entries have multiplicity `−1`. If
 fewer than `P` use sites and public entries take part, every tuple that a use site (with
-multiplicity `−1`) or a public entry looks up is emitted by some table site. -/
+multiplicity `−1`) or a public entry looks up is emitted by some table site with a nonzero
+multiplicity. -/
 theorem used_in_table_ext {sys : System} {inst : ℕ → Inst} {pub : ℕ → F} {ext : PubEntries}
     (hb : BalancedExt sys inst pub ext)
     (use : ℕ → ℕ → Prop) [DecidablePred fun s : Site => use s.1 s.2.2]
@@ -163,22 +164,29 @@ theorem used_in_table_ext {sys : System} {inst : ℕ → Inst} {pub : ℕ → F}
     {R : ℕ} {v : List F}
     (h0 : (∃ s ∈ sites sys inst, use s.1 s.2.2 ∧ siteMult sys inst pub s = -1 ∧ siteRel sys s = R ∧
         siteVals sys inst pub s = v) ∨ (R, v, -1) ∈ ext) :
-    ∃ s ∈ sites sys inst, ¬ use s.1 s.2.2 ∧ siteRel sys s = R ∧ siteVals sys inst pub s = v := by
+    ∃ s ∈ sites sys inst, ¬ use s.1 s.2.2 ∧ siteMult sys inst pub s ≠ 0 ∧ siteRel sys s = R ∧
+      siteVals sys inst pub s = v := by
   by_contra hne
   push Not at hne
   obtain ⟨L, hL⟩ : ∃ L, L = (sites sys inst).filter fun s => siteRel sys s = R ∧ siteVals sys inst pub s = v :=
     ⟨_, rfl⟩
-  have hall : ∀ s ∈ L, use s.1 s.2.2 := by
+  -- Every matching site is a use (multiplicity −1 or 0) or a table site with multiplicity 0.
+  have hsub : ∀ s ∈ L, siteMult sys inst pub s = -1 ∧ use s.1 s.2.2 ∨ siteMult sys inst pub s = 0 := by
     intro s hs
     rw [hL, List.mem_filter] at hs
-    by_contra hn
     have h2 : siteRel sys s = R ∧ siteVals sys inst pub s = v := by simpa using hs.2
-    exact hne s hs.1 hn h2.1 h2.2
-  have hsub : ∀ s ∈ L, siteMult sys inst pub s = -1 ∨ siteMult sys inst pub s = 0 :=
-    fun s hs => huse s (List.mem_filter.mp (hL ▸ hs)).1 (hall s hs)
+    by_cases hu : use s.1 s.2.2
+    · rcases huse s hs.1 hu with h | h
+      · exact Or.inl ⟨h, hu⟩
+      · exact Or.inr h
+    · exact Or.inr (by by_contra hm0; exact hne s hs.1 hu hm0 h2.1 h2.2)
+  have hsub' : ∀ s ∈ L, siteMult sys inst pub s = -1 ∨ siteMult sys inst pub s = 0 := by
+    intro s hs; rcases hsub s hs with h | h
+    · exact Or.inl h.1
+    · exact Or.inr h
   set E := ext.filter fun e => e.1 = R ∧ e.2.1 = v
   have htot : total sys inst pub R v = -(((L.filter fun s => siteMult sys inst pub s = -1).length : ℕ) : F) := by
-    unfold total; rw [← hL]; exact sum_neg_one_or_zero L _ hsub
+    unfold total; rw [← hL]; exact sum_neg_one_or_zero L _ hsub'
   have hext' : extTotal ext R v = -((E.length : ℕ) : F) := by
     unfold extTotal
     exact sum_neg_one (E) _ (fun e he => hext e (List.mem_filter.mp he).1)
@@ -191,16 +199,23 @@ theorem used_in_table_ext {sys : System} {inst : ℕ → Inst} {pub : ℕ → F}
     · have : (R, v, (-1 : F)) ∈ E := List.mem_filter.mpr ⟨he, by simp⟩
       have := List.length_pos_of_mem this; omega
   have hle : a ≤ ((sites sys inst).filter fun s => use s.1 s.2.2).length := by
-    calc a ≤ L.length := List.length_filter_le _ _
-      _ ≤ _ := by
-        have e : L = L.filter fun s => decide (use s.1 s.2.2) :=
-          (List.filter_eq_self.mpr fun s hs => by simpa using hall s hs).symm
-        rw [e, hL, List.filter_filter]
-        apply List.Sublist.length_le
-        apply List.monotone_filter_right
-        intro x hx
-        simp only [Bool.and_eq_true, decide_eq_true_eq] at hx ⊢
-        exact hx.1
+    have hm1 : ∀ s ∈ L.filter (fun s => siteMult sys inst pub s = -1), use s.1 s.2.2 := by
+      intro s hs
+      obtain ⟨hsL, hm⟩ := List.mem_filter.mp hs
+      rcases hsub s hsL with h | h
+      · exact h.2
+      · have : (0 : F) ≠ -1 := fun h0 => one_ne_zero (neg_eq_zero.mp h0.symm)
+        simp at hm; exact absurd (h.symm.trans hm) this
+    have e : L.filter (fun s => siteMult sys inst pub s = -1) =
+        (L.filter fun s => siteMult sys inst pub s = -1).filter fun s => decide (use s.1 s.2.2) :=
+      (List.filter_eq_self.mpr fun s hs => by simpa using hm1 s hs).symm
+    show (L.filter fun s => siteMult sys inst pub s = -1).length ≤ _
+    rw [e, List.filter_filter, hL, List.filter_filter]
+    apply List.Sublist.length_le
+    apply List.monotone_filter_right
+    intro x hx
+    simp only [Bool.and_eq_true, decide_eq_true_eq] at hx ⊢
+    exact hx.1.1
   have hEle : E.length ≤ ext.length := List.length_filter_le _ _
   have h0' := hb R v
   rw [htot, hext', ← neg_add, neg_eq_zero, ← Nat.cast_add] at h0'
