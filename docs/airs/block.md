@@ -54,7 +54,7 @@ Lean: `lean/StarkedAir/Block/Bytes.lean`. Zig witness: `src/block/bytes.zig`.
 
 Costs: 12 main columns, one row per byte.
 
-## `block_fields` (M3a.2 `BLK-FIELDS`, AIR defined; soundness proof in progress)
+## `block_fields` (M3a.2 `BLK-FIELDS`, proven)
 
 Lean: `lean/StarkedAir/Block/Fields.lean` (grammar layer: `Spec/BlockTokens.lean`). Zig:
 `src/block/fields.zig` (tokenizer and witness).
@@ -74,11 +74,24 @@ witness item, locktime; then padding (at least one row).
   is the extended format with all-empty witnesses. Core rejects all three.
 - **Shape:** 112 main columns; constraints of degree at most 3, checked by `#guard`.
 
-**Proven:** the grammar layer.
-- `toksBlock_sound`: accepted tokens are `serBlock b` of a well-formed `b`.
-- `toksBlock_parse`: Core's deserializer reads that back as `b`.
+**Proven** (standard axioms only):
+- **Grammar layer:**
+  - `toksBlock_sound`: accepted tokens are `serBlock b` of a well-formed `b`;
+  - `toksBlock_parse`: Core's deserializer reads them back as `b`.
+- **AIR layer** (`Block/FieldsSound.lean`):
+  - row facts: one-hot kinds, transitions, is-zero decisions, counters;
+  - CompactSize decoding (`compact_ser`), checking that its bytes are the block's (`compact_slice`) and
+    the segwit marker (`marker_read`) through the byte table;
+  - each row's token serializes to its slice (`tok_bytes`), and the rows tile the block (`tiling`);
+  - the grammar runs row by row: `ins_sim`, `outs_sim`, `items_sim`, `wits_sim`, `tx_sim`, `txs_sim`,
+    `block_sim`.
+- **Headline, `fields_sound`:** if the (bytes, fields) system with `2^L ≤ 2^25` rows per component is
+  satisfied and its lookups balance, then `parseBlock` of the block's bytes succeeds. Those bytes are a
+  canonically serialized block, read back in full.
 
-**To prove:** rows ⇒ accepted tokens whose bytes tile the block.
+**Found while proving:** the 5-byte CompactSize's top byte needed a bound. Without it, bytes encoding
+`P + v` decoded to `v` modulo the field prime and passed both range checks. Fixed with two bit columns
+(95a05bc).
 
 **Tests:**
 - The 6 small samples tokenize, satisfy the constraints, and prove and verify with the byte

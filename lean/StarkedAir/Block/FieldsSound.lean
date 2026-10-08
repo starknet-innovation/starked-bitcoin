@@ -1845,6 +1845,39 @@ theorem u8_get_eq {Mb : ℕ → ℕ → F} {len i : ℕ} (h : i < len) {b : ℕ}
     (blockBytes Mb len).getD i 0 = UInt8.ofNat b := by
   rw [blockBytes_get h, hb, ZMod.val_natCast, Nat.mod_eq_of_lt (lt_P (by omega))]
 
+/-- **Block fields soundness (M3a.2).** If the (bytes, fields) system with `2^L` rows per component
+(`L ≤ 25`) is satisfied and its lookups balance, the block's bytes (`LEN = pub 0` bytes, read from
+the byte table) are a canonically serialized block: Core's deserializer reads them as some `b`,
+consuming all of them. -/
+theorem fields_sound : ∃ b, Spec.Block.parseBlock (blockBytes (inst 0).main (pub 0).val) = some b := by
+  have fs := fields_sat h0L h1L hL hsat
+  have hRl : (blockBytes (inst 0).main (pub 0).val).length = (pub 0).val := blockBytes_length _ _
+  have hcs : ∀ r < 2 ^ L, (inst 1).main K_LOCK r + (inst 1).main K_PAD r = 0 → ∀ o : ℕ, (inst 1).main OFF r = (o : F) →
+      o ≤ 86 → ((inst 1).main START r).val + o + prefOf (inst 1).main r ≤ (blockBytes (inst 0).main (pub 0).val).length ∧
+      ((inst 1).main VAL r).val ≤ MAXS ∧
+      Spec.Block.serCompact ((inst 1).main VAL r).val =
+        slice (blockBytes (inst 0).main (pub 0).val) (((inst 1).main START r).val + o) (prefOf (inst 1).main r) :=
+    fun r hr hLP o ho hoP => by
+      obtain ⟨a, b, c⟩ := compact_slice h0L h1L hL hsat hr hLP ho hoP
+      exact ⟨by rw [hRl]; exact a, b, c⟩
+  have hmk : ∀ r < 2 ^ L, (inst 1).main K_TXH r = 1 → (inst 1).main SEG r = 1 →
+      ((inst 1).main START r).val + 5 < (blockBytes (inst 0).main (pub 0).val).length ∧
+      (blockBytes (inst 0).main (pub 0).val).getD (((inst 1).main START r).val + 4) 0 = 0 ∧
+      (blockBytes (inst 0).main (pub 0).val).getD (((inst 1).main START r).val + 5) 0 = 1 :=
+    fun r hr ht hs => by
+      obtain ⟨a, b, c⟩ := marker_read h0L h1L hL hsat hr ht hs
+      refine ⟨by rw [hRl]; exact a, ?_, ?_⟩
+      · rw [blockBytes_get (by omega), b]; rfl
+      · rw [blockBytes_get (by omega), c, ZMod.val_one]; rfl
+  obtain ⟨m, hmn, -, hnp, hpad, hfit, htile⟩ := tiling fs _ hcs hmk (by positivity) hRl
+  obtain ⟨b, hb⟩ := block_sim fs _ hcs hmn hpad hfit hnp
+  refine ⟨b, ?_⟩
+  have := Spec.Block.toksBlock_parse hb
+  have e1 : toksFrom (inst 1).main (blockBytes (inst 0).main (pub 0).val) m 0 =
+      (List.range m).map (tokOf (inst 1).main (blockBytes (inst 0).main (pub 0).val)) := by simp [toksFrom]
+  rw [e1, Spec.Block.toksBytes, List.flatMap_map] at this
+  rw [← htile]; exact this
+
 end System
 
 end StarkedAir.Block.Fields

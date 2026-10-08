@@ -22,6 +22,25 @@ Next: <the exact next step; must match status.md>
 ---
 
 
+## 2026-10-08 (session 4) — M3a.1 and M3a.2 done and proven
+Who: Claude (agent, Opus 5.5), with the owner
+Roadmap: BLOCK-AIR → in progress (M3a.1 BLK-BYTES, M3a.2 BLK-FIELDS done)
+Done:
+- M3a.1 block byte table: `bytes_rows`, `read_byte` (33e3237).
+- M3a.2 grammar layer `toksBlock_parse` (b898e56); fields AIR, tokenizer and witness (310ab0d); AIR-layer proof
+  through `fields_sound` (8bb66a9 … this commit).
+- Soundness fix found while proving: bound the 5-byte CompactSize's top byte (95a05bc).
+Evidence:
+- `zig build -Dtest-filter=block -Doptimize=ReleaseFast test`: 11/11 (6 small samples prove and verify with the byte table;
+  5 large ones satisfy the constraints; tampered rows and bytes rejected).
+- `lake build` clean, no sorry; `#print axioms fields_sound`: propext, Classical.choice, Quot.sound; JSON drift: ok.
+Problems / lessons:
+- `set` abbreviations break rewrites against lemma outputs stated on the original terms; state lemmas
+  over abstract `M`/`R` with hypotheses instead.
+- `by` blocks inside applications elaborate before implicit naturals are unified; use `refine … ?_`.
+- `unfold P` inside goals that mention `ZMod P` values creates distinct omega atoms; bound via `lt_P`.
+Next: M3a.3 BLK-SHA; the full-chain run with the tree continues (see status).
+
 ## 2026-10-08 (session 3) — Prover race fixed; CIRCUIT-GLUE done
 Who: Claude (agent, Opus 5.5), with the owner
 Roadmap: CIRCUIT-GLUE → done; PROOF-STORE proposed; HC-HASHTREE full run in progress

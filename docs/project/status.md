@@ -22,8 +22,8 @@ standard axioms only); the in-circuit verifiers and node code stay trusted
 ## Next step (concrete)
 
 1. When the full-chain run finishes (see In flight), record `T`, timings and proof size in a report.
-2. M3a.2 `BLK-FIELDS`: prove the AIR layer (rows ⇒ `toksBlock` accepts tokens tiling the block);
-   the grammar layer, the AIR and its witness are done ([airs/block.md](../airs/block.md)).
+2. M3a.3 `BLK-SHA` per [block-data.md](../design/block-data.md): message-byte walker plus multi-message
+   SHA-256 (txid, wtxid, header hash). M3a.1–2 are done and proven ([airs/block.md](../airs/block.md)).
 3. Proposed: REC-FUZZ (differential fuzzing of the plain verifier).
 
 ## In flight
@@ -57,6 +57,7 @@ open StarkedAir.HeaderChain StarkedAir.Spec.Bitcoin
 #print axioms chain_from_genesis
 #print axioms StarkedAir.HeaderTree.chain_from_genesis_T
 #print axioms StarkedAir.Circuit.node_compose
+#print axioms StarkedAir.Block.Fields.fields_sound
 EOS
 (cd lean && lake env lean /tmp/ax.lean)  # expect: propext, Classical.choice, Quot.sound
 
