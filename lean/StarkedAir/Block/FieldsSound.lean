@@ -707,6 +707,14 @@ theorem z1_iff_val0 {r : ℕ} (hr : r < n) {x : F} (he : M E1C r = x) (hx : x.va
     (M Z1 r = 1 ↔ x.val = 0) := by
   rw [(z1_spec hsat hr).2, he, ZMod.val_eq_zero]
 
+/-- Transaction-level values carry from row `r` to `r + 1` when no transaction starts or ends and
+no non-empty witness stack opens. -/
+theorem step_inv {r : ℕ} (hr1 : r + 1 < n) (hnT : M K_TXH (r + 1) = 0) (hnL : M K_LOCK r = 0)
+    (hW : M K_WCNT r * (1 - M Z1 r) = 0) :
+    M SEG (r + 1) = M SEG r ∧ M NIN (r + 1) = M NIN r ∧ M TXL (r + 1) = M TXL r ∧ M HASW (r + 1) = M HASW r := by
+  obtain ⟨c1, -, c3, -, -, -, -, c8, c9⟩ := counters hsat hr1
+  exact ⟨c8 hnT, c3 hnT, by rw [c1, hnL, sub_zero], by rw [c9 hnT, hW, add_zero]⟩
+
 end Rows
 
 end StarkedAir.Block.Fields
@@ -1123,6 +1131,73 @@ theorem ins_sim : ∀ k r, r < m → M K_IN r = 1 → (M INL r).val = k + 1 →
     simp only [Spec.Block.insT]
     rw [if_pos ⟨slice_length (by omega), slice_length (by omega), by rw [slice_length (by omega)]; exact hv,
       slice_length (by omega)⟩, hins, show r + 1 + k + 1 = r + (k + 1) + 1 by ring]
+    simp
+
+/-- **Outputs.** From an output row with `k + 1` outputs left, `outsT` reads them; the last one
+ends the outputs (its `Z1` is 1). -/
+theorem outs_sim : ∀ k r, r < m → M K_OUT r = 1 → (M OUTL r).val = k + 1 →
+    ∃ outs, Spec.Block.outsT (k + 1) (toksFrom M R m r) = some (outs, toksFrom M R m (r + k + 1)) ∧
+      r + k < m ∧ M K_OUT (r + k) = 1 ∧ M Z1 (r + k) = 1 ∧
+      M SEG (r + k) = M SEG r ∧ M NIN (r + k) = M NIN r ∧ M TXL (r + k) = M TXL r ∧ M HASW (r + k) = M HASW r := by
+  intro k
+  induction k with
+  | zero =>
+    intro r hr hout houtl
+    have hrn : r < n := by omega
+    obtain ⟨hv, hlen, p1, p5, hft⟩ := row_info hsat R hcs hmn hpad hfit hr (a := K_OUT) (by simp [K_OUT]) hout
+      (by simp [K_OUT, K_LOCK]) (by simp [K_OUT, K_PAD])
+    simp only [lenN, K_BLK, K_TXH, K_IN, K_NOUT, K_OUT, if_false, if_true, show (4 : ℕ) ≠ 0 by norm_num,
+      show (4 : ℕ) ≠ 1 by norm_num, show (4 : ℕ) ≠ 2 by norm_num, show (4 : ℕ) ≠ 3 by norm_num] at hlen
+    have ka := kinds_at hsat hrn (a := K_OUT) (by simp [K_OUT]) hout
+    have he : M E1C r = M OUTL r - 1 := by
+      rw [e1_eq hsat hrn, ka K_BLK (by simp [K_BLK]), ka K_TXH (by simp [K_TXH]), ka K_IN (by simp [K_IN]),
+        ka K_NOUT (by simp [K_NOUT]), ka K_WCNT (by simp [K_WCNT]), ka K_WITEM (by simp [K_WITEM]),
+        ka K_LOCK (by simp [K_LOCK]), hout]
+      simp [K_BLK, K_TXH, K_IN, K_NOUT, K_OUT, K_WCNT, K_WITEM, K_LOCK]
+    have hz : M Z1 r = 1 := (z1_iff_val hsat hrn he houtl).2 rfl
+    refine ⟨[⟨Spec.Block.signed64 (Spec.Block.le (slice R (M START r).val 8)),
+      slice R ((M START r).val + 8 + prefOf M r) (M VAL r).val⟩], ?_, by simpa using hr, by simpa using hout,
+      by simpa using hz, by simp, by simp, by simp, by simp⟩
+    rw [toksFrom_cons hr, tok_out hsat R hcs hmn hpad hfit hrn hout]
+    simp only [Spec.Block.outsT]
+    rw [if_pos ⟨slice_length (by omega), by rw [slice_length (by omega)]; exact hv⟩]
+    simp
+  | succ k ih =>
+    intro r hr hout houtl
+    have hrn : r < n := by omega
+    have hr1 : r + 1 < n := by omega
+    obtain ⟨hv, hlen, p1, p5, hft⟩ := row_info hsat R hcs hmn hpad hfit hr (a := K_OUT) (by simp [K_OUT]) hout
+      (by simp [K_OUT, K_LOCK]) (by simp [K_OUT, K_PAD])
+    simp only [lenN, K_BLK, K_TXH, K_IN, K_NOUT, K_OUT, if_false, if_true, show (4 : ℕ) ≠ 0 by norm_num,
+      show (4 : ℕ) ≠ 1 by norm_num, show (4 : ℕ) ≠ 2 by norm_num, show (4 : ℕ) ≠ 3 by norm_num] at hlen
+    have ka := kinds_at hsat hrn (a := K_OUT) (by simp [K_OUT]) hout
+    have he : M E1C r = M OUTL r - 1 := by
+      rw [e1_eq hsat hrn, ka K_BLK (by simp [K_BLK]), ka K_TXH (by simp [K_TXH]), ka K_IN (by simp [K_IN]),
+        ka K_NOUT (by simp [K_NOUT]), ka K_WCNT (by simp [K_WCNT]), ka K_WITEM (by simp [K_WITEM]),
+        ka K_LOCK (by simp [K_LOCK]), hout]
+      simp [K_BLK, K_TXH, K_IN, K_NOUT, K_OUT, K_WCNT, K_WITEM, K_LOCK]
+    have hz : M Z1 r = 0 := by
+      rcases (z1_spec hsat hrn).1 with h | h
+      · exact h
+      · exact absurd ((z1_iff_val hsat hrn he houtl).1 h) (by omega)
+    have hout1 : M K_OUT (r + 1) = 1 := (next_kind hsat hr1).2.2.2.2.1 (Or.inr hout) hz
+    have kz1 := fun {c : ℕ} (hc : c < 9) (hne : c ≠ K_OUT) =>
+      kz_of hsat R hcs hmn hpad hfit hr1 (a := K_OUT) (by simp [K_OUT]) hout1 hc hne
+    have houtl1 : (M OUTL (r + 1)).val = k + 1 := by
+      rw [(counters hsat hr1).2.2.2.1 (kz1 (by simp [K_NOUT]) (by simp [K_NOUT, K_OUT])), hout]; exact val_pred houtl
+    have inv := step_inv hsat hr1 (kz1 (by simp [K_TXH]) (by simp [K_TXH, K_OUT])) (ka K_LOCK (by simp [K_LOCK]) |>.trans
+      (by simp [K_LOCK, K_OUT])) (by rw [ka K_WCNT (by simp [K_WCNT])]; simp [K_WCNT, K_OUT])
+    have hr1m : r + 1 < m := lt_m hsat R hcs hmn hpad hfit hr1 (kz1 (by simp [K_PAD]) (by simp [K_PAD, K_OUT]))
+    obtain ⟨outs, houts, hlt, ho, hz', i1, i2, i3, i4⟩ := ih (r + 1) hr1m hout1 houtl1
+    have e : r + 1 + k = r + (k + 1) := by ring
+    rw [e] at hlt ho hz' i1 i2 i3 i4
+    refine ⟨⟨Spec.Block.signed64 (Spec.Block.le (slice R (M START r).val 8)),
+      slice R ((M START r).val + 8 + prefOf M r) (M VAL r).val⟩ :: outs, ?_, hlt, ho, hz',
+      i1.trans inv.1, i2.trans inv.2.1, i3.trans inv.2.2.1, i4.trans inv.2.2.2⟩
+    rw [toksFrom_cons hr, tok_out hsat R hcs hmn hpad hfit hrn hout]
+    simp only [Spec.Block.outsT]
+    rw [if_pos ⟨slice_length (by omega), by rw [slice_length (by omega)]; exact hv⟩, houts,
+      show r + 1 + k + 1 = r + (k + 1) + 1 by ring]
     simp
 
 end Grammar
