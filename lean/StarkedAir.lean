@@ -32,3 +32,4 @@ import StarkedAir.Spec.Block
 import StarkedAir.Lookup
 import StarkedAir.LogUp
 import StarkedAir.Testing.ByteLookup
+import StarkedAir.Spec.BlockSer
