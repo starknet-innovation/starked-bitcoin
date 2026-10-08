@@ -177,3 +177,8 @@ Why: A uniqueness argument inside M3a needs sorting. The rule exists in Core bec
 Date: 2026-10-08 · By: owner · Status: active
 Decision: `HC-HASHTREE` hashes with Blake2s inside the AIRs and in the recursion nodes. Work order: a Blake2s compression component with its Lean proof (shared with the block commitment, D-030), then `HC-HASHTREE` (header AIR v7, node circuit, outer verifier, full-chain re-proof), then M3a.1–M3a.6.
 Why: One hash throughout keeps the verifier simple; Blake2s is native in the recursion circuit; the Blake2s AIR is needed for M3a anyway.
+
+### D-033 — The header commitment is a Merkle Mountain Range over block hashes
+Date: 2026-10-08 · By: owner · Status: active
+Decision: `HC-HASHTREE` commits to block hashes in height order as an MMR: each segment proves its aligned perfect subtree root; the recursion fold runs in MMR order (merge equal-size neighbours, then bag the peaks); nodes hash children roots with Blake2s. Design: [header-tree.md](../design/header-tree.md).
+Why: The MMR follows the segments and the recursion naturally (no padding nodes or extra circuits), is canonical for a tip and append-friendly. Inclusion proofs are about log2(N) hashes; the verifier needs the chain length to know the shape.

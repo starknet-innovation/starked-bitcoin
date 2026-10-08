@@ -1,6 +1,6 @@
 # Header commitment tree (HC-HASHTREE) — design
 
-Status: draft · Updated: 2026-10-08
+Status: current · Updated: 2026-10-08
 
 **Goal:** the final proof carries one 32-byte root `T` committing to every block
 hash by height, so anyone can point to "the block at height h has hash X" with a
