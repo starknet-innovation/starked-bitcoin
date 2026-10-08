@@ -128,6 +128,6 @@ The full trust base is in [verification.md](verification.md).
 
 - Single trace size: no lifting. All components of a system share one `log_size`; pad smaller
   components with inactive rows (selectors, multiplicity 0).
-- Lookups have at most 15 values; batch degrees must stay within 3.
+- Lookups have at most 32 values (`component.MAX_LOOKUP_VALS`); batch degrees must stay within 3.
 - The verifier recomputes the preprocessed root in O(n). Production needs a
   verification key holding the roots per `(AIR, log_size)`.

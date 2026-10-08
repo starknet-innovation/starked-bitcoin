@@ -124,7 +124,7 @@ fn fractions(allocator: std.mem.Allocator, part: Part, main: []const []const M31
     const scratch = try allocator.alloc(M31, air.exprs.len);
     const out = try allocator.alloc(M31, air.constraints.len);
     const values = try allocator.alloc(logup_columns.Fraction, n * B);
-    var vals: [15]QM31 = undefined;
+    var vals: [component_mod.MAX_LOOKUP_VALS]QM31 = undefined;
     for (0..n) |r| {
         trace.row = r;
         interp.evalConstraints(M31, air, part.pubs, scratch, &trace, out);

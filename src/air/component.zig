@@ -32,6 +32,8 @@ const prover_circle = @import("stwo_prover_engine").poly.circle;
 const prover_twiddles = @import("stwo_prover_engine").poly.twiddles;
 
 pub const MAX_DEGREE: u32 = 3;
+/// Largest lookup tuple (values after the relation id).
+pub const MAX_LOOKUP_VALS: usize = 32;
 
 /// LogUp parameters, known once the lookup elements are drawn.
 pub const Logup = struct {
@@ -108,7 +110,7 @@ pub const Component = struct {
                 return error.PreprocessedOffsetUnsupported,
             else => {},
         };
-        for (air.lookups) |l| if (l.vals.len > 15) return error.LookupTooWide;
+        for (air.lookups) |l| if (l.vals.len > MAX_LOOKUP_VALS) return error.LookupTooWide;
         if (air.lookups.len != 0) {
             // (S − …)·D − N must have degree ≤ 3: deg D + 1 ≤ 3 and deg N ≤ 3.
             const deg = try air.degrees(allocator);
@@ -287,13 +289,13 @@ pub const Component = struct {
         for (inter_mask, 0..) |c, k| if (c.len != (if (k + 4 >= n_inter) @as(usize, 2) else 1)) return error.InvalidProofShape;
         const nl = self.air.lookups.len;
         const B = nBatches(self.air);
-        const buf = try self.allocator.alloc(QM31, 2 * nl + 2 * B + 16);
+        const buf = try self.allocator.alloc(QM31, 2 * nl + 2 * B + MAX_LOOKUP_VALS);
         defer self.allocator.free(buf);
         const mults = buf[0..nl];
         const dens = buf[nl..][0..nl];
         const S = buf[2 * nl ..][0..B];
         const lout = buf[2 * nl + B ..][0..B];
-        const vals = buf[2 * nl + 2 * B ..][0..16];
+        const vals = buf[2 * nl + 2 * B ..][0..MAX_LOOKUP_VALS];
         for (self.air.lookups, mults, dens) |l, *m, *d| {
             if (l.vals.len > vals.len) return error.LookupTooWide;
             m.* = scratch[l.mult];
@@ -408,7 +410,7 @@ pub const Component = struct {
         defer allocator.free(scratch);
         const per = self.air.exprs.len + self.air.constraints.len;
         const nl = self.air.lookups.len;
-        const per_q = 2 * nl + 2 * nBatches(self.air) + 16;
+        const per_q = 2 * nl + 2 * nBatches(self.air) + MAX_LOOKUP_VALS;
         const qscratch = try allocator.alloc(QM31, n_threads * per_q);
         defer allocator.free(qscratch);
         const chunk = (eval_size + n_threads - 1) / n_threads;
@@ -445,7 +447,7 @@ const DomainJob = struct {
         const dens = qscratch[nl..][0..nl];
         const S = qscratch[2 * nl ..][0..B];
         const lout = qscratch[2 * nl + B ..][0..B];
-        const vals = qscratch[2 * nl + 2 * B ..][0..16];
+        const vals = qscratch[2 * nl + 2 * B ..][0..MAX_LOOKUP_VALS];
         for (start..end) |row| {
             ctx.row = row;
             interp.evalConstraints(M31, self.air, self.pubs, scratch, &ctx, out);
