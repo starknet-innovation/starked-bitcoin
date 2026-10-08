@@ -57,6 +57,9 @@ pub fn build(b: *std.Build) void {
     lib.addAnonymousImport("air:header_chain_v7", .{ .root_source_file = b.path("airs/header_chain_v7.json") });
     lib.addAnonymousImport("air:node_glue", .{ .root_source_file = b.path("airs/node_glue.json") });
     lib.addAnonymousImport("air:leaf_glue", .{ .root_source_file = b.path("airs/leaf_glue.json") });
+    lib.addAnonymousImport("air:block_bytes", .{ .root_source_file = b.path("airs/block_bytes.json") });
+    lib.addAnonymousImport("air:block_reader", .{ .root_source_file = b.path("airs/block_reader.json") });
+    lib.addAnonymousImport("testdata:block_0", .{ .root_source_file = b.path("testdata/blocks/0.bin") });
 
     // `zig build test -Dtest-filter=<substring>` runs only matching tests (the full suite takes ~16 min).
     const test_filters = b.option([]const []const u8, "test-filter", "Only run tests whose names contain this") orelse &.{};

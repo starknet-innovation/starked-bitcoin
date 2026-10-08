@@ -1,0 +1,1 @@
+{"schema":"starked-air-v2","name":"block_reader","n_preprocessed":0,"n_main":3,"n_pub":0,"preprocessed":[],"exprs":[{"col":{"tree":"main","index":2,"offset":0}},{"constant":1},{"sub":[0,1]},{"mul":[0,2]},{"neg":0},{"col":{"tree":"main","index":0,"offset":0}},{"col":{"tree":"main","index":1,"offset":0}}],"constraints":[3],"lookups":[{"rel":3,"mult":4,"vals":[5,6]}]}

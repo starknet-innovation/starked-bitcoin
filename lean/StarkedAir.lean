@@ -43,3 +43,5 @@ import StarkedAir.Gadgets.AggregateTree
 import StarkedAir.Circuit.Gadgets
 import StarkedAir.Circuit.BlakeSound
 import StarkedAir.Circuit.NodeSound
+import StarkedAir.Block.Bytes
+import StarkedAir.Testing.BlockReader

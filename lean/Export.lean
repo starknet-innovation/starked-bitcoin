@@ -8,6 +8,8 @@ import StarkedAir.Testing.ByteLookup
 import StarkedAir.Gadgets.Blake2s
 import StarkedAir.Gadgets.HeaderTree
 import StarkedAir.Circuit.Gadgets
+import StarkedAir.Block.Bytes
+import StarkedAir.Testing.BlockReader
 
 /-- `lake env lean --run Export.lean <name>` prints canonical JSON. -/
 def main (args : List String) : IO Unit := do
@@ -22,5 +24,7 @@ def main (args : List String) : IO Unit := do
   | ["byte_user"] => IO.println StarkedAir.ByteLookup.user.toJson
   | ["node_glue"] => IO.println StarkedAir.Circuit.nodeProgram.toJson
   | ["leaf_glue"] => IO.println StarkedAir.Circuit.leafProgram.toJson
+  | ["block_bytes"] => IO.println StarkedAir.Block.bytes.toJson
+  | ["block_reader"] => IO.println StarkedAir.BlockReader.reader.toJson
   | ["probe_oracle"] => IO.println (StarkedAir.Probe.oracleJson 4 2024)
   | _ => throw <| IO.userError "usage: export-air add32_chain|probe_oracle"

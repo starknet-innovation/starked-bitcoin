@@ -1,8 +1,10 @@
 # Block data (M3a) — design
 
-Status: draft · Updated: 2026-10-08
+Status: current · Updated: 2026-10-08
 
-Awaiting owner review of the decisions at the end.
+Decisions taken (see the end): multi-component LogUp (D-028), spent-output slots from day one
+(D-029), Blake2s commitment (D-030), duplicate inputs left to M3b (D-031). `IR-LOGUP` and
+`BLAKE2S` are done. M3a.1 is done; see [airs/block.md](../airs/block.md).
 
 ## What exists
 
@@ -92,7 +94,7 @@ gadget word by word.
 
 | Sub-milestone | Content | Lean |
 |---|---|---|
-| M3a.1 `BLK-BYTES` | Byte table: `(pos, byte)` with range check; block length | membership lemma per position |
+| M3a.1 `BLK-BYTES` **(done)** | Byte table: `(pos, byte)` with range check; block length | `bytes_rows`, `read_byte` (membership per position) |
 | M3a.2 `BLK-FIELDS` | Field rows tiling the stream: header, tx count, per tx (version, marker/flag, vin/vout counts, outpoint, script length + span, sequence, value, witness counts and items, locktime); canonical CompactSize; segwit flag rules | serialization ⇔ `parseBlock` (Spec/Block.lean) |
 | M3a.3 `BLK-SHA` | Message-byte walker plus multi-message SHA-256 (reusing `compress_sound_air`): txid, wtxid, header hash | stream = `serNoWit` / `serWit` |
 | M3a.4 `BLK-MERKLE` | txid tree with the CVE-2012-2459 check, witness tree, witness commitment | `merkleRoot` |
@@ -112,7 +114,10 @@ about 4–5 min per full block. The chain is a few hundred GB, so a full-chain
 block run on CPU would take months. This is the performance wall D-027 expects;
 GPU work starts when we get there. Early blocks are tiny and fast.
 
-## Decisions for the owner
+## Decisions (taken 2026-10-08)
+
+The owner chose 1: multi-component (D-028); 2: slots now (D-029); 3: Blake2s (D-030); 4: this order.
+The original questions follow for the record.
 
 1. **Multi-component AIR with LogUp** (recommended) versus a monolithic AIR.
    Recommended, because variable-length data needs it anyway and
