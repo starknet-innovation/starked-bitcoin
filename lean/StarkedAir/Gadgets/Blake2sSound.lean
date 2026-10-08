@@ -415,4 +415,54 @@ theorem diag_half {main : ℕ → ℕ → F} {m : ℕ → Word} {v : List Word} 
   interval_cases i <;>
     simp [Spec.Blake2s.gStep, Spec.Blake2s.gIdx, List.range_succ, diagSlot, colSlot, G0, G1, G2, G3]
 
+theorem steps_succ' (m : ℕ → Word) (v0 : List Word) (ρ j : ℕ) (hj : j < 8) :
+    Spec.Blake2s.steps m v0 (8 * ρ + j + 1) = Spec.Blake2s.gStep m (Spec.Blake2s.steps m v0 (8 * ρ + j)) ρ j := by
+  show Spec.Blake2s.gStep m _ ((8 * ρ + j) / 8) ((8 * ρ + j) % 8) = _
+  rw [show (8 * ρ + j) / 8 = ρ by omega, show (8 * ρ + j) % 8 = j by omega]
+
+theorem steps_length (m : ℕ → Word) (v0 : List Word) : ∀ k, (Spec.Blake2s.steps m v0 k).length = v0.length
+  | 0 => rfl
+  | k + 1 => by rw [Spec.Blake2s.steps, gStep_length, steps_length m v0 k]
+
+/-- **Rounds.** If the initial state is the diagonal layout of rows `s … s+3` and every G row of
+the period satisfies `GOK`, then after `ρ` rounds the state is the diagonal layout of rows
+`s + 8ρ … s + 8ρ + 3`. -/
+theorem steps_rounds {main : ℕ → ℕ → F} {m : ℕ → Word} {v0 : List Word} {s : ℕ} (hlen : v0.length = 16)
+    (hv0 : ∀ i < 16, v0.getD i 0 = diagSlot main s i)
+    (hG : ∀ ρ < 10, ∀ g < 8, GOK main (s + 4 + 8 * ρ + g) g (m (Spec.Blake2s.sigma ρ (2 * g)))
+      (m (Spec.Blake2s.sigma ρ (2 * g + 1)))) :
+    ∀ ρ ≤ 10, ∀ i < 16, (Spec.Blake2s.steps m v0 (8 * ρ)).getD i 0 = diagSlot main (s + 8 * ρ) i := by
+  intro ρ hρ
+  induction ρ with
+  | zero => intro i hi; simpa [Spec.Blake2s.steps] using hv0 i hi
+  | succ ρ ih =>
+    have hprev := ih (by omega)
+    have l0 : (Spec.Blake2s.steps m v0 (8 * ρ)).length = 16 := by rw [steps_length, hlen]
+    have half1 := col_half (b := s + 8 * ρ) (ρ := ρ) l0 hprev (fun g hg => by
+      have := hG ρ (by omega) g (by omega)
+      rwa [show s + 4 + 8 * ρ + g = s + 8 * ρ + 4 + g by ring] at this)
+    have e4 : Spec.Blake2s.steps m v0 (8 * ρ + 4) =
+        Spec.Blake2s.gStep m (Spec.Blake2s.gStep m (Spec.Blake2s.gStep m (Spec.Blake2s.gStep m
+          (Spec.Blake2s.steps m v0 (8 * ρ)) ρ 0) ρ 1) ρ 2) ρ 3 := by
+      rw [show 8 * ρ + 4 = 8 * ρ + 3 + 1 by ring, steps_succ' m v0 ρ 3 (by norm_num),
+        show 8 * ρ + 3 = 8 * ρ + 2 + 1 by ring, steps_succ' m v0 ρ 2 (by norm_num),
+        show 8 * ρ + 2 = 8 * ρ + 1 + 1 by ring, steps_succ' m v0 ρ 1 (by norm_num)]
+      have := steps_succ' m v0 ρ 0 (by norm_num)
+      rw [Nat.add_zero] at this
+      rw [this, Nat.add_zero]
+    rw [← e4] at half1
+    have l4 : (Spec.Blake2s.steps m v0 (8 * ρ + 4)).length = 16 := by rw [steps_length, hlen]
+    have half2 := diag_half (b := s + 8 * ρ + 4) (ρ := ρ) l4 half1 (fun k hk => by
+      have := hG ρ (by omega) (4 + k) (by omega)
+      rwa [show s + 4 + 8 * ρ + (4 + k) = s + 8 * ρ + 4 + 4 + k by ring] at this)
+    have e8 : Spec.Blake2s.steps m v0 (8 * (ρ + 1)) =
+        Spec.Blake2s.gStep m (Spec.Blake2s.gStep m (Spec.Blake2s.gStep m (Spec.Blake2s.gStep m
+          (Spec.Blake2s.steps m v0 (8 * ρ + 4)) ρ 4) ρ 5) ρ 6) ρ 7 := by
+      rw [show 8 * (ρ + 1) = 8 * ρ + 7 + 1 by ring, steps_succ' m v0 ρ 7 (by norm_num),
+        show 8 * ρ + 7 = 8 * ρ + 6 + 1 by ring, steps_succ' m v0 ρ 6 (by norm_num),
+        show 8 * ρ + 6 = 8 * ρ + 5 + 1 by ring, steps_succ' m v0 ρ 5 (by norm_num),
+        show 8 * ρ + 5 = 8 * ρ + 4 + 1 by ring, steps_succ' m v0 ρ 4 (by norm_num)]
+    intro i hi
+    rw [e8, half2 i hi, show s + 8 * ρ + 4 + 4 = s + 8 * (ρ + 1) by ring]
+
 end StarkedAir.Blake2s
