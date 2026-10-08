@@ -45,7 +45,9 @@ const EOC = 108;
 const ESC = 109;
 const E1C = 110;
 const E2C = 111;
-pub const N_MAIN = 112;
+const C4B0 = 112;
+const C4B1 = 113;
+pub const N_MAIN = 114;
 const MAX_SIZE: u64 = 0x02000000;
 
 /// One token row.
@@ -188,6 +190,11 @@ pub fn generate(a: std.mem.Allocator, log_size: u32, raw: []const u8, rows: []co
             else => {},
         }
         for (0..r.pref) |j| cols[CB0 + j][i] = f(raw[r.start + r.off + j]);
+        if (r.pref == 5) {
+            const top = raw[r.start + r.off + 4];
+            cols[C4B0][i] = f(top & 1);
+            cols[C4B1][i] = f((top >> 1) & 1);
+        }
         const ra: u32 = switch (r.pref) {
             1 => 252 - r.val,
             3 => r.val - 253,

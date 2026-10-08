@@ -57,7 +57,11 @@ def ESC : ℕ := 109
 /-- The decision expressions, stored (keeps the is-zero tests at degree 3). -/
 def E1C : ℕ := 110
 def E2C : ℕ := 111
-def N_MAIN : ℕ := 112
+/-- Two bits bounding the 5-byte form's top byte by 3 (canonical values have it at most 2), so the
+decoded sum stays below `2^26` and never wraps modulo `P`. -/
+def C4B0 : ℕ := 112
+def C4B1 : ℕ := 113
+def N_MAIN : ℕ := 114
 
 def kinds : List ℕ := [K_BLK, K_TXH, K_IN, K_NOUT, K_OUT, K_WCNT, K_WITEM, K_LOCK, K_PAD]
 
@@ -154,7 +158,8 @@ def compactC : List Expr :=
     .sub (sumPow (fun j => k (RA j)) 25)
       (.add (.mul (k CP1) (.sub (cst 252) (k VAL))) (.add (.mul (k CP3) (.sub (k VAL) (cst 253)))
         (.mul (k CP5) (.sub (k VAL) (cst 65536))))),
-    .sub (sumPow (fun j => k (RB j)) 25) (.mul (k CP5) (.sub (cst MAXS) (k VAL))) ]
+    .sub (sumPow (fun j => k (RB j)) 25) (.mul (k CP5) (.sub (cst MAXS) (k VAL))),
+    .mul (k CP5) (.sub (k (CB 4)) (.add (k C4B0) (.mul (cst 2) (k C4B1)))) ]
 
 /-- Segwit: constant within a transaction; at least one non-empty witness stack. -/
 def segC : List Expr :=
@@ -185,7 +190,7 @@ def zeroC : List Expr :=
   [.sub (k E1C) e1, .sub (k E2C) e2] ++ isZero Z1 INV1 (k E1C) ++ isZero Z2 INV2 (k E2C)
 
 def bitC : List Expr :=
-  [CP1, CP3, CP5].map (fun c => boolC (k c)) ++
+  [CP1, CP3, CP5, C4B0, C4B1].map (fun c => boolC (k c)) ++
   (List.range 25).flatMap (fun j => [boolC (k (RA j)), boolC (k (RB j)), boolC (k (RS j))])
 
 def constraints : List Expr := kindC ++ transC ++ tileC ++ compactC ++ segC ++ countC ++ zeroC ++ bitC
