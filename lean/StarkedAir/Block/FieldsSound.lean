@@ -491,6 +491,85 @@ theorem not_blk {r : ℕ} (hr : r + 1 < n) : M K_BLK (r + 1) = 0 := by
   have := defn hsat (a := K_BLK) (e := first) (mem_kindC (by simp [kindC])) hr
   rw [this, ev_first hr]; simp
 
+/-! ### Counters -/
+
+/-- The counter constraints as equations (`c` a member of `countC` or `segC`). -/
+theorem cnt {e : Expr} (h : e ∈ countC) {r : ℕ} (hr : r < n) : e.eval n preCols pub M r = 0 :=
+  sat hsat (mem_countC h) hr
+
+theorem counters {r : ℕ} (hr : r + 1 < n) :
+    -- row r + 1 from row r
+    M TXL (r + 1) = M TXL r - M K_LOCK r ∧
+    (M K_TXH (r + 1) = 0 → M INL (r + 1) = M INL r - M K_IN r) ∧
+    (M K_TXH (r + 1) = 0 → M NIN (r + 1) = M NIN r) ∧
+    (M K_NOUT (r + 1) = 0 → M OUTL (r + 1) = M OUTL r - M K_OUT r) ∧
+    (M EOC r = 1 → M WINL (r + 1) = M NIN (r + 1)) ∧
+    (M EOC r = 0 → M WINL (r + 1) = M WINL r - M ESC r) ∧
+    (M K_WCNT (r + 1) = 0 → M ITEML (r + 1) = M ITEML r - M K_WITEM r) ∧
+    (M K_TXH (r + 1) = 0 → M SEG (r + 1) = M SEG r) ∧
+    (M K_TXH (r + 1) = 0 → M HASW (r + 1) = M HASW r + M K_WCNT r * (1 - M Z1 r)) := by
+  have hr0 : r < n := by omega
+  have hn := ev_notFirst (pub := pub) (M := M) hr
+  have c := fun (e : Expr) (h : e ∈ countC) => cnt hsat h hr
+  have sg := fun (e : Expr) (h : e ∈ segC) => sat hsat (mem_segC h) hr
+  refine ⟨?_, fun h => ?_, fun h => ?_, fun h => ?_, fun h => ?_, fun h => ?_, fun h => ?_, fun h => ?_, fun h => ?_⟩
+  · have := c (.mul notFirst (.add (.sub (k TXL) (kp TXL)) (kp K_LOCK))) (by simp [countC])
+    simp only [Expr.eval, hn, ev_k hr, ev_kp hr, one_mul] at this; linear_combination this
+  · have := c (.mul (oneMinus (k K_TXH)) (.mul notFirst (.add (.sub (k INL) (kp INL)) (kp K_IN)))) (by simp [countC])
+    simp only [Expr.eval, hn, ev_k hr, ev_kp hr, oneMinus, one, eval_cst, Nat.cast_one, h] at this
+    linear_combination (by simpa using this : _ = (0 : F))
+  · have := c (.mul (oneMinus (k K_TXH)) (.mul notFirst (.sub (k NIN) (kp NIN)))) (by simp [countC])
+    simp only [Expr.eval, hn, ev_k hr, ev_kp hr, oneMinus, one, eval_cst, Nat.cast_one, h] at this
+    linear_combination (by simpa using this : _ = (0 : F))
+  · have := c (.mul (oneMinus (k K_NOUT)) (.mul notFirst (.add (.sub (k OUTL) (kp OUTL)) (kp K_OUT)))) (by simp [countC])
+    simp only [Expr.eval, hn, ev_k hr, ev_kp hr, oneMinus, one, eval_cst, Nat.cast_one, h] at this
+    linear_combination (by simpa using this : _ = (0 : F))
+  · have := c (.mul (kp EOC) (.sub (k WINL) (k NIN))) (by simp [countC])
+    simp only [Expr.eval, ev_k hr, ev_kp hr, h, one_mul] at this; linear_combination this
+  · have := c (.mul (oneMinus (kp EOC)) (.add (.sub (k WINL) (kp WINL)) (kp ESC))) (by simp [countC])
+    simp only [Expr.eval, ev_k hr, ev_kp hr, oneMinus, one, eval_cst, Nat.cast_one, h, sub_zero, one_mul] at this
+    linear_combination this
+  · have := c (.mul (oneMinus (k K_WCNT)) (.mul notFirst (.add (.sub (k ITEML) (kp ITEML)) (kp K_WITEM)))) (by simp [countC])
+    simp only [Expr.eval, hn, ev_k hr, ev_kp hr, oneMinus, one, eval_cst, Nat.cast_one, h] at this
+    linear_combination (by simpa using this : _ = (0 : F))
+  · have := sg (.mul (oneMinus (k K_TXH)) (.mul notFirst (.sub (k SEG) (kp SEG)))) (by simp [segC])
+    simp only [Expr.eval, hn, ev_k hr, ev_kp hr, oneMinus, one, eval_cst, Nat.cast_one, h] at this
+    linear_combination (by simpa using this : _ = (0 : F))
+  · have := sg (.mul (oneMinus (k K_TXH)) (.sub (k HASW) (.add (kp HASW) (.mul (kp K_WCNT) (oneMinus (kp Z1))))))
+      (by simp [segC])
+    simp only [Expr.eval, ev_k hr, ev_kp hr, oneMinus, one, eval_cst, Nat.cast_one, h] at this
+    linear_combination (by simpa using this : _ = (0 : F))
+
+/-- Values set on a row by its own kind. -/
+theorem row_sets {r : ℕ} (hr : r < n) :
+    (M K_BLK r = 1 → M TXL r = M VAL r - 1 ∧ M Z1 r = 0) ∧
+    (M K_TXH r = 1 → M INL r = M VAL r ∧ M NIN r = M VAL r ∧ M HASW r = 0 ∧ M Z1 r = 0) ∧
+    (M K_NOUT r = 1 → M OUTL r = M VAL r) ∧
+    (M K_WCNT r = 1 → M ITEML r = M VAL r) ∧
+    (M K_LOCK r = 1 → M SEG r = 1 → M Z2 r = 0) := by
+  have c := fun (e : Expr) (h : e ∈ countC) => cnt hsat h hr
+  have sg := fun (e : Expr) (h : e ∈ segC) => sat hsat (mem_segC h) hr
+  have ev : ∀ x : ℕ, (k x).eval n preCols pub M r = M x r := fun x => ev_k hr
+  refine ⟨fun h => ⟨?_, ?_⟩, fun h => ⟨?_, ?_, ?_, ?_⟩, fun h => ?_, fun h => ?_, fun h hs => ?_⟩
+  · have := c (.mul (k K_BLK) (.add (.sub (k TXL) (k VAL)) one)) (by simp [countC])
+    simp only [Expr.eval, ev, h, one_mul, one, eval_cst, Nat.cast_one] at this; linear_combination this
+  · have := c (.mul (k K_BLK) (k Z1)) (by simp [countC])
+    simpa [Expr.eval, ev, h] using this
+  · have := c (.mul (k K_TXH) (.sub (k INL) (k VAL))) (by simp [countC])
+    simp only [Expr.eval, ev, h, one_mul] at this; linear_combination this
+  · have := c (.mul (k K_TXH) (.sub (k NIN) (k VAL))) (by simp [countC])
+    simp only [Expr.eval, ev, h, one_mul] at this; linear_combination this
+  · have := sg (.mul (k K_TXH) (k HASW)) (by simp [segC])
+    simpa [Expr.eval, ev, h] using this
+  · have := c (.mul (k K_TXH) (k Z1)) (by simp [countC])
+    simpa [Expr.eval, ev, h] using this
+  · have := c (.mul (k K_NOUT) (.sub (k OUTL) (k VAL))) (by simp [countC])
+    simp only [Expr.eval, ev, h, one_mul] at this; linear_combination this
+  · have := c (.mul (k K_WCNT) (.sub (k ITEML) (k VAL))) (by simp [countC])
+    simp only [Expr.eval, ev, h, one_mul] at this; linear_combination this
+  · have := sg (.mul (k K_LOCK) (.mul (k SEG) (k Z2))) (by simp [segC])
+    simpa [Expr.eval, ev, h, hs] using this
+
 end Rows
 
 end StarkedAir.Block.Fields
