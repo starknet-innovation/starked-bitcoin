@@ -355,4 +355,233 @@ theorem node_step {s : ℕ} (hs : s % PERIOD = 0) (hn : s + PERIOD ≤ n) {l r :
 
 end Tree
 
+/-! ## The system -/
+
+section System
+
+open StarkedAir.Blake2s (bPre PERIOD outWord P_INIT P_FIN ML)
+open StarkedAir.Sha256 (pre col cst)
+
+theorem sites_length {inst : ℕ → Inst} {L : ℕ} (h0L : (inst 0).logSize = L) (h1L : (inst 1).logSize = L) :
+    (sites sys inst).length = 4 * 2 ^ L := by
+  simp [sites, sys, h0L, h1L, List.length_flatMap, headers, tree, treeLookups, List.sum_range_succ]
+  ring
+
+theorem site_hdr_mult {inst : ℕ → Inst} {pub : ℕ → F} {r : ℕ} :
+    siteMult sys inst pub (0, r, 0) =
+      (pre (HeaderChain.OUT0 + 3)).eval (2 ^ (inst 0).logSize) HeaderChain.preCols pub (inst 0).main r *
+        (inst 0).main HMULT (wrap (2 ^ (inst 0).logSize) r 0) := rfl
+
+theorem site_hdr_vals {inst : ℕ → Inst} {pub : ℕ → F} {r : ℕ} :
+    siteVals sys inst pub (0, r, 0) =
+      (cst 0 :: relHeight :: hashLimbs).map (·.eval (2 ^ (inst 0).logSize) HeaderChain.preCols pub (inst 0).main r) := rfl
+
+theorem site_tree_mult {inst : ℕ → Inst} {pub : ℕ → F} {r k : ℕ} (hk : k < 3) :
+    siteMult sys inst pub (1, r, k) = (treeLookups.getD k ⟨0, .const 0, []⟩).mult.eval (2 ^ (inst 1).logSize)
+      Blake2s.preCols pub (inst 1).main r := by
+  interval_cases k <;> rfl
+
+theorem site_tree_vals {inst : ℕ → Inst} {pub : ℕ → F} {r k : ℕ} (hk : k < 3) :
+    siteVals sys inst pub (1, r, k) = (treeLookups.getD k ⟨0, .const 0, []⟩).vals.map
+      (·.eval (2 ^ (inst 1).logSize) Blake2s.preCols pub (inst 1).main r) := by
+  interval_cases k <;> rfl
+
+theorem site_rel {inst : ℕ → Inst} {s : Site} (hs : s ∈ sites sys inst) : siteRel sys s = REL_NODE := by
+  obtain ⟨i, r, k⟩ := s
+  have := sites_mem.mp hs
+  simp only at this
+  rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl
+  · have : k = 0 := by simpa [sys, headers] using this.2.2
+    subst this; rfl
+  · have : k < 3 := by simpa [sys, tree, treeLookups] using this.2.2
+    interval_cases k <;> rfl
+
+theorem limbsOf_inj {a b : Spec.Sha256.State} (h : limbsOf a = limbsOf b) : a = b := by
+  have hw : ∀ k < 8, stWord a k = stWord b k := by
+    intro k hk
+    have get : ∀ hh ≤ 1, Sha256.half16 (stWord a k) hh = Sha256.half16 (stWord b k) hh := by
+      intro hh hh1
+      have := congrArg (fun l => l.getD (2 * k + hh) 0) h
+      simp only [limbsOf_get (show 2 * k + hh < 16 by omega), show (2 * k + hh) / 2 = k by omega,
+        show (2 * k + hh) % 2 = hh by omega] at this
+      exact natCast_inj_of_lt (lt_trans (Sha256.half16_lt _ _) (by norm_num [P]))
+        (lt_trans (Sha256.half16_lt _ _) (by norm_num [P])) this
+    apply BitVec.eq_of_toNat_eq
+    rw [Sha256.half16_split (stWord a k), Sha256.half16_split (stWord b k), get 0 (by norm_num), get 1 (by norm_num)]
+  obtain ⟨a0, a1, a2, a3, a4, a5, a6, a7⟩ := a
+  obtain ⟨b0, b1, b2, b3, b4, b5, b6, b7⟩ := b
+  have := hw 0 (by norm_num); have := hw 1 (by norm_num); have := hw 2 (by norm_num); have := hw 3 (by norm_num)
+  have := hw 4 (by norm_num); have := hw 5 (by norm_num); have := hw 6 (by norm_num); have := hw 7 (by norm_num)
+  simp_all [stWord]
+
+/-- Header `i`'s block hash (the leaf at position `i`). -/
+abbrev leafHash (inst : ℕ → Inst) (i : ℕ) : Spec.Sha256.State := HeaderChain.hashAt (inst 0).main i
+
+theorem msgLimbs_eval {n : ℕ} {pub : ℕ → F} {M : ℕ → ℕ → F} {r half : ℕ} (hr : r < n) :
+    (msgLimbs half).map (·.eval n Blake2s.preCols pub M r) =
+      (List.range 16).map (fun j => M (ML (8 * half + j / 2) (j % 2)) r) := by
+  unfold msgLimbs; rw [List.map_map]; apply List.map_congr_left; intro j _
+  simp [Sha256.eval_col, wrap_zero hr]
+
+/-- **Header tree soundness.** If the system (headers, tree) with `2^L` rows per component is
+satisfied and balanced together with the public entry `node(L − 8, 0, T)`, then `T` is the perfect
+Blake2s tree root over the segment's `2^(L−8)` block hashes, in order. -/
+theorem tree_root_sound {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ} {T : Spec.Sha256.State}
+    (h0L : (inst 0).logSize = L) (h1L : (inst 1).logSize = L) (hL : 8 ≤ L) (hL28 : L ≤ 28)
+    (hsat : sys.SatisfiedExt inst pub [(REL_NODE, ((L - 8 : ℕ) : F) :: 0 :: limbsOf T, -1)]) :
+    T = rootAt (leafHash inst) (L - 8) 0 := by
+  obtain ⟨hcomp, hb⟩ := hsat
+  have hh : HeaderChain.air.Satisfied L pub (inst 0).main := by
+    have := hcomp 0 (by decide); rw [h0L] at this; exact this
+  have ht : ∀ r < 2 ^ L, ∀ c ∈ treeConstraints, c.eval (2 ^ L) Blake2s.preCols pub (inst 1).main r = 0 := by
+    have := hcomp 1 (by decide); rw [h1L] at this; exact this
+  set K := L - 8 with hKdef
+  have hK : 2 ^ L = 256 * 2 ^ K := by
+    rw [show L = 8 + K by omega, pow_add]; norm_num
+  have hPL : 4 * 2 ^ L + 1 < P := by
+    have : 2 ^ L ≤ 2 ^ 28 := Nat.pow_le_pow_right (by norm_num) hL28
+    unfold P; omega
+  -- Uses: the tree's two child lookups, multiplicity −1 at period starts, else 0.
+  have hinit : ∀ r < 2 ^ L, (pre (P_INIT 0)).eval (2 ^ L) Blake2s.preCols pub (inst 1).main r =
+      if r % 88 = 0 then 1 else 0 := fun r hr => by
+    rw [tree_pre ht hr (by simp [P_INIT]), Blake2s.bPre_INIT (by norm_num) (by simp [PERIOD]; omega)]
+  have huse : ∀ s ∈ sites sys inst, (s.1 = 1 ∧ s.2.2 < 2) →
+      siteMult sys inst pub s = -1 ∨ siteMult sys inst pub s = 0 := by
+    rintro ⟨i, r, k⟩ hs ⟨rfl, hk⟩
+    simp only at hk
+    have hr := (sites_mem.mp hs).2.1
+    simp only [h1L] at hr
+    rw [site_tree_mult (by omega), h1L]
+    have : (treeLookups.getD k ⟨0, .const 0, []⟩).mult = .neg (pre (P_INIT 0)) := by
+      interval_cases k <;> rfl
+    rw [this]
+    simp only [Expr.eval, hinit r hr]
+    split_ifs <;> simp
+  have hcount : ((sites sys inst).filter fun s => s.1 = 1 ∧ s.2.2 < 2).length +
+      [(REL_NODE, ((L - 8 : ℕ) : F) :: 0 :: limbsOf T, (-1 : F))].length < P := by
+    have := List.length_filter_le (fun s : Site => decide (s.1 = 1 ∧ s.2.2 < 2)) (sites sys inst)
+    rw [sites_length h0L h1L] at this
+    simp only [List.length_singleton]; omega
+  have mem := fun {R : ℕ} {v : List F} (h0 : _) =>
+    used_in_table_ext hb (use := fun i k => i = 1 ∧ k < 2) huse (by simp) hcount (R := R) (v := v) h0
+  have hPbig : ∀ a < 2 ^ 30, a < P := fun a ha => by unfold P; omega
+  have hKL : 2 ^ K ≤ 2 ^ 20 := by rw [hKdef]; exact Nat.pow_le_pow_right (by norm_num) (by omega)
+  -- Facts about table sites with nonzero multiplicity.
+  have hdr : ∀ r < 2 ^ L, siteMult sys inst pub (0, r, 0) ≠ 0 → ∃ j : ℕ, 256 * (j + 1) ≤ 2 ^ L ∧
+      siteVals sys inst pub (0, r, 0) = (0 : F) :: (j : F) :: limbsOf (leafHash inst j) := by
+    intro r hr hm
+    rw [site_hdr_mult, h0L, HeaderChain.eval_oneRow (show HeaderChain.preCols.getD (HeaderChain.OUT0 + 3) (.periodic [0]) =
+      HeaderChain.oneRow 215 from rfl) hr] at hm
+    have h215 : r % 256 = 215 := by by_contra h; simp [h] at hm
+    obtain ⟨j, rfl⟩ : ∃ j, r = 256 * j + 215 := ⟨r / 256, by omega⟩
+    refine ⟨j, by omega, ?_⟩
+    rw [site_hdr_vals, h0L]
+    simp only [List.map_cons, Sha256.eval_cst, Nat.cast_zero, relHeight_eval hh hL (j := j) (by omega),
+      hashLimbs_eval hh hL (j := j) (by omega)]
+  have tyield : ∀ r < 2 ^ L, siteMult sys inst pub (1, r, 2) ≠ 0 → r % 88 = 87 := by
+    intro r hr hm
+    rw [site_tree_mult (by norm_num), h1L] at hm
+    simp only [treeLookups, List.getD_cons_succ, List.getD_cons_zero, Expr.eval] at hm
+    rw [tree_pre ht hr (by simp [P_FIN]), Blake2s.bPre_FIN (by norm_num) (by simp [PERIOD]; omega)] at hm
+    by_contra h; simp [show ¬ r % 88 = 84 + 3 by omega] at hm
+  have hcast0 : ∀ a : ℕ, a < P → (0 : F) = (a : F) → a = 0 := fun a ha h =>
+    (natCast_inj_of_lt (by unfold P; norm_num) ha (by simpa using h)).symm
+  -- Every looked-up node at level ℓ ≤ K, position p < 2^(K−ℓ) holds its subtree root.
+  have claim : ∀ ℓ : ℕ, ℓ ≤ K → ∀ p : ℕ, p < 2 ^ (K - ℓ) → ∀ x : List F,
+      (∃ s ∈ sites sys inst, ¬ (s.1 = 1 ∧ s.2.2 < 2) ∧ siteMult sys inst pub s ≠ 0 ∧ siteRel sys s = REL_NODE ∧
+        siteVals sys inst pub s = (ℓ : F) :: (p : F) :: x) → x = limbsOf (rootAt (leafHash inst) ℓ p) := by
+    intro ℓ
+    induction ℓ with
+    | zero =>
+      rintro - p hp x ⟨⟨i, r, k⟩, hs, hnu, hm, -, hv⟩
+      simp only [Nat.sub_zero] at hp
+      obtain ⟨hi, hr, hk⟩ := sites_mem.mp hs
+      simp only at hi hr hk hnu
+      rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl
+      · have hk0 : k = 0 := by simpa [sys, headers] using hk
+        subst hk0
+        rw [h0L] at hr
+        obtain ⟨j, hj, hvj⟩ := hdr r hr hm
+        rw [hvj] at hv
+        simp only [List.cons.injEq] at hv
+        obtain ⟨-, hjp, hx⟩ := hv
+        have hjK : j < 2 ^ K := by omega
+        have : j = p := natCast_inj_of_lt (hPbig j (by omega)) (hPbig p (by omega)) hjp
+        subst this
+        rw [← hx]; rfl
+      · have hk3 : k < 3 := by simpa [sys, tree, treeLookups] using hk
+        have hk2 : k = 2 := by omega
+        subst hk2
+        rw [h1L] at hr
+        rw [site_tree_vals (by norm_num), h1L] at hv
+        simp only [treeLookups, List.getD_cons_succ, List.getD_cons_zero, List.map_cons, List.cons.injEq,
+          Sha256.eval_col, wrap_zero hr, Nat.cast_zero] at hv
+        exact absurd hv.1 (level_ne ht hr)
+    | succ ℓ ih =>
+      rintro hℓ p hp x ⟨⟨i, r, k⟩, hs, hnu, hm, -, hv⟩
+      obtain ⟨hi, hr, hk⟩ := sites_mem.mp hs
+      simp only at hi hr hk hnu
+      rcases (by omega : i = 0 ∨ i = 1) with rfl | rfl
+      · have hk0 : k = 0 := by simpa [sys, headers] using hk
+        subst hk0
+        rw [h0L] at hr
+        obtain ⟨j, hj, hvj⟩ := hdr r hr hm
+        rw [hvj] at hv
+        simp only [List.cons.injEq] at hv
+        have := hcast0 (ℓ + 1) (hPbig _ (by omega)) hv.1
+        omega
+      · have hk3 : k < 3 := by simpa [sys, tree, treeLookups] using hk
+        have hk2 : k = 2 := by omega
+        subst hk2
+        rw [h1L] at hr
+        have h87 := tyield r hr hm
+        obtain ⟨s, rfl⟩ : ∃ s, r = s + 87 := ⟨r - 87, by omega⟩
+        have hs0 : s % PERIOD = 0 := by simp only [PERIOD]; omega
+        have hsn : s + PERIOD ≤ 2 ^ L := by simp only [PERIOD]; omega
+        have hsL : s < 2 ^ L := by omega
+        rw [site_tree_vals (by norm_num), h1L] at hv
+        simp only [treeLookups, List.getD_cons_succ, List.getD_cons_zero, List.map_cons, List.cons.injEq,
+          Sha256.eval_col, wrap_zero hr] at hv
+        obtain ⟨hlvl, hpos, hx⟩ := hv
+        rw [level_copy ht hs0 hsn LVL (Or.inl rfl) 87 (by simp [PERIOD])] at hlvl
+        rw [level_copy ht hs0 hsn POS (Or.inr rfl) 87 (by simp [PERIOD])] at hpos
+        rw [outLimbs_eval ht hs0 hsn] at hx
+        -- The two children, looked up at the period's first row.
+        have child : ∀ c < 2, ∃ y, y = (List.range 16).map (fun j => (inst 1).main (ML (8 * c + j / 2) (j % 2)) s) ∧
+            y = limbsOf (rootAt (leafHash inst) ℓ (2 * p + c)) := by
+          intro c hc
+          refine ⟨_, rfl, ?_⟩
+          have hmem : ((1, s, c) : Site) ∈ sites sys inst := sites_mem.mpr ⟨by norm_num, by rw [h1L]; exact hsL,
+            by simp [sys, tree, treeLookups]; omega⟩
+          have hmult : siteMult sys inst pub (1, s, c) = -1 := by
+            rw [site_tree_mult (by omega), h1L]
+            have : (treeLookups.getD c ⟨0, .const 0, []⟩).mult = .neg (pre (P_INIT 0)) := by
+              interval_cases c <;> rfl
+            rw [this]; simp only [Expr.eval, hinit s hsL, show s % 88 = 0 by simp only [PERIOD] at hs0; omega, if_true]
+          have hvals : siteVals sys inst pub (1, s, c) =
+              (ℓ : F) :: ((2 * p + c : ℕ) : F) :: (List.range 16).map (fun j => (inst 1).main (ML (8 * c + j / 2) (j % 2)) s) := by
+            rw [site_tree_vals (by omega), h1L]
+            interval_cases c <;>
+              simp only [treeLookups, List.getD_cons_succ, List.getD_cons_zero, List.map_cons, Expr.eval,
+                Sha256.eval_col, Sha256.eval_cst, wrap_zero hsL, hlvl, hpos, msgLimbs_eval hsL] <;> push_cast <;> ring_nf
+          obtain ⟨s', hs', hnu', hm', hrel', hv'⟩ := mem (R := REL_NODE)
+            (v := (ℓ : F) :: ((2 * p + c : ℕ) : F) :: (List.range 16).map (fun j => (inst 1).main (ML (8 * c + j / 2) (j % 2)) s))
+            (Or.inl ⟨(1, s, c), hmem, ⟨rfl, hc⟩, hmult, site_rel hmem, hvals⟩)
+          exact ih (by omega) (2 * p + c) (by
+              have : 2 ^ (K - ℓ) = 2 * 2 ^ (K - (ℓ + 1)) := by
+                rw [show K - ℓ = (K - (ℓ + 1)) + 1 by omega, pow_succ]; ring
+              omega) _ ⟨s', hs', hnu', hm', hrel', hv'⟩
+        obtain ⟨yl, hyl, hyl'⟩ := child 0 (by norm_num)
+        obtain ⟨yr, hyr, hyr'⟩ := child 1 (by norm_num)
+        rw [hyl'] at hyl; rw [hyr'] at hyr
+        simp only [Nat.add_zero] at hyl
+        rw [← hx, node_step ht hs0 hsn hyl.symm hyr.symm]
+        rfl
+  obtain ⟨s, hs, hnu, hm, -, hv⟩ := mem (R := REL_NODE) (v := ((L - 8 : ℕ) : F) :: 0 :: limbsOf T)
+    (Or.inr (List.mem_singleton_self _))
+  have := claim K le_rfl 0 (by positivity) (limbsOf T) ⟨s, hs, hnu, hm, site_rel hs, by rw [hv]; simp [hKdef]⟩
+  exact limbsOf_inj this
+
+end System
+
 end StarkedAir.HeaderTree

@@ -38,3 +38,4 @@ import StarkedAir.Gadgets.Blake2s
 import StarkedAir.Gadgets.Blake2sSound
 import StarkedAir.Spec.HeaderTree
 import StarkedAir.Gadgets.HeaderTree
+import StarkedAir.Gadgets.HeaderTreeSound
