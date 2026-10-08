@@ -1318,6 +1318,55 @@ theorem stack_sim {r : ℕ} (hr : r < m) (hw : M K_WCNT r = 1) :
     have := (Spec.Block.itemsT_sound _ _ _ _ hitems).1
     rw [h] at this; simp at this
 
+/-- At the end of a witness stack (`Z1 = 1` on a stack or item row), the decision `Z2` says whether
+it was the last stack, and the next row is the locktime or the next stack. -/
+theorem stack_end {re : ℕ} (hre : re < m) (hk : M K_WCNT re = 1 ∨ M K_WITEM re = 1) (hz : M Z1 re = 1) {w : ℕ}
+    (hw : (M WINL re).val = w + 1) :
+    re + 1 < m ∧ M SEG (re + 1) = M SEG re ∧ M NIN (re + 1) = M NIN re ∧ M TXL (re + 1) = M TXL re ∧
+      M HASW (re + 1) = M HASW re ∧
+      (w = 0 → M K_LOCK (re + 1) = 1) ∧ (w ≠ 0 → M K_WCNT (re + 1) = 1 ∧ (M WINL (re + 1)).val = w) := by
+  have hren : re < n := by omega
+  have hr1 : re + 1 < n := by omega
+  have kWW : M K_WCNT re + M K_WITEM re = 1 ∧ M K_NOUT re + M K_OUT re = 0 ∧ M K_LOCK re = 0 := by
+    rcases hk with h | h
+    · have ka := kinds_at hsat hren (a := K_WCNT) (by simp [K_WCNT]) h
+      rw [ka K_WITEM (by simp [K_WITEM]), ka K_NOUT (by simp [K_NOUT]), ka K_OUT (by simp [K_OUT]),
+        ka K_LOCK (by simp [K_LOCK]), h]; simp [K_WITEM, K_WCNT, K_NOUT, K_OUT, K_LOCK]
+    · have ka := kinds_at hsat hren (a := K_WITEM) (by simp [K_WITEM]) h
+      rw [ka K_WCNT (by simp [K_WCNT]), ka K_NOUT (by simp [K_NOUT]), ka K_OUT (by simp [K_OUT]),
+        ka K_LOCK (by simp [K_LOCK]), h]; simp [K_WITEM, K_WCNT, K_NOUT, K_OUT, K_LOCK]
+  obtain ⟨hww, hno, hlk⟩ := kWW
+  have he2 : M E2C re = M WINL re - 1 := by rw [e2_eq hsat hren, hww, hlk]; ring
+  have z2 := z2_spec hsat hren
+  have heoc : M EOC re = 0 := by rw [eoc_eq hsat hren, hno, zero_mul]
+  have hesc : M ESC re = 1 := by rw [esc_eq hsat hren, hww, hz, one_mul]
+  have nk := next_kind hsat hr1
+  have z2iff : M Z2 re = 1 ↔ w = 0 := by
+    rw [z2.2, he2]
+    constructor
+    · intro h; have := val_pred hw; rw [h, ZMod.val_zero] at this; omega
+    · intro h; subst h; rw [← ZMod.natCast_zmod_val (M WINL re), hw]; simp
+  -- The next row: locktime or stack; either way not padding and not a transaction head.
+  have hnext : (w = 0 → M K_LOCK (re + 1) = 1) ∧ (w ≠ 0 → M K_WCNT (re + 1) = 1) := by
+    refine ⟨fun h0 => nk.2.2.2.2.2.2.2.2.2.1 hk hz (z2iff.mpr h0), fun h0 => nk.2.2.2.2.2.2.2.2.1 hk hz ?_⟩
+    rcases z2.1 with h | h
+    · exact h
+    · exact absurd (z2iff.mp h) h0
+  have hnT : M K_TXH (re + 1) = 0 ∧ M K_PAD (re + 1) = 0 := by
+    by_cases h0 : w = 0
+    · have h := hnext.1 h0
+      exact ⟨kz_of hsat R hcs hmn hpad hfit hr1 (a := K_LOCK) (by simp [K_LOCK]) h (by simp [K_TXH]) (by simp [K_TXH, K_LOCK]),
+        kz_of hsat R hcs hmn hpad hfit hr1 (a := K_LOCK) (by simp [K_LOCK]) h (by simp [K_PAD]) (by simp [K_PAD, K_LOCK])⟩
+    · have h := hnext.2 h0
+      exact ⟨kz_of hsat R hcs hmn hpad hfit hr1 (a := K_WCNT) (by simp [K_WCNT]) h (by simp [K_TXH]) (by simp [K_TXH, K_WCNT]),
+        kz_of hsat R hcs hmn hpad hfit hr1 (a := K_WCNT) (by simp [K_WCNT]) h (by simp [K_PAD]) (by simp [K_PAD, K_WCNT])⟩
+  have inv := step_inv hsat hr1 hnT.1 hlk (by rw [hz, sub_self, mul_zero])
+  refine ⟨lt_m hsat R hcs hmn hpad hfit hr1 hnT.2, inv.1, inv.2.1, inv.2.2.1, inv.2.2.2, hnext.1,
+    fun h0 => ⟨hnext.2 h0, ?_⟩⟩
+  rw [(counters hsat hr1).2.2.2.2.2.1 heoc, hesc]
+  obtain ⟨w', rfl⟩ : ∃ w', w = w' + 1 := ⟨w - 1, by omega⟩
+  exact val_pred hw
+
 end Grammar
 
 /-! ### The block system: bytes (component 0) and fields (component 1) -/
