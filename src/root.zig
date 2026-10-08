@@ -10,6 +10,7 @@ pub const segments = @import("btc/segments.zig");
 pub const header_tree = @import("btc/header_tree.zig");
 pub const block = struct {
     pub const bytes = @import("block/bytes.zig");
+    pub const fields = @import("block/fields.zig");
 };
 pub const recursion = struct {
     pub const plain_verifier = @import("recursion/plain_verifier.zig");

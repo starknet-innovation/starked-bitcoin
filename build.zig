@@ -59,6 +59,17 @@ pub fn build(b: *std.Build) void {
     lib.addAnonymousImport("air:leaf_glue", .{ .root_source_file = b.path("airs/leaf_glue.json") });
     lib.addAnonymousImport("air:block_bytes", .{ .root_source_file = b.path("airs/block_bytes.json") });
     lib.addAnonymousImport("air:block_reader", .{ .root_source_file = b.path("airs/block_reader.json") });
+    lib.addAnonymousImport("air:block_fields", .{ .root_source_file = b.path("airs/block_fields.json") });
+    lib.addAnonymousImport("testdata:block_170", .{ .root_source_file = b.path("testdata/blocks/170.bin") });
+    lib.addAnonymousImport("testdata:block_91722", .{ .root_source_file = b.path("testdata/blocks/91722.bin") });
+    lib.addAnonymousImport("testdata:block_91812", .{ .root_source_file = b.path("testdata/blocks/91812.bin") });
+    lib.addAnonymousImport("testdata:block_91842", .{ .root_source_file = b.path("testdata/blocks/91842.bin") });
+    lib.addAnonymousImport("testdata:block_91880", .{ .root_source_file = b.path("testdata/blocks/91880.bin") });
+    lib.addAnonymousImport("testdata:block_400000", .{ .root_source_file = b.path("testdata/blocks/400000.bin") });
+    lib.addAnonymousImport("testdata:block_481824", .{ .root_source_file = b.path("testdata/blocks/481824.bin") });
+    lib.addAnonymousImport("testdata:block_709632", .{ .root_source_file = b.path("testdata/blocks/709632.bin") });
+    lib.addAnonymousImport("testdata:block_970347", .{ .root_source_file = b.path("testdata/blocks/970347.bin") });
+    lib.addAnonymousImport("testdata:block_774628", .{ .root_source_file = b.path("testdata/blocks/774628.bin") });
     lib.addAnonymousImport("testdata:block_0", .{ .root_source_file = b.path("testdata/blocks/0.bin") });
 
     // `zig build test -Dtest-filter=<substring>` runs only matching tests (the full suite takes ~16 min).

@@ -22,7 +22,8 @@ standard axioms only); the in-circuit verifiers and node code stay trusted
 ## Next step (concrete)
 
 1. When the full-chain run finishes (see In flight), record `T`, timings and proof size in a report.
-2. M3a.2 `BLK-FIELDS` per [block-data.md](../design/block-data.md) (M3a.1 `BLK-BYTES` done).
+2. M3a.2 `BLK-FIELDS`: prove the AIR layer (rows ⇒ `toksBlock` accepts tokens tiling the block);
+   the grammar layer, the AIR and its witness are done ([airs/block.md](../airs/block.md)).
 3. Proposed: REC-FUZZ (differential fuzzing of the plain verifier).
 
 ## In flight
@@ -60,7 +61,7 @@ EOS
 (cd lean && lake env lean /tmp/ax.lean)  # expect: propext, Classical.choice, Quot.sound
 
 # JSON drift: committed AIRs must equal the Lean export
-(cd lean && for n in add32_chain sha256_compress header_chain probe_oracle byte_table byte_user blake2s_compress blake2s_tree header_chain_v7 node_glue leaf_glue block_bytes block_reader; do
+(cd lean && for n in add32_chain sha256_compress header_chain probe_oracle byte_table byte_user blake2s_compress blake2s_tree header_chain_v7 node_glue leaf_glue block_bytes block_reader block_fields; do
   lake env lean --run Export.lean $n | cmp -s - ../airs/$n.json && echo "$n ok" || echo "$n DRIFT"; done)
 
 python3 ~/.claude/skills/document/scripts/check_docs.py .   # expect: 0 errors

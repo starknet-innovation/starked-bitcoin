@@ -53,3 +53,45 @@ Lean: `lean/StarkedAir/Block/Bytes.lean`. Zig witness: `src/block/bytes.zig`.
 - a wrong `LEN` violates the constraints.
 
 Costs: 12 main columns, one row per byte.
+
+## `block_fields` (M3a.2 `BLK-FIELDS`, AIR defined; soundness proof in progress)
+
+Lean: `lean/StarkedAir/Block/Fields.lean` (grammar layer: `Spec/BlockTokens.lean`). Zig:
+`src/block/fields.zig` (tokenizer and witness).
+
+One row per token: block head, tx head, input, output count, output, witness stack count,
+witness item, locktime; then padding (at least one row).
+
+- **Tiling:** row `r` covers `[START, START + LEN)`, and the rows tile `[0, LEN_pub)`. `START`
+  is range-checked below 2²⁵.
+- **Reads:** only CompactSize bytes and a segwit head's marker `00` and flag `01`, through the
+  byte table. Opaque payloads aren't read here.
+- **Canonical CompactSize:** the 1/3/5-byte forms, with value at most `MAX_SIZE`, using two
+  25-bit range checks.
+- **Grammar:** counters (txs, inputs, outputs, witness stacks, items) and two is-zero helpers
+  choose each row's kind from the previous row.
+- **Exclusions:** blocks with no transactions and transactions with no inputs are excluded, as
+  is the extended format with all-empty witnesses. Core rejects all three.
+- **Shape:** 112 main columns; constraints of degree at most 3, checked by `#guard`.
+
+**Proven:** the grammar layer.
+- `toksBlock_sound`: accepted tokens are `serBlock b` of a well-formed `b`.
+- `toksBlock_parse`: Core's deserializer reads that back as `b`.
+
+**To prove:** rows ⇒ accepted tokens whose bytes tile the block.
+
+**Tests:**
+- The 6 small samples tokenize, satisfy the constraints, and prove and verify with the byte
+  table.
+- The 5 large ones satisfy the constraints:
+
+  | Block | Size | Rows | Segwit txs |
+  |---|---|---|---|
+  | 400000 | 949 KB | 13,669 | 0 |
+  | 481824 | 989 KB | 14,939 | 7 |
+  | 709632 | 1.4 MB | 36,048 | 1,714 |
+  | 970347 (tip) | 1.6 MB | 53,104 | 3,558 |
+  | 774628 | 3.96 MB | 522 | 36 |
+
+- Negative cases are rejected: a script length off by one breaks the tiling, and a tampered
+  CompactSize byte leaves the lookups unbalanced.
