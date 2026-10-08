@@ -1410,6 +1410,45 @@ theorem wits_sim : ∀ w r, r < m → M K_WCNT r = 1 → (M WINL r).val = w + 1 
       simp [hws]
     · rw [kh (fun x hx => hall x (List.mem_cons_of_mem _ hx)), j4, hh (hall items List.mem_cons_self)]
 
+/-- From an output-count row, the outputs: `outsT` reads them and stops after the row `re` that
+ends them (`EOC = 1`). -/
+theorem outputs_sim {rno : ℕ} (hr : rno < m) (hno : M K_NOUT rno = 1) :
+    ∃ outs re, Spec.Block.outsT (M VAL rno).val (toksFrom M R m (rno + 1)) = some (outs, toksFrom M R m (re + 1)) ∧
+      rno ≤ re ∧ re < m ∧ (M K_NOUT re = 1 ∨ M K_OUT re = 1) ∧ M Z1 re = 1 ∧
+      M SEG re = M SEG rno ∧ M NIN re = M NIN rno ∧ M TXL re = M TXL rno ∧ M HASW re = M HASW rno ∧
+      (M VAL rno).val ≤ MAXS := by
+  have hrn : rno < n := by omega
+  have ka := kinds_at hsat hrn (a := K_NOUT) (by simp [K_NOUT]) hno
+  obtain ⟨hv, -, -, -, -⟩ := row_info hsat R hcs hmn hpad hfit hr (a := K_NOUT) (by simp [K_NOUT]) hno
+    (by simp [K_NOUT, K_LOCK]) (by simp [K_NOUT, K_PAD])
+  have he : M E1C rno = M VAL rno := by
+    rw [e1_eq hsat hrn, ka K_BLK (by simp [K_BLK]), ka K_TXH (by simp [K_TXH]), ka K_IN (by simp [K_IN]),
+      ka K_OUT (by simp [K_OUT]), ka K_WCNT (by simp [K_WCNT]), ka K_WITEM (by simp [K_WITEM]),
+      ka K_LOCK (by simp [K_LOCK]), hno]
+    simp [K_BLK, K_TXH, K_IN, K_NOUT, K_OUT, K_WCNT, K_WITEM, K_LOCK]
+  have zi := z1_iff_val0 hsat hrn he (ZMod.val_lt _)
+  rcases Nat.eq_zero_or_pos (M VAL rno).val with hc | hc
+  · exact ⟨[], rno, by rw [hc]; rfl, le_rfl, hr, Or.inl hno, zi.mpr hc, rfl, rfl, rfl, rfl, hv⟩
+  · have hr1 : rno + 1 < n := by omega
+    have hz : M Z1 rno = 0 := by
+      rcases (z1_spec hsat hrn).1 with h | h
+      · exact h
+      · exact absurd (zi.mp h) (by omega)
+    have ho1 : M K_OUT (rno + 1) = 1 := (next_kind hsat hr1).2.2.2.2.1 (Or.inl hno) hz
+    have kz1 := fun {c' : ℕ} (hc : c' < 9) (hne : c' ≠ K_OUT) =>
+      kz_of hsat R hcs hmn hpad hfit hr1 (a := K_OUT) (by simp [K_OUT]) ho1 hc hne
+    obtain ⟨c', hc'⟩ : ∃ c', (M VAL rno).val = c' + 1 := ⟨(M VAL rno).val - 1, by omega⟩
+    have hol : (M OUTL (rno + 1)).val = c' + 1 := by
+      rw [(counters hsat hr1).2.2.2.1 (kz1 (by simp [K_NOUT]) (by simp [K_NOUT, K_OUT])),
+        ka K_OUT (by simp [K_OUT]), (row_sets hsat hrn).2.2.1 hno]
+      simp [K_OUT, K_NOUT, hc']
+    have inv := step_inv hsat hr1 (kz1 (by simp [K_TXH]) (by simp [K_TXH, K_OUT]))
+      (by rw [ka K_LOCK (by simp [K_LOCK])]; simp [K_LOCK, K_NOUT]) (by rw [ka K_WCNT (by simp [K_WCNT])]; simp [K_WCNT, K_NOUT])
+    have hr1m : rno + 1 < m := lt_m hsat R hcs hmn hpad hfit hr1 (kz1 (by simp [K_PAD]) (by simp [K_PAD, K_OUT]))
+    obtain ⟨outs, houts, hlt, ho, hz', i1, i2, i3, i4⟩ := outs_sim hsat R hcs hmn hpad hfit c' (rno + 1) hr1m ho1 hol
+    exact ⟨outs, rno + 1 + c', by rw [hc', houts], by omega, hlt, Or.inr ho, hz', i1.trans inv.1, i2.trans inv.2.1,
+      i3.trans inv.2.2.1, i4.trans inv.2.2.2, hv⟩
+
 end Grammar
 
 /-! ### The block system: bytes (component 0) and fields (component 1) -/
