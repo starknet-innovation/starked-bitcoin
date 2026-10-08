@@ -121,6 +121,124 @@ theorem kind_exists {r : ℕ} (hr : r < n) : ∃ a < 9, M a r = 1 := by
   · rw [h] at hne; simp at hne
   · exact h
 
+/-! ### Transitions and decisions -/
+
+theorem ev_notFirst {r : ℕ} (hr : r + 1 < n) : notFirst.eval n preCols pub M (r + 1) = 1 := by
+  simp [notFirst, pre, Expr.eval, preCols, PreCol.eval, wrap_zero (show r + 1 < n from hr), cst]
+
+theorem trans_eq {X : ℕ} {fm : Expr} (h : trans X fm ∈ transC) {r : ℕ} (hr : r + 1 < n) :
+    M X (r + 1) = fm.eval n preCols pub M (r + 1) := by
+  have := sat hsat (mem_transC h) hr
+  simp only [trans, Expr.eval, ev_k hr] at this
+  exact sub_eq_zero.mp this
+
+theorem defn {a : ℕ} {e : Expr} (h : Expr.sub (k a) e ∈ constraints) {r : ℕ} (hr : r < n) :
+    M a r = e.eval n preCols pub M r := by
+  have := sat hsat h hr
+  simp only [Expr.eval, ev_k hr] at this
+  exact sub_eq_zero.mp this
+
+theorem z_spec {z inv : ℕ} {e : Expr} (h : ∀ c ∈ isZero z inv e, c ∈ constraints) {r : ℕ} (hr : r < n) :
+    (M z r = 0 ∨ M z r = 1) ∧ (M z r = 1 ↔ e.eval n preCols pub M r = 0) := by
+  have h1 := sat hsat (h (boolC (k z)) (by simp [isZero])) hr
+  have h2 := sat hsat (h (.mul (k z) e) (by simp [isZero])) hr
+  have h3 := sat hsat (h (.mul (oneMinus (k z)) (.sub (.mul e (k inv)) one)) (by simp [isZero])) hr
+  simp only [boolC, oneMinus, one, Expr.eval, ev_k hr, eval_cst, Nat.cast_one] at h1 h2 h3
+  have hb : M z r = 0 ∨ M z r = 1 := by
+    rcases mul_eq_zero.mp h1 with h | h
+    · exact Or.inl h
+    · exact Or.inr (sub_eq_zero.mp h)
+  refine ⟨hb, ⟨fun hz => by rw [hz, one_mul] at h2; exact h2, fun he => ?_⟩⟩
+  rcases hb with hz | hz
+  · rw [hz, he] at h3; simp at h3
+  · exact hz
+
+theorem z1_spec {r : ℕ} (hr : r < n) : (M Z1 r = 0 ∨ M Z1 r = 1) ∧ (M Z1 r = 1 ↔ M E1C r = 0) := by
+  have := z_spec hsat (z := Z1) (inv := INV1) (e := k E1C)
+    (fun c hc => mem_zeroC (by simp only [zeroC, List.mem_append]; exact Or.inl (Or.inr hc))) hr
+  simpa [ev_k hr] using this
+
+theorem z2_spec {r : ℕ} (hr : r < n) : (M Z2 r = 0 ∨ M Z2 r = 1) ∧ (M Z2 r = 1 ↔ M E2C r = 0) := by
+  have := z_spec hsat (z := Z2) (inv := INV2) (e := k E2C)
+    (fun c hc => mem_zeroC (by simp only [zeroC, List.mem_append]; exact Or.inr hc)) hr
+  simpa [ev_k hr] using this
+
+theorem seg_bool {r : ℕ} (hr : r < n) : M SEG r = 0 ∨ M SEG r = 1 :=
+  bool_of hsat (mem_segC (by simp [segC])) hr
+
+/-- Kind columns at a row of known kind. -/
+theorem kinds_at {r : ℕ} (hr : r < n) {a : ℕ} (ha : a < 9) (h : M a r = 1) :
+    ∀ b < 9, M b r = if b = a then 1 else 0 := by
+  intro b hb
+  split_ifs with e
+  · subst e; exact h
+  · exact kind_unique hsat hr ha hb (Ne.symm e) h
+
+theorem eoc_eq {r : ℕ} (hr : r < n) : M EOC r = (M K_NOUT r + M K_OUT r) * M Z1 r := by
+  rw [defn hsat (e := .mul (.add (k K_NOUT) (k K_OUT)) (k Z1)) (mem_transC (by simp [transC])) hr]
+  simp [Expr.eval, ev_k hr]
+
+theorem esc_eq {r : ℕ} (hr : r < n) : M ESC r = (M K_WCNT r + M K_WITEM r) * M Z1 r := by
+  rw [defn hsat (e := .mul (.add (k K_WCNT) (k K_WITEM)) (k Z1)) (mem_transC (by simp [transC])) hr]
+  simp [Expr.eval, ev_k hr]
+
+/-- The transition equations, at row `r + 1`. -/
+theorem trans_all {r : ℕ} (hr : r + 1 < n) :
+    M K_TXH (r + 1) = M K_BLK r + M K_LOCK r * (1 - M Z1 r) ∧
+    M K_IN (r + 1) = M K_TXH r + M K_IN r * (1 - M Z1 r) ∧
+    M K_NOUT (r + 1) = M K_IN r * M Z1 r ∧
+    M K_OUT (r + 1) = (M K_NOUT r + M K_OUT r) * (1 - M Z1 r) ∧
+    M K_WCNT (r + 1) = M EOC r * M SEG r + M ESC r * (1 - M Z2 r) ∧
+    M K_WITEM (r + 1) = (M K_WCNT r + M K_WITEM r) * (1 - M Z1 r) ∧
+    M K_LOCK (r + 1) = M EOC r * (1 - M SEG r) + M ESC r * M Z2 r ∧
+    M K_PAD (r + 1) = M K_LOCK r * M Z1 r + M K_PAD r := by
+  have hn := ev_notFirst hsat hr
+  have t := fun (X : ℕ) (fm : Expr) (h : trans X fm ∈ transC) => trans_eq hsat (X := X) (fm := fm) h hr
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  · rw [t K_TXH (.add (kp K_BLK) (.mul (kp K_LOCK) (oneMinus (kp Z1)))) (by simp [transC])]
+    simp [Expr.eval, ev_kp hr, oneMinus, one, eval_cst]
+  · rw [t K_IN (.add (kp K_TXH) (.mul (kp K_IN) (oneMinus (kp Z1)))) (by simp [transC])]
+    simp [Expr.eval, ev_kp hr, oneMinus, one, eval_cst]
+  · rw [t K_NOUT (.mul (kp K_IN) (kp Z1)) (by simp [transC])]
+    simp [Expr.eval, ev_kp hr]
+  · rw [t K_OUT (.mul (.add (kp K_NOUT) (kp K_OUT)) (oneMinus (kp Z1))) (by simp [transC])]
+    simp [Expr.eval, ev_kp hr, oneMinus, one, eval_cst]
+  · rw [t K_WCNT (.add (.mul (kp EOC) (kp SEG)) (.mul (kp ESC) (oneMinus (kp Z2)))) (by simp [transC])]
+    simp [Expr.eval, ev_kp hr, oneMinus, one, eval_cst]
+  · rw [t K_WITEM (.mul (.add (kp K_WCNT) (kp K_WITEM)) (oneMinus (kp Z1))) (by simp [transC])]
+    simp [Expr.eval, ev_kp hr, oneMinus, one, eval_cst]
+  · rw [t K_LOCK (.add (.mul (kp EOC) (oneMinus (kp SEG))) (.mul (kp ESC) (kp Z2))) (by simp [transC])]
+    simp [Expr.eval, ev_kp hr, oneMinus, one, eval_cst]
+  · rw [t K_PAD (.add (.mul (kp K_LOCK) (kp Z1)) (.mul (kp K_PAD) notFirst)) (by simp [transC])]
+    simp only [Expr.eval, ev_kp hr, hn, mul_one]
+
+/-- **Next kinds.** -/
+theorem next_kind {r : ℕ} (hr : r + 1 < n) :
+    (M K_BLK r = 1 → M K_TXH (r + 1) = 1) ∧
+    (M K_TXH r = 1 → M K_IN (r + 1) = 1) ∧
+    (M K_IN r = 1 → M Z1 r = 0 → M K_IN (r + 1) = 1) ∧
+    (M K_IN r = 1 → M Z1 r = 1 → M K_NOUT (r + 1) = 1) ∧
+    (M K_NOUT r = 1 ∨ M K_OUT r = 1 → M Z1 r = 0 → M K_OUT (r + 1) = 1) ∧
+    (M K_NOUT r = 1 ∨ M K_OUT r = 1 → M Z1 r = 1 → M SEG r = 1 → M K_WCNT (r + 1) = 1) ∧
+    (M K_NOUT r = 1 ∨ M K_OUT r = 1 → M Z1 r = 1 → M SEG r = 0 → M K_LOCK (r + 1) = 1) ∧
+    (M K_WCNT r = 1 ∨ M K_WITEM r = 1 → M Z1 r = 0 → M K_WITEM (r + 1) = 1) ∧
+    (M K_WCNT r = 1 ∨ M K_WITEM r = 1 → M Z1 r = 1 → M Z2 r = 0 → M K_WCNT (r + 1) = 1) ∧
+    (M K_WCNT r = 1 ∨ M K_WITEM r = 1 → M Z1 r = 1 → M Z2 r = 1 → M K_LOCK (r + 1) = 1) ∧
+    (M K_LOCK r = 1 → M Z1 r = 0 → M K_TXH (r + 1) = 1) ∧
+    (M K_LOCK r = 1 → M Z1 r = 1 → M K_PAD (r + 1) = 1) ∧
+    (M K_PAD r = 1 → M K_PAD (r + 1) = 1) := by
+  have hr0 : r < n := by omega
+  obtain ⟨t1, t2, t3, t4, t5, t6, t7, t8⟩ := trans_all hsat hr
+  have eo := eoc_eq hsat hr0
+  have es := esc_eq hsat hr0
+  have ka := fun {a : ℕ} (ha : a < 9) (h : M a r = 1) => kinds_at hsat hr0 ha h
+  simp only [K_BLK, K_TXH, K_IN, K_NOUT, K_OUT, K_WCNT, K_WITEM, K_LOCK, K_PAD] at *
+  refine ⟨fun h => ?_, fun h => ?_, fun h z => ?_, fun h z => ?_, fun h z => ?_, fun h z sg => ?_,
+    fun h z sg => ?_, fun h z => ?_, fun h z z2 => ?_, fun h z z2 => ?_, fun h z => ?_, fun h z => ?_, fun h => ?_⟩
+  all_goals first
+    | (have k' := ka (by norm_num) h; simp [k'] at t1 t2 t3 t4 t5 t6 t7 t8 eo es; simp_all)
+    | (rcases h with h | h <;> (have k' := ka (by norm_num) h; simp [k'] at t1 t2 t3 t4 t5 t6 t7 t8 eo es; simp_all))
+
 end Rows
 
 end StarkedAir.Block.Fields
