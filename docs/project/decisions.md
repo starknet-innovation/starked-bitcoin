@@ -142,3 +142,13 @@ Why: Preserves the formally verified AIR. The extension is new verifier code wit
 Date: 2026-10-08 · By: agent · Status: active
 Decision: Aggregate with our own node circuit (`src/recursion/node.zig`) instead of upstream's multiverifier. Every leaf and node outputs `Blake2s(key ‖ 108 public inputs)`. A node verifies two child circuit proofs, recomputes each child's digest from the guessed key and public inputs, and checks `PubLink` (right input state = left output state; heights +1 with 16-bit limbs and a carry). It outputs the digest of `combine(pL, pR)` (left input state, right output state) under `key = Blake2s(hL ‖ kL ‖ hR ‖ kR)` (circuit hashes and keys of the children; 0 for leaves). Leaves and nodes are padded to one shared target, so one node circuit verifies both. The outer verifier checks the root proof against the node circuit's preprocessed root, recomputes the expected key from the tree shape and the known leaf/node circuit hashes, and checks genesis input state.
 Why: Upstream's multiverifier only hashes child digests, so linking would be checked outside the proof, which is not succinct. Checking the link inside every node keeps the root statement at one segment's size. The Lean side is proven at the public-input level (`pub_compose`, `leaf_valid`, `chain_from_genesis` in `Gadgets/Aggregate.lean`); the node circuit's Zig code mirrors `PubLink` one-to-one and is a trusted component (verification.md).
+
+### D-026 — M3 starts with M3a (block structure); the owner provides the node
+Date: 2026-10-08 · By: owner · Status: active
+Decision: M3a first: block structure (transaction parsing, Merkle root, witness commitment, size and weight limits, `CheckTransaction`-style checks). M3b (UTXO set) comes later; Utreexo is not required: the UTXO commitment should favour an organized, searchable set. The owner sets up an archival `bitcoind` (local network or cloud). Until then, work from sample blocks fetched from public APIs.
+Why: It keeps scope small, and Lean specs and AIRs can be built and tested on samples. The node is needed for full-scale runs and for M3b.
+
+### D-027 — GPU work only when performance blocks progress
+Date: 2026-10-08 · By: owner · Status: active
+Decision: Continues D-022 into M3: Lean proofs and circuits first; acceleration once a measured performance wall is hit.
+Why: Correctness and provability before speed.
