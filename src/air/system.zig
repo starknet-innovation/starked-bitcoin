@@ -156,7 +156,11 @@ fn fractions(allocator: std.mem.Allocator, part: Part, main: []const []const M31
 
 /// Proves the system. `mains[i]` are part `i`'s main columns in natural row order.
 /// `a` should be an arena (intermediate buffers are not freed individually).
-pub fn prove(comptime E: type, a: std.mem.Allocator, cfg: rec.Config, parts: []const Part, mains: []const []const []const M31) !Proof {
+pub fn prove(comptime E: type, caller_allocator: std.mem.Allocator, cfg: rec.Config, parts: []const Part, mains: []const []const []const M31) !Proof {
+    // With several components the prover evaluates them on concurrent threads, and each
+    // evaluator allocates from this allocator: callers may pass an arena, so serialize it.
+    var thread_safe = std.heap.ThreadSafeAllocator{ .child_allocator = caller_allocator };
+    const a = thread_safe.allocator();
     _ = try checkSizes(parts);
     var channel = rec.Channel{};
     Revision.proving_5a7c5ed.mixConfig(cfg, &channel);
