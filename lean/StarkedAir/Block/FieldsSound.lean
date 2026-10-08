@@ -1367,6 +1367,38 @@ theorem stack_end {re : ℕ} (hre : re < m) (hk : M K_WCNT re = 1 ∨ M K_WITEM 
   obtain ⟨w', rfl⟩ : ∃ w', w = w' + 1 := ⟨w - 1, by omega⟩
   exact val_pred hw
 
+/-- **Witness stacks.** From a stack row with `w + 1` stacks left, `witsT` reads them all and stops
+at the locktime; if every stack is empty the witness flag did not change. -/
+theorem wits_sim : ∀ w r, r < m → M K_WCNT r = 1 → (M WINL r).val = w + 1 →
+    ∃ ws r', Spec.Block.witsT (w + 1) (toksFrom M R m r) = some (ws, toksFrom M R m r') ∧ r < r' ∧ r' < m ∧
+      M K_LOCK r' = 1 ∧ M SEG r' = M SEG r ∧ M NIN r' = M NIN r ∧ M TXL r' = M TXL r ∧
+      ((∀ x ∈ ws, x = []) → M HASW r' = M HASW r) := by
+  intro w
+  induction w with
+  | zero =>
+    intro r hr hw hwl
+    obtain ⟨items, re, hit, hre, hrem, hk, hz, w1, i1, i2, i3, hh, hv⟩ := stack_sim hsat R hcs hmn hpad hfit hr hw
+    obtain ⟨hlt, j1, j2, j3, j4, hlock, -⟩ := stack_end hsat R hcs hmn hpad hfit hrem hk hz (w := 0) (by rw [w1]; exact hwl)
+    refine ⟨[items], re + 1, ?_, by omega, hlt, hlock rfl, j1.trans i1, j2.trans i2, j3.trans i3,
+      fun hall => by rw [j4, hh (hall items (by simp))]⟩
+    rw [toksFrom_cons hr, tok_wcnt hsat R hcs hmn hpad hfit (by omega) hw]
+    simp only [Spec.Block.witsT]
+    rw [if_pos (by unfold Spec.Block.MAX_SIZE; unfold MAXS at hv; exact hv), hit]
+    simp [Spec.Block.witsT]
+  | succ w ih =>
+    intro r hr hw hwl
+    obtain ⟨items, re, hit, hre, hrem, hk, hz, w1, i1, i2, i3, hh, hv⟩ := stack_sim hsat R hcs hmn hpad hfit hr hw
+    obtain ⟨hlt, j1, j2, j3, j4, -, hnext⟩ := stack_end hsat R hcs hmn hpad hfit hrem hk hz (w := w + 1) (by rw [w1]; exact hwl)
+    obtain ⟨hw1, hwl1⟩ := hnext (by omega)
+    obtain ⟨ws, r', hws, hr', hr'm, hl, k1, k2, k3, kh⟩ := ih (re + 1) hlt hw1 hwl1
+    refine ⟨items :: ws, r', ?_, by omega, hr'm, hl, k1.trans (j1.trans i1), k2.trans (j2.trans i2),
+      k3.trans (j3.trans i3), fun hall => ?_⟩
+    · rw [toksFrom_cons hr, tok_wcnt hsat R hcs hmn hpad hfit (by omega) hw]
+      simp only [Spec.Block.witsT]
+      rw [if_pos (by unfold Spec.Block.MAX_SIZE; unfold MAXS at hv; exact hv), hit]
+      simp [hws]
+    · rw [kh (fun x hx => hall x (List.mem_cons_of_mem _ hx)), j4, hh (hall items List.mem_cons_self)]
+
 end Grammar
 
 /-! ### The block system: bytes (component 0) and fields (component 1) -/
