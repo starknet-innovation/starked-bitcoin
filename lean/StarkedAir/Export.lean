@@ -7,6 +7,7 @@ the AIR's constraints. This file only prints it.
 -/
 import StarkedAir.IR
 import StarkedAir.Dag
+import StarkedAir.Lookup
 
 namespace StarkedAir
 
@@ -45,5 +46,28 @@ def Air.toJson (air : Air) : String :=
     s!",\"preprocessed\":[{join (air.pre.map preJson)}]" ++
     s!",\"exprs\":[{join (nodes.toList.map nodeJson)}]" ++
     s!",\"constraints\":[{join (roots.map toString)}]}"
+
+/-- A component with lookups (schema v2): constraints and lookup expressions share one DAG. -/
+def Comp.toJson (c : Comp) : String :=
+  let air := c.air
+  let roots := air.constraints ++ c.lookups.flatMap fun l => l.mult :: l.vals
+  let (ids, s) := emitAll roots {}
+  let nc := air.constraints.length
+  let rec lookupsJson : List Lookup → List ℕ → List String
+    | [], _ => []
+    | l :: ls, ids =>
+      let k := l.vals.length + 1
+      let mine := ids.take k
+      s!"\{\"rel\":{l.rel},\"mult\":{mine.headD 0},\"vals\":[{",".intercalate ((mine.drop 1).map toString)}]}" ::
+        lookupsJson ls (ids.drop k)
+  let join (xs : List String) := ",".intercalate xs
+  "{\"schema\":\"starked-air-v2\"" ++
+    s!",\"name\":\"{air.name}\"" ++
+    s!",\"n_preprocessed\":{air.pre.length},\"n_main\":{air.nMain}" ++
+    s!",\"n_pub\":{(roots.map Expr.nPub).foldl max 0}" ++
+    s!",\"preprocessed\":[{join (air.pre.map preJson)}]" ++
+    s!",\"exprs\":[{join (s.out.toList.map nodeJson)}]" ++
+    s!",\"constraints\":[{join ((ids.take nc).map toString)}]" ++
+    s!",\"lookups\":[{join (lookupsJson c.lookups (ids.drop nc))}]}"
 
 end StarkedAir

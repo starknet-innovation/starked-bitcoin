@@ -31,3 +31,4 @@ import StarkedAir.Spec.Sha256Fast
 import StarkedAir.Spec.Block
 import StarkedAir.Lookup
 import StarkedAir.LogUp
+import StarkedAir.Testing.ByteLookup

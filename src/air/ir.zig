@@ -18,13 +18,18 @@
 //!   *defined by the AIR* (`PreCol`), generated identically by prover and
 //!   verifier, and the verifier checks their commitment root. They are never
 //!   prover-supplied.
-//!   LogUp/interaction terms are not in v0.
+//! - Lookups (schema v2, Lean `Lookup.lean`): at every row, lookup `{rel, mult, vals}` emits
+//!   the entry `(rel, vals(row))` with multiplicity `mult(row)`. A system of components is
+//!   satisfied when every AIR is and every relation balances (multiplicities of each tuple sum
+//!   to zero). The LogUp encoding (interaction tree) is derived from the lookups.
 
 const std = @import("std");
 const M31 = @import("stwo_core").fields.m31.M31;
 const P = @import("stwo_core").fields.m31.Modulus;
 
 pub const schema = "starked-air-v1";
+/// Schema of AIRs with lookups. AIRs without lookups keep the v1 bytes (and digests).
+pub const schema_v2 = "starked-air-v2";
 
 pub const Tree = enum(u8) { preprocessed = 0, main = 1 };
 
@@ -64,6 +69,13 @@ pub const Expr = union(enum) {
     @"pub": u32,
 };
 
+/// `(rel, vals)` emitted with multiplicity `mult` at every row; expressions are DAG nodes.
+pub const Lookup = struct {
+    rel: u32,
+    mult: ExprId,
+    vals: []const ExprId,
+};
+
 /// An AIR as a DAG of expressions (children always precede parents) plus
 /// a list of constraint roots.
 pub const Air = struct {
@@ -74,6 +86,7 @@ pub const Air = struct {
     preprocessed: []const PreCol,
     exprs: []const Expr,
     constraints: []const ExprId,
+    lookups: []const Lookup = &.{},
 
     /// Preprocessed columns in natural row order.
     pub fn genPreprocessed(self: Air, allocator: std.mem.Allocator, log_size: u32) ![][]M31 {
@@ -106,6 +119,10 @@ pub const Air = struct {
             .@"pub" => |i| if (i >= self.n_pub) return error.PublicInputOutOfRange,
         };
         for (self.constraints) |c| if (c >= self.exprs.len) return error.ConstraintOutOfRange;
+        for (self.lookups) |l| {
+            if (l.mult >= self.exprs.len) return error.LookupOutOfRange;
+            for (l.vals) |v| if (v >= self.exprs.len) return error.LookupOutOfRange;
+        }
     }
 
     /// Total degree of each expression (columns have degree 1).
@@ -155,6 +172,17 @@ pub const Air = struct {
     // ------------------------------------------------------------- JSON
 
     pub fn writeJson(self: Air, writer: *std.Io.Writer) !void {
+        if (self.lookups.len != 0) return std.json.Stringify.value(JsonAirV2{
+            .schema = schema_v2,
+            .name = self.name,
+            .n_preprocessed = self.n_preprocessed,
+            .n_main = self.n_main,
+            .n_pub = self.n_pub,
+            .preprocessed = self.preprocessed,
+            .exprs = self.exprs,
+            .constraints = self.constraints,
+            .lookups = self.lookups,
+        }, .{}, writer);
         try std.json.Stringify.value(JsonAir{
             .schema = schema,
             .name = self.name,
@@ -179,9 +207,11 @@ pub const Air = struct {
     }
 
     pub fn parseJson(allocator: std.mem.Allocator, bytes: []const u8) !std.json.Parsed(Air) {
-        const parsed = try std.json.parseFromSlice(JsonAir, allocator, bytes, .{});
+        const parsed = try std.json.parseFromSlice(JsonAirIn, allocator, bytes, .{});
         errdefer parsed.deinit();
-        if (!std.mem.eql(u8, parsed.value.schema, schema)) return error.UnknownSchema;
+        const v2 = std.mem.eql(u8, parsed.value.schema, schema_v2);
+        if (!v2 and !std.mem.eql(u8, parsed.value.schema, schema)) return error.UnknownSchema;
+        if (v2 == (parsed.value.lookups.len == 0)) return error.UnknownSchema;
         const air = Air{
             .name = parsed.value.name,
             .n_preprocessed = parsed.value.n_preprocessed,
@@ -190,6 +220,7 @@ pub const Air = struct {
             .preprocessed = parsed.value.preprocessed,
             .exprs = parsed.value.exprs,
             .constraints = parsed.value.constraints,
+            .lookups = parsed.value.lookups,
         };
         try air.validate();
         return .{ .arena = parsed.arena, .value = air };
@@ -205,6 +236,30 @@ const JsonAir = struct {
     preprocessed: []const PreCol,
     exprs: []const Expr,
     constraints: []const ExprId,
+};
+
+const JsonAirV2 = struct {
+    schema: []const u8,
+    name: []const u8,
+    n_preprocessed: u32,
+    n_main: u32,
+    n_pub: u32,
+    preprocessed: []const PreCol,
+    exprs: []const Expr,
+    constraints: []const ExprId,
+    lookups: []const Lookup,
+};
+
+const JsonAirIn = struct {
+    schema: []const u8,
+    name: []const u8,
+    n_preprocessed: u32,
+    n_main: u32,
+    n_pub: u32,
+    preprocessed: []const PreCol,
+    exprs: []const Expr,
+    constraints: []const ExprId,
+    lookups: []const Lookup = &.{},
 };
 
 /// Convenience builder for authoring AIRs in Zig (tests and prototypes).
@@ -270,6 +325,26 @@ pub const Builder = struct {
         return air;
     }
 };
+
+test "AIRs without lookups keep the v1 bytes; lookups round-trip as v2" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var b = Builder.init(a);
+    const x = try b.main(0, 0);
+    try b.assertBool(x);
+    var air = try b.finish("t", &.{}, 1);
+    var out: std.Io.Writer.Allocating = .init(a);
+    try air.writeJson(&out.writer);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "starked-air-v1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "lookups") == null);
+    air.lookups = &.{.{ .rel = 1, .mult = 0, .vals = &.{0} }};
+    var out2: std.Io.Writer.Allocating = .init(a);
+    try air.writeJson(&out2.writer);
+    const back = (try Air.parseJson(a, out2.written())).value;
+    try std.testing.expectEqual(@as(usize, 1), back.lookups.len);
+    try std.testing.expectEqual(@as(u32, 1), back.lookups[0].rel);
+}
 
 pub fn freeAir(allocator: std.mem.Allocator, air: Air) void {
     allocator.free(air.preprocessed);

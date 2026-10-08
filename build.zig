@@ -50,8 +50,12 @@ pub fn build(b: *std.Build) void {
     lib.addAnonymousImport("circuit:air_programs", .{ .root_source_file = b.path("third_party/stwo-zig/vectors/circuit/official/circuit_air.air_programs_v1.bin") });
     lib.addAnonymousImport("circuit:compiled_constraints", .{ .root_source_file = b.path("third_party/stwo-zig/vectors/circuit/official/compiled_air_constraints_v1.bin") });
     lib.addAnonymousImport("air:probe_oracle", .{ .root_source_file = b.path("airs/probe_oracle.json") });
+    lib.addAnonymousImport("air:byte_table", .{ .root_source_file = b.path("airs/byte_table.json") });
+    lib.addAnonymousImport("air:byte_user", .{ .root_source_file = b.path("airs/byte_user.json") });
 
-    const tests = b.addTest(.{ .root_module = lib });
+    // `zig build test -Dtest-filter=<substring>` runs only matching tests (the full suite takes ~16 min).
+    const test_filters = b.option([]const []const u8, "test-filter", "Only run tests whose names contain this") orelse &.{};
+    const tests = b.addTest(.{ .root_module = lib, .filters = test_filters });
 
     if (target.result.os.tag == .macos) {
         const dep_opts = .{ .target = target, .optimize = optimize };

@@ -1,0 +1,1 @@
+{"schema":"starked-air-v2","name":"byte_user","n_preprocessed":0,"n_main":1,"n_pub":0,"preprocessed":[],"exprs":[{"constant":2147483646},{"col":{"tree":"main","index":0,"offset":0}}],"constraints":[],"lookups":[{"rel":1,"mult":0,"vals":[1]}]}
