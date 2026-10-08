@@ -101,6 +101,44 @@ gadget word by word.
 | M3a.5 `BLK-CHECKS` | `CheckTransaction` (values, MoneyRange, coinbase length, prevout-null), coinbase position, finality, BIP34 prefix, sigops (opcode walk over script spans), sizes and weight | `checkBlock = none` |
 | M3a.6 `BLK-COMMIT` | Canonical encoding (with spent-output slots, D-029) and its Blake2s commitment (D-030); needs a Blake2s AIR | encoding spec |
 
+### M3a.2 `BLK-FIELDS` design (2026-10-08)
+
+**Target.** `fields_sound`: a satisfied (bytes, fields) system gives a block `b` with `Blk.WF b`
+and `serBlock b = raw`. The existing round trip `parseBlock_serBlock` then gives
+`parseBlock raw = some b`. So the AIR checks Core's *serializer*, which is simple; it never needs
+Core's branchy parser.
+
+**Tokens.** One row per token. Each row covers `[START, START+LEN)`; rows tile the block from 0 to
+`LEN`, then padding rows (`LEN = 0`, at least one).
+
+| Kind | Bytes | Read here |
+|---|---|---|
+| `BLK` | header (80) · CompactSize `nTx` | the CompactSize |
+| `TXH` | version (4) · [`00 01` if segwit] · CompactSize `nIn` | marker/flag, CompactSize |
+| `IN` | prevout hash (32) · n (4) · CompactSize `len` · scriptSig (`len`) · sequence (4) | CompactSize |
+| `NOUT` | CompactSize `nOut` | CompactSize |
+| `OUT` | value (8) · CompactSize `len` · scriptPubKey (`len`) | CompactSize |
+| `WCNT` | CompactSize: stack size (segwit only, one per input) | CompactSize |
+| `WITEM` | CompactSize `len` · item (`len`) | CompactSize |
+| `LOCK` | locktime (4) | — |
+
+- Opaque payloads (header, hashes, scripts, witness items, fixed-size fields) are not read here.
+  Later components read them through the byte table.
+- **CompactSize:** canonical forms 1/3/5 bytes, with value at most `MAX_SIZE = 2^25`. The
+  9-byte form never occurs. Range checks use two 25-bit decompositions.
+- **Grammar:** counters (txs, inputs, outputs, witness stacks, items) and two is-zero helpers
+  choose the next row's kind.
+- **Segwit:** the extended format (marker `00`, flag `01`) requires at least one non-empty
+  witness stack in the transaction. That is exactly when `serWit` uses it.
+- **Excluded (sound):** blocks with no transactions and transactions with no inputs. Core rejects
+  both, and `Tx.WF` excludes the latter.
+
+**Proof plan.**
+1. A pure grammar layer: a token list accepted by the grammar is `serBlock` of a well-formed
+   block, by structural recursion.
+2. The AIR layer: rows ⇒ a grammar-accepted token list whose bytes tile `raw`, using
+   `read_byte` for the bytes that are read.
+
 **Duplicate inputs.** `bad-txns-inputs-duplicate` needs a uniqueness argument (sorting).
 Within a block, M3b's UTXO update rejects a second spend of the same coin, so M3a may leave this
 rule to M3b. The statement then says so explicitly: `BlockValid` minus duplicate inputs, plus
