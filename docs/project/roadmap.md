@@ -29,7 +29,7 @@ Rules:
 | BENCH-RAITO | Benchmark our SHA-256 AIR against Raito's Cairo SHA-256 | done (this commit) | Same machine, documented methodology, results in airs/sha256.md |
 | HC-V6 | Minimum block version (Core `ContextualCheckBlockHeader` "bad-version"): nVersion ≥ 2/3/4 from heights 227931/363725/388381 (BIP34/66/65) | done (this commit) | Found 2026-10-07: missing from `SegmentValid`. Done per [adding-an-air.md](../guides/adding-an-air.md); add to `SegmentValid` and `header_chain_sound`. |
 | HC-AUDIT | Line-by-line audit of Core `CheckBlockHeader` + `ContextualCheckBlockHeader` (mainnet) against `SegmentValid`; record in verification.md | done (this commit; verification.md § Coverage audit) | Guards against further omissions like HC-V6 |
-| HC-FULLRUN **(next)** | Generate (and satisfy-check) the witness for every mainnet header, genesis to tip | in-progress (download running) | Needs all headers: local `bitcoind` preferred (Q-HEADERS), else rate-limited public API. Proves completeness on real data. |
+| HC-FULLRUN | Generate (and satisfy-check) the witness for every mainnet header, genesis to tip | done (2026-10-08: heights 0..970,347, 0 failures; chainwork equals Core's; [report](../reports/2026-10-08-full-chain.md)) | Proves completeness on real data. |
 | FV-Z3 | Tier-1 formal verification: Z3 search for under-constrained witnesses (adapt stwo-zig `scripts/air_uniqueness_board.py`) | done (this commit; [report](../reports/2026-10-07-z3-uniqueness.md)) | Runs on each exported AIR; results recorded |
 
 ## M2: full chain to the tip, on the H200
