@@ -90,3 +90,4 @@ history module · browser/phone verifier.
 | DRIFT-CI | Automate the JSON drift check and the sorry/axiom check in CI | Manual commands are in status.md for now |
 | LICENSE | Choose a license | Needs an owner decision (possibly legal) |
 | SIMP-LINT | Clean up unused-simp-argument warnings in the Lean files | Cosmetic |
+| LEAF-ONE-PROOF | `buildSegmentLeaf` proves each segment twice (the native capture consumes one copy); a deep clone of the proof would save one segment proof per leaf and lower peak memory, with the same circuits and VK | Engineering; measured leaf at log 19: 68 s, peak about 22 GB |
