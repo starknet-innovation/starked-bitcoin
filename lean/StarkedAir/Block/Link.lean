@@ -438,6 +438,39 @@ theorem mid_tuple (hL25 : L ≤ 25) {r0 r1 : ℕ} (h0 : r0 < 2 ^ L) (h1 : r1 < 2
     exact ⟨a0.trans a1.symm, w0.trans w1.symm, ta0.trans ta1.symm, tl0.trans tl1.symm,
       fun h => absurd (h.symm.trans a0) zero_ne_one⟩
 
+/-- **One message per id.** Two message starts with the same id have the same data length and the
+same data bytes. -/
+theorem same_bytes (hL25 : L ≤ 25) {r0 r1 d0 d1 : ℕ} (h0 : r0 < 2 ^ L) (h1 : r1 < 2 ^ L)
+    (f0 : (inst 2).main Msg.FIRSTM r0 = 1) (f1 : (inst 2).main Msg.FIRSTM r1 = 1)
+    (hm : (inst 2).main Msg.MID r0 = (inst 2).main Msg.MID r1)
+    (hc0 : ∀ j < d0, (inst 2).main Msg.CONT (r0 + j) = 1 ∨ (inst 2).main Msg.SW (r0 + j) = 1)
+    (he0 : (inst 2).main Msg.ENDD (r0 + d0) = 1)
+    (hc1 : ∀ j < d1, (inst 2).main Msg.CONT (r1 + j) = 1 ∨ (inst 2).main Msg.SW (r1 + j) = 1)
+    (he1 : (inst 2).main Msg.ENDD (r1 + d1) = 1) :
+    d0 = d1 ∧ ∀ j ≤ d0, (inst 2).main Msg.BYTE (r0 + j) = (inst 2).main Msg.BYTE (r1 + j) := by
+  have ms := hash_msg_sat hL hsat
+  obtain ⟨hh, hw, ta, tl, rest⟩ := mid_tuple hL hsat hL25 h0 h1 f0 f1 hm
+  have hmt : (inst 2).main Msg.MT r0 = (inst 2).main Msg.MT r1 ∧
+      ((inst 2).main Msg.MT r0 = 1 → (inst 2).main Msg.TW r0 = (inst 2).main Msg.TW r1) := by
+    rw [Msg.mt_eq ms h0, Msg.mt_eq ms h1]
+    rcases Msg.bool_col ms (e := Msg.HDR) (by simp) h0 with a | a
+    · obtain ⟨sg, tw⟩ := rest a
+      exact ⟨by rw [hw, hh, sg], fun _ => tw⟩
+    · obtain ⟨-, -, w0⟩ := hdr_tuple hL hsat h0 a
+      obtain ⟨-, -, w1⟩ := hdr_tuple hL hsat h1 (hh ▸ a)
+      rw [a, w0, ← hh, a, w1]
+      exact ⟨by ring, fun h => by simp at h⟩
+  obtain ⟨hd, hpos⟩ := Msg.same_layout ms h0 h1 f0 f1 hc0 he0 hc1 he1 hmt.1 ta hmt.2 tl
+  refine ⟨hd, fun j hj => ?_⟩
+  obtain ⟨l0, dd0, -⟩ := Msg.data_walk ms h0 f0 j (fun i hi => hc0 i (by omega))
+  obtain ⟨l1, dd1, -⟩ := Msg.data_walk ms h1 f1 j (fun i hi => hc1 i (by omega))
+  obtain ⟨ρ0, hρ0, p0, b0⟩ := msg_read hL hsat hL25 l0 dd0
+  obtain ⟨ρ1, hρ1, p1, b1⟩ := msg_read hL hsat hL25 l1 dd1
+  have hρ : ρ0 = ρ1 := by
+    have := ZMod.val_lt (pub 0)
+    exact natCast_inj_of_lt (by omega) (by omega) (p0.symm.trans ((hpos j hj).trans p1))
+  rw [b0, b1, hρ]
+
 end System
 
 end StarkedAir.Block
