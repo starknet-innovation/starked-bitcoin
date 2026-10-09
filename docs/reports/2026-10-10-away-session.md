@@ -14,7 +14,7 @@ Nothing was pushed. Every commit is local, on `main`.
 | Workstream | Result |
 |---|---|
 | PROOF-STORE | Implemented and tested; full-chain run *(result below)* |
-| REC-FUZZ | Done: every mutation rejected by the circuit *(exhaustive run below)* |
+| REC-FUZZ | Done: 102,013 mutations, all rejected by the circuit (every site of a header-chain and a LogUp proof, plus 4,012 on a real header-tree segment through the leaf circuit) |
 | MMR in Lean | Done: `mmr_inclusion`, `fold_eq_mmr`; Zig sides cross-checked |
 | Genesis checks from Lean | Done: `chain_from_genesis_checked`; `verifyRoot` reads the exported table |
 | Spec vs Core | Done: about 860,000 mainnet-domain cases (756k header, 100k block kinds), 0 mismatches |
@@ -79,8 +79,11 @@ Details:
 
 - **REC-FUZZ.** Every guessed proof value and statement input of a header-chain proof (82,972 sites)
   and a LogUp-system proof (1,952 sites) is mutated one at a time. The circuit must reject each
-  mutation, and all are rejected by unsatisfied constraints (not by early errors). *(Exhaustive run
-  below.)*
+  mutation, and all are rejected by unsatisfied constraints (not by early errors).
+  - The exhaustive run mutated every site: 95,992 mutations for the header chain and 2,009 for LogUp.
+  - A third campaign uses the production shape: a header-tree segment with its public lookup entry,
+    through the real leaf circuit. 4,012 mutations over 117,421 sites.
+  - 0 accepted.
 - **Spec vs Core.** Core's own C++ (sparse checkout at `c067aa71`) is linked into a harness that
   answers random and edge-case inputs; `SpecCases.lean` answers from the Lean specs.
   - Header kinds: `SetCompact`, `GetCompact`, `CalculateNextWorkRequired`, `GetBlockProof`,
