@@ -41,7 +41,8 @@ standard axioms only); the in-circuit verifiers and node code stay trusted
    - M3a.5a.
 3. **Waiting on the owner:**
    - D-035 (M3a.5 AIR design) review;
-   - whether to commit `docs/reports/2026-10-09-proof-review.md`, which is untracked.
+   - whether to commit `docs/reports/2026-10-09-proof-review.md`. It is untracked now but was committed
+     by mistake in e871e49 (local only; can be dropped from history before any push).
 
 
 ## In flight
