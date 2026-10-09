@@ -76,9 +76,7 @@ def kp (c : ℕ) : Expr := col c (-1)
 def one : Expr := cst 1
 def om (e : Expr) : Expr := .sub one e
 
-/-- `sel · (limb X h − rhs h)` for both halves. -/
-def eqLimbs (sel : Expr) (X : ℕ) (offX : ℤ) (rhs : ℕ → Expr) : List Expr :=
-  [0, 1].map fun h => .mul sel (.sub (limb X h offX) (rhs h))
+open StarkedAir.HeaderChain (eqLimbs)
 
 def flagC : List Expr :=
   [FST, DBL, NILS].map (fun c => boolC (k c)) ++
