@@ -243,6 +243,204 @@ theorem node_mid (hL25 : L ≤ 25) {x : ℕ} (hx : x < 2 ^ L)
     ZMod.val_natCast_of_lt (Fields.lt_P (by unfold Merkle.NB; norm_num at h25 ⊢; omega))]
   omega
 
+/-- **A node block's tuple is a Merkle node row's**: `MID = NB + r'`, children and `dup` as on row `r'`. -/
+theorem node_row (hL25 : L ≤ 25) {x : ℕ} (hx : x < 2 ^ L)
+    (hm : (Expr.mul (pre Sha.ROW0) (Sha.k Sha.NODE)).eval (2 ^ L) Sha.preCols pub (inst 3).main x = 1) :
+    ∃ r' < 2 ^ L, (inst 4).main Merkle.ACTN r' = 1 ∧
+      (inst 3).main Sha.MID x = ((Merkle.NB + r' : ℕ) : F) ∧ (inst 3).main Sha.LID x = (inst 4).main Merkle.LEFT r' ∧
+      (inst 3).main Sha.RID x = (inst 4).main Merkle.RIGHT r' ∧ (inst 3).main Sha.NDUP x = (inst 4).main Merkle.DUP r' := by
+  classical
+  have h3 : hashSys.comp 3 = Sha.sha := rfl
+  have h4 : hashSys.comp 4 = Merkle.merkle := rfl
+  have mem : ∀ {i r k}, ((i, r, k) : Site) ∈ sites hashSys inst ↔
+      i < 5 ∧ r < 2 ^ L ∧ k < (hashSys.comp i).lookups.length := by
+    intro i r k
+    simp only [sites, List.mem_flatMap, List.mem_range, List.mem_map, Prod.mk.injEq]
+    constructor
+    · rintro ⟨i', hi, r', hr', k', hk', rfl, rfl, rfl⟩
+      exact ⟨hi, by rw [← hL i' hi]; exact hr', hk'⟩
+    · rintro ⟨hi, hr', hk'⟩
+      exact ⟨i, hi, r, by rw [hL i hi]; exact hr', k, hk', rfl, rfl, rfl⟩
+  have ss := hash_sha_sat hL hsat
+  have hs1 : ((3, x, 3) : Site) ∈ sites hashSys inst := mem.mpr ⟨by decide, hx, by simp [h3, Sha.sha, Sha.lookups]⟩
+  have multv : ∀ r < 2 ^ L, siteMult hashSys inst pub (3, r, 3) =
+      -((Expr.mul (pre Sha.ROW0) (Sha.k Sha.NODE)).eval (2 ^ L) Sha.preCols pub (inst 3).main r) := by
+    intro r hr; simp [siteMult, siteEval, siteLookup, h3, Sha.sha, Sha.lookups, hL 3 (by decide), Expr.eval]
+  have hm1 : siteMult hashSys inst pub (3, x, 3) = -1 := by rw [multv x hx, hm]
+  obtain ⟨s', hs', hnu, hsm, hsr, hsv⟩ := used_in_table_ext hsat.2 (use := fun i k => i = 3 ∧ k = 3)
+    (fun s hs hu => by
+      obtain ⟨i, r', k⟩ := s
+      obtain ⟨rfl, rfl⟩ := hu
+      have hr' := (mem.mp hs).2.1
+      rw [multv r' hr']
+      have hn := Sha.kbool ss (c := Sha.NODE) (by simp) hr'
+      have hr0 : (pre Sha.ROW0).eval (2 ^ L) Sha.preCols pub (inst 3).main r' = 0 ∨
+          (pre Sha.ROW0).eval (2 ^ L) Sha.preCols pub (inst 3).main r' = 1 := by
+        rw [Sha.eval_per72 ss (i := Sha.ROW0) (f := fun q => if q = 0 then 1 else 0) rfl hr']
+        split_ifs <;> simp
+      simp only [Expr.eval, Sha.k, StarkedAir.Sha256.eval_col, wrap_zero hr']
+      rcases hr0 with a | a <;> rcases hn with b | b <;> simp [a, b])
+    (by simp)
+    (by
+      have := List.length_filter_le (fun s : Site => decide (s.1 = 3 ∧ s.2.2 = 3)) (sites hashSys inst)
+      rw [hash_sites_len hL] at this
+      have := hash_rows_lt_P hL hL25
+      simp only [List.length_nil, add_zero]; omega)
+    (Or.inl ⟨(3, x, 3), hs1, ⟨rfl, rfl⟩, hm1, rfl, rfl⟩)
+  obtain ⟨i, r', k⟩ := s'
+  obtain ⟨hi, hr', hk'⟩ := mem.mp hs'
+  have hrel : siteRel hashSys (i, r', k) = Sha.REL_NODE := by
+    rw [hsr]; simp [siteRel, siteLookup, h3, Sha.sha, Sha.lookups]
+  have hik : i = 4 ∧ k = 0 := by
+    interval_cases i
+    · simp [hashSys, bytes] at hk'; subst hk'
+      simp [siteRel, siteLookup, hashSys, bytes, REL_BYTE, Sha.REL_NODE] at hrel
+    · simp [hashSys, Fields.fields, Fields.lookups] at hk'
+      interval_cases k <;> simp [siteRel, siteLookup, hashSys, Fields.fields, Fields.lookups, REL_BYTE, Fields.REL_TX,
+        Sha.REL_NODE] at hrel
+    · simp [hashSys, Msg.msg, Msg.lookups] at hk'
+      interval_cases k <;> simp [siteRel, siteLookup, hashSys, Msg.msg, Msg.lookups, REL_BYTE, Fields.REL_TX,
+        Msg.REL_MSGW, Msg.REL_MLEN, Sha.REL_NODE] at hrel
+    · simp [hashSys, Sha.sha, Sha.lookups] at hk'
+      interval_cases k
+      any_goals simp [siteRel, siteLookup, hashSys, Sha.sha, Sha.lookups, Msg.REL_MSGW, Msg.REL_MLEN, Sha.REL_DIGEST,
+        Sha.REL_NODE] at hrel
+      exact absurd ⟨rfl, rfl⟩ hnu
+    · simp [hashSys, Merkle.merkle, Merkle.lookups] at hk'
+      interval_cases k
+      · exact ⟨rfl, rfl⟩
+      all_goals simp [siteRel, siteLookup, hashSys, Merkle.merkle, Merkle.lookups, Msg.REL_MSGW, Msg.REL_MLEN,
+        Sha.REL_DIGEST, Sha.REL_NODE] at hrel
+  obtain ⟨rfl, rfl⟩ := hik
+  have hv4 : siteVals hashSys inst pub (4, r', 0) = [(Merkle.NB : F) + (inst 4).main Merkle.RIX r',
+      (inst 4).main Merkle.LEFT r', (inst 4).main Merkle.RIGHT r', (inst 4).main Merkle.DUP r'] := by
+    simp [siteVals, siteEval, siteLookup, h4, hL 4 (by decide), Merkle.merkle, Merkle.lookups, Merkle.nodeId, Merkle.k,
+      StarkedAir.Sha256.eval_col, StarkedAir.Sha256.eval_cst, wrap_zero hr', Expr.eval]
+  have hv3 : siteVals hashSys inst pub (3, x, 3) = [(inst 3).main Sha.MID x, (inst 3).main Sha.LID x,
+      (inst 3).main Sha.RID x, (inst 3).main Sha.NDUP x] := by
+    simp [siteVals, siteEval, siteLookup, h3, hL 3 (by decide), Sha.sha, Sha.lookups, Sha.k,
+      StarkedAir.Sha256.eval_col, wrap_zero hx]
+  rw [hv4, hv3] at hsv
+  simp only [List.cons.injEq, and_true] at hsv
+  obtain ⟨e1, e2, e3, e4⟩ := hsv
+  rw [Merkle.rix_eq (hash_merkle_sat hL hsat) r' hr'] at e1
+  have hact : (inst 4).main Merkle.ACTN r' = 1 := by
+    have hm4 : (inst 4).main Merkle.ACTN r' * (inst 4).main Merkle.NM r' ≠ 0 := by
+      simpa [siteMult, siteEval, siteLookup, h4, hL 4 (by decide), Merkle.merkle, Merkle.lookups, Expr.eval, Merkle.k,
+        StarkedAir.Sha256.eval_col, wrap_zero hr'] using hsm
+    rcases Merkle.kbool (hash_merkle_sat hL hsat) (c := Merkle.ACTN) (by simp) hr' with h | h
+    · rw [h, zero_mul] at hm4; exact absurd rfl hm4
+    · exact h
+  exact ⟨r', hr', hact, by rw [← e1]; push_cast; ring, e2.symm, e3.symm, e4.symm⟩
+
+/-- **Digest uses are second hashes' outputs.** A digest use (a node block's child read, `SHA` lookups 4–5,
+or the root row's read, Merkle lookup 2) with multiplicity `−1` reads the tuple yielded at the last row of
+a second-hash period `q'`. -/
+theorem digest_linked (hL25 : L ≤ 25) {i r k : ℕ} (hu : (i = 3 ∧ (k = 4 ∨ k = 5)) ∨ (i = 4 ∧ k = 2))
+    (hr : r < 2 ^ L) (hm : siteMult hashSys inst pub (i, r, k) = -1) :
+    ∃ q', 72 * q' + 72 ≤ 2 ^ L ∧ (inst 3).main Sha.DBL (72 * q') = 1 ∧
+      siteVals hashSys inst pub (3, 72 * q' + 71, 2) = siteVals hashSys inst pub (i, r, k) := by
+  classical
+  have h3 : hashSys.comp 3 = Sha.sha := rfl
+  have h4 : hashSys.comp 4 = Merkle.merkle := rfl
+  have mem : ∀ {i r k}, ((i, r, k) : Site) ∈ sites hashSys inst ↔
+      i < 5 ∧ r < 2 ^ L ∧ k < (hashSys.comp i).lookups.length := by
+    intro i r k
+    simp only [sites, List.mem_flatMap, List.mem_range, List.mem_map, Prod.mk.injEq]
+    constructor
+    · rintro ⟨i', hi, r', hr', k', hk', rfl, rfl, rfl⟩
+      exact ⟨hi, by rw [← hL i' hi]; exact hr', hk'⟩
+    · rintro ⟨hi, hr', hk'⟩
+      exact ⟨i, hi, r, by rw [hL i hi]; exact hr', k, hk', rfl, rfl, rfl⟩
+  have ss := hash_sha_sat hL hsat
+  have ks := hash_merkle_sat hL hsat
+  have hs1 : ((i, r, k) : Site) ∈ sites hashSys inst := by
+    refine mem.mpr ⟨?_, hr, ?_⟩
+    · rcases hu with ⟨rfl, -⟩ | ⟨rfl, -⟩ <;> decide
+    · rcases hu with ⟨rfl, h | h⟩ | ⟨rfl, rfl⟩ <;> (try subst h) <;> simp [h3, h4, Sha.sha, Sha.lookups, Merkle.merkle,
+        Merkle.lookups]
+  have pre01 : ∀ {f : ℕ → ℕ} {ii r'}, r' < 2 ^ L → Sha.preCols.getD ii (.periodic [0]) = Sha.per72 f → (∀ q, f q ≤ 1) →
+      (pre ii).eval (2 ^ L) Sha.preCols pub (inst 3).main r' = 0 ∨
+      (pre ii).eval (2 ^ L) Sha.preCols pub (inst 3).main r' = 1 := by
+    intro f ii r' hr' hi hf
+    rw [Sha.eval_per72 ss hi hr']
+    rcases Nat.le_one_iff_eq_zero_or_eq_one.mp (hf (r' % 72)) with h | h <;> simp [h]
+  obtain ⟨s', hs', hnu, hsm, hsr, hsv⟩ := used_in_table_ext hsat.2
+    (use := fun i k => (i = 3 ∧ (k = 4 ∨ k = 5)) ∨ (i = 4 ∧ k = 2))
+    (fun s hs hu' => by
+      obtain ⟨i', r', k'⟩ := s
+      have hr' := (mem.mp hs).2.1
+      rcases hu' with ⟨rfl, hk⟩ | ⟨rfl, rfl⟩
+      · have hn := Sha.kbool ss (c := Sha.NODE) (by simp) hr'
+        rcases hk with rfl | rfl
+        · rcases pre01 (ii := Sha.DLR) (f := fun q => if q = 11 then 1 else 0) hr' rfl (fun q => by split_ifs <;> omega)
+            with a | a <;> rcases hn with b | b <;>
+            simp [siteMult, siteEval, siteLookup, h3, Sha.sha, Sha.lookups, hL 3 (by decide), Expr.eval, Sha.k,
+              StarkedAir.Sha256.eval_col, wrap_zero hr', a, b]
+        · rcases pre01 (ii := Sha.DRR) (f := fun q => if q = 19 then 1 else 0) hr' rfl (fun q => by split_ifs <;> omega)
+            with a | a <;> rcases hn with b | b <;>
+            simp [siteMult, siteEval, siteLookup, h3, Sha.sha, Sha.lookups, hL 3 (by decide), Expr.eval, Sha.k,
+              StarkedAir.Sha256.eval_col, wrap_zero hr', a, b]
+      · rcases Merkle.kbool ks (c := Merkle.RT) (by simp) hr' with a | a <;>
+          simp [siteMult, siteEval, siteLookup, h4, Merkle.merkle, Merkle.lookups, hL 4 (by decide), Expr.eval,
+            Merkle.k, StarkedAir.Sha256.eval_col, wrap_zero hr', a])
+    (by simp)
+    (by
+      have := List.length_filter_le (fun s : Site => decide ((s.1 = 3 ∧ (s.2.2 = 4 ∨ s.2.2 = 5)) ∨ (s.1 = 4 ∧ s.2.2 = 2)))
+        (sites hashSys inst)
+      rw [hash_sites_len hL] at this
+      have := hash_rows_lt_P hL hL25
+      simp only [List.length_nil, add_zero]; omega)
+    (Or.inl ⟨(i, r, k), hs1, hu, hm, rfl, rfl⟩)
+  obtain ⟨i', r', k'⟩ := s'
+  obtain ⟨hi', hr', hk'⟩ := mem.mp hs'
+  have hrel : siteRel hashSys (i', r', k') = Sha.REL_DIGEST := by
+    rw [hsr]; rcases hu with ⟨rfl, h | h⟩ | ⟨rfl, rfl⟩ <;> (try subst h) <;>
+      simp [siteRel, siteLookup, h3, h4, Sha.sha, Sha.lookups, Merkle.merkle, Merkle.lookups]
+  have hik : i' = 3 ∧ k' = 2 := by
+    interval_cases i'
+    · simp [hashSys, bytes] at hk'; subst hk'
+      simp [siteRel, siteLookup, hashSys, bytes, REL_BYTE, Sha.REL_DIGEST] at hrel
+    · simp [hashSys, Fields.fields, Fields.lookups] at hk'
+      interval_cases k' <;> simp [siteRel, siteLookup, hashSys, Fields.fields, Fields.lookups, REL_BYTE, Fields.REL_TX,
+        Sha.REL_DIGEST] at hrel
+    · simp [hashSys, Msg.msg, Msg.lookups] at hk'
+      interval_cases k' <;> simp [siteRel, siteLookup, hashSys, Msg.msg, Msg.lookups, REL_BYTE, Fields.REL_TX,
+        Msg.REL_MSGW, Msg.REL_MLEN, Sha.REL_DIGEST] at hrel
+    · simp [hashSys, Sha.sha, Sha.lookups] at hk'
+      interval_cases k'
+      any_goals simp [siteRel, siteLookup, hashSys, Sha.sha, Sha.lookups, Msg.REL_MSGW, Msg.REL_MLEN, Sha.REL_DIGEST,
+        Sha.REL_NODE] at hrel
+      · exact ⟨rfl, rfl⟩
+      · exact absurd (Or.inl ⟨rfl, Or.inl rfl⟩) hnu
+      · exact absurd (Or.inl ⟨rfl, Or.inr rfl⟩) hnu
+    · simp [hashSys, Merkle.merkle, Merkle.lookups] at hk'
+      interval_cases k'
+      any_goals simp [siteRel, siteLookup, hashSys, Merkle.merkle, Merkle.lookups, Msg.REL_MSGW, Msg.REL_MLEN,
+        Sha.REL_DIGEST, Sha.REL_NODE] at hrel
+      exact absurd (Or.inr ⟨rfl, rfl⟩) hnu
+  obtain ⟨rfl, rfl⟩ := hik
+  -- the yield row is a second hash's last row
+  have hdy : (inst 3).main Sha.DBL r' * (inst 3).main Sha.YM r' ≠ 0 := by
+    simpa [siteMult, siteEval, siteLookup, h3, hL 3 (by decide), Sha.sha, Sha.lookups, Expr.eval, Sha.k,
+      StarkedAir.Sha256.eval_col, wrap_zero hr'] using hsm
+  have h71 : r' % 72 = 71 := by
+    have := Sha.order_sat ss (c := .mul (Sha.k Sha.YM) (Sha.om (pre Sha.FIN3))) (by simp [Sha.orderC]) hr'
+    simp only [Expr.eval, Sha.k, Sha.om, Sha.one, StarkedAir.Sha256.eval_col, StarkedAir.Sha256.eval_cst, wrap_zero hr',
+      Nat.cast_one] at this
+    rw [Sha.eval_per72 ss (i := Sha.FIN3) (f := fun q => if q = 71 then 1 else 0) rfl hr'] at this
+    by_contra h
+    simp only [h, if_false, Nat.cast_zero, sub_zero, mul_one] at this
+    exact hdy (by rw [this, mul_zero])
+  have hd1 : (inst 3).main Sha.DBL r' = 1 := by
+    rcases Sha.kbool ss (c := Sha.DBL) (by simp) hr' with h | h
+    · rw [h, zero_mul] at hdy; exact absurd rfl hdy
+    · exact h
+  refine ⟨r' / 72, by omega, ?_, ?_⟩
+  · have := Sha.per_const ss (X := Sha.DBL) (by simp) (s := 72 * (r' / 72)) (by omega) 71 (by norm_num) (by omega)
+    rw [show 72 * (r' / 72) + 71 = r' by omega, hd1] at this; exact this.symm
+  · rw [show 72 * (r' / 72) + 71 = r' by omega]; exact hsv
+
 /-- **SHA message words are message bytes.** At a SHA message row `x` (rows 4..19 of a period) of a
 period that reads words, the word limbs are bytes `j − 3 .. j` (big-endian) of a message starting at
 message row `r0`, with the same id, where `j − 3 = 64 · BLKI + 4 · (row − 4)`. -/
