@@ -121,4 +121,23 @@ theorem sha256d_pair (A B : State) :
       rfl
   rw [h1, h2]
 
+/-- A state's word `t` from its bytes (big-endian, bytes `4t … 4t + 3`). -/
+theorem stateWord_bytes (S : State) {t : ℕ} (ht : t < 8) :
+    StarkedAir.Spec.Bitcoin.stateWord S t = BitVec.ofNat 32
+      (((stateBytes S).getD (4 * t) 0).toNat * 2 ^ 24 + ((stateBytes S).getD (4 * t + 1) 0).toNat * 2 ^ 16 +
+        ((stateBytes S).getD (4 * t + 2) 0).toNat * 2 ^ 8 + ((stateBytes S).getD (4 * t + 3) 0).toNat) := by
+  obtain ⟨a, b, c, d, e, f, g, h⟩ := S
+  interval_cases t <;> simp [stateBytes, beBytes, StarkedAir.Spec.Bitcoin.stateWord, be4']
+
+theorem stateBytes_inj {A B : State} (h : stateBytes A = stateBytes B) : A = B := by
+  have w : ∀ t < 8, StarkedAir.Spec.Bitcoin.stateWord A t = StarkedAir.Spec.Bitcoin.stateWord B t := fun t ht => by
+    rw [stateWord_bytes A ht, stateWord_bytes B ht, h]
+  obtain ⟨a, b, c, d, e, f, g, hh⟩ := A
+  obtain ⟨a', b', c', d', e', f', g', hh'⟩ := B
+  have h0 := w 0 (by norm_num); have h1 := w 1 (by norm_num); have h2 := w 2 (by norm_num)
+  have h3 := w 3 (by norm_num); have h4 := w 4 (by norm_num); have h5 := w 5 (by norm_num)
+  have h6 := w 6 (by norm_num); have h7 := w 7 (by norm_num)
+  simp only [StarkedAir.Spec.Bitcoin.stateWord] at h0 h1 h2 h3 h4 h5 h6 h7
+  subst h0 h1 h2 h3 h4 h5 h6 h7; rfl
+
 end StarkedAir.Block.HashSpec
