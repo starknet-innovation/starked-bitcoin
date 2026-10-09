@@ -46,6 +46,7 @@ import StarkedAir.Circuit.NodeSound
 import StarkedAir.Block.Bytes
 import StarkedAir.Block.Fields
 import StarkedAir.Block.FieldsSound
+import StarkedAir.Block.TxIndex
 import StarkedAir.Block.Msg
 import StarkedAir.Block.MsgSound
 import StarkedAir.Block.Sha
