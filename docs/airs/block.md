@@ -181,7 +181,7 @@ block index, and first-block / second-hash / unused flags.
   the block parses as `b`, and each second-hash digest is `SHA256d(b.header)` or the `wtxid`/`txid` of
   `b.txs[TI]`.
 
-## `block_merkle` and SHA node blocks (M3a.4 `BLK-MERKLE`, AIRs and witnesses done; soundness in progress)
+## `block_merkle` and SHA node blocks (M3a.4 `BLK-MERKLE`, txid tree done and proven)
 
 Lean: `Block/Merkle.lean`, `Block/Sha.lean` (node blocks); proofs `Block/MerkleSound.lean`. Zig:
 `src/block/merkle.zig`. Design: [block-data.md](../design/block-data.md) (M3a.4), decision D-034.
@@ -210,4 +210,27 @@ Lean: `Block/Merkle.lean`, `Block/Sha.lean` (node blocks); proofs `Block/MerkleS
   Byte-message digests take "the id is below `NB`" (`node_mid`: node blocks carry Merkle ids).
   `Spec.MerkleLevels`: `level_get`, `dupPair_false`, `merkleRoot_step`.
 
-**To prove:** `merkle_sound`: `merkleRoot (b.txs.map txid) = (headerMerkle b, false)`.
+- **Soundness:**
+  - **Headline, `merkle_sound`** (`Block/MerkleLink.lean`): in a satisfied 5-component system (at most
+    `2^25` rows), the block parses as `b` and `merkleRoot (b.txs.map txid) = (headerMerkle b, false)`. So
+    `bad-txnmrklroot` and `bad-txns-duplicate` cannot fire.
+  - Merkle rows (`MerkleSound`):
+    - `level_rows`, `tree_rows`: level `l` occupies rows `baseL l … + cntL l` with the expected columns;
+    - `root_row`: the root row reads entry `(H, 0)`;
+    - `kids`: a node row's children as tree entries.
+  - SHA node blocks (`ShaSound`):
+    - `node_out`: a node's output is SHA256d of its block;
+    - `npad_message`: the padding block is constant;
+    - `node_distinct`: a non-duplicating node block's two halves differ (the mutation check).
+  - Links (`Link`, `MerkleLink`):
+    - `node_row`, `digest_linked`, `merkle_word_linked`: lookup links;
+    - `node_period`: a node id's second hash follows its padding and node blocks;
+    - `node_children`, `node_setup`: a node block's words and children;
+    - `id_digest`: every tree entry's second hash outputs that entry of the txid tree;
+    - `tree_hashed`: no level has equal pairs;
+    - `header_word`: the root row's words are header bytes 36–67.
+  - Spec: `Spec.MerkleLevels` (`level_get`, `dupPair_false`, `merkleRoot_lvs`); `HashSpec`
+    (`sha256d_pair`, `stateBytes_inj`, `stateBytes_of_words`).
+
+**Next (with M3a.5):** the witness tree over `[0^32, wtxid(tx1), …]` reuses this machinery. Its commitment
+check is contextual (height, coinbase output), so it goes with the M3a.5 checks.

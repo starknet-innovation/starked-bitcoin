@@ -22,6 +22,31 @@ Next: <the exact next step; must match status.md>
 ---
 
 
+## 2026-10-09 (session 4) — M3a.4 done: the txid Merkle root is proven
+Who: Claude (agent, Opus 5.5), on the owner's "go ahead"
+Roadmap: BLOCK-AIR → in progress (M3a.4 BLK-MERKLE done for the txid tree; witness tree with M3a.5)
+Done:
+- Design and D-034: Merkle nodes are SHA messages (`NODE`/`NPAD` blocks); a Merkle component lays out the
+  tree; the transaction count is public input 1.
+- AIRs: `block_sha` gains node blocks and the CVE-2012-2459 mutation check; `block_merkle` (new);
+  `block_fields` checks `VAL = pub 1` on row 0.
+- Zig: `src/block/merkle.zig` (tree layout, SHA plan extension, witness). Tests:
+  - the 5-component system proves on blocks 0, 170 and 91812;
+  - blocks 481824 and 709632 (1,866 and 2,043 transactions) satisfy the SHA and Merkle constraints with
+    the header's root;
+  - rejected: a tampered root limb; a duplicated transaction (fails at the mutation check).
+- Proofs moved to the 5-component system (`ShaSound`, `Link`, `HashSound`), plus `MerkleSound` and
+  `MerkleLink`. Headline `merkle_sound`.
+Evidence:
+- `lake build` OK (8,773 jobs, no `sorry`). `#print axioms merkle_sound`: `propext`, `Classical.choice`,
+  `Quot.sound`.
+- `zig build test -Dtest-filter=block` and `-Dtest-filter="block merkle"` pass.
+Problems / lessons:
+- A positive-offset-free design (comparisons at `−8`) kept the prover unchanged.
+- Lookups' degree limits shaped the AIR: `NNE`, `ZZ` and the `LEFT`/`RIGHT` columns keep every
+  constraint at degree ≤ 3 and every value at degree 1.
+Next: M3a.5 BLK-CHECKS design (including the witness tree and commitment).
+
 ## 2026-10-09 (session 3) — M3a.3 done: digests are txids, wtxids and the header hash
 Who: Claude (agent, Opus 5.5)
 Roadmap: BLOCK-AIR → in progress (M3a.3 BLK-SHA done)
