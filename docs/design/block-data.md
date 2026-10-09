@@ -173,6 +173,57 @@ Then:
 component. Without lifting (mixed component sizes), the byte table and fields must also pad to 2²³.
 This is the M3 performance wall (D-027); see the decision below.
 
+### M3a.4 `BLK-MERKLE` design (draft, 2026-10-09)
+
+**Target.** `merkle_sound`: in a satisfied (bytes, fields, msg, sha, merkle) system, with `b` the parsed
+block, `merkleRoot (b.txs.map txid) = (headerMerkle b, false)`. That is, the root matches the header
+field and no level is mutated (`bad-txnmrklroot` and `bad-txns-duplicate` cannot fire).
+
+**Inner nodes are SHA messages.** A node's message is its children's digests, 64 bytes. As SHA-256
+words, these are the left child's 8 state words, then the right child's: no byte shuffling. The SHA
+component gets two new period kinds:
+- `NODE`: the first block of a node message. It starts from the IV. Words 0–7 are the left child's
+  digest and words 8–15 the right child's, read with two `digest` uses. It also uses the node's tuple
+  `node(id, left, right, dup)` from the Merkle component.
+- `NPAD`: the second block, the constant padding of a 64-byte message (`0x80000000`, zeros, `512`). It
+  must follow a `NODE` period of the same id.
+- The existing `DBL` period finishes the hash. Its length check `mlen(id, 128)` is yielded by the
+  Merkle component for node ids, so `DBL` stays uniform.
+
+`NODE` periods also check the mutation rule. Unless the node duplicates an odd last child (`dup`), the
+two digests differ in some 16-bit limb. Per word row there are is-zero flags for the two limb
+differences, a running product, and at the period end `NODE · (1 − dup) · alleq = 0`.
+
+**The Merkle component.** It has one row per internal node, level by level.
+- Columns: level size `CNT` and previous size `PCNT` (`2·CNT = PCNT + odd`), index `I`, the level's
+  first row `BASE`, and the previous level's first row `PBASE`.
+- Ids: node ids are `2^27 + row`, disjoint from message ids (`< 2^26 + 2`). Leaves are the txid
+  messages, `1 + 2·j`.
+- Children: on level 1, `left = 1 + 4i` and `right = left + 2`. On level `l > 1`,
+  `left = 2^27 + PBASE + 2i` and `right = left + 1`. The last odd child pairs with itself
+  (`right = left`, `dup = 1`).
+- The leaf count is the block's transaction count. It is a new public input (`pub 1 = nTx`), which
+  the fields' first row checks (`VAL = pub 1`).
+- The root row (`CNT = 1`) uses `digest(root)` and compares its limbs with the header's Merkle field.
+  That field is bytes 36–67, read as the header message's words 9–16 through `msgw(0, 36 + 4k, lo, hi)`.
+  In internal byte order, digest word `k` is exactly those big-endian bytes.
+
+**Soundness.** By induction on levels, every node id's digest is `sha256d(left ‖ right)` of its
+children's digests (`digest_sound` extended to `NODE`/`NPAD` periods). Leaves are `txid (b.txs[j])` by
+`digest_tx`. So the root row's digest is `merkleRoot` of the txids, read through `Spec.level`
+(`(level l)[i] = sha256d (l[2i] ++ l[min (2i+1) (len−1)])`). The inequality flags give `dupPair = false`
+on every level.
+
+**Later (with M3a.5).** The witness tree uses the same machinery over `[0^32, wtxid(tx1), …]`. Its
+commitment check (`sha256d(root ‖ nonce)` against the coinbase's last commitment output) depends on the
+height and is contextual, so it goes with the M3a.5 checks.
+
+**Stages.**
+1. Spec: `Spec.level` by index, and `merkleRoot` as iterated levels.
+2. SHA: `NODE`/`NPAD` periods and the mutation flags (Lean AIR, Zig witness, tests).
+3. The Merkle component (Lean AIR, Zig witness, tests), and a 5-component system proof on samples.
+4. Lean soundness.
+
 **Duplicate inputs.** `bad-txns-inputs-duplicate` needs a uniqueness argument (sorting).
 Within a block, M3b's UTXO update rejects a second spend of the same coin, so M3a may leave this
 rule to M3b. The statement then says so explicitly: `BlockValid` minus duplicate inputs, plus

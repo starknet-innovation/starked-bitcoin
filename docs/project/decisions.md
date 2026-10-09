@@ -182,3 +182,8 @@ Why: One hash throughout keeps the verifier simple; Blake2s is native in the rec
 Date: 2026-10-08 · By: owner · Status: active
 Decision: `HC-HASHTREE` commits to block hashes in height order as an MMR: each segment proves its aligned perfect subtree root; the recursion fold runs in MMR order (merge equal-size neighbours, then bag the peaks); nodes hash children roots with Blake2s. Design: [header-tree.md](../design/header-tree.md).
 Why: The MMR follows the segments and the recursion naturally (no padding nodes or extra circuits), is canonical for a tip and append-friendly. Inclusion proofs are about log2(N) hashes; the verifier needs the chain length to know the shape.
+
+### D-034 — Merkle nodes are SHA messages; the transaction count is public
+Date: 2026-10-09 · By: Claude (agent), on the owner's "go ahead" for M3a.4 · Status: active
+Decision: Inner Merkle nodes are hashed by the existing SHA component, with two new period kinds (`NODE`: words from the children's digests; `NPAD`: constant padding). A Merkle component lays out the tree level by level and yields node tuples and lengths. The block's transaction count becomes public input 1, checked by the fields' first row. The mutation check (CVE-2012-2459) runs in the `NODE` period. The witness tree reuses this; its commitment check moves to M3a.5. Design: [block-data.md](../design/block-data.md#m3a4-blk-merkle-design-draft-2026-10-09).
+Why: Reuses the proven compression and `digest_sound`; child digests are already state words, so no byte handling. Without a public (or otherwise bound) count, a prover could hash a prefix of the transactions.
