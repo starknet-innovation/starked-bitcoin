@@ -270,6 +270,52 @@ theorem step_end {r : ℕ} (hr : r + 1 < n) (h : M ENDD r = 1) :
   · have := kind_unique hsat hr (a := P80) (b := D) (by simp [P80]) (by simp [D]) (by simp [P80, D]) p1
     rw [firstm_d hsat hr f] at this; exact absurd this one_ne_zero
 
+theorem kind_off {r : ℕ} (hr : r < n) {a b : ℕ} (ha : a < 5) (hb : b < 5) (hab : a ≠ b) (h : M a r = 1)
+    (h' : M b r = 1) : False := by
+  have := kind_unique hsat hr ha hb hab h; rw [h'] at this; exact one_ne_zero this
+
+/-- A row of kind other than data does not start a message. -/
+theorem no_first {r : ℕ} (hr : r < n) {a : ℕ} (ha : a < 5) (had : a ≠ D) (h : M a r = 1) : M FIRSTM r = 0 := by
+  rcases bool_col hsat (e := FIRSTM) (by simp) hr with f | f
+  · exact f
+  · exact (kind_off hsat hr ha (by simp [D]) had h (firstm_d hsat hr f)).elim
+
+/-- After `0x80` or a zero: a zero, or at row 56 of the block the length starts. -/
+theorem step_pad {r : ℕ} (hr : r + 1 < n) (h : M P80 r = 1 ∨ M ZR r = 1) :
+    M FIRSTM (r + 1) = 0 ∧ ((r + 1) % 64 = 56 → M LN (r + 1) = 1) ∧ ((r + 1) % 64 ≠ 56 → M ZR (r + 1) = 1) := by
+  have hr' : r < n := by omega
+  have hs : M P80 r + M ZR r = 1 := by
+    rcases h with h | h
+    · rw [h, kind_unique hsat hr' (a := P80) (b := ZR) (by simp [P80]) (by simp [ZR]) (by simp [P80, ZR]) h, add_zero]
+    · rw [h, kind_unique hsat hr' (a := ZR) (b := P80) (by simp [ZR]) (by simp [P80]) (by simp [P80, ZR]) h, zero_add]
+  have hl : M LN r = 0 := by
+    rcases h with h | h
+    · exact kind_unique hsat hr' (a := P80) (b := LN) (by simp [P80]) (by simp [LN]) (by simp [P80, LN]) h
+    · exact kind_unique hsat hr' (a := ZR) (b := LN) (by simp [ZR]) (by simp [LN]) (by simp [ZR, LN]) h
+  obtain ⟨-, -, t3, t4, -⟩ := trans_all hsat hr
+  rw [hs, one_mul] at t3 t4; rw [hl, zero_mul, add_zero] at t4
+  by_cases h56 : (r + 1) % 64 = 56
+  · simp only [h56, if_true] at t4
+    exact ⟨no_first hsat hr (a := LN) (by simp [LN]) (by simp [LN, D]) t4, fun _ => t4, fun h => (h h56).elim⟩
+  · simp only [h56, if_false, sub_zero] at t3
+    exact ⟨no_first hsat hr (a := ZR) (by simp [ZR]) (by simp [ZR, D]) t3, fun h => (h56 h).elim, fun _ => t3⟩
+
+/-- In the length: the next row continues it, or at a block start ends the message. -/
+theorem step_ln {r : ℕ} (hr : r + 1 < n) (h : M LN r = 1) :
+    ((r + 1) % 64 ≠ 0 → M LN (r + 1) = 1 ∧ M FIRSTM (r + 1) = 0) ∧
+    ((r + 1) % 64 = 0 → M NIL (r + 1) + M FIRSTM (r + 1) = 1) := by
+  have hr' : r < n := by omega
+  have hp := kind_unique hsat hr' (a := LN) (b := P80) (by simp [LN]) (by simp [P80]) (by simp [P80, LN]) h
+  have hz := kind_unique hsat hr' (a := LN) (b := ZR) (by simp [LN]) (by simp [ZR]) (by simp [ZR, LN]) h
+  have hn := kind_unique hsat hr' (a := LN) (b := NIL) (by simp [LN]) (by simp [NIL]) (by simp [NIL, LN]) h
+  obtain ⟨-, -, -, t4, t5, -⟩ := trans_all hsat hr
+  rw [hp, hz, add_zero, zero_mul, zero_add, h, one_mul] at t4
+  rw [h, hn, add_zero, one_mul] at t5
+  refine ⟨fun h0 => ?_, fun h0 => ?_⟩
+  · simp only [h0, if_false, sub_zero] at t4
+    exact ⟨t4, no_first hsat hr (a := LN) (by simp [LN]) (by simp [LN, D]) t4⟩
+  · simpa [h0] using t5
+
 end Rows
 
 end StarkedAir.Block.Msg
