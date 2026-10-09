@@ -30,6 +30,23 @@ const M31W = builder.wrappers.M31Wrapper(QM31);
 const U32W = builder.wrappers.U32Wrapper(QM31);
 const HashValue = builder.blake.HashValue;
 
+/// How mutations were rejected: by an error while building the circuit (an evaluation-time
+/// equality check), or by an unsatisfied circuit.
+var rejected_by_error: usize = 0;
+var rejected_by_circuit: usize = 0;
+
+fn verdict(ctx: anytype) !bool {
+    const ok = try ctx.isCircuitValid();
+    if (!ok) rejected_by_circuit += 1;
+    return ok;
+}
+
+fn errored(e: anyerror) anyerror!bool {
+    if (e == error.OutOfMemory) return e;
+    rejected_by_error += 1;
+    return false;
+}
+
 const Site = union(enum) {
     q: *QM31,
     m: *M31W,
@@ -133,6 +150,8 @@ fn campaign(a: std.mem.Allocator, values: *pv.PlainProof(QM31), runner: anytype,
     const step = if (every or all.len <= budget) 1 else all.len / budget;
     var findings = std.ArrayList([]const u8).empty;
     var n_runs: usize = 0;
+    rejected_by_error = 0;
+    rejected_by_circuit = 0;
     var timer = try std.time.Timer.start();
     var i: usize = rng.uintLessThan(usize, step);
     while (i < all.len) : (i += step) {
@@ -152,7 +171,7 @@ fn campaign(a: std.mem.Allocator, values: *pv.PlainProof(QM31), runner: anytype,
             }
         }
     }
-    std.debug.print("rec fuzz {s}: {d} sites in total, {d} mutations run in {d:.1}s, {d} accepted\n", .{ name, all.len, n_runs, @as(f64, @floatFromInt(timer.read())) / 1e9, findings.items.len });
+    std.debug.print("rec fuzz {s}: {d} sites in total, {d} mutations run in {d:.1}s, {d} accepted; rejected by an evaluation check {d}, by the circuit {d}\n", .{ name, all.len, n_runs, @as(f64, @floatFromInt(timer.read())) / 1e9, findings.items.len, rejected_by_error, rejected_by_circuit });
     // The unmutated proof is still accepted (restores were exact).
     if (!try runner.run(values)) return error.BaselineRejected;
     return findings.items;
@@ -203,9 +222,9 @@ test "rec fuzz: every guessed value of a header-chain proof is bound" {
             const pub_vars = try ra.alloc(Var, self.pubs.len);
             for (pub_vars, self.pubs) |*w, x| w.* = try ctx.guess(QM31.fromBase(x));
             const st = pv.PlainStatement{ .parts = &.{.{ .air = self.air, .digest = self.digest, .pubs = pub_vars }}, .preprocessed_root = self.pre_root };
-            pv.verifyPlain(QM31, &ctx, &g, self.config, &st) catch |e| return if (e == error.OutOfMemory) e else false;
-            ctx.finalizeGuessedVars() catch |e| return if (e == error.OutOfMemory) e else false;
-            return ctx.isCircuitValid();
+            pv.verifyPlain(QM31, &ctx, &g, self.config, &st) catch |e| return errored(e);
+            ctx.finalizeGuessedVars() catch |e| return errored(e);
+            return verdict(&ctx);
         }
     };
     var runner = Runner{ .a = a, .config = config, .air = &air, .digest = digest, .pre_root = pre_root, .pubs = &wit.pubs };
@@ -282,9 +301,9 @@ test "rec fuzz: every guessed value of a LogUp system proof is bound" {
                 .{ .air = &self.airs[0], .digest = try self.airs[0].digest(ra), .pubs = &.{} },
                 .{ .air = &self.airs[1], .digest = try self.airs[1].digest(ra), .pubs = &.{} },
             } };
-            pv.verifyPlain(QM31, &ctx, &g, self.config, &st) catch |e| return if (e == error.OutOfMemory) e else false;
-            ctx.finalizeGuessedVars() catch |e| return if (e == error.OutOfMemory) e else false;
-            return ctx.isCircuitValid();
+            pv.verifyPlain(QM31, &ctx, &g, self.config, &st) catch |e| return errored(e);
+            ctx.finalizeGuessedVars() catch |e| return errored(e);
+            return verdict(&ctx);
         }
     };
     const runner = Runner{ .a = a, .airs = &airs, .config = config, .pre_root = pre_root };
