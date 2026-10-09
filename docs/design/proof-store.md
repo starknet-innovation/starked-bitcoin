@@ -1,6 +1,6 @@
 # Proof store (PROOF-STORE): a saved, verifiable, extendable chain proof — design
 
-Status: current · Updated: 2026-10-09 · Decision: D-036
+Status: current (implemented) · Updated: 2026-10-10 · Decision: D-036
 
 ## Goal
 
@@ -97,6 +97,27 @@ crash never leaves a half-written proof.
 - `chainproof inclusion <file> <headers.bin> <height>`: an MMR inclusion proof of a block hash.
 
 `prove` is `extend` from an empty store: one code path.
+
+## Memory (measured 2026-10-10)
+
+| Phase | Footprint |
+|---|---|
+| Leaf of 4,096 headers (log 20) | peaks at 34–37 GB |
+| Leaf of 2,048 headers (log 19) | about 22 GB |
+| Node | about 19 GB |
+| Between segments | falls back to about 11 GB, then lower |
+
+There is no steady leak; the peaks are transient. On a 24 GB machine, log-20 leaves swap heavily: the
+first two full-run attempts were stopped at footprints of 36–38 GB with about 22 GB of swap. So long
+runs use:
+
+- `--max-log 19`: any segment size up to the VK's is valid, and the plan stays aligned. A log-19 leaf
+  took 68 s, against 125–190 s for log 20 while swapping.
+- `tools/prove_loop.sh`, which runs one `prove --segments K` process per K segments. Each step resumes
+  from the checkpoint, so nothing can accumulate across the run.
+
+Release builds use libc malloc instead of `DebugAllocator`, and checkpoints no longer allocate in the
+prover's long-lived arena.
 
 ## Tests before any long run
 
