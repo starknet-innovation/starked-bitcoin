@@ -198,7 +198,7 @@ fn inclusion(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8, 
     const hashes = try a.alloc(HT.Words, s.headers);
     for (hashes, all[0..s.headers]) |*h, *hd| h.* = HT.blockHash(hd);
     const steps = try HT.inclusionProof(a, hashes, height);
-    if (!HT.verifyInclusion(hashes[height], steps, s.t)) return error.InclusionFailed;
+    if (!try HT.verifyAt(a, hashes[height], steps, height, s.headers, s.t)) return error.InclusionFailed;
     printHash("block hash ", hashes[height]);
     std.debug.print("included at height {d} in T (verified file); path of {d} steps (sibling, side):\n", .{ height, steps.len });
     for (steps) |st| {

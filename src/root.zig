@@ -20,6 +20,7 @@ pub const recursion = struct {
     pub const leaf = @import("recursion/leaf.zig");
     pub const node = @import("recursion/node.zig");
     pub const store = @import("recursion/store.zig");
+    pub const fuzz = @import("recursion/fuzz.zig");
 };
 pub const air = struct {
     pub const ir = @import("air/ir.zig");

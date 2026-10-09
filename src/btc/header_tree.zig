@@ -194,6 +194,41 @@ pub fn verifyInclusion(leaf: Words, steps: []const Step, t: Words) bool {
     return std.mem.eql(u32, &x, &t);
 }
 
+/// The sides (`Step.left`) of leaf `h`'s inclusion path in the MMR over `n` leaves, leaf to root:
+/// they depend only on `h` and `n`, so checking them binds a path to its position.
+pub fn inclusionSides(a: std.mem.Allocator, h: usize, n: usize) ![]bool {
+    if (h >= n) return error.OutOfRange;
+    const E = struct { has: bool };
+    const Ctx = struct {
+        a: std.mem.Allocator,
+        sides: *std.ArrayList(bool),
+        fn merge(c: @This(), l: E, r: E) anyerror!E {
+            if (l.has) try c.sides.append(c.a, false);
+            if (r.has) try c.sides.append(c.a, true);
+            return .{ .has = l.has or r.has };
+        }
+    };
+    const items = try a.alloc(E, n);
+    defer a.free(items);
+    for (items, 0..) |*e, i| e.* = .{ .has = i == h };
+    const ones = try a.alloc(usize, n);
+    defer a.free(ones);
+    @memset(ones, 1);
+    var sides = std.ArrayList(bool).empty;
+    errdefer sides.deinit(a);
+    _ = try mmrFold(E, a, items, ones, Ctx{ .a = a, .sides = &sides }, Ctx.merge);
+    return sides.toOwnedSlice(a);
+}
+
+/// Checks that `steps` proves `leaf` at height `h` in the MMR over `n` leaves with root `t`.
+pub fn verifyAt(a: std.mem.Allocator, leaf: Words, steps: []const Step, h: usize, n: usize, t: Words) !bool {
+    const sides = try inclusionSides(a, h, n);
+    defer a.free(sides);
+    if (sides.len != steps.len) return false;
+    for (sides, steps) |s, st| if (s != st.left) return false;
+    return verifyInclusion(leaf, steps, t);
+}
+
 /// A header's block hash (SHA256d) as the 8 SHA-256 state words (the leaves' encoding).
 pub fn blockHash(header: *const H.Header) Words {
     const Sha = std.crypto.hash.sha2.Sha256;
@@ -417,5 +452,20 @@ test "header tree: incremental peaks, aligned plans and the leftmost path" {
             const other = try inclusionProof(a, leaves[0..n], 1);
             try std.testing.expect(!verifyLeftmost(leaves[1], other, n, t));
         }
+    }
+}
+
+test "header tree: inclusion paths are bound to their height" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var leaves: [13]Words = undefined;
+    for (&leaves, 0..) |*l, i| l.* = .{ @intCast(i), 7, 7, 7, 7, 7, 7, 7 };
+    const t = try mmrRoot(a, &leaves);
+    for (0..13) |h| {
+        const steps = try inclusionProof(a, &leaves, h);
+        try std.testing.expect(try verifyAt(a, leaves[h], steps, h, 13, t));
+        for (0..13) |other| if (other != h) try std.testing.expect(!try verifyAt(a, leaves[h], steps, other, 13, t));
+        if (h == 0) try std.testing.expect(verifyLeftmost(leaves[0], steps, 13, t));
     }
 }
