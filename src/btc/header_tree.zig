@@ -469,3 +469,22 @@ test "header tree: inclusion paths are bound to their height" {
         if (h == 0) try std.testing.expect(verifyLeftmost(leaves[0], steps, 13, t));
     }
 }
+
+test "header tree: inclusion sides match the Lean spec (Spec/Mmr.lean, n <= 64)" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var lines = std.mem.tokenizeScalar(u8, @embedFile("testdata:mmr_sides"), '\n');
+    var count: usize = 0;
+    while (lines.next()) |line| {
+        var f = std.mem.tokenizeScalar(u8, line, ' ');
+        const n = try std.fmt.parseInt(usize, f.next().?, 10);
+        const h = try std.fmt.parseInt(usize, f.next().?, 10);
+        const bits = f.next() orelse "";
+        const sides = try inclusionSides(a, h, n);
+        try std.testing.expectEqual(bits.len, sides.len);
+        for (bits, sides) |c, s| try std.testing.expectEqual(c == '1', s);
+        count += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 64 * 65 / 2), count);
+}

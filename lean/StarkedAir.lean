@@ -37,6 +37,7 @@ import StarkedAir.Spec.Blake2s
 import StarkedAir.Gadgets.Blake2s
 import StarkedAir.Gadgets.Blake2sSound
 import StarkedAir.Spec.HeaderTree
+import StarkedAir.Spec.Mmr
 import StarkedAir.Gadgets.HeaderTree
 import StarkedAir.Gadgets.HeaderTreeSound
 import StarkedAir.Gadgets.AggregateTree
