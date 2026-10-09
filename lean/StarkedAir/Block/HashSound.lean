@@ -188,7 +188,7 @@ theorem dbl_digest (h : Spec.Sha256.State) : Sha.dblBlock h = Spec.Bitcoin.diges
 period `q` outputs `SHA256d` of the data bytes of a message with the period's id. -/
 theorem digest_sha256d (hL25 : L ≤ 25) {q : ℕ} (hq : 1 ≤ q) (hn : 72 * q + 72 ≤ 2 ^ L)
     (hd : (inst 3).main Sha.DBL (72 * q) = 1) :
-    ∃ r0 d, (inst 2).main Msg.FIRSTM r0 = 1 ∧ (inst 2).main Msg.MID r0 = (inst 3).main Sha.MID (72 * q) ∧
+    ∃ r0 d, r0 < 2 ^ L ∧ (inst 2).main Msg.FIRSTM r0 = 1 ∧ (inst 2).main Msg.MID r0 = (inst 3).main Sha.MID (72 * q) ∧
       (∀ j < d, (inst 2).main Msg.CONT (r0 + j) = 1 ∨ (inst 2).main Msg.SW (r0 + j) = 1) ∧
       (inst 2).main Msg.ENDD (r0 + d) = 1 ∧
       Spec.Block.stateBytes (outputAt (inst 3).main (72 * q)) = Spec.Block.sha256d (msgData inst r0 d) := by
@@ -239,7 +239,7 @@ theorem digest_sha256d (hL25 : L ≤ 25) {q : ℕ} (hq : 1 ≤ q) (hn : 72 * q +
       have vj := vals (q0 + b) (by omega) (by omega)
       rw [show 72 * (q0 + b) = 72 * q0 + 72 * b by ring, show q0 + b - q0 = b by omega] at vj
       exact block_word hL hsat hL25 hr0 f hc he hs (by omega) ht hfc (vj.1.trans hmid.symm) vj.2 (by omega)
-  refine ⟨r0, d, f, hmid, hc, he, ?_⟩
+  refine ⟨r0, d, hr0, f, hmid, hc, he, ?_⟩
   rw [hout, hfold _ le_rfl, dbl_digest, HashSpec.sha256d_eq _ _ hpl]
 
 /-- **A whole message's data is a block slice**: `msgData = R[TA, TA + d]`, and `TA + d = TL + 3`. -/
@@ -408,6 +408,44 @@ theorem split_tx (hL25 : L ≤ 25) {r0 d : ℕ} (h0 : r0 < 2 ^ L) (f0 : (inst 2)
       rw [(b1' i (by simpa using hi)).1]
     · refine List.map_congr_left (fun i hi => ?_)
       rw [show 4 + (d1 - 3 + i) = d1 + 1 + i by omega, (b2' i (by simpa using hi)).1]
+
+/-- **What each digest is.** In a satisfied hashing system (at most `2^25` rows), a second-hash period
+`q` outputs: for the header message (id 0), `SHA256d` of the block's first 80 bytes; for a transaction
+message, the `wtxid` (`WTX = 1`) or `txid` (`WTX = 0`) of a transaction serialized in the block. -/
+theorem digest_tx (hL25 : L ≤ 25) {q : ℕ} (hq : 1 ≤ q) (hn : 72 * q + 72 ≤ 2 ^ L)
+    (hd : (inst 3).main Sha.DBL (72 * q) = 1) :
+    ∃ r0, (inst 2).main Msg.FIRSTM r0 = 1 ∧ (inst 2).main Msg.MID r0 = (inst 3).main Sha.MID (72 * q) ∧
+      ((inst 2).main Msg.HDR r0 = 1 → Spec.Block.stateBytes (outputAt (inst 3).main (72 * q)) =
+        Spec.Block.sha256d (Fields.slice (Fields.blockBytes (inst 0).main (pub 0).val) 0 80)) ∧
+      ((inst 2).main Msg.HDR r0 = 0 → ∃ tx, Spec.Block.stateBytes (outputAt (inst 3).main (72 * q)) =
+        if (inst 2).main Msg.WTX r0 = 1 then Spec.Block.wtxid tx else Spec.Block.txid tx) := by
+  have ms := hash_msg_sat hL hsat
+  obtain ⟨r0, d, h0, f, hmid, hc, he, hdig⟩ := digest_sha256d hL hsat hL25 hq hn hd
+  refine ⟨r0, f, hmid, fun hh => ?_, fun hh => ?_⟩
+  · -- the header message: bytes `[0, 80)`
+    obtain ⟨ta, tl, w0⟩ := hdr_tuple hL hsat h0 hh
+    have hmt : (inst 2).main Msg.MT r0 = 0 := by rw [Msg.mt_eq ms h0, w0, hh]; ring
+    obtain ⟨hb, hdata, hend⟩ := whole_data hL hsat hL25 h0 f hc he hmt
+    have ha : ((inst 2).main Msg.TA r0).val = 0 := by rw [ta]; rfl
+    rw [ha, tl] at hend; rw [ha] at hdata hb
+    have h25 : 2 ^ L ≤ 2 ^ 25 := Nat.pow_le_pow_right (by norm_num) hL25
+    have hd79 : d = 79 := by
+      have hdL : r0 + d < 2 ^ L := (Msg.data_walk ms h0 f d hc).1
+      have e : ((0 + d : ℕ) : F) = ((79 : ℕ) : F) := by rw [hend]; norm_num
+      have := natCast_inj_of_lt (Fields.lt_P (by norm_num at h25 ⊢; omega)) (Fields.lt_P (by norm_num)) e
+      omega
+    subst hd79
+    rw [hdig, hdata]
+  · rcases Msg.mt_bool ms h0 with m | m
+    · obtain ⟨tx, hw, hnw⟩ := whole_tx hL hsat hL25 h0 f hh hc he m
+      refine ⟨tx, ?_⟩
+      rw [hdig]
+      rcases Msg.bool_col ms (e := Msg.WTX) (by simp) h0 with w | w
+      · rw [if_neg (by rw [w]; exact zero_ne_one), Spec.Block.txid, hnw w]
+      · rw [if_pos w, Spec.Block.wtxid, hw]
+    · obtain ⟨tx, w, hnw⟩ := split_tx hL hsat hL25 h0 f hh hc he m
+      refine ⟨tx, ?_⟩
+      rw [hdig, if_neg (by rw [w]; exact zero_ne_one), Spec.Block.txid, hnw]
 
 end System
 
