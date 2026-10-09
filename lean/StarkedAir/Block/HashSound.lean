@@ -281,6 +281,38 @@ theorem whole_data (hL25 : L ≤ 25) {r0 d : ℕ} (h0 : r0 < 2 ^ L) (f0 : (inst 
   · have := ((rows d le_rfl).2.2.2).mpr rfl
     push_cast; rw [ZMod.natCast_zmod_val]; exact this
 
+/-- **wtxid and legacy txid messages are `serWit`.** A non-header message start whose message is whole
+(`MT = 0`: a wtxid, or the txid of a transaction without the segwit flag) reads a transaction's
+`serWit`; for a txid message (`WTX = 0`) that is also its `serNoWit`. -/
+theorem whole_tx (hL25 : L ≤ 25) {r0 d : ℕ} (h0 : r0 < 2 ^ L) (f0 : (inst 2).main Msg.FIRSTM r0 = 1)
+    (hh : (inst 2).main Msg.HDR r0 = 0)
+    (hc0 : ∀ j < d, (inst 2).main Msg.CONT (r0 + j) = 1 ∨ (inst 2).main Msg.SW (r0 + j) = 1)
+    (he0 : (inst 2).main Msg.ENDD (r0 + d) = 1) (hmt : (inst 2).main Msg.MT r0 = 0) :
+    ∃ tx, msgData inst r0 d = Spec.Block.serWit tx ∧
+      ((inst 2).main Msg.WTX r0 = 0 → msgData inst r0 d = Spec.Block.serNoWit tx) := by
+  have ms := hash_msg_sat hL hsat
+  have fs := hash_fields_sat' hL hsat
+  have hb0 := hash_bytes_sat hL hsat
+  obtain ⟨ρ, hρ, hl, ti, ta, sg, tw, tl⟩ := msg_tuple_row hL hsat hL25 h0 f0 hh
+  obtain ⟨tx, hw, -, hnn⟩ := Fields.lock_tx hL25 fs hb0 (hash_fields_read hL hsat hL25) hρ hl
+  obtain ⟨hb, hdata, hend⟩ := whole_data hL hsat hL25 h0 f0 hc0 he0 hmt
+  have hst := Fields.start_lt fs hρ
+  have hLEN : (pub 0).val ≤ 2 ^ 25 := Fields.len_le hL25 fs hb0 (hash_fields_read hL hsat hL25)
+  -- `TA + d = TL + 3` as naturals
+  have hta : ((inst 2).main Msg.TA r0).val = ((inst 1).main Fields.TXA ρ).val := by rw [ta]
+  have hn : ((inst 2).main Msg.TA r0).val + d = ((inst 1).main Fields.START ρ).val + 3 := by
+    refine natCast_inj_of_lt (a := ((inst 2).main Msg.TA r0).val + d) (b := ((inst 1).main Fields.START ρ).val + 3)
+      (Fields.lt_P (by omega)) (Fields.lt_P (by omega)) ?_
+    rw [hend, ← tl]; push_cast; rw [ZMod.natCast_zmod_val]
+  have hdat : msgData inst r0 d = Spec.Block.serWit tx := by
+    rw [hdata, hw, ← hta, show ((inst 1).main Fields.START ρ).val + 4 - ((inst 2).main Msg.TA r0).val = d + 1 by omega]
+  refine ⟨tx, hdat, fun hw0 => ?_⟩
+  -- a txid message is whole only without the segwit flag
+  have hseg : (inst 1).main Fields.SEG ρ ≠ 1 := by
+    intro h1
+    rw [Msg.mt_eq ms h0, hw0, hh, ← sg, h1] at hmt; simp at hmt
+  rw [hdat, hnn hseg]
+
 end System
 
 end StarkedAir.Block
