@@ -187,6 +187,89 @@ theorem pieces_zero {r : ℕ} (hr : r < n) (hd : M D r = 0) : M PC0 r = 0 ∧ M 
     · push_cast; rw [← b0.1, ← b1.1, ← b2.1]; linear_combination this
   exact ⟨(ZMod.val_eq_zero _).mp (by omega), (ZMod.val_eq_zero _).mp (by omega), (ZMod.val_eq_zero _).mp (by omega)⟩
 
+omit hsat in
+theorem diff_one {a b : F} (ha : a = 0 ∨ a = 1) (hb : b = 0 ∨ b = 1) (h : a - b = 1) : a = 1 ∧ b = 0 := by
+  rcases ha with rfl | rfl <;> rcases hb with rfl | rfl
+  · simp at h
+  · exact absurd (by linear_combination -h) one_add_one_ne
+  · exact ⟨rfl, rfl⟩
+  · simp at h
+
+omit hsat in
+theorem prod_one {a b : F} (ha : a = 0 ∨ a = 1) (hb : b = 0 ∨ b = 1) (h : a * (1 - b) = 1) : a = 1 ∧ b = 0 := by
+  rcases ha with rfl | rfl <;> rcases hb with rfl | rfl <;> simp_all
+
+omit hsat in
+theorem first_off {r : ℕ} (hr : r + 1 < n) : (pre FIRST).eval n preCols pub M (r + 1) = 0 := by
+  simp [pre, Expr.eval, wrap_zero hr, preCols, PreCol.eval, FIRST]
+
+theorem firstm_d {r : ℕ} (hr : r < n) (h : M FIRSTM r = 1) : M D r = 1 := by
+  have := sat hsat (mem_kindC (c := .mul (k FIRSTM) (om (k D))) (by simp [kindC])) hr
+  simp only [Expr.eval, om, one, eval_cst, Nat.cast_one, ev_k hr, h, one_mul, sub_eq_zero] at this
+  exact this.symm
+
+/-- **Inside a message** the index counts rows and the tuple is constant. -/
+theorem in_msg {r : ℕ} (hr : r + 1 < n) (hf : M FIRSTM (r + 1) = 0) :
+    M IDX (r + 1) = M IDX r + 1 ∧ ∀ c ∈ [HDR, WTX, SEG, TI, TA, TW, TL], M c (r + 1) = M c r := by
+  constructor
+  · have := sat hsat (mem_msgC (c := .mul (om (k FIRSTM)) (.mul notFirst (.sub (.sub (k IDX) (kp IDX)) one)))
+      (by simp [msgC])) hr
+    simp only [Expr.eval, om, one, notFirst, eval_cst, Nat.cast_one, ev_k hr, ev_kp hr, hf, first_off hr,
+      sub_zero, one_mul] at this
+    linear_combination this
+  · intro c hc
+    have := sat hsat (mem_msgC (c := .mul (om (k FIRSTM)) (.mul notFirst (.sub (k c) (kp c))))
+      (by simp only [msgC, List.mem_append, List.mem_map]; right; exact ⟨c, hc, rfl⟩)) hr
+    simp only [Expr.eval, om, one, notFirst, eval_cst, Nat.cast_one, ev_k hr, ev_kp hr, hf, first_off hr,
+      sub_zero, one_mul] at this
+    exact sub_eq_zero.mp this
+
+/-- A continuing data row: the next row is data of the same piece. -/
+theorem step_cont {r : ℕ} (hr : r + 1 < n) (h : M CONT r = 1) :
+    M Z r = 0 ∧ M D (r + 1) = 1 ∧ M FIRSTM (r + 1) = 0 ∧
+    M PC0 (r + 1) = M PC0 r ∧ M PC1 (r + 1) = M PC1 r ∧ M PC2 (r + 1) = M PC2 r := by
+  have hr' : r < n := by omega
+  obtain ⟨hc, hs, -⟩ := helpers hsat hr'
+  obtain ⟨hd, hz⟩ := prod_one (bool_col hsat (e := D) (by simp) hr') (bool_col hsat (e := Z) (by simp) hr') (hc ▸ h)
+  have hsw : M SW r = 0 := by rw [hs, hz, zero_mul]
+  obtain ⟨t1, -, -, -, -, t6, t7, t8⟩ := trans_all hsat hr
+  rw [h, hsw, add_zero] at t1
+  obtain ⟨d1, f1⟩ := diff_one (bool_col hsat (e := D) (by simp) hr) (bool_col hsat (e := FIRSTM) (by simp) hr) t1
+  refine ⟨hz, d1, f1, ?_, ?_, ?_⟩
+  · rw [f1, h, sub_zero, one_mul] at t6; exact t6
+  · rw [t7, h, hsw]; ring
+  · rw [t8, h, hsw]; ring
+
+/-- A piece switch: the next row is data of the next piece. -/
+theorem step_sw {r : ℕ} (hr : r + 1 < n) (h : M SW r = 1) :
+    M Z r = 1 ∧ M CONT r = 0 ∧ M D (r + 1) = 1 ∧ M FIRSTM (r + 1) = 0 ∧
+    M PC0 (r + 1) = 0 ∧ M PC1 (r + 1) = M PC0 r ∧ M PC2 (r + 1) = M PC1 r := by
+  have hr' : r < n := by omega
+  obtain ⟨hc, hs, -⟩ := helpers hsat hr'
+  have hz : M Z r = 1 := by
+    rcases bool_col hsat (e := Z) (by simp) hr' with z | z
+    · rw [hs, z, zero_mul] at h; exact absurd h zero_ne_one
+    · exact z
+  have hco : M CONT r = 0 := by rw [hc, hz, sub_self, mul_zero]
+  obtain ⟨t1, -, -, -, -, t6, t7, t8⟩ := trans_all hsat hr
+  rw [h, hco, zero_add] at t1
+  obtain ⟨d1, f1⟩ := diff_one (bool_col hsat (e := D) (by simp) hr) (bool_col hsat (e := FIRSTM) (by simp) hr) t1
+  refine ⟨hz, hco, d1, f1, ?_, ?_, ?_⟩
+  · rw [f1, hco, sub_zero, zero_mul] at t6; exact t6
+  · rw [t7, h, hco]; ring
+  · rw [t8, h, hco]; ring
+
+/-- The end of the data: the next row is the `0x80` byte. -/
+theorem step_end {r : ℕ} (hr : r + 1 < n) (h : M ENDD r = 1) :
+    M P80 (r + 1) = 1 ∧ M FIRSTM (r + 1) = 0 := by
+  obtain ⟨-, t2, -⟩ := trans_all hsat hr
+  have p1 : M P80 (r + 1) = 1 := t2.trans h
+  refine ⟨p1, ?_⟩
+  rcases bool_col hsat (e := FIRSTM) (by simp) hr with f | f
+  · exact f
+  · have := kind_unique hsat hr (a := P80) (b := D) (by simp [P80]) (by simp [D]) (by simp [P80, D]) p1
+    rw [firstm_d hsat hr f] at this; exact absurd this one_ne_zero
+
 end Rows
 
 end StarkedAir.Block.Msg
