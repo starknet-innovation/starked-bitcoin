@@ -351,3 +351,34 @@ pub fn freeAir(allocator: std.mem.Allocator, air: Air) void {
     allocator.free(air.exprs);
     allocator.free(air.constraints);
 }
+
+test "every exported AIR re-serializes to Lean's exact text, so its digest is SHA-256 of that text" {
+    // Proof review 2026-10-09, §5 item 10 (the cheap half): the digest the verifiers mix into the
+    // transcript is `digest(parse(json))`; byte-identical re-serialization means it is SHA-256 of the
+    // file Lean printed (`lake env lean --run Export.lean <name>`), so the statement is bound to it.
+    const files = .{
+        "air:add32_chain",      "air:sha256_compress", "air:header_chain",
+        "air:byte_table",       "air:byte_user",       "air:blake2s_compress", "air:blake2s_tree",
+        "air:header_chain_v7",  "air:block_bytes",     "air:block_reader",  "air:block_sha",
+        "air:block_msg",        "air:block_fields",    "air:block_merkle",
+    };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    inline for (files) |name| {
+        const text = std.mem.trimRight(u8, @embedFile(name), "\n");
+        const air = (Air.parseJson(a, text) catch |e| {
+            std.debug.print("{s}: parse failed\n", .{name});
+            return e;
+        }).value;
+        var out: std.Io.Writer.Allocating = .init(a);
+        try air.writeJson(&out.writer);
+        std.testing.expectEqualStrings(text, out.written()) catch |e| {
+            std.debug.print("{s}: re-serialization differs from Lean's text\n", .{name});
+            return e;
+        };
+        var want: [32]u8 = undefined;
+        std.crypto.hash.sha2.Sha256.hash(text, &want, .{});
+        try std.testing.expectEqualSlices(u8, &want, &try air.digest(a));
+    }
+}
