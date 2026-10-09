@@ -4,10 +4,11 @@ Rewritten at the end of every session; see [README.md](README.md#ending-a-sessio
 If `HEAD at last update` doesn't match `git log -1`, this file is stale:
 follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work).
 
-- **Updated:** 2026-10-09
-- **HEAD at last update:** 3c29769 (plus this status commit)
+- **Updated:** 2026-10-10 (owner away 48 h; agent working through the agreed priorities)
+- **HEAD at last update:** see `git log -1` (this file is committed with the work)
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
-- **Current item:** M3a.5 `BLK-CHECKS` **parked** (2026-10-09, owner): design drafted (D-035, proposed), awaiting owner review; M3a.3 `BLK-SHA` and M3a.4 `BLK-MERKLE` done (2026-10-09). HC-HASHTREE done (full chain re-proven 2026-10-09).
+- **Current item:** PROOF-STORE full-chain run (in progress, see below). M3a.5 AIR stages stay
+  **parked** (owner); its spec stage M3a.5a is done (`Spec/BlockFlat.lean`).
 
 ## State in one paragraph
 
@@ -21,48 +22,27 @@ standard axioms only); the in-circuit verifiers and node code stay trusted
 
 ## Next step (concrete)
 
-1. M3a.3 `BLK-SHA` is done and proven (`digest_tx`: each digest is a transaction's `wtxid`/`txid` or the
-   hash of the block's first 80 bytes; see [airs/block.md](../airs/block.md)). `digest_tx` names the parsed block:
-   `SHA256d(b.header)` and the `wtxid`/`txid` of `b.txs[TI]`. M3a.4 `BLK-MERKLE` (txid tree) is done and proven:
-   `merkle_sound` states `merkleRoot (b.txs.map txid) = (headerMerkle b, false)`. Next is M3a.5
-   `BLK-CHECKS` (`CheckTransaction`, coinbase rules, finality, BIP34, sigops, sizes and weight, the witness
-   tree and commitment). Its design is drafted ([block-data.md § M3a.5](../design/block-data.md#m3a5-blk-checks-design-draft-2026-10-09), D-035 proposed);
-   on the owner's confirmation, start stage M3a.5a (the flattened spec `BlockFlat`). See [airs/block.md](../airs/block.md).
-2. **Next requested (owner, 2026-10-09): a full-chain run whose proof is saved to disk and extendable at the
-   tip (owner chose extendable, not only re-verifiable).** Do the core of `PROOF-STORE` first, then the run:
-   - **Freeze the node shape.** Today `spike chain` derives it (the elementwise max over the first leaf of every
-     segment size in *this* plan), so a later extension that uses a new segment size could change the node
-     identity and orphan the stored peaks. Fix it as a constant covering every allowed segment size.
-   - **Save the `mmrFold` stack** (the peaks and their sizes), not only the bagged root.
-   - **Test extension on a small chain first**: prove N headers and save; extend by k in a fresh process; check
-     that the root equals a from-scratch root over N + k and verifies.
-   Prerequisites, from the review of [2026-10-09-proof-review.md](../reports/2026-10-09-proof-review.md), checked
-   in the code:
-   - **Save before verifying.** Today `spike chain` frees the root (`defer root.proof.deinit()`) and keeps only
-     a log.
-   - **What to save:**
-     - the proof `bytes` and the full `request` (`pcs_config`, preprocessed column ids and log sizes,
-       preprocessed root, output digest), with `writeVerifyRequest` and `parseVerifyRequest` in
-       stwo-zig `interop/circuit_recursion`;
-     - the circuit hash and the 124 public inputs;
-     - the VK (node identity, `leaf_hashes`, `sizes`);
-     - provenance: the repo commit, the stwo-zig commit, the SHA-256 of `headers.bin`, the FRI
-       parameters and the tip.
-   - **File format:** versioned (magic and version), length-prefixed, with a checksum. Write to a temporary
-     file, then rename it, so a crash never leaves a half-written file.
-   - **Pin the configuration in a standalone `verify` command.** Compare the loaded `pcs_config` and the
-     column log sizes with expected constants, and never trust the file's own values (review finding 2).
-     The VK is loaded from constants or the file, not re-derived (947 s today).
-   - **Reuse for extending at the tip** (`PROOF-STORE`) needs the MMR peak proofs, not only the bagged
-     root, and a way to rebuild `prepared` from bytes. Candidate: `circuit_serialize.deserializeProof`;
-     its format compatibility with `VerifierProof.serialize` is not yet checked. Save the peaks and
-     checkpoint the leaf and node proofs as they finish, so a crash late in a 14 h run loses little.
-   - **Validate on a small chain first** (the 52-header test):
-     - save, reload in a fresh process and verify;
-     - the result must be rejected after flipping a proof byte, lowering the query count in the file, or
-       changing one public input;
-     - only then run the full chain.
-3. Proposed: REC-FUZZ (differential fuzzing of the plain verifier).
+1. **The saved full-chain proof (PROOF-STORE, D-036).** `chainproof` is implemented and tested, and the
+   pinned production VK is in `vk/`. Run with:
+   `data/store/chainproof-run2 prove mainnet data/headers.bin 970348 data/store/mainnet-0-970347.sbchain`.
+   It resumes from `data/store/mainnet-0-970347.sbchain.ckpt` (90,112 headers when last checked).
+   - **Memory problem being investigated (2026-10-10):** the process footprint grew by GBs per production
+     segment and reached 36–38 GB (heavy swap), so the run was stopped twice. Checkpoints are intact.
+     Switching to libc malloc and fixing the checkpoint arena did not cure it at production size (test
+     sizes stay flat). The measurement is in `data/store/exp2/`.
+   - Then: verify in a fresh process; fetch the new headers (`scripts/fetch_headers.py`); extend with
+     `--from`; time it; write a report.
+2. **Done this session** (details in log.md):
+   - REC-FUZZ;
+   - spec-vs-Core fuzzing;
+   - the MMR in Lean (`mmr_inclusion`, `fold_eq_mmr`);
+   - genesis checks exported from Lean;
+   - LogUp's Schwartz–Zippel step in Lean;
+   - M3a.5a.
+3. **Waiting on the owner:**
+   - D-035 (M3a.5 AIR design) review;
+   - whether to commit `docs/reports/2026-10-09-proof-review.md`, which is untracked.
+
 
 ## In flight
 
