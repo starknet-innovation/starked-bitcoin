@@ -174,9 +174,9 @@ block index, and first-block / second-hash / unused flags.
   on a transaction's lock-time row, `serWit = R[TXA, START + 4)`, and for segwit
   `serNoWit = R[TXA, TXA + 4) ++ R[TXA + 6, WST) ++ R[START, START + 4)` (`tx_bytes`, `lock_tx`). The
   fields' byte-read lemmas are generic over a read oracle, so `hashSys` uses them too.
-- **Messages are those serializations** (`whole_tx`, `split_tx`), and **`digest_tx`**: each second-hash
-  digest is SHA256d of the block's first 80 bytes (the header message) or the `wtxid`/`txid` of a
-  transaction serialized in the block.
-
-**Left for M3a.4:** tie each transaction to its index in the parsed block (`b.txs[i]`, with `TI = i`) and
-the header message to `b.header`; then the Merkle root.
+- **Messages are those serializations** (`whole_tx`, `split_tx`). `txs_rows` and `block_index` show
+  the block parses as `b`, `b.header` is its first 80 bytes, and the transaction ending at the lock-time
+  row with `i` lock-time rows above it is `b.txs[i]`.
+- **Headline, `digest_tx`** (`Block/HashSound.lean`): in a satisfied hashing system (at most `2^25` rows)
+  the block parses as `b`, and each second-hash digest is `SHA256d(b.header)` or the `wtxid`/`txid` of
+  `b.txs[TI]`.

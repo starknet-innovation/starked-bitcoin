@@ -30,14 +30,16 @@ Done:
 - Transaction ranges: `TxSplit.txT_split`, `tx_layout`, `tx_cols`, `tx_bytes`, `lock_tx`. FieldsSound's
   byte-read lemmas are now generic over a read oracle (`Reads` section). `Link.hash_read` and
   `hash_fields_read` supply the oracle for `hashSys`.
-- `whole_data`, `whole_tx`, `split_pieces`, `split_tx`, and the headline `digest_tx`.
+- `whole_data`, `whole_tx`, `split_pieces`, `split_tx`, `txs_rows`, `block_index`, and the headline
+  `digest_tx`: the block parses as `b`, and each digest is `SHA256d(b.header)` or the `wtxid`/`txid` of
+  `b.txs[TI]`.
 Evidence:
-- `lake build` OK (8,769 jobs). `#print axioms` on every new theorem: `propext`, `Classical.choice`,
+- `lake build` OK (8,769 jobs, no `sorry`). `#print axioms` on every new theorem: `propext`, `Classical.choice`,
   `Quot.sound` only.
 Problems / lessons:
 - `unfold P` inside goals with `ZMod.val` makes `omega` fail with bogus counterexamples (recorded in
   reference/lean.md).
-Next: M3a.4. First bind transaction index `i` to `b.txs[i]` and the header message to `b.header`.
+Next: M3a.4 BLK-MERKLE (Merkle component).
 
 ## 2026-10-09 (session 2) — M3a.3: message and SHA components built; component soundness proven
 Who: Claude (agent, Opus 5.5), with the owner
