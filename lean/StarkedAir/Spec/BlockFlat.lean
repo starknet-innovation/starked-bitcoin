@@ -338,4 +338,203 @@ theorem size_of_weight (b : Blk) (h : weight b ≤ MAX_BLOCK_WEIGHT) :
     omega
   omega
 
+/-! ### Legacy sigops as a byte automaton
+
+The AIR walks each script byte by byte. `walk` is that automaton: at an opcode, a push sets the
+number of data bytes to skip (after reading `PUSHDATA1/2/4`'s length bytes); a data byte counts
+down; `CHECKSIG(VERIFY)` adds 1 and `CHECKMULTISIG(VERIFY)` 20. A truncated push simply skips to
+the end. `walk_eq_sigOps`: it counts exactly `sigOps` (`CScript::GetSigOpCount(false)`). -/
+
+/-- A legacy opcode's sigop weight. -/
+def sigW (o : UInt8) : ℕ := if o = 0xac ∨ o = 0xad then 1 else if o = 0xae ∨ o = 0xaf then 20 else 0
+
+theorem foldl_sig (l : List UInt8) (n : ℕ) :
+    l.foldl (fun n o => if o = 0xac ∨ o = 0xad then n + 1 else if o = 0xae ∨ o = 0xaf then n + 20 else n) n =
+      n + (l.map sigW).sum := by
+  induction l generalizing n with
+  | nil => simp
+  | cons o r ih =>
+    simp only [List.foldl_cons, List.map_cons, List.sum_cons, sigW]
+    split_ifs <;> rw [ih] <;> ring
+
+theorem sigOps_eq (s : Bytes) : sigOps s = ((ops s).map sigW).sum := by
+  unfold sigOps; rw [foldl_sig]; simp
+
+/-- Automaton states: at an opcode; reading length byte `i` of `k` (accumulated `acc`); skipping
+`r ≥ 1` data bytes. -/
+inductive WS where
+  | op
+  | len (k i acc : ℕ)
+  | data (r : ℕ)
+
+def wstep : WS → UInt8 → WS × ℕ
+  | .op, o =>
+    if o < 0x4c then (if o = 0 then .op else .data o.toNat, 0)
+    else if o = 0x4c then (.len 1 0 0, 0)
+    else if o = 0x4d then (.len 2 0 0, 0)
+    else if o = 0x4e then (.len 4 0 0, 0)
+    else (.op, sigW o)
+  | .len k i acc, x =>
+    if i + 1 = k then (if acc + x.toNat * 256 ^ i = 0 then .op else .data (acc + x.toNat * 256 ^ i), 0)
+    else (.len k (i + 1) (acc + x.toNat * 256 ^ i), 0)
+  | .data r, _ => (if r = 1 then .op else .data (r - 1), 0)
+
+def walk : WS → Bytes → ℕ
+  | _, [] => 0
+  | s, x :: rest => (wstep s x).2 + walk (wstep s x).1 rest
+
+theorem walk_data : ∀ (l : Bytes) (r : ℕ), 1 ≤ r → walk (.data r) l = if r ≤ l.length then walk .op (l.drop r) else 0
+  | [], r, hr => by simp [walk] <;> omega
+  | x :: l, r, hr => by
+    simp only [walk, wstep, zero_add, List.length_cons]
+    by_cases h1 : r = 1
+    · subst h1; simp
+    · simp only [h1, ite_false]
+      rw [walk_data l (r - 1) (by omega)]
+      have : List.drop r (x :: l) = List.drop (r - 1) l := by
+        rw [show r = (r - 1) + 1 by omega, List.drop_succ_cons]; simp
+      rw [this]
+      by_cases h2 : r - 1 ≤ l.length
+      · rw [if_pos h2, if_pos (by omega)]
+      · rw [if_neg h2, if_neg (by omega)]
+
+theorem le_cons (x : UInt8) (r : Bytes) : le (x :: r) = x.toNat + 256 * le r := rfl
+
+theorem walk_len : ∀ (l : Bytes) (k i acc : ℕ), i < k →
+    walk (.len k i acc) l =
+      if k - i ≤ l.length then
+        (if acc + 256 ^ i * le (l.take (k - i)) = 0 then walk .op (l.drop (k - i))
+         else walk (.data (acc + 256 ^ i * le (l.take (k - i)))) (l.drop (k - i)))
+      else 0
+  | [], k, i, acc, hi => by simp [walk] <;> omega
+  | x :: l, k, i, acc, hi => by
+    simp only [walk, wstep, zero_add, List.length_cons]
+    have hm : k - i = (k - i - 1) + 1 := by omega
+    have htake : List.take (k - i) (x :: l) = x :: List.take (k - i - 1) l := by
+      conv_lhs => rw [hm]
+      simp
+    have hdrop : List.drop (k - i) (x :: l) = List.drop (k - i - 1) l := by
+      conv_lhs => rw [hm]
+      simp
+    rw [htake, hdrop, le_cons]
+    by_cases h1 : i + 1 = k
+    · subst h1
+      have e1 : acc + x.toNat * 256 ^ i = acc + 256 ^ i * x.toNat := by ring
+      simp only [ite_true, e1, Nat.add_sub_cancel_left, Nat.sub_self, List.take_zero, List.drop_zero,
+        show le [] = 0 from rfl, mul_zero, add_zero, show 1 ≤ l.length + 1 from by omega]
+      by_cases h0 : acc + 256 ^ i * x.toNat = 0 <;> simp only [h0, ite_true, ite_false, zero_add]
+    · simp only [h1, ite_false]
+      rw [walk_len l k (i + 1) _ (by omega)]
+      have hk : k - (i + 1) = k - i - 1 := by omega
+      rw [hk]
+      have hn : acc + x.toNat * 256 ^ i + 256 ^ (i + 1) * le (List.take (k - i - 1) l) =
+          acc + 256 ^ i * (x.toNat + 256 * le (List.take (k - i - 1) l)) := by ring
+      rw [hn]
+      by_cases h2 : k - i - 1 ≤ l.length
+      · simp only [h2, show k - i ≤ l.length + 1 from by omega, ite_true, zero_add]
+      · simp only [h2, show ¬(k - i ≤ l.length + 1) from by omega, ite_false]
+
+theorem sigW_push {o : UInt8} (h : o.toNat ≤ 0x4e) : sigW o = 0 := by
+  unfold sigW
+  have h1 : o ≠ 0xac := fun e => by subst e; simp at h
+  have h2 : o ≠ 0xad := fun e => by subst e; simp at h
+  have h3 : o ≠ 0xae := fun e => by subst e; simp at h
+  have h4 : o ≠ 0xaf := fun e => by subst e; simp at h
+  simp [h1, h2, h3, h4]
+
+/-- After a push of `n` data bytes over `t` (with every suffix's count known), the automaton and
+`ops` agree. -/
+theorem walk_push {o : UInt8} (hsig : sigW o = 0) (t : Bytes) (n : ℕ)
+    (ih : ∀ m, walk .op (t.drop m) = ((ops (t.drop m)).map sigW).sum) :
+    (if n = 0 then walk .op t else walk (.data n) t) =
+      ((if t.length < n then [] else o :: ops (t.drop n)).map sigW).sum := by
+  by_cases h0 : n = 0
+  · subst h0
+    simp only [ite_true, Nat.not_lt_zero, ite_false, List.map_cons, List.sum_cons, hsig, zero_add]
+    simpa using ih 0
+  · rw [if_neg h0, walk_data t n (by omega)]
+    by_cases h : n ≤ t.length
+    · rw [if_pos h, if_neg (by omega)]; simp [hsig, ih n]
+    · rw [if_neg h, if_pos (by omega)]; simp
+
+/-- **The automaton counts the legacy sigops.** -/
+theorem walk_eq_sigOps (s : Bytes) : walk .op s = sigOps s := by
+  rw [sigOps_eq]
+  induction h : s.length using Nat.strong_induction_on generalizing s with
+  | _ n ih =>
+    match s with
+    | [] => simp [walk, ops]
+    | o :: r =>
+      have ihr : ∀ t : Bytes, t.length < n → walk .op t = ((ops t).map sigW).sum := fun t ht => ih _ ht t rfl
+      have hr : r.length < n := by simp at h; omega
+      have hdrop : ∀ m, (r.drop m).length < n := fun m => by simp; omega
+      rw [ops.eq_2]
+      simp only [walk, wstep]
+      have hlt : o < 0x4c ↔ o.toNat < 76 := UInt8.lt_iff_toNat_lt
+      have heq : ∀ c : ℕ, c < 256 → (o = UInt8.ofNat c ↔ o.toNat = c) := fun c hc => by
+        constructor
+        · rintro rfl; simp [UInt8.toNat_ofNat', Nat.mod_eq_of_lt hc]
+        · intro e; apply UInt8.toNat_inj.mp; simp [e, UInt8.toNat_ofNat', Nat.mod_eq_of_lt hc]
+      by_cases h1 : o.toNat < 76
+      · have hle : o.toNat ≤ 0x4e := by omega
+        have h76 : o ≠ 0x4c := fun e => by have := congrArg UInt8.toNat e; simp at this; omega
+        have h77 : o ≠ 0x4d := fun e => by have := congrArg UInt8.toNat e; simp at this; omega
+        have h78 : o ≠ 0x4e := fun e => by have := congrArg UInt8.toNat e; simp at this; omega
+        have hle' : o ≤ 78 := UInt8.le_iff_toNat_le.mpr (by simpa using hle)
+        simp only [hlt.mpr h1, ite_true, h76, h77, h78, ite_false, List.drop_zero, hle', true_and]
+        by_cases h0 : o = 0
+        · subst h0
+          simp only [ite_true, zero_add, UInt8.toNat_zero, Nat.not_lt_zero, ite_false, List.drop_zero,
+            List.map_cons, List.sum_cons, sigW_push (show (0 : UInt8).toNat ≤ 0x4e by decide)]
+          exact ihr r hr
+        · have hpos : 1 ≤ o.toNat := by
+            rcases Nat.eq_zero_or_pos o.toNat with e | e
+            · exact absurd (UInt8.toNat_inj.mp (by simpa using e)) h0
+            · exact e
+          simp only [h0, ite_false, zero_add]
+          rw [walk_data r o.toNat hpos]
+          by_cases h2 : o.toNat ≤ r.length
+          · simp only [h2, ite_true, show ¬(r.length < o.toNat) by omega, ite_false, List.map_cons, List.sum_cons,
+              sigW_push hle, zero_add]
+            exact ihr _ (hdrop _)
+          · simp [h2, show r.length < o.toNat by omega]
+      · have hnlt : ¬ o < 0x4c := fun e => h1 (hlt.mp e)
+        simp only [hnlt, ite_false]
+        by_cases h76 : o = 76
+        · subst h76
+          simp (config := { decide := true }) only [ite_true, ite_false, true_and, zero_add]
+          rw [walk_len r 1 0 0 (by norm_num)]
+          by_cases hk2 : 1 ≤ r.length
+          · simp (config := { decide := true }) only [hk2, ite_true, Nat.sub_zero, pow_zero, one_mul, zero_add,
+              true_and]
+            exact walk_push (sigW_push (by decide)) (r.drop 1) _ (fun m => ihr _ (by simp; omega))
+          · simp [hk2]
+        by_cases h77 : o = 77
+        · subst h77
+          simp (config := { decide := true }) only [ite_true, ite_false, true_and, zero_add]
+          rw [walk_len r 2 0 0 (by norm_num)]
+          by_cases hk2 : 2 ≤ r.length
+          · simp (config := { decide := true }) only [hk2, ite_true, Nat.sub_zero, pow_zero, one_mul, zero_add,
+              true_and]
+            exact walk_push (sigW_push (by decide)) (r.drop 2) _ (fun m => ihr _ (by simp; omega))
+          · simp [hk2]
+        by_cases h78 : o = 78
+        · subst h78
+          simp (config := { decide := true }) only [ite_true, ite_false, true_and, zero_add]
+          rw [walk_len r 4 0 0 (by norm_num)]
+          by_cases hk2 : 4 ≤ r.length
+          · simp (config := { decide := true }) only [hk2, ite_true, Nat.sub_zero, pow_zero, one_mul, zero_add,
+              true_and]
+            exact walk_push (sigW_push (by decide)) (r.drop 4) _ (fun m => ihr _ (by simp; omega))
+          · simp [hk2]
+        have hgt : ¬ o ≤ 78 := by
+          intro e
+          have := UInt8.le_iff_toNat_le.mp e
+          have e76 : o.toNat ≠ 76 := fun x => h76 (UInt8.toNat_inj.mp (by simpa using x))
+          have e77 : o.toNat ≠ 77 := fun x => h77 (UInt8.toNat_inj.mp (by simpa using x))
+          have e78 : o.toNat ≠ 78 := fun x => h78 (UInt8.toNat_inj.mp (by simpa using x))
+          simp at this; omega
+        simp only [h76, h77, h78, ite_false, List.drop_zero, hgt, false_and, List.map_cons, List.sum_cons]
+        rw [ihr r hr]
+
 end StarkedAir.Spec.Block
