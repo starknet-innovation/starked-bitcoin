@@ -9,7 +9,7 @@ import StarkedAir.Block.ShaSound
 namespace StarkedAir.Block
 
 open StarkedAir
-open StarkedAir.Sha256 (pre)
+open StarkedAir.Sha256 (pre cst)
 
 def hashSys : System := ⟨4, fun i => if i = 0 then bytes else if i = 1 then Fields.fields else if i = 2 then Msg.msg else Sha.sha⟩
 
@@ -133,6 +133,49 @@ theorem sha_use_linked (hL25 : L ≤ 25) {r : ℕ} (hr : r < 2 ^ L) {kk : ℕ} (
           Sha.REL_DIGEST] at hrel
   obtain ⟨rfl, rfl⟩ := hik
   exact ⟨hsm, hsv⟩
+
+/-- **SHA message words are message bytes.** At a SHA message row `x` (rows 4..19 of a period) of a
+period that reads words, the word limbs are bytes `j − 3 .. j` (big-endian) of a message starting at
+message row `r0`, with the same id, where `j − 3 = 64 · BLKI + 4 · (row − 4)`. -/
+theorem sha_word (hL25 : L ≤ 25) {x : ℕ} (hx : x < 2 ^ L)
+    (hm : (Expr.mul (pre Sha.MSGROW) (Sha.k Sha.USEW)).eval (2 ^ L) Sha.preCols pub (inst 3).main x = 1) :
+    ∃ r0 j, r0 + j < 2 ^ L ∧ 3 ≤ j ∧ r0 % 64 = 0 ∧ (inst 2).main Msg.FIRSTM r0 = 1 ∧
+      (∀ i, r0 < i → i ≤ r0 + j → (inst 2).main Msg.FIRSTM i = 0 ∧ (inst 2).main Msg.NIL i = 0) ∧
+      (inst 2).main Msg.MID r0 = (inst 3).main Sha.MID x ∧
+      ((j - 3 : ℕ) : F) = (Expr.add (.mul (cst 64) (Sha.k Sha.BLKI)) (.sub (.mul (cst 4) (pre Sha.ROWIDX)) (cst 16))).eval
+        (2 ^ L) Sha.preCols pub (inst 3).main x ∧
+      (StarkedAir.Sha256.limb StarkedAir.Sha256.W 0).eval (2 ^ L) Sha.preCols pub (inst 3).main x =
+        256 * (inst 2).main Msg.BYTE (r0 + j - 1) + (inst 2).main Msg.BYTE (r0 + j) ∧
+      (StarkedAir.Sha256.limb StarkedAir.Sha256.W 1).eval (2 ^ L) Sha.preCols pub (inst 3).main x =
+        256 * (inst 2).main Msg.BYTE (r0 + j - 3) + (inst 2).main Msg.BYTE (r0 + j - 2) := by
+  have hm' : siteMult hashSys inst pub (3, x, 0) = -1 := by
+    simp only [siteMult, siteEval, siteLookup, hashSys, hL 3 (by decide)]
+    simp only [show (3 : ℕ) ≠ 0 by decide, show (3 : ℕ) ≠ 1 by decide, show (3 : ℕ) ≠ 2 by decide, if_false]
+    simp only [Sha.sha, Sha.lookups, List.getD_cons_zero, Expr.eval]
+    rw [show Expr.eval (2 ^ L) Sha.preCols pub (inst 3).main x (pre Sha.MSGROW) *
+      Expr.eval (2 ^ L) Sha.preCols pub (inst 3).main x (Sha.k Sha.USEW) = 1 from hm]
+  obtain ⟨r', hr', hym, hyv⟩ := sha_use_linked hL hsat hL25 hx (kk := 0) (by norm_num) hm'
+  have ms := hash_msg_sat hL hsat
+  have hmult : (pre Msg.IS3).eval (2 ^ L) Msg.preCols pub (inst 2).main r' * (inst 2).main Msg.WM r' ≠ 0 := by
+    simpa [siteMult, siteEval, siteLookup, hashSys, hL 2 (by decide), Msg.msg, Msg.lookups, Expr.eval, Msg.k,
+      StarkedAir.Sha256.eval_col, wrap_zero hr'] using hym
+  obtain ⟨r0, j, rfl, hj, ha, hf, hnil, hb, hmid, hidx, hvals⟩ := Msg.word_yield ms hr' hmult
+  have hv2 : siteVals hashSys inst pub (2, r0 + j, 2) = [(inst 2).main Msg.MID r0, ((j - 3 : ℕ) : F),
+      256 * (inst 2).main Msg.BYTE (r0 + j - 1) + (inst 2).main Msg.BYTE (r0 + j),
+      256 * (inst 2).main Msg.BYTE (r0 + j - 3) + (inst 2).main Msg.BYTE (r0 + j - 2)] := by
+    rw [← hvals]; simp [siteVals, siteEval, siteLookup, hashSys, hL 2 (by decide), Msg.msg, Msg.lookups]
+  have hv3 : siteVals hashSys inst pub (3, x, 0) =
+      [(inst 3).main Sha.MID x,
+       (Expr.add (.mul (cst 64) (Sha.k Sha.BLKI)) (.sub (.mul (cst 4) (pre Sha.ROWIDX)) (cst 16))).eval
+         (2 ^ L) Sha.preCols pub (inst 3).main x,
+       (StarkedAir.Sha256.limb StarkedAir.Sha256.W 0).eval (2 ^ L) Sha.preCols pub (inst 3).main x,
+       (StarkedAir.Sha256.limb StarkedAir.Sha256.W 1).eval (2 ^ L) Sha.preCols pub (inst 3).main x] := by
+    simp [siteVals, siteEval, siteLookup, hashSys, hL 3 (by decide), Sha.sha, Sha.lookups, Sha.k,
+      StarkedAir.Sha256.eval_col, wrap_zero hx]
+  rw [hv2, hv3] at hyv
+  simp only [List.cons.injEq, and_true] at hyv
+  obtain ⟨e1, e2, e3, e4⟩ := hyv
+  exact ⟨r0, j, hr', hj, ha, hf, hb, e1, e2, e3.symm, e4.symm⟩
 
 end System
 
