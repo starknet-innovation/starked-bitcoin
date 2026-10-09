@@ -82,6 +82,10 @@ theorem cntL_bound {N : ℕ} (h : 1 ≤ N) : ∀ l, cntL N l ≤ max 1 (N - l)
     have := cntL_bound h l; have := cntL_pos h l
     simp only [cntL]; omega
 
+/-- The SHA message id of tree entry `(l, i)`: the txid message of transaction `i` on level 0, node row
+`base l + i` above. -/
+def idOf (N l i : ℕ) : ℕ := if l = 0 then 1 + 2 * i else NB + baseL N l + i
+
 section Rows2
 
 variable {n : ℕ} {pub : ℕ → F} {M : ℕ → ℕ → F}
@@ -440,6 +444,46 @@ theorem tree_rows (hn0 : 0 < n) (hn : n ≤ 2 ^ 25) {N : ℕ} (hN : pub 1 = (N :
       obtain ⟨-, hp1⟩ := size_eq hsat hn0 c1
       exact hp1 (by rw [r0.2.2.2.1, hN]; simp)
     · exact t
+
+/-- **A node row's children** in terms of tree entries: `left = (l − 1, 2i)`, `right = (l − 1, 2i + 1)`, or the
+left again when `2i + 1` is the previous level's size (`dup`). -/
+theorem kids {N l i r c : ℕ} (hr : r < n) (hl : 1 ≤ l) (hc : c = cntL N (l - 1)) (hi : i < (c + 1) / 2)
+    (hL1 : M L1 r = (if l = 1 then 1 else 0)) (hpb : l ≠ 1 → M PBASE r = (baseL N (l - 1) : F))
+    (hI : M I r = (i : F)) (hodd : M ODD r = ((c % 2 : ℕ) : F))
+    (hlast : M LAST r = (if i + 1 = (c + 1) / 2 then 1 else 0)) :
+    M DUP r = (if 2 * i + 1 = c then 1 else 0) ∧ M LEFT r = (idOf N (l - 1) (2 * i) : F) ∧
+      M RIGHT r = (idOf N (l - 1) (min (2 * i + 1) (c - 1)) : F) := by
+  have hdup : M DUP r = (if 2 * i + 1 = c then 1 else 0) := by
+    rw [defn hsat (e := .mul (k ODD) (k LAST)) (mem_childC (by simp [childC])) hr]
+    simp only [Expr.eval, ev_k hr, hodd, hlast]
+    by_cases h : 2 * i + 1 = c
+    · rw [if_pos (by omega), if_pos h, show c % 2 = 1 by omega]; simp
+    · rw [if_neg h]
+      by_cases h2 : i + 1 = (c + 1) / 2
+      · rw [if_pos h2, show c % 2 = 0 by omega]; simp
+      · rw [if_neg h2]; simp
+  have hleft : M LEFT r = (idOf N (l - 1) (2 * i) : F) := by
+    rw [defn hsat (e := .add (.mul (k L1) (.add (.mul (cst 4) (k I)) one))
+      (.mul (om (k L1)) (.add (.add (cst NB) (k PBASE)) (.mul (cst 2) (k I))))) (mem_childC (by simp [childC])) hr]
+    rcases (show l = 1 ∨ 2 ≤ l by omega) with rfl | h2
+    · simp only [Expr.eval, ev_k hr, om, one, eval_cst, Nat.cast_one, hL1, hI, idOf]; simp; push_cast; ring
+    · have hne : l ≠ 1 := by omega
+      simp only [Expr.eval, ev_k hr, om, one, eval_cst, Nat.cast_one, hL1, hI, idOf, hpb hne, if_neg hne,
+        if_neg (show ¬ (l - 1 = 0) by omega)]
+      push_cast; ring
+  refine ⟨hdup, hleft, ?_⟩
+  rw [defn hsat (e := .add (k LEFT) (.mul (om (k DUP)) (.add (k L1) one))) (mem_childC (by simp [childC])) hr]
+  rcases (show l = 1 ∨ 2 ≤ l by omega) with rfl | h2
+  · simp only [Expr.eval, ev_k hr, om, one, eval_cst, Nat.cast_one, hleft, hdup, hL1, idOf]
+    by_cases h : 2 * i + 1 = c
+    · rw [if_pos h, show min (2 * i + 1) (c - 1) = 2 * i by omega]; simp
+    · rw [if_neg h, show min (2 * i + 1) (c - 1) = 2 * i + 1 by omega]; simp; push_cast; ring
+  · have hne : l ≠ 1 := by omega
+    simp only [Expr.eval, ev_k hr, om, one, eval_cst, Nat.cast_one, hleft, hdup, hL1, idOf, if_neg hne,
+      if_neg (show ¬ (l - 1 = 0) by omega)]
+    by_cases h : 2 * i + 1 = c
+    · rw [if_pos h, show min (2 * i + 1) (c - 1) = 2 * i by omega]; simp
+    · rw [if_neg h, show min (2 * i + 1) (c - 1) = 2 * i + 1 by omega]; simp; push_cast; ring
 
 end Rows2
 
