@@ -894,6 +894,67 @@ theorem belongs {r : ℕ} (hr : r < n) (hnil : M NIL r = 0) :
       simp only [Expr.eval, ev_k hr, f, one_mul] at this
       exact ⟨r + 1, le_rfl, f, by simpa using this, fun i h1 h2 => absurd h2 (by omega)⟩
 
+/-- Message starts are block-aligned. -/
+theorem first_align {r : ℕ} (hr : r < n) (hf : M FIRSTM r = 1) : r % 64 = 0 := by
+  have := sat hsat (mem_kindC (c := .mul (k FIRSTM) (om (pre IS0))) (by simp [kindC])) hr
+  simp only [Expr.eval, om, one, eval_cst, Nat.cast_one, ev_k hr, hf, one_mul,
+    ev_per64 (i := IS0) (p := (· = 0)) rfl hr] at this
+  by_contra h; simp [h] at this
+
+/-- Rows of one message share the tuple, hence the message id. -/
+theorem tuple_const {r0 r : ℕ} (hr : r < n) (h0 : r0 ≤ r)
+    (hb : ∀ i, r0 < i → i ≤ r → M FIRSTM i = 0 ∧ M NIL i = 0) :
+    ∀ c ∈ [HDR, WTX, SEG, TI, TA, TW, TL], M c r = M c r0 := by
+  induction r with
+  | zero => intro c _; rw [show r0 = 0 by omega]
+  | succ r ih =>
+    intro c hc
+    rcases Nat.lt_or_ge r0 (r + 1) with h | h
+    · rw [(in_msg hsat hr (hb (r + 1) h le_rfl).1).2 c hc]
+      exact ih (by omega) (by omega) (fun i h1 h2 => hb i h1 (by omega)) c hc
+    · rw [show r0 = r + 1 by omega]
+
+theorem mid_eq {r : ℕ} (hr : r < n) : M MID r = (1 - M HDR r) * (1 + 2 * M TI r + M WTX r) := by
+  rw [defn hsat (a := MID) (e := .mul (om (k HDR)) (.add (.add one (.mul (cst 2) (k TI))) (k WTX)))
+    (mem_msgC (by simp [msgC])) hr]
+  simp only [Expr.eval, om, one, eval_cst, Nat.cast_one, ev_k hr]; push_cast; ring
+
+/-- **Word yields** come from a message: at index `j ≥ 3` of a message starting at `r0`, the word of its
+bytes `j − 3 .. j`. -/
+theorem word_yield {r : ℕ} (hr : r < n)
+    (hy : (pre IS3).eval n preCols pub M r * M WM r ≠ 0) :
+    ∃ r0 j, r = r0 + j ∧ 3 ≤ j ∧ r0 % 64 = 0 ∧ M FIRSTM r0 = 1 ∧ M NIL r = 0 ∧
+      (∀ i, r0 < i → i ≤ r → M FIRSTM i = 0 ∧ M NIL i = 0) ∧
+      M MID r = M MID r0 ∧ M IDX r - 3 = ((j - 3 : ℕ) : F) ∧
+      (Lookup.vals ⟨REL_MSGW, .mul (pre IS3) (k WM),
+        [k MID, .sub (k IDX) (cst 3), .add (.mul (cst 256) (byteE (-1))) (k BYTE),
+         .add (.mul (cst 256) (byteE (-3))) (byteE (-2))]⟩).map (fun e => e.eval n preCols pub M r) =
+      [M MID r0, ((j - 3 : ℕ) : F), 256 * M BYTE (r0 + j - 1) + M BYTE (r0 + j),
+       256 * M BYTE (r0 + j - 3) + M BYTE (r0 + j - 2)] := by
+  rw [ev_per64 (i := IS3) (p := (· % 4 = 3)) rfl hr] at hy
+  have h3 : r % 4 = 3 := by by_contra h; simp [h] at hy
+  have hnil : M NIL r = 0 := by
+    have := sat hsat (mem_padC (c := .mul (k WM) (k NIL)) (by simp [padC])) hr
+    simp only [Expr.eval, ev_k hr] at this
+    rcases mul_eq_zero.mp this with w | w
+    · simp [h3, w] at hy
+    · exact w
+  obtain ⟨r0, h0, hf, hx, hb⟩ := belongs hsat hr hnil
+  have ha := first_align hsat (by omega) hf
+  have hj : 3 ≤ r - r0 := by omega
+  have ht := tuple_const hsat hr h0 hb
+  have hmid : M MID r = M MID r0 := by
+    rw [mid_eq hsat hr, mid_eq hsat (by omega), ht HDR (by simp), ht TI (by simp), ht WTX (by simp)]
+  have hi : M IDX r - 3 = ((r - r0 - 3 : ℕ) : F) := by
+    rw [hx, Nat.cast_sub (by omega : 3 ≤ r - r0)]; push_cast; ring
+  refine ⟨r0, r - r0, by omega, hj, ha, hf, hnil, hb, hmid, hi, ?_⟩
+  rw [show r0 + (r - r0) = r by omega]
+  rw [show (-3 : ℤ) = -((3 : ℕ) : ℤ) by simp, show (-2 : ℤ) = -((2 : ℕ) : ℤ) by simp,
+    show (-1 : ℤ) = -((1 : ℕ) : ℤ) by simp]
+  simp only [List.map_cons, List.map_nil, Expr.eval, ev_k hr, eval_cst, ev_byte (by omega : 3 ≤ r) hr,
+    ev_byte (by omega : 2 ≤ r) hr, ev_byte (by omega : 1 ≤ r) hr, hmid]
+  rw [← hi]; push_cast; ring_nf
+
 end Rows
 
 end StarkedAir.Block.Msg
