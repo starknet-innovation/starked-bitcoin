@@ -271,6 +271,7 @@ theorem block_index {m : ℕ} (hmn : m < 2 ^ L) (hnp : ∀ r < m, (inst 1).main 
     (hSm : ((inst 1).main START m).val = (blockBytes (inst 0).main (pub 0).val).length) :
     ∃ b, Spec.Block.parseBlock (blockBytes (inst 0).main (pub 0).val) = some b ∧
       b.header = slice (blockBytes (inst 0).main (pub 0).val) 0 80 ∧
+      b.txs.length = ((inst 1).main VAL 0).val ∧
       ∀ ρ < 2 ^ L, (inst 1).main K_LOCK ρ = 1 → ∀ tx, TxAt (inst 1).main (blockBytes (inst 0).main (pub 0).val) m ρ tx →
         b.txs[locks (inst 1).main ρ]? = some tx := by
   set R := blockBytes (inst 0).main (pub 0).val with hR
@@ -290,7 +291,7 @@ theorem block_index {m : ℕ} (hmn : m < 2 ^ L) (hnp : ∀ r < m, (inst 1).main 
   have htok0 : tokOf (inst 1).main R 0 = .blk (slice R 0 80) ((inst 1).main VAL 0).val := by
     simp [tokOf, hblk0, start_zero fs hn]
   rw [toksFrom_cons h0m, htok0] at hb
-  obtain ⟨n0, txs, hn0, htxs, hbe⟩ : ∃ n0 txs, 1 ≤ n0 ∧
+  obtain ⟨n0, txs, hn0, hnv, htxs, hbe⟩ : ∃ n0 txs, 1 ≤ n0 ∧ n0 = ((inst 1).main VAL 0).val ∧
       Spec.Block.txsT n0 (toksFrom (inst 1).main R m (0 + 1)) = some (txs, []) ∧ b = ⟨slice R 0 80, txs⟩ := by
     simp only [Spec.Block.toksBlock] at hb
     by_cases hc : (slice R 0 80).length = 80 ∧ 1 ≤ ((inst 1).main VAL 0).val ∧ ((inst 1).main VAL 0).val ≤ Spec.Block.MAX_SIZE
@@ -302,10 +303,9 @@ theorem block_index {m : ℕ} (hmn : m < 2 ^ L) (hnp : ∀ r < m, (inst 1).main 
         obtain ⟨txs, rest⟩ := p
         rw [ht] at hb
         cases rest with
-        | nil => simp at hb; exact ⟨_, txs, hc.2.1, ht, hb.symm⟩
+        | nil => simp at hb; exact ⟨_, txs, hc.2.1, rfl, ht, hb.symm⟩
         | cons x xs => simp at hb
   subst hbe
-  refine ⟨_, hparse, rfl, ?_⟩
   -- the transactions start at row 1
   have h1m : 1 < m := by
     by_contra hc
@@ -315,6 +315,7 @@ theorem block_index {m : ℕ} (hmn : m < 2 ^ L) (hnp : ∀ r < m, (inst 1).main 
     simp [Spec.Block.txsT, Spec.Block.txT] at htxs
   have ht1 : (inst 1).main K_TXH 1 = 1 := (next_kind fs (r := 0) (by omega)).1 hblk0
   obtain ⟨hlen, rows, e, he, hrest, hle⟩ := txs_rows fs R hcs hmn hpad hfit n0 1 txs [] h1m ht1 htxs
+  refine ⟨_, hparse, rfl, by simpa [hnv] using hlen, ?_⟩
   have hl1 : locks (inst 1).main 1 = 0 := by
     rw [locks_succ, if_neg (by
       rw [kind_unique fs hn (a := K_BLK) (b := K_LOCK) (by simp [K_BLK]) (by simp [K_LOCK]) (by simp [K_BLK, K_LOCK]) hblk0]
