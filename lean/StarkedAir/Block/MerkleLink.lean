@@ -485,6 +485,81 @@ theorem tree_hashed (hL25 : L ≤ 25) {b : Spec.Block.Blk}
   simp only [Nat.mul_zero, Nat.zero_add, Nat.mul_one] at *
   rw [wL t ht, show t + 8 = 8 + t by ring, wR t ht, hs]
 
+/-- **The root row's header words** are the block's bytes 36..67 (big-endian 16-bit limbs). -/
+theorem header_word (hL25 : L ≤ 25) {r : ℕ} (hr : r < 2 ^ L) (hrt : (inst 4).main Merkle.RT r = 1) {w : ℕ} (hw : w < 8) :
+    79 < (pub 0).val ∧
+    (inst 4).main (Merkle.RL (2 * w)) r = 256 * (inst 0).main BYTE (38 + 4 * w) + (inst 0).main BYTE (39 + 4 * w) ∧
+    (inst 4).main (Merkle.RL (2 * w + 1)) r = 256 * (inst 0).main BYTE (36 + 4 * w) + (inst 0).main BYTE (37 + 4 * w) := by
+  have ms := hash_msg_sat hL hsat
+  have fs := hash_fields_sat' hL hsat
+  have h25 : 2 ^ L ≤ 2 ^ 25 := Nat.pow_le_pow_right (by norm_num) hL25
+  norm_num at h25
+  have hm : siteMult hashSys inst pub (4, r, 3 + w) = -1 := by
+    simp only [siteMult, siteEval, siteLookup, hashSys, hL 4 (by decide)]
+    simp only [show (4 : ℕ) ≠ 0 by decide, show (4 : ℕ) ≠ 1 by decide, show (4 : ℕ) ≠ 2 by decide,
+      show (4 : ℕ) ≠ 3 by decide, ↓reduceIte]
+    interval_cases w <;> simp [Merkle.merkle, Merkle.lookups, Expr.eval, Merkle.k, StarkedAir.Sha256.eval_col,
+      wrap_zero hr, hrt]
+  obtain ⟨r', hr', hym, hyv⟩ := merkle_word_linked hL hsat hL25 (k := 3 + w) (by omega) (by omega) hr hm
+  have hmult : (pre Msg.IS3).eval (2 ^ L) Msg.preCols pub (inst 2).main r' * (inst 2).main Msg.WM r' ≠ 0 := by
+    simpa [siteMult, siteEval, siteLookup, hashSys, hL 2 (by decide), Msg.msg, Msg.lookups, Expr.eval, Msg.k,
+      StarkedAir.Sha256.eval_col, wrap_zero hr'] using hym
+  obtain ⟨r0, j, rfl, hj, ha, f0, -, hb, hmid, -, hvals⟩ := Msg.word_yield ms hr' hmult
+  have hv2 : siteVals hashSys inst pub (2, r0 + j, 2) = [(inst 2).main Msg.MID r0, ((j - 3 : ℕ) : F),
+      256 * (inst 2).main Msg.BYTE (r0 + j - 1) + (inst 2).main Msg.BYTE (r0 + j),
+      256 * (inst 2).main Msg.BYTE (r0 + j - 3) + (inst 2).main Msg.BYTE (r0 + j - 2)] := by
+    rw [← hvals]; simp [siteVals, siteEval, siteLookup, hashSys, hL 2 (by decide), Msg.msg, Msg.lookups]
+  have hv4 : siteVals hashSys inst pub (4, r, 3 + w) = [0, ((36 + 4 * w : ℕ) : F),
+      (inst 4).main (Merkle.RL (2 * w)) r, (inst 4).main (Merkle.RL (2 * w + 1)) r] := by
+    interval_cases w <;> simp [siteVals, siteEval, siteLookup, hashSys, hL 4 (by decide), Merkle.merkle, Merkle.lookups,
+      Merkle.k, StarkedAir.Sha256.eval_col, StarkedAir.Sha256.eval_cst, wrap_zero hr, Expr.eval, Merkle.RL]
+  rw [hv2, hv4] at hyv
+  simp only [List.cons.injEq, and_true] at hyv
+  obtain ⟨e0, e1, e2, e3⟩ := hyv
+  have h0 : r0 < 2 ^ L := by omega
+  -- the header message
+  have hh : (inst 2).main Msg.HDR r0 = 1 := by
+    rcases Msg.bool_col ms (e := Msg.HDR) (by simp) h0 with h | h
+    · exfalso
+      obtain ⟨ρ, hρ, -, ti, -⟩ := msg_tuple_row hL hsat hL25 h0 f0 h
+      have hw' := Fields.bool_val (Msg.bool_col ms (e := Msg.WTX) (by simp) h0)
+      rw [Msg.mid_eq ms h0, h, sub_zero, one_mul, ← ti, Fields.txi_count fs ρ hρ, hw'.1] at e0
+      have := Fields.locks_le (M := (inst 1).main) ρ
+      have := natCast_inj_of_lt (a := 1 + 2 * Fields.locks (inst 1).main ρ + ((inst 2).main Msg.WTX r0).val) (b := 0)
+        (Fields.lt_P (by omega)) (Fields.lt_P (by norm_num)) (by push_cast; rw [e0])
+      omega
+    · exact h
+  obtain ⟨ta, tl, w0⟩ := hdr_tuple hL hsat h0 hh
+  have hmt : (inst 2).main Msg.MT r0 = 0 := by rw [Msg.mt_eq ms h0, w0, hh]; ring
+  obtain ⟨d, hc, he⟩ := Msg.data_exit ms h0 f0
+  have rows := Msg.whole_rows ms h0 f0 hmt hc he
+  have hd79 : d = 79 := by
+    obtain ⟨hl, -, -, -⟩ := Msg.data_walk ms h0 f0 d hc
+    have := ((rows d le_rfl).2.2.2).mpr rfl
+    rw [ta, tl, zero_add] at this
+    exact natCast_inj_of_lt (a := d) (b := 79) (Fields.lt_P (by omega)) (Fields.lt_P (by norm_num))
+      (by push_cast; rw [this]; norm_num)
+  subst hd79
+  -- data rows read the block's bytes at their index
+  have rd : ∀ j' ≤ 79, j' < (pub 0).val ∧ (inst 2).main Msg.BYTE (r0 + j') = (inst 0).main BYTE j' := by
+    intro j' hj'
+    obtain ⟨hl, -⟩ := Msg.data_walk ms h0 f0 j' (fun i hi => hc i (by omega))
+    obtain ⟨hd, -, hpos, -⟩ := rows j' hj'
+    obtain ⟨ρ, hρ, pρ, bρ⟩ := msg_read hL hsat hL25 hl hd
+    rw [hpos, ta, zero_add] at pρ
+    have hLEN : (pub 0).val ≤ 2 ^ 25 := Fields.len_le hL25 fs (hash_bytes_sat hL hsat) (hash_fields_read hL hsat hL25)
+    have e := natCast_inj_of_lt (a := j') (b := ρ) (Fields.lt_P (by omega)) (Fields.lt_P (by omega)) pρ
+    subst e; exact ⟨hρ, bρ⟩
+  -- the word's index
+  have hj39 : j = 39 + 4 * w := by
+    have := natCast_inj_of_lt (a := j - 3) (b := 36 + 4 * w) (Fields.lt_P (by omega)) (Fields.lt_P (by omega)) e1
+    omega
+  subst hj39
+  refine ⟨(rd 79 le_rfl).1, ?_, ?_⟩
+  · rw [← e2, show r0 + (39 + 4 * w) - 1 = r0 + (38 + 4 * w) by omega, (rd _ (by omega)).2, (rd _ (by omega)).2]
+  · rw [← e3, show r0 + (39 + 4 * w) - 3 = r0 + (36 + 4 * w) by omega,
+      show r0 + (39 + 4 * w) - 2 = r0 + (37 + 4 * w) by omega, (rd _ (by omega)).2, (rd _ (by omega)).2]
+
 end System
 
 end StarkedAir.Block
