@@ -186,6 +186,7 @@ theorem sha_len (hL25 : L ≤ 25) {x : ℕ} (hx : x < 2 ^ L)
     ∃ r0 d, (inst 2).main Msg.FIRSTM r0 = 1 ∧ (inst 2).main Msg.ENDD (r0 + d) = 1 ∧
       (∀ j < d, (inst 2).main Msg.CONT (r0 + j) = 1 ∨ (inst 2).main Msg.SW (r0 + j) = 1) ∧
       (inst 2).main Msg.MID r0 = (inst 3).main Sha.MID x ∧
+      r0 + d + 1 + 1 + (119 - (r0 + d + 1) % 64) % 64 + 7 < 2 ^ L ∧
       (((r0 + d + 1 + 1 + (119 - (r0 + d + 1) % 64) % 64 + 7) + 1 - r0 : ℕ) : F) =
         (Expr.add (.mul (cst 64) (Sha.kp Sha.BLKI)) (cst 64)).eval (2 ^ L) Sha.preCols pub (inst 3).main x := by
   have hm' : siteMult hashSys inst pub (3, x, 1) = -1 := by
@@ -210,7 +211,7 @@ theorem sha_len (hL25 : L ≤ 25) {x : ℕ} (hx : x < 2 ^ L)
   rw [hv2, hv3] at hyv
   simp only [List.cons.injEq, and_true] at hyv
   obtain ⟨e1, e2⟩ := hyv
-  refine ⟨r0, d, hf, he, hc, hmid.symm.trans e1, ?_⟩
+  refine ⟨r0, d, hf, he, hc, hmid.symm.trans e1, heq ▸ hr', ?_⟩
   rw [← heq, ← e2, hidx]
 
 theorem hash_fields_sat' : ∀ r < 2 ^ L, ∀ c ∈ Fields.constraints,

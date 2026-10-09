@@ -164,6 +164,76 @@ theorem block_word (hL25 : L ≤ 25) {r0 d : ℕ} (h0 : r0 < 2 ^ L) (f0 : (inst 
   simp only [add_zero]
   congr 1; ring
 
+omit hL hsat in
+theorem dbl_digest (h : Spec.Sha256.State) : Sha.dblBlock h = Spec.Bitcoin.digestBlock h := by
+  funext t
+  unfold Sha.dblBlock Spec.Bitcoin.digestBlock Sha.dblWord
+  by_cases h8 : t < 8
+  · simp [h8]
+  · by_cases e8 : t = 8
+    · subst e8; rfl
+    · by_cases e15 : t = 15
+      · subst e15; rfl
+      · simp [h8, e8, e15]
+
+/-- **Block hashing soundness.** In a satisfied hashing system with at most `2^25` rows, a second-hash
+period `q` outputs `SHA256d` of the data bytes of a message with the period's id. -/
+theorem digest_sha256d (hL25 : L ≤ 25) {q : ℕ} (hq : 1 ≤ q) (hn : 72 * q + 72 ≤ 2 ^ L)
+    (hd : (inst 3).main Sha.DBL (72 * q) = 1) :
+    ∃ r0 d, (inst 2).main Msg.FIRSTM r0 = 1 ∧ (inst 2).main Msg.MID r0 = (inst 3).main Sha.MID (72 * q) ∧
+      (∀ j < d, (inst 2).main Msg.CONT (r0 + j) = 1 ∨ (inst 2).main Msg.SW (r0 + j) = 1) ∧
+      (inst 2).main Msg.ENDD (r0 + d) = 1 ∧
+      Spec.Block.stateBytes (outputAt (inst 3).main (72 * q)) = Spec.Block.sha256d (msgData inst r0 d) := by
+  have ss := hash_sha_sat hL hsat
+  have ms := hash_msg_sat hL hsat
+  have h25 : 2 ^ L ≤ 2 ^ 25 := Nat.pow_le_pow_right (by norm_num) hL25
+  norm_num at h25
+  obtain ⟨q0, hq0, f0, chn, vals, hout⟩ := Sha.digest_sound ss hq hn hd
+  -- the length check of the second hash
+  have hx : 72 * q < 2 ^ L := by omega
+  have hrow : (Expr.mul (pre Sha.ROW0) (Sha.k Sha.DBL)).eval (2 ^ L) Sha.preCols pub (inst 3).main (72 * q) = 1 := by
+    simp only [Expr.eval, Sha.k, StarkedAir.Sha256.eval_col, wrap_zero hx, hd, mul_one]
+    rw [Sha.eval_per72 ss (i := Sha.ROW0) (f := fun q => if q = 0 then 1 else 0) rfl hx]
+    simp
+  obtain ⟨r0, d, f, he, hc, hmid, hlt, hlen⟩ := sha_len hL hsat hL25 hx hrow
+  have hr0 : r0 < 2 ^ L := by omega
+  have hal := Msg.first_align ms hr0 f
+  -- the padded length is `64 (q − q0)`
+  have hprev : (Expr.add (.mul (cst 64) (Sha.kp Sha.BLKI)) (cst 64)).eval (2 ^ L) Sha.preCols pub (inst 3).main (72 * q) =
+      ((64 * (q - q0) : ℕ) : F) := by
+    simp only [Expr.eval, Sha.kp, StarkedAir.Sha256.eval_col, StarkedAir.Sha256.eval_cst]
+    rw [show (-1 : ℤ) = -((1 : ℕ) : ℤ) by simp, StarkedAir.Sha256.wrap_back (by omega) hx]
+    have e := Sha.per_const ss (X := Sha.BLKI) (by simp) (s := 72 * (q - 1)) (by omega) 71 (by norm_num) (by omega)
+    rw [show 72 * q - 1 = 72 * (q - 1) + 71 by omega, e, (vals (q - 1) (by omega) (by omega)).2]
+    rw [show q - 1 - q0 = (q - q0) - 1 by omega, Nat.cast_sub (by omega)]
+    push_cast; ring
+  rw [hprev] at hlen
+  have hplen := natCast_inj_of_lt (by unfold P; omega) (by unfold P; omega) hlen
+  have hpl : (Spec.Block.pad (msgData inst r0 d)).length = 64 * (q - q0) := by
+    rw [HashSpec.pad_length, show (msgData inst r0 d).length = d + 1 by simp [msgData]]
+    omega
+  -- the message blocks
+  have hfold : ∀ b ≤ q - q0, Sha.fold (inst 3).main (72 * q0) b = HashSpec.chunkFold Spec.Sha256.IV
+      (Spec.Block.pad (msgData inst r0 d)) b := by
+    intro b hb
+    induction b with
+    | zero => rfl
+    | succ b ih =>
+      simp only [Sha.fold, HashSpec.chunkFold]
+      rw [ih (by omega)]
+      apply StarkedAir.HeaderChain.compress_congr
+      intro t ht
+      have hs : (72 * q0 + 72 * b) % 72 = 0 := by omega
+      have hfc : (inst 3).main Sha.FST (72 * q0 + 72 * b) = 1 ∨ (inst 3).main Sha.CHN (72 * q0 + 72 * b) = 1 := by
+        rcases Nat.eq_zero_or_pos b with h | h
+        · left; rw [h, mul_zero, add_zero]; exact f0
+        · right; rw [show 72 * q0 + 72 * b = 72 * (q0 + b) by ring]; exact chn _ (by omega) (by omega)
+      have vj := vals (q0 + b) (by omega) (by omega)
+      rw [show 72 * (q0 + b) = 72 * q0 + 72 * b by ring, show q0 + b - q0 = b by omega] at vj
+      exact block_word hL hsat hL25 hr0 f hc he hs (by omega) ht hfc (vj.1.trans hmid.symm) vj.2 (by omega)
+  refine ⟨r0, d, f, hmid, hc, he, ?_⟩
+  rw [hout, hfold _ le_rfl, dbl_digest, HashSpec.sha256d_eq _ _ hpl]
+
 end System
 
 end StarkedAir.Block

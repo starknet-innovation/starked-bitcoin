@@ -53,5 +53,6 @@ import StarkedAir.Block.Sha
 import StarkedAir.Block.ShaSound
 import StarkedAir.Block.HashSpec
 import StarkedAir.Block.Link
+import StarkedAir.Block.HashSound
 import StarkedAir.Spec.BlockTokens
 import StarkedAir.Testing.BlockReader
