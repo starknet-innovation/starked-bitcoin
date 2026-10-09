@@ -290,6 +290,81 @@ theorem tx_cols {rh : ℕ} (hr : rh < m) (ht : M K_TXH rh = 1) :
   rw [show rw + (r' - rw) = r' by omega] at hws
   exact ⟨tx, r', rw, v, nIn, l, htx, h1, h2, hr'm, hl, htok, hlock, hseg, hnw, hta, hws, hsg, notxh, nolock⟩
 
+omit hsat hcs hmn hpad hfit in
+theorem locks_const {a b : ℕ} (h : ∀ j, a ≤ j → j < b → M K_LOCK j ≠ 1) (hab : a ≤ b) : locks M b = locks M a := by
+  induction b, hab using Nat.le_induction with
+  | base => rfl
+  | succ b hab ih => rw [locks_succ, if_neg (h b hab (by omega)), ih (fun j x y => h j x (by omega))]; rfl
+
+/-- Transaction `tx` ends at lock-time row `ρ`: its header row `rh` is the last header row before `ρ`
+and its tokens parse to `tx`, up to row `ρ`. -/
+def TxAt (M : ℕ → ℕ → F) (R : Spec.Block.Bytes) (m ρ : ℕ) (tx : Spec.Block.Tx) : Prop :=
+  ∃ rh, rh < ρ ∧ M K_TXH rh = 1 ∧ (∀ j, rh < j → j ≤ ρ → M K_TXH j = 0) ∧
+    Spec.Block.txT (toksFrom M R m rh) = some (tx, toksFrom M R m (ρ + 1))
+
+omit hcs hmn hpad hfit in
+theorem txh_of_txT {r : ℕ} (hr : r < n) {ts' : List Spec.Block.Tok} {t : Spec.Block.Tx} {rest : List Spec.Block.Tok}
+    (h : Spec.Block.txT (tokOf M R r :: ts') = some (t, rest)) : M K_TXH r = 1 := by
+  unfold tokOf at h
+  split_ifs at h with h1 h2 <;> simp [Spec.Block.txT] at h
+  exact h2
+
+/-- **The transactions of a run of rows.** If `k` transactions parse from header row `rh`, the `j`-th
+ends at a lock-time row with `locks rh + j` lock-time rows above it, and the run ends at row `e`. -/
+theorem txs_rows : ∀ (k rh : ℕ) (txs : List Spec.Block.Tx) (rest : List Spec.Block.Tok),
+    rh < m → M K_TXH rh = 1 → Spec.Block.txsT k (toksFrom M R m rh) = some (txs, rest) →
+    txs.length = k ∧ (∀ j < k, ∃ ρ tx, ρ < m ∧ M K_LOCK ρ = 1 ∧ locks M ρ = locks M rh + j ∧
+      txs[j]? = some tx ∧ TxAt M R m ρ tx) ∧
+    ∃ e, e ≤ m ∧ rest = toksFrom M R m e ∧ locks M e = locks M rh + k
+  | 0, rh, txs, rest, _, _, h => by
+    simp [Spec.Block.txsT] at h; obtain ⟨rfl, rfl⟩ := h
+    exact ⟨rfl, fun j hj => absurd hj (Nat.not_lt_zero _), rh, by omega, rfl, rfl⟩
+  | k + 1, rh, txs, rest, hr, ht, h => by
+    obtain ⟨tx, r', rw, v, nIn, l, htx, h1, h2, hr'm, hl, htok, hlock, hseg, hnw, hta, hws, hsg, notxh, nolock⟩ :=
+      tx_cols hsat R hcs hmn hpad hfit hr ht
+    simp only [Spec.Block.txsT, htx] at h
+    cases hk : Spec.Block.txsT k (toksFrom M R m (r' + 1)) with
+    | none => simp [hk] at h
+    | some p =>
+      obtain ⟨txs', rest'⟩ := p
+      rw [hk] at h; simp only [Option.map_some, Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      -- locks: none in `[rh, r')`, one at `r'`
+      have e1 : locks M r' = locks M rh :=
+        locks_const (fun j a b => by rw [nolock j a b]; exact zero_ne_one) (by omega)
+      have hlk : locks M (r' + 1) = locks M rh + 1 := by
+        rw [locks_succ, if_pos hl, e1]
+      have hhead : TxAt M R m r' tx := ⟨rh, by omega, ht, notxh, htx⟩
+      rcases Nat.eq_zero_or_pos k with hk0 | hk0
+      · subst hk0
+        simp [Spec.Block.txsT] at hk; obtain ⟨rfl, rfl⟩ := hk
+        refine ⟨rfl, fun j hj => ?_, r' + 1, by omega, rfl, by rw [hlk]⟩
+        have : j = 0 := by omega
+        subst this
+        exact ⟨r', tx, hr'm, hl, by simpa using e1, by simp, hhead⟩
+      · -- the next transaction starts right after the lock time
+        have hr1 : r' + 1 < m := by
+          by_contra hc
+          have e : m - (r' + 1) = 0 := by omega
+          have : toksFrom M R m (r' + 1) = [] := by simp [toksFrom, e]
+          rw [this] at hk
+          obtain ⟨k', rfl⟩ : ∃ k', k = k' + 1 := ⟨k - 1, by omega⟩
+          simp [Spec.Block.txsT, Spec.Block.txT] at hk
+        have ht1 : M K_TXH (r' + 1) = 1 := by
+          obtain ⟨k', rfl⟩ : ∃ k', k = k' + 1 := ⟨k - 1, by omega⟩
+          rw [toksFrom_cons hr1] at hk
+          simp only [Spec.Block.txsT] at hk
+          cases hh : Spec.Block.txT (tokOf M R (r' + 1) :: toksFrom M R m (r' + 1 + 1)) with
+          | none => simp [hh] at hk
+          | some q => exact txh_of_txT hsat R (r := r' + 1) (by omega) (t := q.1) (rest := q.2) (by rw [hh])
+        obtain ⟨hlen, hrows, e, he, hrest, hle⟩ := txs_rows k (r' + 1) txs' rest' hr1 ht1 hk
+        refine ⟨by simp [hlen], fun j hj => ?_, e, he, hrest, by rw [hle, hlk]; ring⟩
+        rcases Nat.eq_zero_or_pos j with hj0 | hj0
+        · subst hj0; exact ⟨r', tx, hr'm, hl, by simpa using e1, by simp, hhead⟩
+        · obtain ⟨ρ, t, a, b, c, d, e'⟩ := hrows (j - 1) (by omega)
+          refine ⟨ρ, t, a, b, by rw [c, hlk]; omega, ?_, e'⟩
+          rw [show j = (j - 1) + 1 by omega]; simpa using d
+
 end Layout
 
 end StarkedAir.Block.Fields
