@@ -732,6 +732,85 @@ theorem split_walk {r0 : ℕ} (hr0 : r0 < n) (hf : M FIRSTM r0 = 1) (hmt : M MT 
         · rw [hsw, m1, p0, p1] at c; simp at c
       exact ⟨2, by omega, cont_case c, by have := hq0; omega⟩
 
+theorem endd_z {r : ℕ} (hr : r < n) (hd : M D r = 1) (he : M ENDD r = 1) : M Z r = 1 ∧ M SW r = 0 := by
+  obtain ⟨-, w, e⟩ := helpers hsat hr
+  rcases bool_col hsat (e := Z) (by simp) hr with z | z
+  · rw [e, w, z] at he; simp at he
+  · refine ⟨z, ?_⟩; rw [e, hd, z] at he; linear_combination -he
+
+/-- **Split messages** (`MT = 1`): rows `0..3` read `TA + j`; piece 1 reads `TA + j + 2` and ends (at a
+switch to piece 2) exactly when it reaches `TW − 1`; piece 2 reads `TA + j + TL − TW + 2` and the data
+ends exactly when it reaches `TL + 3`. -/
+theorem split_msg {r0 : ℕ} (hr0 : r0 < n) (hf : M FIRSTM r0 = 1) (hmt : M MT r0 = 1) :
+    ∃ d, r0 + d < n ∧ M ENDD (r0 + d) = 1 ∧ inPiece M (r0 + d) 2 ∧
+      ∀ j ≤ d, M D (r0 + j) = 1 ∧ M IDX (r0 + j) = j ∧ ∃ q ≤ 2, inPiece M (r0 + j) q ∧ (q = 0 ↔ j ≤ 3) ∧
+        (q = 0 → M POS (r0 + j) = M TA r0 + j) ∧
+        (q = 1 → M POS (r0 + j) = M TA r0 + j + 2 ∧ j < d ∧
+          (M POS (r0 + j) = M TW r0 - 1 → inPiece M (r0 + j + 1) 2) ∧
+          (M POS (r0 + j) ≠ M TW r0 - 1 → inPiece M (r0 + j + 1) 1)) ∧
+        (q = 2 → M POS (r0 + j) = M TA r0 + j + (M TL r0 - M TW r0 + 2) ∧
+          (M POS (r0 + j) = M TL r0 + 3 ↔ j = d)) := by
+  obtain ⟨d, hc, he⟩ := data_exit hsat hr0 hf
+  have W := split_walk hsat hr0 hf hmt hc
+  -- the end-test value per piece
+  have zq : ∀ j ≤ d, ∀ q, inPiece M (r0 + j) q → q ≤ 2 →
+      (q = 1 → (M Z (r0 + j) = 1 ↔ M POS (r0 + j) = M TW r0 - 1)) ∧
+      (q = 2 → (M Z (r0 + j) = 1 ↔ M POS (r0 + j) = M TL r0 + 3)) := by
+    intro j hj q ⟨p0, p1, p2⟩ hq
+    obtain ⟨hl, -, -, m1, -, tw, tl, -⟩ := W j hj
+    have hez := z_iff hsat hl
+    rw [ezE_eval hl, m1, p0, p1, p2, tw, tl] at hez
+    refine ⟨fun h1 => ?_, fun h2 => ?_⟩ <;> subst_vars <;> rw [hez] <;> simp <;> constructor <;> intro h <;>
+      linear_combination h
+  -- piece at the end: 2
+  have hd2 : inPiece M (r0 + d) 2 := by
+    obtain ⟨hl, hd, -, m1, -, -, -, q, hq, hp, -⟩ := W d le_rfl
+    obtain ⟨z, sw⟩ := endd_z hsat hl hd he
+    obtain ⟨p0, p1, p2⟩ := hp
+    interval_cases q
+    · rw [(helpers hsat hl).2.1, z, m1, p0, p1] at sw; simp at sw
+    · rw [(helpers hsat hl).2.1, z, m1, p0, p1] at sw; simp at sw
+    · exact ⟨p0, p1, p2⟩
+  refine ⟨d, (W d le_rfl).1, he, hd2, fun j hj => ?_⟩
+  obtain ⟨hl, hd, hx, m1, ta, tw, tl, q, hq, hp, hq0⟩ := W j hj
+  obtain ⟨p0, p1, p2⟩ := hp
+  have hpos := data_pos hsat hl hd
+  rw [p1, p2, ta, tw, tl, hx] at hpos
+  refine ⟨hd, hx, q, hq, ⟨p0, p1, p2⟩, hq0, fun h => ?_, fun h => ?_, fun h => ?_⟩
+  · subst h; rw [hpos]; simp
+  · subst h
+    have hjd : j < d := by
+      rcases Nat.lt_or_ge j d with h | h
+      · exact h
+      · have := hd2.2.1; rw [show j = d by omega] at p1; rw [p1] at this; simp at this
+    have hz := (zq j hj 1 ⟨p0, p1, p2⟩ (by omega)).1 rfl
+    have h1 : r0 + j + 1 < n := by have := (W (j + 1) (by omega)).1; rw [← add_assoc] at this; exact this
+    refine ⟨by rw [hpos]; simp, hjd, fun e => ?_, fun e => ?_⟩
+    · have sw : M SW (r0 + j) = 1 := by rw [(helpers hsat hl).2.1, hz.mpr e, m1, p0, p1]; simp
+      obtain ⟨-, -, -, -, q0, q1, q2⟩ := step_sw hsat h1 sw
+      exact ⟨by simp [q0], by rw [q1, p0]; simp, by rw [q2, p1]; simp⟩
+    · have z : M Z (r0 + j) = 0 := by
+        rcases bool_col hsat (e := Z) (by simp) hl with z | z
+        · exact z
+        · exact absurd (hz.mp z) e
+      have c : M CONT (r0 + j) = 1 := by rw [(helpers hsat hl).1, hd, z]; ring
+      obtain ⟨-, -, -, q0, q1, q2⟩ := step_cont hsat h1 c
+      exact ⟨q0.trans p0, q1.trans p1, q2.trans p2⟩
+  · subst h
+    have hz := (zq j hj 2 ⟨p0, p1, p2⟩ (by omega)).2 rfl
+    refine ⟨by rw [hpos]; simp, ?_⟩
+    rw [← hz]
+    constructor
+    · intro z
+      by_contra hne
+      have c : M CONT (r0 + j) = 1 := by
+        rcases hc j (by omega) with c | c
+        · exact c
+        · rw [(helpers hsat hl).2.1, m1, p0, p1] at c; simp at c
+      have h1 : r0 + j + 1 < n := by have := (W (j + 1) (by omega)).1; rw [← add_assoc] at this; exact this
+      rw [(step_cont hsat h1 c).1] at z; exact zero_ne_one z
+    · rintro rfl; exact (endd_z hsat hl hd he).1
+
 end Rows
 
 end StarkedAir.Block.Msg
