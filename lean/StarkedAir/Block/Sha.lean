@@ -58,7 +58,8 @@ def preCols : List PreCol :=
     per72 (fun q => if q < 4 then HeaderChain.ivWords.getD (3 - q) 0 / 2 ^ 16 else 0),  -- 21 IVA_HI
     per72 (fun q => if q < 4 then HeaderChain.ivWords.getD (7 - q) 0 % 2 ^ 16 else 0),  -- 22 IVE_LO
     per72 (fun q => if q < 4 then HeaderChain.ivWords.getD (7 - q) 0 / 2 ^ 16 else 0),  -- 23 IVE_HI
-    per72 (fun q => if q = 71 then 1 else 0) ]                                 -- 24 FIN3
+    per72 (fun q => if q = 71 then 1 else 0),                                  -- 24 FIN3
+    .isFirst ]                                                                 -- 25 FIRST
 
 def ROW0 : ℕ := 5
 def INIT : ℕ := 6
@@ -70,6 +71,7 @@ def DC_LO : ℕ := 18
 def IVA_LO : ℕ := 20
 def IVE_LO : ℕ := 22
 def FIN3 : ℕ := 24
+def FIRST : ℕ := 25
 
 def k (c : ℕ) : Expr := col c
 def kp (c : ℕ) : Expr := col c (-1)
@@ -107,7 +109,9 @@ def orderC : List Expr :=
     .mul (pre ROW0) (.mul (k CHN) (.add (kp DBL) (kp NILS))),
     .mul (pre ROW0) (.mul (k DBL) (.sub (k MID) (kp MID))),
     .mul (pre ROW0) (.mul (k DBL) (.add (kp DBL) (kp NILS))),
-    .mul (k YM) (om (pre FIN3)) ]
+    .mul (k YM) (om (pre FIN3)),
+    -- Period 0 starts a message or is unused (no wrap-around predecessor).
+    .mul (pre FIRST) (.add (k CHN) (k DBL)) ]
 
 def constraints : List Expr := Sha256.constraints ++ flagC ++ initC ++ dblC ++ orderC
 
