@@ -918,7 +918,9 @@ the block's bytes. -/
 theorem tiling (hn : 0 < n) (hRl : R.length = (pub 0).val) :
     ∃ m, m < n ∧ M K_PAD m = 1 ∧ (∀ r < m, M K_PAD r = 0) ∧ (∀ r < n, m ≤ r → M K_PAD r = 1) ∧
       (∀ r < m, (M START r).val + (M LEN r).val ≤ R.length) ∧
-      ((List.range m).flatMap fun r => Spec.Block.Tok.bytes (tokOf M R r)) = R := by
+      ((List.range m).flatMap fun r => Spec.Block.Tok.bytes (tokOf M R r)) = R ∧
+      (∀ k ≤ m, ((List.range k).flatMap fun r => Spec.Block.Tok.bytes (tokOf M R r)) = slice R 0 (M START k).val) ∧
+      (∀ k j, k ≤ j → j ≤ m → (M START k).val ≤ (M START j).val) ∧ (M START m).val = R.length := by
   classical
   have hex : ∃ r, r < n ∧ M K_PAD r = 1 := ⟨n - 1, by omega, last_pad hsat hn⟩
   set m := Nat.find hex with hmdef
@@ -960,7 +962,7 @@ theorem tiling (hn : 0 < n) (hRl : R.length = (pub 0).val) :
   refine ⟨m, hm.1, hm.2, hmin, fun r hr hmr => ?_, fun r hr => ?_, ?_⟩
   · have := suffix (r - m) (by omega); rwa [Nat.add_sub_cancel' hmr] at this
   · rw [← start_val_succ hsat R hcs hmk (show r + 1 < n by omega), ← hSm]; exact mono _ _ (by omega) le_rfl
-  · rw [cat m le_rfl, hSm, slice_zero]
+  · exact ⟨by rw [cat m le_rfl, hSm, slice_zero], cat, mono, hSm⟩
 
 end Tokens
 
@@ -1891,7 +1893,7 @@ theorem fields_sound_gen : ∃ b, Spec.Block.parseBlock (blockBytes (inst 0).mai
       refine ⟨by rw [hRl]; exact a, ?_, ?_⟩
       · rw [blockBytes_get (by omega), b]; rfl
       · rw [blockBytes_get (by omega), c, ZMod.val_one]; rfl
-  obtain ⟨m, hmn, -, hnp, hpad, hfit, htile⟩ := tiling fs _ hcs hmk (by positivity) hRl
+  obtain ⟨m, hmn, -, hnp, hpad, hfit, htile, -⟩ := tiling fs _ hcs hmk (by positivity) hRl
   obtain ⟨b, hb⟩ := block_sim fs _ hcs hmn hpad hfit hnp
   refine ⟨b, ?_⟩
   have := Spec.Block.toksBlock_parse hb
