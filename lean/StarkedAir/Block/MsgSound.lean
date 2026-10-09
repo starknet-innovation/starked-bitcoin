@@ -316,6 +316,79 @@ theorem step_ln {r : ℕ} (hr : r + 1 < n) (h : M LN r = 1) :
     exact ⟨t4, no_first hsat hr (a := LN) (by simp [LN]) (by simp [LN, D]) t4⟩
   · simpa [h0] using t5
 
+/-- A row of kind other than `NIL` is not the last. -/
+theorem succ_lt {r : ℕ} (hr : r < n) {a : ℕ} (ha : a < 5) (hna : a ≠ NIL) (h : M a r = 1) : r + 1 < n := by
+  by_contra hc
+  have hl := last_nil hsat (by omega : 0 < n)
+  rw [show n - 1 = r by omega] at hl
+  exact kind_off hsat hr ha (by simp [NIL]) hna h hl
+
+/-- **Zero run**: after `0x80` (or a zero) at row `p`, zeros until row 56 of a block. -/
+theorem zero_run {p : ℕ} (hp : p < n) (h : M P80 p = 1 ∨ M ZR p = 1) (i : ℕ)
+    (hj : ∀ j ≤ i, (p + j + 1) % 64 ≠ 56) : p + i + 1 < n ∧ M ZR (p + i + 1) = 1 ∧ M FIRSTM (p + i + 1) = 0 := by
+  induction i with
+  | zero =>
+    have h1 : p + 1 < n := by
+      rcases h with h | h
+      · exact succ_lt hsat hp (a := P80) (by simp [P80]) (by simp [P80, NIL]) h
+      · exact succ_lt hsat hp (a := ZR) (by simp [ZR]) (by simp [ZR, NIL]) h
+    obtain ⟨f, -, z⟩ := step_pad hsat h1 h
+    exact ⟨h1, z (hj 0 le_rfl), f⟩
+  | succ i ih =>
+    obtain ⟨hl, hz, -⟩ := ih (fun j hj' => hj j (by omega))
+    have h2 := succ_lt hsat hl (a := ZR) (by simp [ZR]) (by simp [ZR, NIL]) hz
+    obtain ⟨f, -, z⟩ := step_pad hsat h2 (Or.inr hz)
+    have e : p + (i + 1) + 1 = p + i + 1 + 1 := by ring
+    rw [e]; exact ⟨h2, z (by rw [← e]; exact hj (i + 1) le_rfl), f⟩
+
+/-- **Length run**: the length rows continue to the end of the block. -/
+theorem ln_run {q : ℕ} (hq : q < n) (h : M LN q = 1) (i : ℕ) (hi : q % 64 + i < 64) :
+    q + i < n ∧ M LN (q + i) = 1 ∧ (0 < i → M FIRSTM (q + i) = 0) := by
+  induction i with
+  | zero => exact ⟨hq, h, fun h => absurd h (lt_irrefl 0)⟩
+  | succ i ih =>
+    obtain ⟨hl, hln, -⟩ := ih (by omega)
+    have h2 := succ_lt hsat hl (a := LN) (by simp [LN]) (by simp [LN, NIL]) hln
+    have hm : (q + i + 1) % 64 ≠ 0 := by omega
+    obtain ⟨l1, f1⟩ := (step_ln hsat h2 hln).1 hm
+    exact ⟨h2, l1, fun _ => f1⟩
+
+/-- **Padding.** After `0x80` at row `p`: zeros up to the next row `s ≡ 56`, eight length rows, then a
+new block row that is unused or starts a message. -/
+theorem pad_ok {p : ℕ} (hp : p < n) (h : M P80 p = 1) :
+    let s := p + 1 + (119 - p % 64) % 64
+    s % 64 = 56 ∧ s + 8 < n ∧ (∀ j, p < j → j < s → M ZR j = 1 ∧ M FIRSTM j = 0) ∧
+    (∀ j, s ≤ j → j < s + 8 → M LN j = 1 ∧ M FIRSTM j = 0) ∧ M NIL (s + 8) + M FIRSTM (s + 8) = 1 := by
+  intro s
+  have hs : s % 64 = 56 := by omega
+  -- the row before `s` is `0x80` or a zero
+  have hpre : s - 1 < n ∧ (M P80 (s - 1) = 1 ∨ M ZR (s - 1) = 1) := by
+    by_cases h0 : (119 - p % 64) % 64 = 0
+    · exact ⟨by omega, Or.inl (by rw [show s - 1 = p by omega]; exact h)⟩
+    · obtain ⟨hl, hz, -⟩ := zero_run hsat hp (Or.inl h) ((119 - p % 64) % 64 - 1) (fun j hj => by omega)
+      rw [show p + ((119 - p % 64) % 64 - 1) + 1 = s - 1 by omega] at hl hz
+      exact ⟨hl, Or.inr hz⟩
+  have hsn : s < n := by
+    have := hpre.2
+    rcases hpre.2 with h' | h'
+    · have := succ_lt hsat hpre.1 (a := P80) (by simp [P80]) (by simp [P80, NIL]) h'; omega
+    · have := succ_lt hsat hpre.1 (a := ZR) (by simp [ZR]) (by simp [ZR, NIL]) h'; omega
+  obtain ⟨-, l56, -⟩ := step_pad hsat (by omega : s - 1 + 1 < n) hpre.2
+  rw [show s - 1 + 1 = s by omega] at l56
+  have hl := l56 hs
+  obtain ⟨h7, l7, -⟩ := ln_run hsat hsn hl 7 (by omega)
+  have h8 := succ_lt hsat h7 (a := LN) (by simp [LN]) (by simp [LN, NIL]) l7
+  refine ⟨hs, h8, fun j hj1 hj2 => ?_, fun j hj1 hj2 => ?_, ?_⟩
+  · obtain ⟨-, hz, hf⟩ := zero_run hsat hp (Or.inl h) (j - p - 1) (fun j' hj' => by omega)
+    rw [show p + (j - p - 1) + 1 = j by omega] at hz hf; exact ⟨hz, hf⟩
+  · obtain ⟨-, hz, hf⟩ := ln_run hsat hsn hl (j - s) (by omega)
+    rw [show s + (j - s) = j by omega] at hz hf
+    refine ⟨hz, ?_⟩
+    by_cases hjs : j = s
+    · subst hjs; exact no_first hsat hsn (a := LN) (by simp [LN]) (by simp [LN, D]) hl
+    · exact hf (by omega)
+  · exact (step_ln hsat h8 l7).2 (by omega)
+
 end Rows
 
 end StarkedAir.Block.Msg
