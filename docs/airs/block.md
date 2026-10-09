@@ -157,8 +157,15 @@ block index, and first-block / second-hash / unused flags.
   - `msg_pad`: a message's rows are `Spec.Block.pad` of its data bytes. This assumes at most `2^27`
     rows, so the bit length stays below `P`.
 
+- System linking (`Block/Link.lean`, the system bytes, fields, msg, sha):
+  - `sha_use_linked`: every SHA word or length use is matched by a message yield;
+  - `sha_word`: each SHA message word is bytes `j − 3 .. j` of a message with the same id, where
+    `j − 3 = 64 · BLKI + 4 · (row − 4)`;
+  - `sha_len`: a second hash's message has padded length `64 · (blocks hashed)`.
+
 **To prove:**
-1. System linking: the SHA `msgw`/`mlen` uses match the message yields; message byte reads match the
-   byte table; tx tuples match the fields.
+1. Linking, rest: message byte reads match the byte table (as `sys_read` does for fields); tx tuples
+   match the fields; one message per id. Then compose with `digest_sound` and `msg_pad`: each digest is
+   `Spec.Block.sha256d` of its message's data bytes.
 2. The fields tuples are the transactions' ranges, so the txid and wtxid messages are `serNoWit` and
    `serWit`.

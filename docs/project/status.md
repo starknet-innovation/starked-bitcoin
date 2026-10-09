@@ -5,7 +5,7 @@ If `HEAD at last update` doesn't match `git log -1`, this file is stale:
 follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work).
 
 - **Updated:** 2026-10-09
-- **HEAD at last update:** eee2e07 (plus this status commit)
+- **HEAD at last update:** see `git log -1` (status updated in the same session, 2026-10-09 10:45)
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
 - **Current item:** M3a.3 `BLK-SHA` ([block-data.md](../design/block-data.md)): AIRs, witnesses and component proofs done; spec tie-in and system linking next. HC-HASHTREE done (full chain re-proven 2026-10-09).
 
@@ -25,7 +25,9 @@ standard axioms only); the in-circuit verifiers and node code stay trusted
    done (`digest_sound`, `whole_msg`, `split_msg`, `pad_bytes`, `word_yield`, `len_yield`; see
    [airs/block.md](../airs/block.md)). Next:
    - (a) done: `msg_pad`, a message's rows are `Spec.Block.pad` of its data bytes;
-   - (b) system linking: SHA `msgw`/`mlen` ↔ message yields, message bytes ↔ byte table, tuples ↔ fields;
+   - (b) system linking: SHA ↔ messages done (`sha_word`, `sha_len` in `Block/Link.lean`). Still to do:
+     message bytes ↔ byte table, tuples ↔ fields, one message per id, then compose into
+     "digest = `Spec.Block.sha256d` of the message";
    - (c) the fields tuples are the transactions' `serNoWit`/`serWit` ranges.
 2. Proposed: REC-FUZZ (differential fuzzing of the plain verifier).
 
