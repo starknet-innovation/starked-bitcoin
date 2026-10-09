@@ -4,6 +4,7 @@ reads `<case>\t<Core's answer>` lines on stdin and prints `<case>\t<Lean's answe
 Run: `lake env lean --run SpecCases.lean < cases.tsv` (see `tools/specfuzz/run.sh`).
 -/
 import StarkedAir.Spec.Bitcoin
+import StarkedAir.Spec.Block
 
 open StarkedAir.Spec.Bitcoin StarkedAir.Spec.Sha256
 
@@ -34,6 +35,25 @@ def bytesOfHex (s : String) : Option (List ℕ) :=
     let lo ← hexDigit (cs.getD (2 * i + 1) ' ')
     pure (16 * hi + lo)
 
+/-- Hex to bytes (`-` is the empty string). -/
+def bytesOfHexAny (s : String) : Option StarkedAir.Spec.Block.Bytes :=
+  if s == "-" then some [] else
+  let cs := s.toList
+  if cs.length % 2 ≠ 0 then none else
+  (List.range (cs.length / 2)).mapM fun i => do
+    let hi ← hexDigit (cs.getD (2 * i) ' ')
+    let lo ← hexDigit (cs.getD (2 * i + 1) ' ')
+    pure (UInt8.ofNat (16 * hi + lo))
+
+def hexOfBytes (b : StarkedAir.Spec.Block.Bytes) : String :=
+  String.join (b.map fun x => let s := String.ofList (Nat.toDigits 16 x.toNat); if s.length = 1 then "0" ++ s else s)
+
+/-- A whole transaction, as a block's transaction parser reads it. -/
+def parseTx (b : StarkedAir.Spec.Block.Bytes) : Option StarkedAir.Spec.Block.Tx :=
+  match StarkedAir.Spec.Block.tx b with
+  | some (t, []) => some t
+  | _ => none
+
 def answer (kind : String) (args : List String) : Option String := do
   match kind, args with
   | "compact", [n] => let n ← n.toNat?; pure <| match compactTarget n with | none => "none" | some t => hex64 t
@@ -48,6 +68,21 @@ def answer (kind : String) (args : List String) : Option String := do
   | "mtp", [ts] =>
     let ts ← (ts.splitOn ",").mapM String.toNat?
     pure (toString (medianTimePast ts))
+  | "sigops", [s] => let b ← bytesOfHexAny s; pure (toString (StarkedAir.Spec.Block.sigOps b))
+  | "merkle", [l] =>
+    let ls ← (l.splitOn ",").mapM bytesOfHexAny
+    let r := StarkedAir.Spec.Block.merkleRoot ls
+    pure s!"{hexOfBytes r.1} {if r.2 then 1 else 0}"
+  | "checktx", [s] =>
+    let b ← bytesOfHexAny s
+    pure <| match parseTx b with
+      | none => "deserialize"
+      | some t => (StarkedAir.Spec.Block.checkTx t).getD "ok"
+  | "txids", [s] =>
+    let b ← bytesOfHexAny s
+    pure <| match parseTx b with
+      | none => "deserialize"
+      | some t => s!"{hexOfBytes (StarkedAir.Spec.Block.txid t)} {hexOfBytes (StarkedAir.Spec.Block.wtxid t)}"
   | _, _ => none
 
 partial def loop (stdin : IO.FS.Stream) : IO Unit := do
