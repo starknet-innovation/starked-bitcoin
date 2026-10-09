@@ -128,6 +128,8 @@ pub fn build(b: *std.Build) void {
                 },
             }),
         });
+        // The pinned production VK (70 queries, 26 PoW bits, segments up to 4096 headers).
+        chainproof.root_module.addAnonymousImport("vk:mainnet", .{ .root_source_file = b.path("vk/mainnet-q70-p26-l20.vk") });
         chainproof.linkLibC();
         b.installArtifact(chainproof);
     }

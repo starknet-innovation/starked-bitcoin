@@ -2,6 +2,8 @@
 //!
 //!   chainproof setup <n_queries> <pow_bits> <max_log> <headers.bin> <out.vk>
 //!       The frozen node shape and the VK (leaf identities for segment log sizes 9..max_log).
+//! `<vk>` is a VK file, or `mainnet` for the pinned production VK built into the binary.
+//!
 //!   chainproof prove <vk> <headers.bin> <to> <out.sbchain> [--from <in.sbchain>]
 //!       Proves headers [0, to) (or extends a verified <in.sbchain> to `to`). Checkpoints after
 //!       every segment to <out.sbchain>.ckpt and resumes from it. Writes the file, then reloads and
@@ -101,8 +103,17 @@ fn setup(gpa: std.mem.Allocator, a: std.mem.Allocator, n_queries: u32, pow_bits:
     std.debug.print("  wrote {s}\n", .{out});
 }
 
+/// The pinned production VK (`vk/mainnet-q70-p26-l20.vk`): 70 queries, 26 PoW bits, segment log
+/// sizes 9..20. `mainnet` as the VK argument selects it.
+const mainnet_vk = @embedFile("vk:mainnet");
+
 fn loadVk(a: std.mem.Allocator, path: []const u8) !S.Vk {
-    return S.Vk.decode(a, try S.readFile(a, path));
+    const vk = try S.Vk.decode(a, if (std.mem.eql(u8, path, "mainnet")) mainnet_vk else try S.readFile(a, path));
+    var d: [8]u32 = try vk.digest(a);
+    std.debug.print("VK {s}: digest ", .{path});
+    for (&d) |w| std.debug.print("{x:0>8}", .{w});
+    std.debug.print(" (queries {d}, pow {d}, segment logs 9..{d})\n", .{ vk.fri.n_queries, vk.fri.pow_bits, vk.max_log });
+    return vk;
 }
 
 fn fileExists(path: []const u8) bool {
