@@ -212,6 +212,73 @@ theorem sha_len (hL25 : L ≤ 25) {x : ℕ} (hx : x < 2 ^ L)
   refine ⟨r0, d, hf, he, hc, hmid.symm.trans e1, ?_⟩
   rw [← heq, ← e2, hidx]
 
+theorem hash_fields_sat' : ∀ r < 2 ^ L, ∀ c ∈ Fields.constraints,
+    c.eval (2 ^ L) Fields.preCols pub (inst 1).main r = 0 := by
+  have := hsat.1 1 (by decide); rw [hL 1 (by decide)] at this; exact this
+
+/-- **Message data bytes are the block's.** A message data row reads the block byte at its position. -/
+theorem msg_read (hL25 : L ≤ 25) {r : ℕ} (hr : r < 2 ^ L) (hd : (inst 2).main Msg.D r = 1) :
+    ∃ r0, r0 < (pub 0).val ∧ (inst 2).main Msg.POS r = (r0 : F) ∧
+      (inst 2).main Msg.BYTE r = (inst 0).main BYTE r0 := by
+  classical
+  have mem : ∀ {i r k}, ((i, r, k) : Site) ∈ sites hashSys inst ↔
+      i < 4 ∧ r < 2 ^ L ∧ k < (hashSys.comp i).lookups.length := by
+    intro i r k
+    simp only [sites, List.mem_flatMap, List.mem_range, List.mem_map, Prod.mk.injEq]
+    constructor
+    · rintro ⟨i', hi, r', hr', k', hk', rfl, rfl, rfl⟩
+      exact ⟨hi, by rw [← hL i' hi]; exact hr', hk'⟩
+    · rintro ⟨hi, hr', hk'⟩
+      exact ⟨i, hi, r, by rw [hL i hi]; exact hr', k, hk', rfl, rfl, rfl⟩
+  have ms := hash_msg_sat hL hsat
+  have fs := hash_fields_sat' hL hsat
+  have hs0 : ((2, r, 0) : Site) ∈ sites hashSys inst := mem.mpr ⟨by decide, hr, by simp [hashSys, Msg.msg, Msg.lookups]⟩
+  have hm : siteMult hashSys inst pub (2, r, 0) = -1 := by
+    simp [siteMult, siteEval, siteLookup, hashSys, hL 2 (by decide), Msg.msg, Msg.lookups, Expr.eval, Msg.k,
+      StarkedAir.Sha256.eval_col, wrap_zero hr, hd]
+  have hv : siteVals hashSys inst pub (2, r, 0) = [(inst 2).main Msg.POS r, (inst 2).main Msg.BYTE r] := by
+    simp [siteVals, siteEval, siteLookup, hashSys, hL 2 (by decide), Msg.msg, Msg.lookups, Msg.k,
+      StarkedAir.Sha256.eval_col, wrap_zero hr]
+  have hb0 : bytes.air.Satisfied (inst 0).logSize pub (inst 0).main := by
+    have := hash_bytes_sat hL hsat; rw [hL 0 (by decide)]; exact this
+  have hP : 2 ^ (inst 0).logSize < P := by
+    rw [hL 0 (by decide)]; have := hash_rows_lt_P hL hL25; omega
+  have huse : ∀ s ∈ sites hashSys inst, s.1 ≠ 0 → siteRel hashSys s = REL_BYTE →
+      siteMult hashSys inst pub s = -1 ∨ siteMult hashSys inst pub s = 0 := by
+    intro s hs h0 hrel
+    obtain ⟨i, r', k⟩ := s
+    obtain ⟨hi, hr', hk'⟩ := mem.mp hs
+    simp only at h0
+    interval_cases i
+    · exact absurd rfl h0
+    · simp [hashSys, Fields.fields, Fields.lookups] at hk'
+      have hk7 : k < 7 := by
+        by_contra hc
+        have e7 : k = 7 := by omega
+        subst e7
+        simp [siteRel, siteLookup, hashSys, Fields.fields, Fields.lookups, Fields.REL_TX, REL_BYTE] at hrel
+      have := Fields.mult_vals fs hr' hk7
+      simpa [siteMult, siteEval, siteLookup, hashSys, Fields.fields, hL 1 (by decide)] using this
+    · simp [hashSys, Msg.msg, Msg.lookups] at hk'
+      interval_cases k
+      · have := Msg.bool_col ms (e := Msg.D) (by simp) hr'
+        simp [siteMult, siteEval, siteLookup, hashSys, hL 2 (by decide), Msg.msg, Msg.lookups, Expr.eval, Msg.k,
+          StarkedAir.Sha256.eval_col, wrap_zero hr']
+        rcases this with h | h <;> simp [h]
+      all_goals simp [siteRel, siteLookup, hashSys, Msg.msg, Msg.lookups, Fields.REL_TX, Msg.REL_MSGW,
+        Msg.REL_MLEN, REL_BYTE] at hrel
+    · simp [hashSys, Sha.sha, Sha.lookups] at hk'
+      interval_cases k <;> simp [siteRel, siteLookup, hashSys, Sha.sha, Sha.lookups, Msg.REL_MSGW, Msg.REL_MLEN,
+        Sha.REL_DIGEST, REL_BYTE] at hrel
+  have hcount : ((sites hashSys inst).filter fun s => s.1 ≠ 0 ∧ siteRel hashSys s = REL_BYTE).length < P := by
+      have := List.length_filter_le (fun s : Site => decide (s.1 ≠ 0 ∧ siteRel hashSys s = REL_BYTE)) (sites hashSys inst)
+      rw [hash_sites_len hL] at this
+      have := hash_rows_lt_P hL hL25
+      omega
+  obtain ⟨r0, hr0, hp, hb⟩ := read_byte hsat.2 rfl hb0 hP huse hcount
+    hs0 (by simp) (by simp [siteRel, siteLookup, hashSys, Msg.msg, Msg.lookups]) hm hv
+  exact ⟨r0, hr0, hp, hb⟩
+
 end System
 
 end StarkedAir.Block
