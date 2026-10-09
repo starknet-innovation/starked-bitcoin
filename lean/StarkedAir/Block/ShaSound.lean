@@ -207,21 +207,20 @@ theorem usew_bool {r : ℕ} (hr : r < n) : M USEW r = 0 ∨ M USEW r = 1 := by
       (norm_num at e7; done) | (norm_num at e9; done) | (norm_num at e10; done)
 
 /-- **A continuation starts from the previous period's output.** -/
-theorem input_chain {s : ℕ} (hs : s % 72 = 0) (h72 : 72 ≤ s) (hsn : s + 72 ≤ n) (h : M CHN s = 1) :
+theorem input_chain' {s : ℕ} (hs : s % 72 = 0) (h72 : 72 ≤ s) (hsn : s + 72 ≤ n) (h : M CHN s + M NPAD s = 1) :
     inputAt M s = outputAt M (s - 72) := by
   have row : ∀ q < 4, Sha256.word M Sha256.A (s + q) = Sha256.word M Sha256.A (s - 4 + q) ∧
       Sha256.word M Sha256.E (s + q) = Sha256.word M Sha256.E (s - 4 + q) := by
     intro q hq
     have hr : s + q < n := by omega
-    have hc : M CHN (s + q) = 1 := by
+    have hc : M CHN (s + q) = M CHN s := by
       rw [chn_eq hsat hr, per_const hsat (X := FST) (by simp) hs q (by omega) hr,
         per_const hsat (X := DBL) (by simp) hs q (by omega) hr, per_const hsat (X := NILS) (by simp) hs q (by omega) hr,
         per_const hsat (X := NODE) (by simp) hs q (by omega) hr, per_const hsat (X := NPAD) (by simp) hs q (by omega) hr,
-        ← chn_eq hsat (by omega), h]
-    have hnp : M NPAD (s + q) = 0 := by
-      rw [per_const hsat (X := NPAD) (by simp) hs q (by omega) hr]; exact (chn_one hsat (by omega) h).2.2.2.2
+        ← chn_eq hsat (by omega)]
+    have hnp : M NPAD (s + q) = M NPAD s := per_const hsat (X := NPAD) (by simp) hs q (by omega) hr
     have hsel : (Expr.mul (pre INIT) (.add (k CHN) (k NPAD))).eval n preCols pub M (s + q) = 1 := by
-      simp only [Expr.eval, init_row hsat hs hq hr, k, Sha256.eval_col, wrap_zero hr, one_mul, hc, hnp, add_zero]
+      simp only [Expr.eval, init_row hsat hs hq hr, k, Sha256.eval_col, wrap_zero hr, one_mul, hc, hnp, h]
     have hw : wrap n (s + q) (-4) = s - 4 + q := by
       rw [show (-4 : ℤ) = -((4 : ℕ) : ℤ) by simp, Sha256.wrap_back (by omega) hr]; omega
     constructor
@@ -239,6 +238,10 @@ theorem input_chain {s : ℕ} (hs : s % 72 = 0) (h72 : 72 ≤ s) (hsn : s + 72 �
     show s - 1 - 3 = s - 4 by omega] at *
   rw [a0, e0, a1, e1, a2, e2, a3, e3, show s - 4 + 1 = s - 3 by omega, show s - 4 + 2 = s - 2 by omega,
     show s - 4 + 3 = s - 1 by omega]
+
+theorem input_chain {s : ℕ} (hs : s % 72 = 0) (h72 : 72 ≤ s) (hsn : s + 72 ≤ n) (h : M CHN s = 1) :
+    inputAt M s = outputAt M (s - 72) :=
+  input_chain' hsat hs h72 hsn (by rw [h, (chn_one hsat (by omega) h).2.2.2.2, add_zero])
 
 theorem dbl_sat {c : Expr} (hc : c ∈ dblC) {r : ℕ} (hr : r < n) : c.eval n preCols pub M r = 0 :=
   hsat r hr c (by simp only [constraints, List.mem_append]; tauto)
@@ -521,6 +524,167 @@ theorem digest_sound {q : ℕ} (hq : 1 ≤ q) (hn : 72 * q + 72 ≤ n) (hd : M D
     (fun j h1 h2 => by rw [show 72 * q0 + 72 * j = 72 * (q0 + j) by ring]; exact c0 _ (by omega) (by omega))
     (q - q0) (by omega) le_rfl
   rw [dbl_out hsat (by omega) (by omega) hn hd, show 72 * q - 72 = 72 * q0 + 72 * (q - q0 - 1) by omega, hb]
+
+theorem npad_sat {c : Expr} (hc : c ∈ npadC) {r : ℕ} (hr : r < n) : c.eval n preCols pub M r = 0 :=
+  hsat r hr c (by simp only [constraints, List.mem_append]; tauto)
+
+/-- **A node's padding block** is the constant padding of a 64-byte message. -/
+theorem npad_message {s : ℕ} (hs : s % 72 = 0) (hsn : s + 72 ≤ n) (h : M NPAD s = 1) :
+    ∀ t < 16, messageAt M s t = BitVec.ofNat 32 (npadWord t) := by
+  intro t ht
+  have hr : s + 4 + t < n := by omega
+  have hd : M NPAD (s + 4 + t) = 1 := by
+    rw [show s + 4 + t = s + (4 + t) by ring, per_const hsat (X := NPAD) (by simp) hs (4 + t) (by omega) (by omega), h]
+  have ev := fun (i : ℕ) (f : ℕ → ℕ) (hi : preCols.getD i (.periodic [0]) = per72 f) => eval_per72 hsat hi hr
+  have hq : (s + 4 + t) % 72 = 4 + t := by omega
+  have hsel : (Expr.mul (k NPAD) (pre MSGROW)).eval n preCols pub M (s + 4 + t) = 1 := by
+    simp only [Expr.eval, k, Sha256.eval_col, wrap_zero hr, hd, one_mul]
+    rw [ev MSGROW (fun q => if 4 ≤ q ∧ q < 20 then 1 else 0) rfl, hq]; simp; omega
+  simp only [messageAt]
+  refine HeaderChain.eqLimbs_word _ (fun c hc => npad_sat hsat (by simpa [npadC] using hc) hr)
+    hsel (wrap_zero hr) (wbits hsat hr) (fun hh hhh => ?_)
+  have hlt : npadWord t < 2 ^ 32 := by unfold npadWord; split_ifs <;> norm_num
+  interval_cases hh
+  · rw [ev (NP_LO + 0) (fun q => if 4 ≤ q ∧ q < 20 then npadWord (q - 4) % 2 ^ 16 else 0) rfl, hq,
+      if_pos (by omega), show 4 + t - 4 = t by omega, HeaderChain.half16_ofNat hlt 0 (by norm_num)]; simp
+  · rw [ev (NP_LO + 1) (fun q => if 4 ≤ q ∧ q < 20 then npadWord (q - 4) / 2 ^ 16 else 0) rfl, hq,
+      if_pos (by omega), show 4 + t - 4 = t by omega, HeaderChain.half16_ofNat hlt 1 (by norm_num)]; simp
+
+/-- The padding block of a 64-byte message, as words. -/
+def npadBlock (t : ℕ) : Spec.Sha256.Word := BitVec.ofNat 32 (npadWord t)
+
+/-- **A node's digest.** A second hash at period `q` after a padding block (period `q − 1`) after a node
+block (period `q − 2`): SHA256d of the node block's 16 words. -/
+theorem node_out {q : ℕ} (hq : 2 ≤ q) (hn : 72 * q + 72 ≤ n) (hd : M DBL (72 * q) = 1)
+    (hp : M NPAD (72 * (q - 1)) = 1) (ho : M NODE (72 * (q - 2)) = 1) :
+    outputAt M (72 * q) = Spec.Sha256.compress Spec.Sha256.IV (dblBlock
+      (Spec.Sha256.compress (Spec.Sha256.compress Spec.Sha256.IV (messageAt M (72 * (q - 2)))) npadBlock)) := by
+  have s2 : (72 * (q - 2)) % 72 = 0 := by omega
+  have s1 : (72 * (q - 1)) % 72 = 0 := by omega
+  -- the node block starts from the IV
+  have hf0 : M FST (72 * (q - 2)) = 0 := by
+    have := (kinds_excl hsat (show 72 * (q - 2) < n by omega)).2.2.2.1; rw [ho, one_mul] at this; exact this
+  have hd0 : M DBL (72 * (q - 2)) = 0 := by
+    have := (kinds_excl hsat (show 72 * (q - 2) < n by omega)).2.2.2.2.1; rw [ho, one_mul] at this; exact this
+  have o2 : outputAt M (72 * (q - 2)) = Spec.Sha256.compress Spec.Sha256.IV (messageAt M (72 * (q - 2))) := by
+    rw [← period_compress hsat s2 (by omega), input_iv hsat s2 (by omega) (by rw [hf0, hd0, ho]; ring)]
+  -- the padding block continues it
+  have hc0 : M CHN (72 * (q - 1)) = 0 := by
+    have hr : 72 * (q - 1) < n := by omega
+    obtain ⟨-, -, -, -, -, -, -, e8, e9, e10⟩ := kinds_excl hsat hr
+    rw [hp, one_mul] at e8 e9 e10
+    have e7 := (kinds_excl hsat hr).2.2.2.2.2.2.1
+    rw [hp, mul_one] at e7
+    rw [chn_eq hsat hr, e8, e9, e10, e7, hp]; ring
+  have o1 : outputAt M (72 * (q - 1)) = Spec.Sha256.compress (outputAt M (72 * (q - 2))) npadBlock := by
+    rw [← period_compress hsat s1 (by omega), input_chain' hsat s1 (by omega) (by omega) (by rw [hc0, hp]; ring),
+      show 72 * (q - 1) - 72 = 72 * (q - 2) by omega]
+    exact HeaderChain.compress_congr _ (fun t ht => npad_message hsat s1 (by omega) hp t ht)
+  rw [dbl_out hsat (by omega) (by omega) hn hd, show 72 * q - 72 = 72 * (q - 1) by omega, o1, o2]
+
+theorem mut_sat {c : Expr} (hc : c ∈ mutC) {r : ℕ} (hr : r < n) : c.eval n preCols pub M r = 0 :=
+  hsat r hr c (by simp only [constraints, List.mem_append]; tauto)
+
+/-- **The mutation check.** A node block that does not duplicate its child has two different halves. -/
+theorem node_distinct {s : ℕ} (hs : s % 72 = 0) (hsn : s + 72 ≤ n) (ho : M NODE s = 1) (hd : M NDUP s = 0) :
+    ∃ t < 8, messageAt M s t ≠ messageAt M s (t + 8) := by
+  by_contra hne
+  push Not at hne
+  -- every compared limb pair is equal, so each is-zero flag is 1
+  have flags : ∀ t < 8, M ZZ (s + 12 + t) = 1 := by
+    intro t ht
+    have hr : s + 12 + t < n := by omega
+    have dl : ∀ h ≤ 1, (dLimb h).eval n preCols pub M (s + 12 + t) = 0 := by
+      intro h hh
+      simp only [dLimb, Expr.eval]
+      rw [show (-8 : ℤ) = -((8 : ℕ) : ℤ) by simp, Sha256.limbs_back (sha_sat hsat) hr (by omega) (by simp [Sha256.W]) hh,
+        show (0 : ℤ) = -((0 : ℕ) : ℤ) by simp, Sha256.limbs_back (sha_sat hsat) hr (by omega) (by simp [Sha256.W]) hh]
+      have e := hne t ht
+      simp only [messageAt] at e
+      rw [show s + 12 + t - 0 = s + 4 + (t + 8) by omega, show s + 12 + t - 8 = s + 4 + t by omega, e, sub_self]
+    have zf : ∀ (Z IV : ℕ) (h : ℕ), h ≤ 1 →
+        Expr.mul (om (k Z)) (.sub (.mul (dLimb h) (k IV)) one) ∈ mutC → M Z (s + 12 + t) = 1 := by
+      intro Z IV h hh hm
+      have := mut_sat hsat hm hr
+      simp only [Expr.eval, om, one, Sha256.eval_cst, k, Sha256.eval_col, wrap_zero hr, dl h hh, zero_mul, zero_sub,
+        Nat.cast_one, mul_neg, mul_one, neg_eq_zero, sub_eq_zero] at this
+      exact this.symm
+    have zl := zf ZL IL 0 (by norm_num) (by simp [mutC])
+    have zh := zf ZH IH 1 (by norm_num) (by simp [mutC])
+    have := mut_sat hsat (c := .sub (k ZZ) (.mul (k ZL) (k ZH))) (by simp [mutC]) hr
+    simp only [Expr.eval, k, Sha256.eval_col, wrap_zero hr, zl, zh, mul_one, sub_eq_zero] at this
+    exact this
+  -- so `ALLEQ` is 1 through row 19
+  have alleq : ∀ t < 8, M ALLEQ (s + 12 + t) = 1 := by
+    intro t ht
+    induction t with
+    | zero =>
+      have hr : s + 12 < n := by omega
+      have := mut_sat hsat (c := .mul (pre CMPF) (.sub (k ALLEQ) (k ZZ))) (by simp [mutC]) hr
+      rw [show Expr.eval n preCols pub M (s + 12) (.mul (pre CMPF) (.sub (k ALLEQ) (k ZZ))) =
+        (pre CMPF).eval n preCols pub M (s + 12) * (M ALLEQ (s + 12) - M ZZ (s + 12)) by
+          simp [Expr.eval, k, Sha256.eval_col, wrap_zero hr],
+        eval_per72 hsat (i := CMPF) (f := fun q => if q = 12 then 1 else 0) rfl hr,
+        show (s + 12) % 72 = 12 by omega] at this
+      have z := flags 0 (by norm_num)
+      simp only [Nat.add_zero] at z ⊢
+      simp only [if_true, Nat.cast_one, one_mul, sub_eq_zero, z] at this; exact this
+    | succ t ih =>
+      have hr : s + 12 + t + 1 < n := by omega
+      have := mut_sat hsat (c := .mul (pre CMPR) (.sub (k ALLEQ) (.mul (kp ALLEQ) (k ZZ)))) (by simp [mutC]) hr
+      rw [show Expr.eval n preCols pub M (s + 12 + t + 1) (.mul (pre CMPR) (.sub (k ALLEQ) (.mul (kp ALLEQ) (k ZZ)))) =
+        (pre CMPR).eval n preCols pub M (s + 12 + t + 1) *
+          (M ALLEQ (s + 12 + t + 1) - M ALLEQ (s + 12 + t) * M ZZ (s + 12 + t + 1)) by
+          simp only [Expr.eval, k, kp, Sha256.eval_col, wrap_zero hr]
+          rw [show (-1 : ℤ) = -((1 : ℕ) : ℤ) by simp, Sha256.wrap_back (by omega) hr]; rfl,
+        eval_per72 hsat (i := CMPR) (f := fun q => if 13 ≤ q ∧ q < 20 then 1 else 0) rfl hr,
+        show (s + 12 + t + 1) % 72 = 13 + t by omega] at this
+      have z := flags (t + 1) ht
+      rw [show s + 12 + (t + 1) = s + 12 + t + 1 by ring] at z ⊢
+      rw [if_pos (by omega), Nat.cast_one, one_mul, ih (by omega), z, one_mul, sub_eq_zero] at this
+      exact this
+  -- row 19 forbids it
+  have hr : s + 19 < n := by omega
+  have := mut_sat hsat (c := .mul (pre DRR) (.mul (k NNE) (k ALLEQ))) (by simp [mutC]) hr
+  have hnne : M NNE (s + 19) = 1 := by
+    have e := nflag_sat hsat (c := .sub (k NNE) (.mul (k NODE) (om (k NDUP)))) (by simp [nodeFlagC]) hr
+    simp only [Expr.eval, k, om, one, Sha256.eval_col, Sha256.eval_cst, wrap_zero hr, Nat.cast_one, sub_eq_zero] at e
+    rw [e, show s + 19 = s + 19 by rfl, per_const hsat (X := NODE) (by simp) hs 19 (by norm_num) hr,
+      per_const hsat (X := NDUP) (by simp) hs 19 (by norm_num) hr, ho, hd]; ring
+  have a19 := alleq 7 (by norm_num)
+  rw [show s + 12 + 7 = s + 19 by ring] at a19
+  rw [show Expr.eval n preCols pub M (s + 19) (.mul (pre DRR) (.mul (k NNE) (k ALLEQ))) =
+    (pre DRR).eval n preCols pub M (s + 19) * (M NNE (s + 19) * M ALLEQ (s + 19)) by
+      simp [Expr.eval, k, Sha256.eval_col, wrap_zero hr],
+    eval_per72 hsat (i := DRR) (f := fun q => if q = 19 then 1 else 0) rfl hr, show (s + 19) % 72 = 19 by omega,
+    hnne, a19] at this
+  simp at this
+
+/-- **The digest tuple** at a second hash's last row is the output state's words, 16-bit limbs. -/
+theorem digest_tuple {s : ℕ} (hsn : s + 72 ≤ n) {j : ℕ} (hj : j < 16) :
+    (digestLimbs.getD j (cst 0)).eval n preCols pub M (s + 71) =
+      ((Sha256.half16 (Spec.Bitcoin.stateWord (outputAt M s) (j / 2)) (j % 2) : ℕ) : F) := by
+  have hr : s + 71 < n := by omega
+  have hw : j / 2 < 8 := by omega
+  have hh : j % 2 ≤ 1 := by omega
+  simp only [digestLimbs, List.getD_eq_getElem?_getD, List.getElem?_map, List.getElem?_range hj, Option.map_some,
+    Option.getD_some, outputAt]
+  rw [HeaderChain.stAt_word _ _ hw]
+  split_ifs with h4
+  · rw [Sha256.limbs_back (sha_sat hsat) hr (by omega) (by simp [Sha256.A]) hh]
+  · rw [Sha256.limbs_back (sha_sat hsat) hr (by omega) (by simp [Sha256.E]) hh]
+
+/-- **A node block's word tuples** (rows 11 and 19): message words `0..7` and `8..15`, limbs. -/
+theorem node_tuple {s : ℕ} (hsn : s + 72 ≤ n) {j : ℕ} (hj : j < 16) (half : ℕ) (hhalf : half ≤ 1) :
+    (nodeWordLimbs.getD j (cst 0)).eval n preCols pub M (s + 11 + 8 * half) =
+      ((Sha256.half16 (messageAt M s (8 * half + j / 2)) (j % 2) : ℕ) : F) := by
+  have hr : s + 11 + 8 * half < n := by omega
+  have hh : j % 2 ≤ 1 := by omega
+  simp only [nodeWordLimbs, List.getD_eq_getElem?_getD, List.getElem?_map, List.getElem?_range hj, Option.map_some,
+    Option.getD_some, messageAt]
+  rw [show (((j / 2 : ℕ) : ℤ) - 7) = -((7 - j / 2 : ℕ) : ℤ) by omega,
+    Sha256.limbs_back (sha_sat hsat) hr (by omega) (by simp [Sha256.W]) hh,
+    show s + 11 + 8 * half - (7 - j / 2) = s + 4 + (8 * half + j / 2) by omega]
 
 end Period
 
