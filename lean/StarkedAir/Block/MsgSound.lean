@@ -572,6 +572,99 @@ theorem ezE_eval {r : ℕ} (hr : r < n) :
       (1 - M MT r) * (M POS r - (M TL r + 3)) := by
   simp only [ezE, Expr.eval, ev_k hr, om, one, eval_cst, Nat.cast_one]; push_cast; ring
 
+theorem cont_bool {r : ℕ} (hr : r < n) : M CONT r = 0 ∨ M CONT r = 1 := by
+  rw [(helpers hsat hr).1]
+  rcases bool_col hsat (e := D) (by simp) hr with d | d <;> rcases bool_col hsat (e := Z) (by simp) hr with z | z <;>
+    simp [d, z]
+
+/-- A message's first row is in piece 0 only. -/
+theorem first_pieces {r : ℕ} (hr : r < n) (hf : M FIRSTM r = 1) :
+    M PC0 r = 1 ∧ M PC1 r = 0 ∧ M PC2 r = 0 := by
+  have := sat hsat (mem_transC (c := .sub (.sub (k PC0) (k FIRSTM)) (.mul (kp CONT) (kp PC0))) (by simp [transC])) hr
+  simp only [Expr.eval, ev_k hr, ev_kpp hr, hf, sub_eq_zero] at this
+  have h0 : M PC0 r = 1 := by
+    rcases bool_col hsat (e := PC0) (by simp) hr with z | z
+    · rw [z] at this
+      have hp : prv n r < n := Nat.mod_lt _ (by omega)
+      rcases cont_bool hsat hp with c | c <;> rcases bool_col hsat (e := PC0) (by simp) hp with q | q <;>
+        rw [c, q] at this
+      · exact absurd (by linear_combination -this) (one_ne_zero (α := F))
+      · exact absurd (by linear_combination -this) (one_ne_zero (α := F))
+      · exact absurd (by linear_combination -this) (one_ne_zero (α := F))
+      · exact absurd (by linear_combination -this) one_add_one_ne
+    · exact z
+  have hs := sat hsat (mem_transC (c := .sub (.add (k PC0) (.add (k PC1) (k PC2))) (k D)) (by simp [transC])) hr
+  simp only [Expr.eval, ev_k hr, firstm_d hsat hr hf, h0] at hs
+  have b1 := bool_val (bool_col hsat (e := PC1) (by simp) hr)
+  have b2 := bool_val (bool_col hsat (e := PC2) (by simp) hr)
+  have hv : (M PC1 r).val + (M PC2 r).val = 0 := by
+    refine natCast_inj_of_lt ?_ (by unfold P; norm_num) ?_
+    · have := b1.2; have := b2.2; exact lt_P (by omega)
+    · push_cast; rw [← b1.1, ← b2.1]; linear_combination hs
+  exact ⟨h0, (ZMod.val_eq_zero _).mp (by omega), (ZMod.val_eq_zero _).mp (by omega)⟩
+
+/-- `MT` is a function of the tuple flags. -/
+theorem mt_eq {r : ℕ} (hr : r < n) : M MT r = (1 - M WTX r - M HDR r) * M SEG r := by
+  rw [defn hsat (a := MT) (e := .mul (.sub (om (k WTX)) (k HDR)) (k SEG)) (mem_msgC (by simp [msgC])) hr]
+  simp only [Expr.eval, om, one, eval_cst, Nat.cast_one, ev_k hr]
+
+/-- **Whole messages** (`MT = 0`: the header, wtxids, legacy txids): data rows `0..d` read
+`TA, TA + 1, …`, and `d` is the first index with `TA + d = TL + 3`. -/
+theorem whole_msg {r0 : ℕ} (hr0 : r0 < n) (hf : M FIRSTM r0 = 1) (hmt : M MT r0 = 0) :
+    ∃ d, r0 + d < n ∧ M ENDD (r0 + d) = 1 ∧
+      ∀ j ≤ d, M D (r0 + j) = 1 ∧ M IDX (r0 + j) = j ∧ M POS (r0 + j) = M TA r0 + j ∧
+        (M TA r0 + j = M TL r0 + 3 ↔ j = d) := by
+  obtain ⟨d, hc, he⟩ := data_exit hsat hr0 hf
+  -- along the data: same tuple, so `MT = 0`, no switch, piece 0
+  have row : ∀ j ≤ d, r0 + j < n ∧ M D (r0 + j) = 1 ∧ M IDX (r0 + j) = j ∧ M MT (r0 + j) = 0 ∧
+      M PC0 (r0 + j) = 1 ∧ M PC1 (r0 + j) = 0 ∧ M PC2 (r0 + j) = 0 ∧
+      M TA (r0 + j) = M TA r0 ∧ M TL (r0 + j) = M TL r0 := by
+    intro j hj
+    induction j with
+    | zero =>
+      simp only [add_zero]
+      obtain ⟨a, b, c⟩ := first_pieces hsat hr0 hf
+      have hx := (data_walk hsat hr0 hf 0 (fun _ h => absurd h (Nat.not_lt_zero _))).2.2.1
+      simp only [add_zero, Nat.cast_zero] at hx
+      exact ⟨hr0, firstm_d hsat hr0 hf, hx, hmt, a, b, c, trivial, trivial⟩
+    | succ j ih =>
+      obtain ⟨hl, -, -, m0, p0, p1, p2, -⟩ := ih (by omega)
+      obtain ⟨hl2, hd2, hx2, -, ht⟩ := data_walk hsat hr0 hf (j + 1) (fun i hi => hc i (by omega))
+      have hcont : M CONT (r0 + j) = 1 := by
+        rcases hc j (by omega) with c | c
+        · exact c
+        · rw [(helpers hsat hl).2.1, m0] at c; simp at c
+      have h1 : r0 + j + 1 < n := by rw [← add_assoc] at hl2; exact hl2
+      obtain ⟨-, -, -, q0, q1, q2⟩ := step_cont hsat h1 hcont
+      rw [show r0 + (j + 1) = r0 + j + 1 by ring] at hd2 hx2 ht ⊢
+      have hm : M MT (r0 + j + 1) = 0 := by
+        rw [mt_eq hsat h1, ht WTX (by simp), ht HDR (by simp), ht SEG (by simp), ← mt_eq hsat hr0, hmt]
+      exact ⟨h1, hd2, hx2, hm, q0.trans p0, q1.trans p1, q2.trans p2, ht TA (by simp), ht TL (by simp)⟩
+  refine ⟨d, (row d le_rfl).1, he, fun j hj => ?_⟩
+  obtain ⟨hl, hd, hx, m0, p0, p1, p2, ta, tl⟩ := row j hj
+  have hpos : M POS (r0 + j) = M TA r0 + j := by
+    rw [data_pos hsat hl hd, p1, p2, ta, hx]; ring
+  refine ⟨hd, hx, hpos, ?_⟩
+  have hz : M Z (r0 + j) = 1 ↔ M TA r0 + j = M TL r0 + 3 := by
+    rw [z_iff hsat hl, ezE_eval hl, m0, hpos, tl]; simp [sub_eq_zero]
+  rw [← hz]
+  constructor
+  · intro z
+    by_contra hne
+    have hcont : M CONT (r0 + j) = 1 := by
+      rcases hc j (by omega) with c | c
+      · exact c
+      · rw [(helpers hsat hl).2.1, m0] at c; simp at c
+    rw [(step_cont hsat (by
+      have := (row (j + 1) (by omega)).1; rw [← add_assoc] at this; exact this) hcont).1] at z
+    exact zero_ne_one z
+  · rintro rfl
+    obtain ⟨-, -, e⟩ := helpers hsat hl
+    rw [e, hd, one_mul] at he
+    rcases bool_col hsat (e := Z) (by simp) hl with z | z
+    · rw [z, (helpers hsat hl).2.1, z] at he; simp at he
+    · exact z
+
 end Rows
 
 end StarkedAir.Block.Msg
