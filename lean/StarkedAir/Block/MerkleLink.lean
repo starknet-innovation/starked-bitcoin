@@ -560,6 +560,130 @@ theorem header_word (hL25 : L ≤ 25) {r : ℕ} (hr : r < 2 ^ L) (hrt : (inst 4)
   · rw [← e3, show r0 + (39 + 4 * w) - 3 = r0 + (36 + 4 * w) by omega,
       show r0 + (39 + 4 * w) - 2 = r0 + (37 + 4 * w) by omega, (rd _ (by omega)).2, (rd _ (by omega)).2]
 
+/-- **Merkle soundness (M3a.4).** In a satisfied (bytes, fields, msg, sha, merkle) system with at most `2^25`
+rows, the block's bytes parse as a block `b` whose txid Merkle root is the header's Merkle field and whose
+tree is not mutated: `bad-txnmrklroot` and `bad-txns-duplicate` cannot fire. -/
+theorem merkle_sound (hL25 : L ≤ 25) :
+    ∃ b, Spec.Block.parseBlock (Fields.blockBytes (inst 0).main (pub 0).val) = some b ∧
+      Spec.Block.merkleRoot (b.txs.map Spec.Block.txid) = (Spec.Block.headerMerkle b, false) := by
+  have ms := hash_msg_sat hL hsat
+  have fs := hash_fields_sat' hL hsat
+  have hb0 := hash_bytes_sat hL hsat
+  have ks := hash_merkle_sat hL hsat
+  have h25 : 2 ^ L ≤ 2 ^ 25 := Nat.pow_le_pow_right (by norm_num) hL25
+  norm_num at h25
+  have hn0 : 0 < 2 ^ L := by positivity
+  obtain ⟨m, hmn, hnp, hpad, hfit, hcs, cat, mono, hSm⟩ :=
+    Fields.block_ctx hL25 fs hb0 (hash_fields_read hL hsat hL25)
+  obtain ⟨b, hparse, hhead, hlenv, hN1, hN25, -⟩ :=
+    Fields.block_index hL25 fs hb0 (hash_fields_read hL hsat hL25) hmn hnp hpad hfit hcs cat mono hSm
+  refine ⟨b, hparse, ?_⟩
+  set N := b.txs.length with hNdef
+  -- public input 1 is the transaction count
+  have hN : pub 1 = (N : F) := by
+    have := fs 0 hn0 (.mul Fields.first (.sub (Fields.k Fields.VAL) (.pub 1)))
+      (by simp only [Fields.constraints, List.mem_append]; right; simp [Fields.pubC])
+    simp only [Expr.eval, Fields.ev_first hn0, if_true, one_mul, Fields.ev_k hn0, sub_eq_zero] at this
+    rw [← this, hlenv, ZMod.natCast_zmod_val]
+  -- the number of levels
+  have hex : ∃ H, Merkle.cntL N H = 1 := ⟨N, by
+    have := Merkle.cntL_bound hN1 N; have := Merkle.cntL_pos hN1 N; omega⟩
+  obtain ⟨H, hH, hHl⟩ : ∃ H, Merkle.cntL N H = 1 ∧ ∀ l < H, 2 ≤ Merkle.cntL N l := by
+    refine ⟨Nat.find hex, Nat.find_spec hex, fun l hl => ?_⟩
+    have := Nat.find_min hex hl; have := Merkle.cntL_pos hN1 l; omega
+  -- the root row reads the top entry's digest
+  obtain ⟨rr, hrr, hrt, hrid⟩ := Merkle.root_row ks hn0 (by omega) hN hN1 (by omega) hH hHl
+  have hmr : siteMult hashSys inst pub (4, rr, 2) = -1 := by
+    simp [siteMult, siteEval, siteLookup, hashSys, hL 4 (by decide), Merkle.merkle, Merkle.lookups, Expr.eval,
+      Merkle.k, StarkedAir.Sha256.eval_col, wrap_zero hrr, hrt]
+  obtain ⟨q, hq, hd, hv⟩ := digest_linked hL hsat hL25 (i := 4) (k := 2) (Or.inr ⟨rfl, rfl⟩) hrr hmr
+  have hv4 : siteVals hashSys inst pub (4, rr, 2) = (inst 4).main Merkle.RIDC rr ::
+      (List.range 16).map (fun j => (inst 4).main (Merkle.RL j) rr) := by
+    simp [siteVals, siteEval, siteLookup, hashSys, hL 4 (by decide), Merkle.merkle, Merkle.lookups, Merkle.k,
+      StarkedAir.Sha256.eval_col, wrap_zero hrr]
+  rw [digest_vals hL hsat hq, hv4] at hv
+  simp only [List.cons.injEq] at hv
+  obtain ⟨hmid, hlimbs⟩ := hv
+  have rl : ∀ j < 16, ((Sha256.half16 (Spec.Bitcoin.stateWord (outputAt (inst 3).main (72 * q)) (j / 2)) (j % 2) : ℕ) : F) =
+      (inst 4).main (Merkle.RL j) rr := by
+    intro j hj
+    have e := congrArg (fun l => l[j]?) hlimbs
+    simpa [List.getElem?_map, List.getElem?_range hj] using e
+  -- the root's digest is the top entry of the txid tree
+  have hroot := id_digest hL hsat hL25 hparse hN hN1 hN25 H (by
+      rcases Nat.eq_zero_or_pos H with h | h
+      · exact Or.inl h
+      · exact Or.inr ⟨h, hHl (H - 1) (by omega)⟩) 0 (by rw [hH]; norm_num) q hq hd (hmid.trans hrid)
+  -- the root's digest is the header's Merkle field
+  have hlen := lvs_len (b.txs.map Spec.Block.txid) H
+  simp only [List.length_map, ← hNdef, hH] at hlen
+  have hfield : Spec.Block.stateBytes (outputAt (inst 3).main (72 * q)) = Spec.Block.headerMerkle b := by
+    have hw0 := header_word hL hsat hL25 hrr hrt (w := 0) (by norm_num)
+    have hLEN : 79 < (pub 0).val := hw0.1
+    have tb : ∀ p, p < 80 → ((inst 0).main BYTE p).val < 256 := fun p hp =>
+      Block.byte_lt (n := 2 ^ L) hb0 (by
+        have := (Block.bytes_rows (n := 2 ^ L) (pub := pub) (main := (inst 0).main) hb0
+          (by have := hash_rows_lt_P hL hL25; omega) hn0).2.1
+        omega)
+    have hR : (Fields.blockBytes (inst 0).main (pub 0).val).length = (pub 0).val := Fields.blockBytes_length _ _
+    apply HashSpec.stateBytes_of_words
+    · rw [Spec.Block.headerMerkle, hhead]; simp [Fields.slice, hR]; omega
+    · intro w hw
+      obtain ⟨-, e0, e1⟩ := header_word hL hsat hL25 hrr hrt hw
+      have l0 := rl (2 * w) (by omega)
+      have l1 := rl (2 * w + 1) (by omega)
+      rw [show 2 * w / 2 = w by omega, show 2 * w % 2 = 0 by omega, e0] at l0
+      rw [show (2 * w + 1) / 2 = w by omega, show (2 * w + 1) % 2 = 1 by omega, e1] at l1
+      set Sw := Spec.Bitcoin.stateWord (outputAt (inst 3).main (72 * q)) w with hSw
+      have hh0 := half16_lt Sw 0
+      have hh1 := half16_lt Sw 1
+      have t36 := tb (36 + 4 * w) (by omega)
+      have t37 := tb (37 + 4 * w) (by omega)
+      have t38 := tb (38 + 4 * w) (by omega)
+      have t39 := tb (39 + 4 * w) (by omega)
+      have c0 : ((Sha256.half16 Sw 0 : ℕ) : F) =
+          ((256 * ((inst 0).main BYTE (38 + 4 * w)).val + ((inst 0).main BYTE (39 + 4 * w)).val : ℕ) : F) := by
+        rw [l0]; push_cast; simp
+      have c1 : ((Sha256.half16 Sw 1 : ℕ) : F) =
+          ((256 * ((inst 0).main BYTE (36 + 4 * w)).val + ((inst 0).main BYTE (37 + 4 * w)).val : ℕ) : F) := by
+        rw [l1]; push_cast; simp
+      have v0 := natCast_inj_of_lt (Fields.lt_P (by omega)) (Fields.lt_P (by omega)) c0
+      have v1 := natCast_inj_of_lt (Fields.lt_P (by omega)) (Fields.lt_P (by omega)) c1
+      -- the header field's bytes
+      have g : ∀ k < 4, ((Spec.Block.headerMerkle b).getD (4 * w + k) 0).toNat = ((inst 0).main BYTE (36 + 4 * w + k)).val := by
+        intro k hk
+        have h32 : 4 * w + k < 32 := by omega
+        have h80 : 36 + (4 * w + k) < 80 := by omega
+        have h1 : 36 + (4 * w + k) < (pub 0).val := by omega
+        have e : (Spec.Block.headerMerkle b).getD (4 * w + k) 0 =
+            (Fields.blockBytes (inst 0).main (pub 0).val).getD (36 + (4 * w + k)) 0 := by
+          rw [Spec.Block.headerMerkle, hhead]
+          simp [Fields.slice, List.getD_eq_getElem?_getD, List.getElem?_take, List.getElem?_drop, h32, h80]
+        rw [e, Fields.blockBytes_get h1, UInt8.toNat_ofNat', show 36 + (4 * w + k) = 36 + 4 * w + k by ring]
+        exact Nat.mod_eq_of_lt (tb _ (by omega))
+      have g0 := g 0 (by norm_num); have g1 := g 1 (by norm_num); have g2 := g 2 (by norm_num); have g3 := g 3 (by norm_num)
+      simp only [Nat.add_zero] at g0
+      rw [g0, g1, g2, g3]
+      apply BitVec.eq_of_toNat_eq
+      simp only [Sha256.half16] at v0 v1
+      have := Sw.isLt
+      simp only [BitVec.toNat_ofNat]
+      rw [show 36 + 4 * w + 1 = 37 + 4 * w by ring, show 36 + 4 * w + 2 = 38 + 4 * w by ring,
+        show 36 + 4 * w + 3 = 39 + 4 * w by ring]
+      omega
+  -- assemble
+  rw [Spec.Block.merkleRoot_lvs _ H (fun k hk => by
+      have := lvs_len (b.txs.map Spec.Block.txid) k; simp only [List.length_map, ← hNdef] at this
+      rw [this]; exact hHl k hk) (by rw [hlen])]
+  have hnodup := tree_hashed hL hsat hL25 hparse hN hN1 hN25 hH hHl hq hd (hmid.trans hrid)
+  have hany : ((List.range H).any fun k => Spec.Block.dupPair (Spec.Block.lvs (b.txs.map Spec.Block.txid) k)) = false := by
+    rw [List.any_eq_false]; intro k hk; rw [hnodup k (List.mem_range.mp hk)]; simp
+  rw [hany, ← hfield, hroot]
+  obtain ⟨a, ha⟩ : ∃ a, Spec.Block.lvs (b.txs.map Spec.Block.txid) H = [a] := by
+    match h : Spec.Block.lvs (b.txs.map Spec.Block.txid) H, hlen with
+    | [a], _ => exact ⟨a, rfl⟩
+  rw [ha]; rfl
+
 end System
 
 end StarkedAir.Block

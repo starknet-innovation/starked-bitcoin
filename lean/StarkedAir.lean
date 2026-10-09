@@ -58,6 +58,7 @@ import StarkedAir.Block.ShaSound
 import StarkedAir.Block.HashSpec
 import StarkedAir.Block.Link
 import StarkedAir.Block.HashSound
+import StarkedAir.Block.MerkleLink
 import StarkedAir.Spec.BlockTokens
 import StarkedAir.Spec.TxSplit
 import StarkedAir.Spec.MerkleLevels
