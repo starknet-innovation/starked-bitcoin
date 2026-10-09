@@ -311,3 +311,75 @@ test "rec fuzz: every guessed value of a LogUp system proof is bound" {
     const findings = try campaign(a, &values, runner, "logup-system", sampleBudget());
     try std.testing.expectEqual(@as(usize, 0), findings.len);
 }
+
+test "rec fuzz: every guessed value of a header-tree segment proof is bound, through the leaf circuit" {
+    // The production shape: the (headers, Blake2s tree) system with its public lookup entry
+    // node(k, 0, T), verified by the actual leaf circuit (glue program + plain verifier).
+    const H = @import("../btc/header_chain.zig");
+    const HT = @import("../btc/header_tree.zig");
+    const system = @import("../air/system.zig");
+    const leaf = @import("leaf.zig");
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const log_size: u32 = 12;
+    const headers = try H.loadHeaders(a, @embedFile("testdata:mainnet_headers_0_16"));
+    const hair = (try ir.Air.parseJson(a, HT.header_json)).value;
+    const tair = (try ir.Air.parseJson(a, HT.tree_json)).value;
+    const hw = try H.generateFrom(a, log_size, headers, H.genesis_start);
+    const tw = try HT.generate(a, log_size, hw);
+    const k: u32 = log_size - 8;
+    const parts = [_]system.Part{ .{ .air = &hair, .log_size = log_size, .pubs = &hw.pubs }, .{ .air = &tair, .log_size = log_size } };
+    const mains = [_][]const []const M31{ @ptrCast(tw.header_main), @ptrCast(tw.tree_main) };
+    const ext = [_]system.PubEntry{try HT.rootEntry(a, k, tw.root)};
+    const cfg = try prove_rec.config(log_size);
+    const E = prove_rec.Engine(@import("stwo_cpu_backend").CpuBackend);
+    const proof_a = try system.prove(E, a, cfg, &parts, &mains);
+    const proof_b = try system.prove(E, a, cfg, &parts, &mains);
+    var capture: core.verifier.ProofCapture(prove_rec.Hasher) = undefined;
+    try system.verifyCapture(a, cfg, &parts, &ext, proof_a, &capture);
+    const config = pv.PlainConfig{ .log_trace_size = log_size, .fri = cfg.fri_config, .system = true, .parts = &.{
+        .{ .n_preprocessed = hair.n_preprocessed, .main_offsets = try pv.mainOffsets(a, hair), .n_inter = 4 },
+        .{ .n_preprocessed = tair.n_preprocessed, .main_offsets = try pv.mainOffsets(a, tair), .n_inter = 8 },
+    } };
+    const pre_root: [32]u8 = std.mem.toBytes(try system.preprocessedRoot(a, cfg, &parts));
+    var values = try pv.fromCapture(a, prove_rec.Hasher, &proof_b.stark, &capture, config, proof_b.claimed_sums);
+    var pubs: [leaf.N_PUB]M31 = undefined;
+    @memcpy(pubs[0..leaf.T_BASE], &hw.pubs);
+    @memcpy(pubs[leaf.T_BASE..], &HT.limbs(tw.root));
+
+    const Runner = struct {
+        gpa: std.mem.Allocator,
+        config: pv.PlainConfig,
+        airs: [2]*const ir.Air,
+        digests: [2][32]u8,
+        pre_root: [32]u8,
+        k: u32,
+        pubs: []const M31,
+        fn run(self: @This(), v: *const pv.PlainProof(QM31)) !bool {
+            var ctx = leaf.buildLeafCircuit(self.gpa, v, self.config, self.airs, self.digests, self.pre_root, self.k, self.pubs) catch |e|
+                return errored(e);
+            defer ctx.deinit();
+            return verdict(&ctx);
+        }
+    };
+    var runner = Runner{ .gpa = gpa, .config = config, .airs = .{ &hair, &tair }, .digests = .{ try hair.digest(a), try tair.digest(a) }, .pre_root = pre_root, .k = k, .pubs = &pubs };
+    try std.testing.expect(try runner.run(&values));
+    const findings = try campaign(a, &values, runner, "header-tree segment (leaf circuit)", sampleBudget());
+
+    // The statement: every public input, including the tree root T in the public entry.
+    var stmt_findings: usize = 0;
+    var prng = std.Random.DefaultPrng.init(99);
+    for (0..pubs.len) |i| {
+        if (!std.process.hasEnvVarConstant("REC_FUZZ_ALL") and prng.random().uintLessThan(usize, 4) != 0) continue;
+        var bad = pubs;
+        bad[i] = bad[i].add(M31.one());
+        runner.pubs = &bad;
+        if (try runner.run(&values)) {
+            std.debug.print("REC-FUZZ FINDING (segment): public input {d} not bound\n", .{i});
+            stmt_findings += 1;
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 0), findings.len + stmt_findings);
+}
