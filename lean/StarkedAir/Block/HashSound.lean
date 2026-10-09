@@ -301,8 +301,8 @@ theorem whole_tx (hL25 : L ≤ 25) {m : ℕ} (hmn : m < 2 ^ L) (hnp : ∀ r < m,
     (hh : (inst 2).main Msg.HDR r0 = 0)
     (hc0 : ∀ j < d, (inst 2).main Msg.CONT (r0 + j) = 1 ∨ (inst 2).main Msg.SW (r0 + j) = 1)
     (he0 : (inst 2).main Msg.ENDD (r0 + d) = 1) (hmt : (inst 2).main Msg.MT r0 = 0) :
-    ∃ tx ρ, ρ < 2 ^ L ∧ (inst 2).main Msg.TI r0 = ((Fields.locks (inst 1).main ρ : ℕ) : F) ∧
-      Fields.TxAt (inst 1).main (Fields.blockBytes (inst 0).main (pub 0).val) m ρ tx ∧ msgData inst r0 d = Spec.Block.serWit tx ∧
+    ∃ tx ρ, ρ < 2 ^ L ∧ (inst 1).main Fields.K_LOCK ρ = 1 ∧
+      (inst 2).main Msg.TI r0 = ((Fields.locks (inst 1).main ρ : ℕ) : F) ∧ Fields.TxAt (inst 1).main (Fields.blockBytes (inst 0).main (pub 0).val) m ρ tx ∧ msgData inst r0 d = Spec.Block.serWit tx ∧
       ((inst 2).main Msg.WTX r0 = 0 → msgData inst r0 d = Spec.Block.serNoWit tx) := by
   have ms := hash_msg_sat hL hsat
   have fs := hash_fields_sat' hL hsat
@@ -320,7 +320,7 @@ theorem whole_tx (hL25 : L ≤ 25) {m : ℕ} (hmn : m < 2 ^ L) (hnp : ∀ r < m,
     rw [hend, ← tl]; push_cast; rw [ZMod.natCast_zmod_val]
   have hdat : msgData inst r0 d = Spec.Block.serWit tx := by
     rw [hdata, hw, ← hta, show ((inst 1).main Fields.START ρ).val + 4 - ((inst 2).main Msg.TA r0).val = d + 1 by omega]
-  refine ⟨tx, ρ, hρ, by rw [← ti, Fields.txi_count fs ρ hρ], hat, hdat, fun hw0 => ?_⟩
+  refine ⟨tx, ρ, hρ, hl, by rw [← ti, Fields.txi_count fs ρ hρ], hat, hdat, fun hw0 => ?_⟩
   -- a txid message is whole only without the segwit flag
   have hseg : (inst 1).main Fields.SEG ρ ≠ 1 := by
     intro h1
@@ -350,8 +350,8 @@ theorem split_tx (hL25 : L ≤ 25) {m : ℕ} (hmn : m < 2 ^ L) (hnp : ∀ r < m,
     (hh : (inst 2).main Msg.HDR r0 = 0)
     (hc0 : ∀ j < d, (inst 2).main Msg.CONT (r0 + j) = 1 ∨ (inst 2).main Msg.SW (r0 + j) = 1)
     (he0 : (inst 2).main Msg.ENDD (r0 + d) = 1) (hmt : (inst 2).main Msg.MT r0 = 1) :
-    ∃ tx ρ, ρ < 2 ^ L ∧ (inst 2).main Msg.TI r0 = ((Fields.locks (inst 1).main ρ : ℕ) : F) ∧
-      Fields.TxAt (inst 1).main (Fields.blockBytes (inst 0).main (pub 0).val) m ρ tx ∧
+    ∃ tx ρ, ρ < 2 ^ L ∧ (inst 1).main Fields.K_LOCK ρ = 1 ∧
+      (inst 2).main Msg.TI r0 = ((Fields.locks (inst 1).main ρ : ℕ) : F) ∧ Fields.TxAt (inst 1).main (Fields.blockBytes (inst 0).main (pub 0).val) m ρ tx ∧
       (inst 2).main Msg.WTX r0 = 0 ∧ msgData inst r0 d = Spec.Block.serNoWit tx := by
   have ms := hash_msg_sat hL hsat
   have fs := hash_fields_sat' hL hsat
@@ -416,7 +416,7 @@ theorem split_tx (hL25 : L ≤ 25) {m : ℕ} (hmn : m < 2 ^ L) (hnp : ∀ r < m,
     obtain ⟨x, y⟩ := rd (d1 + 1 + i) (by omega) (l + i)
       (by rw [pos2 (d1 + 1 + i) (by omega) (by omega), hTA, hTW, hTL]; push_cast; ring) (by omega)
     exact ⟨y, x⟩
-  refine ⟨tx, ρ, hρ, by rw [← ti, Fields.txi_count fs ρ hρ], hat, hwseg.1, ?_⟩
+  refine ⟨tx, ρ, hρ, hl, by rw [← ti, Fields.txi_count fs ρ hρ], hat, hwseg.1, ?_⟩
   rw [hnw hsegρ]
   have eTXA : ((inst 1).main Fields.TXA ρ).val = a := by rw [ta]
   have eWST : ((inst 1).main Fields.WST ρ).val = a + d1 + 3 := by
@@ -438,19 +438,28 @@ theorem split_tx (hL25 : L ≤ 25) {m : ℕ} (hmn : m < 2 ^ L) (hnp : ∀ r < m,
     · refine List.map_congr_left (fun i hi => ?_)
       rw [show 4 + (d1 - 3 + i) = d1 + 1 + i by omega, (b2' i (by simpa using hi)).1]
 
-/-- **What each digest is.** In a satisfied hashing system (at most `2^25` rows), a second-hash period
-`q` outputs: for the header message (id 0), `SHA256d` of the block's first 80 bytes; for a transaction
-message, the `wtxid` (`WTX = 1`) or `txid` (`WTX = 0`) of a transaction serialized in the block. -/
+/-- **Block hashing soundness (M3a.3).** In a satisfied hashing system with at most `2^25` rows, the
+block's bytes parse as a block `b`, and each second-hash period `q` outputs `SHA256d` of `b.header` (for
+the header message) or, for a transaction message with index `TI = i`, the `wtxid` (`WTX = 1`) or the
+`txid` (`WTX = 0`) of `b.txs[i]`. -/
 theorem digest_tx (hL25 : L ≤ 25) {q : ℕ} (hq : 1 ≤ q) (hn : 72 * q + 72 ≤ 2 ^ L)
     (hd : (inst 3).main Sha.DBL (72 * q) = 1) :
-    ∃ r0, (inst 2).main Msg.FIRSTM r0 = 1 ∧ (inst 2).main Msg.MID r0 = (inst 3).main Sha.MID (72 * q) ∧
+    ∃ b, Spec.Block.parseBlock (Fields.blockBytes (inst 0).main (pub 0).val) = some b ∧
+      ∃ r0, (inst 2).main Msg.FIRSTM r0 = 1 ∧ (inst 2).main Msg.MID r0 = (inst 3).main Sha.MID (72 * q) ∧
       ((inst 2).main Msg.HDR r0 = 1 → Spec.Block.stateBytes (outputAt (inst 3).main (72 * q)) =
-        Spec.Block.sha256d (Fields.slice (Fields.blockBytes (inst 0).main (pub 0).val) 0 80)) ∧
-      ((inst 2).main Msg.HDR r0 = 0 → ∃ tx, Spec.Block.stateBytes (outputAt (inst 3).main (72 * q)) =
-        if (inst 2).main Msg.WTX r0 = 1 then Spec.Block.wtxid tx else Spec.Block.txid tx) := by
+        Spec.Block.sha256d b.header) ∧
+      ((inst 2).main Msg.HDR r0 = 0 → ∃ (i : ℕ) (tx : Spec.Block.Tx), (inst 2).main Msg.TI r0 = (i : F) ∧ b.txs[i]? = some tx ∧
+        Spec.Block.stateBytes (outputAt (inst 3).main (72 * q)) =
+          if (inst 2).main Msg.WTX r0 = 1 then Spec.Block.wtxid tx else Spec.Block.txid tx) := by
   have ms := hash_msg_sat hL hsat
+  have fs := hash_fields_sat' hL hsat
+  have hb0 := hash_bytes_sat hL hsat
+  obtain ⟨m, hmn, hnp, hpad, hfit, hcs, cat, mono, hSm⟩ :=
+    Fields.block_ctx hL25 fs hb0 (hash_fields_read hL hsat hL25)
+  obtain ⟨b, hparse, hhead, hidx⟩ :=
+    Fields.block_index hL25 fs hb0 (hash_fields_read hL hsat hL25) hmn hnp hpad hfit hcs cat mono hSm
   obtain ⟨r0, d, h0, f, hmid, hc, he, hdig⟩ := digest_sha256d hL hsat hL25 hq hn hd
-  refine ⟨r0, f, hmid, fun hh => ?_, fun hh => ?_⟩
+  refine ⟨b, hparse, r0, f, hmid, fun hh => ?_, fun hh => ?_⟩
   · -- the header message: bytes `[0, 80)`
     obtain ⟨ta, tl, w0⟩ := hdr_tuple hL hsat h0 hh
     have hmt : (inst 2).main Msg.MT r0 = 0 := by rw [Msg.mt_eq ms h0, w0, hh]; ring
@@ -464,16 +473,18 @@ theorem digest_tx (hL25 : L ≤ 25) {q : ℕ} (hq : 1 ≤ q) (hn : 72 * q + 72 �
       have := natCast_inj_of_lt (Fields.lt_P (by norm_num at h25 ⊢; omega)) (Fields.lt_P (by norm_num)) e
       omega
     subst hd79
-    rw [hdig, hdata]
-  · rcases Msg.mt_bool ms h0 with m | m
-    · obtain ⟨tx, hw, hnw⟩ := whole_tx hL hsat hL25 h0 f hh hc he m
-      refine ⟨tx, ?_⟩
+    rw [hdig, hdata, hhead]
+  · rcases Msg.mt_bool ms h0 with mt | mt
+    · obtain ⟨tx, ρ, hρ, hl, hti, hat, hw, hnw⟩ :=
+        whole_tx hL hsat hL25 hmn hnp hpad hfit hcs cat mono hSm h0 f hh hc he mt
+      refine ⟨_, tx, hti, hidx ρ hρ hl tx hat, ?_⟩
       rw [hdig]
       rcases Msg.bool_col ms (e := Msg.WTX) (by simp) h0 with w | w
       · rw [if_neg (by rw [w]; exact zero_ne_one), Spec.Block.txid, hnw w]
       · rw [if_pos w, Spec.Block.wtxid, hw]
-    · obtain ⟨tx, w, hnw⟩ := split_tx hL hsat hL25 h0 f hh hc he m
-      refine ⟨tx, ?_⟩
+    · obtain ⟨tx, ρ, hρ, hl, hti, hat, w, hnw⟩ :=
+        split_tx hL hsat hL25 hmn hnp hpad hfit hcs cat mono hSm h0 f hh hc he mt
+      refine ⟨_, tx, hti, hidx ρ hρ hl tx hat, ?_⟩
       rw [hdig, if_neg (by rw [w]; exact zero_ne_one), Spec.Block.txid, hnw]
 
 end System
