@@ -150,6 +150,65 @@ theorem input_chain {s : ℕ} (hs : s % 72 = 0) (h72 : 72 ≤ s) (hsn : s + 72 �
   rw [a0, e0, a1, e1, a2, e2, a3, e3, show s - 4 + 1 = s - 3 by omega, show s - 4 + 2 = s - 2 by omega,
     show s - 4 + 3 = s - 1 by omega]
 
+theorem dbl_sat {c : Expr} (hc : c ∈ dblC) {r : ℕ} (hr : r < n) : c.eval n preCols pub M r = 0 :=
+  hsat r hr c (by simp only [constraints, List.mem_append]; tauto)
+
+theorem wbits {r : ℕ} (hr : r < n) : ∀ i < 32, (M (Sha256.W + i) r).val ≤ 1 :=
+  fun i hi => Sha256.bool_val (sha_sat hsat) hr (by simp [Sha256.W]; omega)
+
+/-- **The second hash's message**: the previous period's digest words, then `dblWord`. -/
+theorem dbl_message {s : ℕ} (hs : s % 72 = 0) (h72 : 72 ≤ s) (hsn : s + 72 ≤ n) (h : M DBL s = 1) :
+    ∀ t < 16, messageAt M s t =
+      if t < 8 then Spec.Bitcoin.stateWord (outputAt M (s - 72)) t else BitVec.ofNat 32 (dblWord t) := by
+  intro t ht
+  have hr : s + 4 + t < n := by omega
+  have hd : M DBL (s + 4 + t) = 1 := by
+    rw [show s + 4 + t = s + (4 + t) by ring, per_const hsat (X := DBL) (by simp) hs (4 + t) (by omega) (by omega), h]
+  have ev := fun (i : ℕ) (f : ℕ → ℕ) (hi : preCols.getD i (.periodic [0]) = per72 f) => eval_per72 hsat hi hr
+  have hq : (s + 4 + t) % 72 = 4 + t := by omega
+  simp only [messageAt]
+  split_ifs with h8
+  · -- Digest words.
+    have hsel : (Expr.mul (k DBL) (pre (DMSG t))).eval n preCols pub M (s + 4 + t) = 1 := by
+      simp only [Expr.eval, k, Sha256.eval_col, wrap_zero hr, hd, one_mul]
+      have hg : preCols.getD (DMSG t) (.periodic [0]) = per72 (fun q => if q = 4 + t then 1 else 0) := by
+        interval_cases t <;> rfl
+      rw [eval_per72 hsat hg hr, hq]; simp
+    simp only [outputAt, show s - 72 + 71 = s - 1 by omega]
+    rw [HeaderChain.stAt_word _ _ h8]
+    have hsrc : ((HeaderChain.msgSrc t).2 : ℤ) = -((((if t < 4 then 5 + 2 * t else 9 + 2 * (t - 4)) : ℕ)) : ℤ) := by
+      unfold HeaderChain.msgSrc; split_ifs <;> rfl
+    have hw : wrap n (s + 4 + t) (HeaderChain.msgSrc t).2 =
+        if t < 4 then s - 1 - t else s - 1 - (t - 4) := by
+      rw [hsrc, Sha256.wrap_back (by split_ifs <;> omega) hr]; split_ifs <;> omega
+    have hX : (HeaderChain.msgSrc t).1 = if t < 4 then Sha256.A else Sha256.E := by
+      unfold HeaderChain.msgSrc; split_ifs <;> rfl
+    have hsrcb : ∀ i < 32, (M ((HeaderChain.msgSrc t).1 + i) (if t < 4 then s - 1 - t else s - 1 - (t - 4))).val ≤ 1 := by
+      rw [hX]; split_ifs
+      · exact abits hsat (by omega)
+      · exact ebits hsat (by omega)
+    have key := HeaderChain.eqLimbs_word (n := n) (pc := preCols) (pub := pub) (main := M) (r := s + 4 + t)
+      (Y := Sha256.word M (HeaderChain.msgSrc t).1 (if t < 4 then s - 1 - t else s - 1 - (t - 4))) (X := Sha256.W)
+      (off := 0) (sel := .mul (k DBL) (pre (DMSG t)))
+      (rhs := fun h => limb (HeaderChain.msgSrc t).1 h (HeaderChain.msgSrc t).2)
+      (fun c hc => dbl_sat hsat (by
+        simp only [dblC, List.mem_append, List.mem_flatMap, List.mem_range]; left; exact ⟨t, h8, hc⟩) hr)
+      hsel (wrap_zero hr) (wbits hsat hr) (fun hh hhh => Sha256.eval_limb hw hsrcb hhh)
+    rw [key, hX]; split_ifs <;> rfl
+  · -- Constant words.
+    have hsel : (Expr.mul (k DBL) (pre DCONST)).eval n preCols pub M (s + 4 + t) = 1 := by
+      simp only [Expr.eval, k, Sha256.eval_col, wrap_zero hr, hd, one_mul]
+      rw [ev DCONST (fun q => if 12 ≤ q ∧ q < 20 then 1 else 0) rfl, hq]; simp; omega
+    refine HeaderChain.eqLimbs_word _ (fun c hc => dbl_sat hsat (by
+        simp only [dblC, List.mem_append]; right; exact hc) hr)
+      hsel (wrap_zero hr) (wbits hsat hr) (fun hh hhh => ?_)
+    have hlt : dblWord t < 2 ^ 32 := by unfold dblWord; split_ifs <;> norm_num
+    interval_cases hh
+    · rw [ev (DC_LO + 0) (fun q => if 12 ≤ q ∧ q < 20 then dblWord (q - 4) % 2 ^ 16 else 0) rfl, hq,
+        if_pos (by omega), show 4 + t - 4 = t by omega, HeaderChain.half16_ofNat hlt 0 (by norm_num)]; simp
+    · rw [ev (DC_LO + 1) (fun q => if 12 ≤ q ∧ q < 20 then dblWord (q - 4) / 2 ^ 16 else 0) rfl, hq,
+        if_pos (by omega), show 4 + t - 4 = t by omega, HeaderChain.half16_ofNat hlt 1 (by norm_num)]; simp
+
 end Period
 
 end StarkedAir.Block.Sha
