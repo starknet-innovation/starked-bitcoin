@@ -665,6 +665,73 @@ theorem whole_msg {r0 : ℕ} (hr0 : r0 < n) (hf : M FIRSTM r0 = 1) (hmt : M MT r
     · rw [z, (helpers hsat hl).2.1, z] at he; simp at he
     · exact z
 
+/-- Row `r` is in piece `q` (one flag set). -/
+def inPiece (M : ℕ → ℕ → F) (r q : ℕ) : Prop :=
+  M PC0 r = (if q = 0 then 1 else 0) ∧ M PC1 r = (if q = 1 then 1 else 0) ∧ M PC2 r = (if q = 2 then 1 else 0)
+
+/-- **Split walk** (`MT = 1`, segwit txids): rows `0..3` are piece 0; then piece 1 and piece 2, a piece
+ending exactly when its end test holds. -/
+theorem split_walk {r0 : ℕ} (hr0 : r0 < n) (hf : M FIRSTM r0 = 1) (hmt : M MT r0 = 1) {d : ℕ}
+    (hc : ∀ j < d, M CONT (r0 + j) = 1 ∨ M SW (r0 + j) = 1) :
+    ∀ j ≤ d, r0 + j < n ∧ M D (r0 + j) = 1 ∧ M IDX (r0 + j) = j ∧ M MT (r0 + j) = 1 ∧
+      M TA (r0 + j) = M TA r0 ∧ M TW (r0 + j) = M TW r0 ∧ M TL (r0 + j) = M TL r0 ∧
+      ∃ q ≤ 2, inPiece M (r0 + j) q ∧ (q = 0 ↔ j ≤ 3) := by
+  intro j hj
+  induction j with
+  | zero =>
+    simp only [add_zero]
+    obtain ⟨a, b, c⟩ := first_pieces hsat hr0 hf
+    have hx := (data_walk hsat hr0 hf 0 (fun _ h => absurd h (Nat.not_lt_zero _))).2.2.1
+    simp only [add_zero, Nat.cast_zero] at hx
+    exact ⟨hr0, firstm_d hsat hr0 hf, hx, hmt, trivial, trivial, trivial, 0, by omega, ⟨by simp [a], by simp [b], by simp [c]⟩,
+      by simp⟩
+  | succ j ih =>
+    obtain ⟨hl, hd, hx, m1, ta, tw, tl, q, hq, ⟨p0, p1, p2⟩, hq0⟩ := ih (by omega)
+    obtain ⟨hl2, hd2, hx2, -, ht⟩ := data_walk hsat hr0 hf (j + 1) (fun i hi => hc i (by omega))
+    have h1 : r0 + j + 1 < n := by rw [← add_assoc] at hl2; exact hl2
+    rw [show r0 + (j + 1) = r0 + j + 1 by ring] at hd2 hx2 ht ⊢
+    have hm : M MT (r0 + j + 1) = 1 := by
+      rw [mt_eq hsat h1, ht WTX (by simp), ht HDR (by simp), ht SEG (by simp), ← mt_eq hsat hr0, hmt]
+    refine ⟨h1, hd2, hx2, hm, ht TA (by simp), ht TW (by simp), ht TL (by simp), ?_⟩
+    obtain ⟨hcd, hsw, -⟩ := helpers hsat hl
+    have hez := z_iff hsat hl
+    rw [ezE_eval hl, m1, p0, p1, p2, hx] at hez
+    -- the next piece, from continue / switch
+    have cont_case : M CONT (r0 + j) = 1 → inPiece M (r0 + j + 1) q := fun c => by
+      obtain ⟨-, -, -, q0, q1, q2⟩ := step_cont hsat h1 c
+      exact ⟨q0.trans p0, q1.trans p1, q2.trans p2⟩
+    have sw_case : M SW (r0 + j) = 1 → inPiece M (r0 + j + 1) (q + 1) := fun c => by
+      obtain ⟨-, -, -, -, q0, q1, q2⟩ := step_sw hsat h1 c
+      refine ⟨?_, q1.trans (p0.trans ?_), q2.trans (p1.trans ?_)⟩ <;> simp <;> omega
+    interval_cases q
+    · -- piece 0: switch exactly at index 3
+      by_cases j3 : j = 3
+      · subst j3
+        have z : M Z (r0 + 3) = 1 := hez.mpr (by simp)
+        have sw : M SW (r0 + 3) = 1 := by rw [hsw, z, m1, p0, p1]; simp
+        exact ⟨1, by omega, sw_case sw, by omega⟩
+      · have hj3 : j < 3 := by have := hq0.mp rfl; omega
+        have z : M Z (r0 + j) = 0 := by
+          rcases bool_col hsat (e := Z) (by simp) hl with z | z
+          · exact z
+          · have e := hez.mp z
+            simp at e
+            have : ((j : ℕ) : F) = ((3 : ℕ) : F) := by push_cast; linear_combination e
+            have := natCast_inj_of_lt (by unfold P; omega) (by unfold P; norm_num) this
+            omega
+        have c : M CONT (r0 + j) = 1 := by rw [hcd, hd, z]; ring
+        exact ⟨0, by omega, cont_case c, by omega⟩
+    · -- piece 1: continue, or switch to piece 2
+      rcases hc j (by omega) with c | c
+      · exact ⟨1, by omega, cont_case c, by have := hq0; omega⟩
+      · exact ⟨2, by omega, sw_case c, by have := hq0; omega⟩
+    · -- piece 2: no switch
+      have c : M CONT (r0 + j) = 1 := by
+        rcases hc j (by omega) with c | c
+        · exact c
+        · rw [hsw, m1, p0, p1] at c; simp at c
+      exact ⟨2, by omega, cont_case c, by have := hq0; omega⟩
+
 end Rows
 
 end StarkedAir.Block.Msg
