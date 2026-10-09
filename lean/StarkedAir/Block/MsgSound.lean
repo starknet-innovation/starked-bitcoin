@@ -955,6 +955,51 @@ theorem word_yield {r : ℕ} (hr : r < n)
     ev_byte (by omega : 2 ≤ r) hr, ev_byte (by omega : 1 ≤ r) hr, hmid]
   rw [← hi]; push_cast; ring_nf
 
+/-- **Length yields** come from a message's last row: for the message starting at `r0` whose data ends
+at index `d` (so `0x80` at `p = r0 + d + 1`), the yield is its padded length `s + 8 − r0`. -/
+theorem len_yield {r : ℕ} (hr : r < n) (hy : M LN r * M MM r ≠ 0) :
+    ∃ r0 d, M FIRSTM r0 = 1 ∧ M ENDD (r0 + d) = 1 ∧ (∀ j < d, M CONT (r0 + j) = 1 ∨ M SW (r0 + j) = 1) ∧
+      r = r0 + d + 1 + 1 + (119 - (r0 + d + 1) % 64) % 64 + 7 ∧ M MID r = M MID r0 ∧
+      M IDX r + 1 = ((r + 1 - r0 : ℕ) : F) := by
+  have hm : M MM r ≠ 0 := fun h => hy (by rw [h, mul_zero])
+  have hl : M LN r = 1 := by
+    have := sat hsat (mem_padC (c := .mul (k MM) (om (k LN))) (by simp [padC])) hr
+    simp only [Expr.eval, om, one, eval_cst, Nat.cast_one, ev_k hr] at this
+    exact (sub_eq_zero.mp ((mul_eq_zero.mp this).resolve_left hm)).symm
+  have h63 : r % 64 = 63 := by
+    have := sat hsat (mem_padC (c := .mul (k MM) (om (pre IS63))) (by simp [padC])) hr
+    simp only [Expr.eval, om, one, eval_cst, Nat.cast_one, ev_k hr, ev_per64 (i := IS63) (p := (· = 63)) rfl hr] at this
+    by_contra h; simp [h, hm] at this
+  have hnil := kind_unique hsat hr (a := LN) (b := NIL) (by simp [LN]) (by simp [NIL]) (by simp [LN, NIL]) hl
+  obtain ⟨r0, h0, hf, hx, hb⟩ := belongs hsat hr hnil
+  have hr0 : r0 < n := by omega
+  obtain ⟨d, hc, he⟩ := data_exit hsat hr0 hf
+  obtain ⟨hdl, hdd, -⟩ := data_walk hsat hr0 hf d hc
+  have hp1 := succ_lt hsat hdl (a := D) (by simp [D]) (by simp [D, NIL]) hdd
+  obtain ⟨p80, -⟩ := step_end hsat hp1 he
+  obtain ⟨hs, h8, hz, hln, hnf⟩ := pad_ok hsat hp1 p80
+  -- locate `r` in the message
+  have hgt : r0 + d + 1 < r := by
+    by_contra hle
+    rcases Nat.lt_or_ge r (r0 + d + 1) with h | h
+    · obtain ⟨-, hd', -⟩ := data_walk hsat hr0 hf (r - r0) (fun j hj => hc j (by omega))
+      rw [show r0 + (r - r0) = r by omega] at hd'
+      exact kind_off hsat hr (by simp [D]) (by simp [LN]) (by simp [D, LN]) hd' hl
+    · rw [show r = r0 + d + 1 by omega] at hl
+      exact kind_off hsat hp1 (by simp [P80]) (by simp [LN]) (by simp [P80, LN]) p80 hl
+  have heq : r = r0 + d + 1 + 1 + (119 - (r0 + d + 1) % 64) % 64 + 7 := by
+    rcases Nat.lt_or_ge r (r0 + d + 1 + 1 + (119 - (r0 + d + 1) % 64) % 64) with h | h
+    · exact (kind_off hsat hr (by simp [ZR]) (by simp [LN]) (by simp [ZR, LN]) (hz r hgt h).1 hl).elim
+    · rcases Nat.lt_or_ge r (r0 + d + 1 + 1 + (119 - (r0 + d + 1) % 64) % 64 + 8) with h' | h'
+      · omega
+      · exfalso
+        obtain ⟨f8, n8⟩ := hb _ (by omega) h'
+        rw [f8, n8, add_zero] at hnf; exact zero_ne_one hnf
+  have ht := tuple_const hsat hr h0 hb
+  refine ⟨r0, d, hf, he, hc, heq, ?_, ?_⟩
+  · rw [mid_eq hsat hr, mid_eq hsat hr0, ht HDR (by simp), ht TI (by simp), ht WTX (by simp)]
+  · rw [hx, show r + 1 - r0 = (r - r0) + 1 by omega]; push_cast; ring
+
 end Rows
 
 end StarkedAir.Block.Msg
