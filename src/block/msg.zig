@@ -37,7 +37,7 @@ const CONT = 32;
 const SW = 33;
 const ENDD = 34;
 const DLC = 35;
-const WM = 36;
+pub const WM = 36;
 const MM = 37;
 
 /// A transaction's ranges, as the fields component yields them.
@@ -221,7 +221,7 @@ test "block msg: header, txid and wtxid messages of the samples satisfy the mess
         const log_size: u32 = std.math.log2_int_ceil(usize, need);
         var reads = std.ArrayList(u32).empty;
         const mm = try generate(a, log_size, raw, msgs, &reads);
-        const pubs = [_]M31{f(raw.len)};
+        const pubs = [_]M31{ f(raw.len), f(rows[0].val) };
         const tr = interp.RowTrace{ .log_size = log_size, .pubs = &pubs, .preprocessed = @ptrCast(try msg_air.genPreprocessed(a, log_size)), .main = @ptrCast(mm) };
         if (try interp.firstViolation(a, msg_air, tr)) |v| {
             std.debug.print("block of {d} bytes: msg row {d} violates constraint {d}\n", .{ raw.len, v.row, v.constraint });
@@ -233,7 +233,7 @@ test "block msg: header, txid and wtxid messages of the samples satisfy the mess
         try reads.appendSlice(a, try fields.reads(a, rows));
         const bm = try bytes.generate(a, log_size, raw, reads.items);
         const parts = [_]system.Part{
-            .{ .air = &bytes_air, .log_size = log_size, .pubs = &pubs },
+            .{ .air = &bytes_air, .log_size = log_size, .pubs = pubs[0..1] },
             .{ .air = &fields_air, .log_size = log_size, .pubs = &pubs },
             .{ .air = &msg_air, .log_size = log_size },
         };

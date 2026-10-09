@@ -211,7 +211,10 @@ def txC : List Expr :=
     .mul (k K_BLK) (k TXI),
     .mul notFirst (.sub (k TXI) (.add (kp TXI) (kp K_LOCK))) ]
 
-def constraints : List Expr := kindC ++ transC ++ tileC ++ compactC ++ segC ++ countC ++ zeroC ++ bitC ++ txC
+/-- M3a.4: the block token's transaction count is public input 1 (the Merkle tree's leaf count). -/
+def pubC : List Expr := [.mul first (.sub (k VAL) (.pub 1))]
+
+def constraints : List Expr := kindC ++ transC ++ tileC ++ compactC ++ segC ++ countC ++ zeroC ++ bitC ++ txC ++ pubC
 
 /-- Byte reads: the CompactSize's bytes, and a segwit head's marker and flag. -/
 def lookups : List Lookup :=

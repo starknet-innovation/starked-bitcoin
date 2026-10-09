@@ -12,6 +12,7 @@ import StarkedAir.Block.Bytes
 import StarkedAir.Block.Fields
 import StarkedAir.Block.Msg
 import StarkedAir.Block.Sha
+import StarkedAir.Block.Merkle
 import StarkedAir.Testing.BlockReader
 
 /-- `lake env lean --run Export.lean <name>` prints canonical JSON. -/
@@ -31,6 +32,7 @@ def main (args : List String) : IO Unit := do
   | ["block_fields"] => IO.println StarkedAir.Block.Fields.fields.toJson
   | ["block_msg"] => IO.println StarkedAir.Block.Msg.msg.toJson
   | ["block_sha"] => IO.println StarkedAir.Block.Sha.sha.toJson
+  | ["block_merkle"] => IO.println StarkedAir.Block.Merkle.merkle.toJson
   | ["block_reader"] => IO.println StarkedAir.BlockReader.reader.toJson
   | ["probe_oracle"] => IO.println (StarkedAir.Probe.oracleJson 4 2024)
   | _ => throw <| IO.userError "usage: export-air add32_chain|probe_oracle"

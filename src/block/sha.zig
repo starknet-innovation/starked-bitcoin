@@ -9,7 +9,7 @@ const spec = @import("../sha256/spec.zig");
 const msg = @import("msg.zig");
 
 pub const json = @embedFile("air:block_sha");
-pub const N_MAIN = 132;
+pub const N_MAIN = 144;
 const MID = 124;
 const BLKI = 125;
 const FST = 126;
@@ -18,6 +18,18 @@ const NILS = 128;
 const USEW = 129;
 const CHN = 130;
 const YM = 131;
+const NODE = 132;
+const NPAD = 133;
+const LID = 134;
+const RID = 135;
+const NDUP = 136;
+const ZL = 137;
+const IL = 138;
+const ZH = 139;
+const IH = 140;
+const ZZ = 141;
+const ALLEQ = 142;
+const NNE = 143;
 
 /// The padded message bytes (SHA-256 padding).
 pub fn padded(a: std.mem.Allocator, raw: []const u8, m: msg.Message) ![]u8 {
@@ -31,17 +43,32 @@ pub fn padded(a: std.mem.Allocator, raw: []const u8, m: msg.Message) ![]u8 {
     return out;
 }
 
+pub const Meta = struct {
+    mid: u32,
+    blk: u32,
+    fst: bool,
+    dbl: bool,
+    /// M3a.4: a Merkle node's first block (children's digests) and its padding block.
+    node: bool = false,
+    npad: bool = false,
+    lid: u32 = 0,
+    rid: u32 = 0,
+    dup: bool = false,
+    /// Digest uses of this second hash (the `digest` yield's multiplicity).
+    ym: u32 = 0,
+};
+
 pub const Plan = struct {
     compressions: []sha.Compression,
     /// Per compression: message id, block index, first block, second hash.
-    meta: []struct { mid: u32, blk: u32, fst: bool, dbl: bool },
+    meta: []Meta,
     /// Per message: its SHA256d as state words.
     digests: []spec.State,
 };
 
 pub fn plan(a: std.mem.Allocator, raw: []const u8, msgs: []const msg.Message) !Plan {
     var comps = std.ArrayList(sha.Compression).empty;
-    var meta = std.ArrayList(@typeInfo(@FieldType(Plan, "meta")).pointer.child).empty;
+    var meta = std.ArrayList(Meta).empty;
     const digests = try a.alloc(spec.State, msgs.len);
     for (msgs, digests) |m, *dg| {
         const bytes = try padded(a, raw, m);
@@ -92,11 +119,36 @@ pub fn generate(a: std.mem.Allocator, log_size: u32, p: Plan) ![][]M31 {
             cols[BLKI][r] = f(m.blk);
             if (m.fst) cols[FST][r] = one;
             if (m.dbl) cols[DBL][r] = one;
+            if (m.node) cols[NODE][r] = one;
+            if (m.npad) cols[NPAD][r] = one;
+            cols[LID][r] = f(m.lid);
+            cols[RID][r] = f(m.rid);
+            if (m.dup) cols[NDUP][r] = one;
+            if (m.dbl and r % sha.PERIOD == sha.PERIOD - 1) cols[YM][r] = f(m.ym);
         } else cols[NILS][r] = one;
-        cols[USEW][r] = one.sub(cols[DBL][r]).sub(cols[NILS][r]);
-        cols[CHN][r] = one.sub(cols[FST][r]).sub(cols[DBL][r]).sub(cols[NILS][r]);
+        const kinds = cols[NODE][r].add(cols[NPAD][r]);
+        cols[USEW][r] = one.sub(cols[DBL][r]).sub(cols[NILS][r]).sub(kinds);
+        cols[CHN][r] = one.sub(cols[FST][r]).sub(cols[DBL][r]).sub(cols[NILS][r]).sub(kinds);
+        cols[NNE][r] = cols[NODE][r].mul(one.sub(cols[NDUP][r]));
     }
-    _ = YM;
+    // Mutation check columns: limb differences of message word t and t − 8.
+    const limb = struct {
+        fn get(c: [][]M31, row: usize, h: usize) M31 {
+            var v: u32 = 0;
+            for (0..16) |i| v |= @as(u32, @intCast(c[sha.W + 16 * h + i][row].toU32())) << @intCast(i);
+            return M31.fromCanonical(v);
+        }
+    };
+    for (0..n) |r| {
+        const rp = (r + n - 8) % n;
+        const dl = limb.get(cols, r, 0).sub(limb.get(cols, rp, 0));
+        const dh = limb.get(cols, r, 1).sub(limb.get(cols, rp, 1));
+        if (dl.eql(M31.zero())) cols[ZL][r] = one else cols[IL][r] = try dl.inv();
+        if (dh.eql(M31.zero())) cols[ZH][r] = one else cols[IH][r] = try dh.inv();
+        cols[ZZ][r] = cols[ZL][r].mul(cols[ZH][r]);
+        const q = r % sha.PERIOD;
+        if (q == 12) cols[ALLEQ][r] = cols[ZZ][r] else if (q > 12 and q < 20) cols[ALLEQ][r] = cols[ALLEQ][r - 1].mul(cols[ZZ][r]);
+    }
     return cols;
 }
 
@@ -196,9 +248,9 @@ test "block sha: (bytes, fields, msg, sha) prove for small blocks; digests are t
         fields.setTxUses(fm, rows, 2);
         try reads.appendSlice(a, try fields.reads(a, rows));
         const bm = try bytes.generate(a, log_size, raw, reads.items);
-        const pubs = [_]M31{f(raw.len)};
+        const pubs = [_]M31{ f(raw.len), f(rows[0].val) };
         const parts = [_]system.Part{
-            .{ .air = &bytes_air, .log_size = log_size, .pubs = &pubs },
+            .{ .air = &bytes_air, .log_size = log_size, .pubs = pubs[0..1] },
             .{ .air = &fields_air, .log_size = log_size, .pubs = &pubs },
             .{ .air = &msg_air, .log_size = log_size },
             .{ .air = &sha_air, .log_size = log_size },
@@ -235,9 +287,9 @@ test "block sha: a wrong message word or a message hashed short is rejected" {
     fields.setTxUses(fm, rows, 2);
     try reads.appendSlice(a, try fields.reads(a, rows));
     const bm = try bytes.generate(a, log_size, raw, reads.items);
-    const pubs = [_]M31{f(raw.len)};
+    const pubs = [_]M31{ f(raw.len), f(rows[0].val) };
     const parts = [_]system.Part{
-        .{ .air = &bytes_air, .log_size = log_size, .pubs = &pubs },
+        .{ .air = &bytes_air, .log_size = log_size, .pubs = pubs[0..1] },
         .{ .air = &fields_air, .log_size = log_size, .pubs = &pubs },
         .{ .air = &msg_air, .log_size = log_size },
         .{ .air = &sha_air, .log_size = log_size },
@@ -260,7 +312,7 @@ test "block sha: a wrong message word or a message hashed short is rejected" {
     {
         const pl0 = try plan(a, raw, msgs);
         var comps = std.ArrayList(sha.Compression).empty;
-        var meta = std.ArrayList(@typeInfo(@FieldType(Plan, "meta")).pointer.child).empty;
+        var meta = std.ArrayList(Meta).empty;
         try comps.append(a, pl0.compressions[0]);
         try meta.append(a, pl0.meta[0]);
         const h0 = spec.compress(spec.IV, pl0.compressions[0].block);

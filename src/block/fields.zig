@@ -290,7 +290,7 @@ test "block fields: the sample blocks tokenize and satisfy the fields AIR; small
         const rows = try tokenize(a, raw);
         const log_size: u32 = @max(std.math.log2_int_ceil(usize, raw.len + 1), std.math.log2_int_ceil(usize, rows.len + 1));
         const fm = try generate(a, log_size, raw, rows);
-        const pubs = [_]M31{f(raw.len)};
+        const pubs = [_]M31{ f(raw.len), f(rows[0].val) };
         const tr = interp.RowTrace{ .log_size = log_size, .pubs = &pubs, .preprocessed = @ptrCast(try fields_air.genPreprocessed(a, log_size)), .main = @ptrCast(fm) };
         if (try interp.firstViolation(a, fields_air, tr)) |v| {
             std.debug.print("block of {d} bytes: row {d} violates constraint {d}\n", .{ raw.len, v.row, v.constraint });
@@ -299,7 +299,7 @@ test "block fields: the sample blocks tokenize and satisfy the fields AIR; small
         // Prove (bytes, fields) together: the reads balance against the byte table.
         const bm = try bytes.generate(a, log_size, raw, try reads(a, rows));
         const parts = [_]system.Part{
-            .{ .air = &bytes_air, .log_size = log_size, .pubs = &pubs },
+            .{ .air = &bytes_air, .log_size = log_size, .pubs = pubs[0..1] },
             .{ .air = &fields_air, .log_size = log_size, .pubs = &pubs },
         };
         const cfg = rec.Config.fromFriAndTraceSize(try @import("stwo_core").pcs.config_v2.FriConfigV2.init(10, 0, 1, 3, 1), log_size);
@@ -323,7 +323,7 @@ test "block fields: tampered rows or bytes are rejected" {
     const raw = @embedFile("testdata:block_170");
     const rows = try tokenize(a, raw);
     const log_size: u32 = 9;
-    const pubs = [_]M31{f(raw.len)};
+    const pubs = [_]M31{ f(raw.len), f(rows[0].val) };
     const pre = try fields_air.genPreprocessed(a, log_size);
     // A script length off by one: the rows no longer tile the block.
     {
@@ -343,7 +343,7 @@ test "block fields: tampered rows or bytes are rejected" {
         tampered[rows[1].start + rows[1].off] ^= 1;
         const bm = try bytes.generate(a, log_size, tampered, try reads(a, rows));
         const parts = [_]system.Part{
-            .{ .air = &bytes_air, .log_size = log_size, .pubs = &pubs },
+            .{ .air = &bytes_air, .log_size = log_size, .pubs = pubs[0..1] },
             .{ .air = &fields_air, .log_size = log_size, .pubs = &pubs },
         };
         const cfg = rec.Config.fromFriAndTraceSize(try @import("stwo_core").pcs.config_v2.FriConfigV2.init(10, 0, 1, 3, 1), log_size);
@@ -372,7 +372,7 @@ test "block fields: large and segwit samples satisfy the fields AIR (run with Re
         };
         const log_size: u32 = std.math.log2_int_ceil(usize, rows.len + 1);
         const fm = try generate(a, log_size, raw, rows);
-        const pubs = [_]M31{f(raw.len)};
+        const pubs = [_]M31{ f(raw.len), f(rows[0].val) };
         const tr = interp.RowTrace{ .log_size = log_size, .pubs = &pubs, .preprocessed = @ptrCast(try fields_air.genPreprocessed(a, log_size)), .main = @ptrCast(fm) };
         std.debug.print("block of {d} bytes: {d} rows ({d} segwit txs), log {d}\n", .{ raw.len, rows.len, nseg, log_size });
         if (try interp.firstViolation(a, fields_air, tr)) |v| {

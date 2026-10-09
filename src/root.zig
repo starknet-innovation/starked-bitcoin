@@ -13,6 +13,7 @@ pub const block = struct {
     pub const fields = @import("block/fields.zig");
     pub const msg = @import("block/msg.zig");
     pub const sha = @import("block/sha.zig");
+    pub const merkle = @import("block/merkle.zig");
 };
 pub const recursion = struct {
     pub const plain_verifier = @import("recursion/plain_verifier.zig");
