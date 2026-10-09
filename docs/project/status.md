@@ -23,9 +23,9 @@ standard axioms only); the in-circuit verifiers and node code stay trusted
 
 1. M3a.3 `BLK-SHA` is done and proven (`digest_tx`: each digest is a transaction's `wtxid`/`txid` or the
    hash of the block's first 80 bytes; see [airs/block.md](../airs/block.md)). `digest_tx` names the parsed block:
-   `SHA256d(b.header)` and the `wtxid`/`txid` of `b.txs[TI]`. Next is M3a.4 `BLK-MERKLE`: the
-   Merkle component (txid tree with the CVE-2012-2459 check, witness tree, witness commitment) per
-   [block-data.md](../design/block-data.md).
+   `SHA256d(b.header)` and the `wtxid`/`txid` of `b.txs[TI]`. M3a.4 `BLK-MERKLE` is in progress (D-034).
+   Spec lemmas, SHA node blocks, the Merkle component, witnesses and tests are done, and the proofs are
+   updated to the 5-component system. Next: `merkle_sound` (see [airs/block.md](../airs/block.md)).
 2. Proposed: REC-FUZZ (differential fuzzing of the plain verifier).
 
 ## In flight

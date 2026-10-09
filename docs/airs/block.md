@@ -180,3 +180,34 @@ block index, and first-block / second-hash / unused flags.
 - **Headline, `digest_tx`** (`Block/HashSound.lean`): in a satisfied hashing system (at most `2^25` rows)
   the block parses as `b`, and each second-hash digest is `SHA256d(b.header)` or the `wtxid`/`txid` of
   `b.txs[TI]`.
+
+## `block_merkle` and SHA node blocks (M3a.4 `BLK-MERKLE`, AIRs and witnesses done; soundness in progress)
+
+Lean: `Block/Merkle.lean`, `Block/Sha.lean` (node blocks); proofs `Block/MerkleSound.lean`. Zig:
+`src/block/merkle.zig`. Design: [block-data.md](../design/block-data.md) (M3a.4), decision D-034.
+
+- **SHA node blocks:** a `NODE` period's message words are its children's digests, read with two
+  `digest` uses at rows 11 and 19, and its tuple is read with `node(id, left, right, dup)`. `NPAD` is the
+  constant padding block of a 64-byte message, and `DBL` finishes as usual.
+- **Mutation check:** rows 12–19 of a node block compare word `t` with word `t − 8` limb by limb
+  (is-zero flags, running product `ALLEQ`). Unless `dup`, `ALLEQ` must be 0 at row 19.
+- **`block_merkle`:** one row per internal node, level by level; then the root row.
+  - Node ids are `NB + row` (`NB = 2^27`).
+  - Level 1's children are the txid messages `1 + 4i`, `+ 2`; higher levels' are the previous level's
+    nodes.
+  - The leaf count is public input 1, which the fields' first row checks.
+  - The root row reads the root's digest and the header's Merkle field (the header message's words
+    9–16).
+- **Shapes:** SHA 144 columns, 6 lookups; Merkle 41 columns, 11 lookups. The five-component system has
+  30 lookup sites per row.
+- **Tests:**
+  - The 5-component system proves and verifies on blocks 0, 170 and 91812.
+  - Blocks 481824 and 709632 (1,866 and 2,043 transactions; 1,870 and 2,044 nodes) satisfy the SHA and
+    Merkle constraints, and the roots equal the headers'.
+  - Rejected: a tampered root limb; a block whose two transactions are identical (CVE-2012-2459), which
+    fails at the node block's mutation check.
+- **Proofs so far:** the earlier results carry over to the 5-component system (`Link`, `HashSound`).
+  Byte-message digests take "the id is below `NB`" (`node_mid`: node blocks carry Merkle ids).
+  `Spec.MerkleLevels`: `level_get`, `dupPair_false`, `merkleRoot_step`.
+
+**To prove:** `merkle_sound`: `merkleRoot (b.txs.map txid) = (headerMerkle b, false)`.
