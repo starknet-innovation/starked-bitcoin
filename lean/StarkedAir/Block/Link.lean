@@ -441,6 +441,78 @@ theorem digest_linked (hL25 : L ≤ 25) {i r k : ℕ} (hu : (i = 3 ∧ (k = 4 �
     rw [show 72 * (r' / 72) + 71 = r' by omega, hd1] at this; exact this.symm
   · rw [show 72 * (r' / 72) + 71 = r' by omega]; exact hsv
 
+/-- **The root row's header reads are message yields.** A Merkle word use (lookups 3–10) with multiplicity
+`−1` is matched by a message row yielding the same tuple. -/
+theorem merkle_word_linked (hL25 : L ≤ 25) {r k : ℕ} (hk : 3 ≤ k) (hk11 : k < 11) (hr : r < 2 ^ L)
+    (hm : siteMult hashSys inst pub (4, r, k) = -1) :
+    ∃ r' < 2 ^ L, siteMult hashSys inst pub (2, r', 2) ≠ 0 ∧
+      siteVals hashSys inst pub (2, r', 2) = siteVals hashSys inst pub (4, r, k) := by
+  classical
+  have h3 : hashSys.comp 3 = Sha.sha := rfl
+  have h4 : hashSys.comp 4 = Merkle.merkle := rfl
+  have mem : ∀ {i r k}, ((i, r, k) : Site) ∈ sites hashSys inst ↔
+      i < 5 ∧ r < 2 ^ L ∧ k < (hashSys.comp i).lookups.length := by
+    intro i r k
+    simp only [sites, List.mem_flatMap, List.mem_range, List.mem_map, Prod.mk.injEq]
+    constructor
+    · rintro ⟨i', hi, r', hr', k', hk', rfl, rfl, rfl⟩
+      exact ⟨hi, by rw [← hL i' hi]; exact hr', hk'⟩
+    · rintro ⟨hi, hr', hk'⟩
+      exact ⟨i, hi, r, by rw [hL i hi]; exact hr', k, hk', rfl, rfl, rfl⟩
+  have ks := hash_merkle_sat hL hsat
+  have hs1 : ((4, r, k) : Site) ∈ sites hashSys inst :=
+    mem.mpr ⟨by decide, hr, by simp [h4, Merkle.merkle, Merkle.lookups]; omega⟩
+  obtain ⟨s', hs', hnu, hsm, hsr, hsv⟩ := used_in_table_ext hsat.2
+    (use := fun i k => (i = 3 ∧ k < 2) ∨ (i = 4 ∧ 3 ≤ k))
+    (fun s hs hu => by
+      obtain ⟨i, r', k'⟩ := s
+      have hr' := (mem.mp hs).2.1
+      rcases hu with ⟨rfl, hk'⟩ | ⟨rfl, hk3⟩
+      · have := sha_use_mult hL hsat hr' hk'
+        simpa [siteMult, siteEval, siteLookup, h3, Sha.sha, hL 3 (by decide)] using this
+      · have hk11 : k' < 11 := by have := (mem.mp hs).2.2; simpa [h4, Merkle.merkle, Merkle.lookups] using this
+        have hrt := Merkle.kbool ks (c := Merkle.RT) (by simp) hr'
+        have e : siteMult hashSys inst pub (4, r', k') = -((inst 4).main Merkle.RT r') := by
+          simp only [siteMult, siteEval, siteLookup, h4, hL 4 (by decide)]
+          interval_cases k' <;> simp [Merkle.merkle, Merkle.lookups, Expr.eval, Merkle.ev_k hr']
+        rw [e]; rcases hrt with h | h <;> simp [h])
+    (by simp)
+    (by
+      have := List.length_filter_le (fun s : Site => decide ((s.1 = 3 ∧ s.2.2 < 2) ∨ (s.1 = 4 ∧ 3 ≤ s.2.2)))
+        (sites hashSys inst)
+      rw [hash_sites_len hL] at this
+      have := hash_rows_lt_P hL hL25
+      simp only [List.length_nil, add_zero]; omega)
+    (Or.inl ⟨(4, r, k), hs1, Or.inr ⟨rfl, hk⟩, hm, rfl, rfl⟩)
+  obtain ⟨i, r', k'⟩ := s'
+  obtain ⟨hi, hr', hk'⟩ := mem.mp hs'
+  have hrel : siteRel hashSys (i, r', k') = Msg.REL_MSGW := by
+    rw [hsr]; simp only [siteRel, siteLookup, h4, Merkle.merkle, Merkle.lookups]
+    interval_cases k <;> rfl
+  refine ⟨r', hr', ?_⟩
+  interval_cases i
+  · simp [hashSys, bytes] at hk'; subst hk'
+    simp [siteRel, siteLookup, hashSys, bytes, REL_BYTE, Msg.REL_MSGW] at hrel
+  · simp [hashSys, Fields.fields, Fields.lookups] at hk'
+    interval_cases k' <;> simp [siteRel, siteLookup, hashSys, Fields.fields, Fields.lookups, REL_BYTE, Fields.REL_TX,
+      Msg.REL_MSGW] at hrel
+  · simp [hashSys, Msg.msg, Msg.lookups] at hk'
+    interval_cases k'
+    any_goals simp [siteRel, siteLookup, hashSys, Msg.msg, Msg.lookups, REL_BYTE, Fields.REL_TX, Msg.REL_MSGW,
+      Msg.REL_MLEN] at hrel
+    exact ⟨hsm, hsv⟩
+  · simp [hashSys, Sha.sha, Sha.lookups] at hk'
+    interval_cases k'
+    · exact absurd (Or.inl ⟨rfl, by norm_num⟩) hnu
+    · exact absurd (Or.inl ⟨rfl, by norm_num⟩) hnu
+    all_goals simp [siteRel, siteLookup, hashSys, Sha.sha, Sha.lookups, Msg.REL_MSGW, Msg.REL_MLEN, Sha.REL_DIGEST,
+      Sha.REL_NODE] at hrel
+  · simp [hashSys, Merkle.merkle, Merkle.lookups] at hk'
+    interval_cases k'
+    any_goals simp [siteRel, siteLookup, hashSys, Merkle.merkle, Merkle.lookups, Msg.REL_MSGW, Msg.REL_MLEN,
+      Sha.REL_DIGEST, Sha.REL_NODE] at hrel
+    all_goals exact absurd (Or.inr ⟨rfl, by norm_num⟩) hnu
+
 /-- **SHA message words are message bytes.** At a SHA message row `x` (rows 4..19 of a period) of a
 period that reads words, the word limbs are bytes `j − 3 .. j` (big-endian) of a message starting at
 message row `r0`, with the same id, where `j − 3 = 64 · BLKI + 4 · (row − 4)`. -/
