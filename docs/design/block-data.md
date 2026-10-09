@@ -387,8 +387,15 @@ uniform row lemma.
 
 **Stages** (each with Lean AIR, Zig witness and tests, then the Lean proof):
 
-1. **M3a.5a, spec**: `BlockFlat` with the simplification lemmas, the sigop automaton equivalence, and
-   the `BlockCheck` cross-check.
+1. **M3a.5a, spec** — **done (2026-10-10, `Spec/BlockFlat.lean`, standard axioms only):**
+   - `checkBlock_none_iff`, with `CtxFreeOK` and `CtxOK`;
+   - `checkTx_none_iff` (`TxOK`) and `values_ok_iff`;
+   - `size_of_weight`;
+   - `walk_eq_sigOps` (the byte automaton is `sigOps`);
+   - `commitmentIndex_eq` / `commitmentIndex_some` (last matching output);
+   - `not_coinbase_of_inputs`.
+
+   The equivalences make a runtime cross-check unnecessary.
 2. **M3a.5b, per-tx checks**: the range table, public inputs 2–6, and the fields extensions (values,
    non-empty outputs, non-null prevouts, finality, `W`, `NSEG`, `totals`). Lean: per-tx facts of
    `BlockOK`.
