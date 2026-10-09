@@ -1912,7 +1912,7 @@ include h0L h1L hL hsat
 /-- **Block fields soundness (M3a.2)**, for the (bytes, fields) system. -/
 theorem fields_sound : ∃ b, Spec.Block.parseBlock (blockBytes (inst 0).main (pub 0).val) = some b :=
   fields_sound_gen hL (fields_sat h0L h1L hL hsat) (bytes_sat h0L h1L hL hsat)
-    (fun hr hk hm => sys_read h0L h1L hL hsat hr hk hm)
+    (fun hr _ hk hm => sys_read h0L h1L hL hsat hr hk hm)
 
 end System2
 
