@@ -666,6 +666,62 @@ theorem whole_msg {r0 : ℕ} (hr0 : r0 < n) (hf : M FIRSTM r0 = 1) (hmt : M MT r
     · rw [z, (helpers hsat hl).2.1, z] at he; simp at he
     · exact z
 
+/-- **Whole messages, for a given data exit `d`.** -/
+theorem whole_rows {r0 d : ℕ} (hr0 : r0 < n) (hf : M FIRSTM r0 = 1) (hmt : M MT r0 = 0)
+    (hc : ∀ j < d, M CONT (r0 + j) = 1 ∨ M SW (r0 + j) = 1) (he : M ENDD (r0 + d) = 1) :
+    ∀ j ≤ d, M D (r0 + j) = 1 ∧ M IDX (r0 + j) = j ∧ M POS (r0 + j) = M TA r0 + j ∧
+      (M TA r0 + j = M TL r0 + 3 ↔ j = d) := by
+  -- along the data: same tuple, so `MT = 0`, no switch, piece 0
+  have row : ∀ j ≤ d, r0 + j < n ∧ M D (r0 + j) = 1 ∧ M IDX (r0 + j) = j ∧ M MT (r0 + j) = 0 ∧
+      M PC0 (r0 + j) = 1 ∧ M PC1 (r0 + j) = 0 ∧ M PC2 (r0 + j) = 0 ∧
+      M TA (r0 + j) = M TA r0 ∧ M TL (r0 + j) = M TL r0 := by
+    intro j hj
+    induction j with
+    | zero =>
+      simp only [add_zero]
+      obtain ⟨a, b, c⟩ := first_pieces hsat hr0 hf
+      have hx := (data_walk hsat hr0 hf 0 (fun _ h => absurd h (Nat.not_lt_zero _))).2.2.1
+      simp only [add_zero, Nat.cast_zero] at hx
+      exact ⟨hr0, firstm_d hsat hr0 hf, hx, hmt, a, b, c, trivial, trivial⟩
+    | succ j ih =>
+      obtain ⟨hl, -, -, m0, p0, p1, p2, -⟩ := ih (by omega)
+      obtain ⟨hl2, hd2, hx2, -, ht⟩ := data_walk hsat hr0 hf (j + 1) (fun i hi => hc i (by omega))
+      have hcont : M CONT (r0 + j) = 1 := by
+        rcases hc j (by omega) with c | c
+        · exact c
+        · rw [(helpers hsat hl).2.1, m0] at c; simp at c
+      have h1 : r0 + j + 1 < n := by rw [← add_assoc] at hl2; exact hl2
+      obtain ⟨-, -, -, q0, q1, q2⟩ := step_cont hsat h1 hcont
+      rw [show r0 + (j + 1) = r0 + j + 1 by ring] at hd2 hx2 ht ⊢
+      have hm : M MT (r0 + j + 1) = 0 := by
+        rw [mt_eq hsat h1, ht WTX (by simp), ht HDR (by simp), ht SEG (by simp), ← mt_eq hsat hr0, hmt]
+      exact ⟨h1, hd2, hx2, hm, q0.trans p0, q1.trans p1, q2.trans p2, ht TA (by simp), ht TL (by simp)⟩
+  intro j hj
+  obtain ⟨hl, hd, hx, m0, p0, p1, p2, ta, tl⟩ := row j hj
+  have hpos : M POS (r0 + j) = M TA r0 + j := by
+    rw [data_pos hsat hl hd, p1, p2, ta, hx]; ring
+  refine ⟨hd, hx, hpos, ?_⟩
+  have hz : M Z (r0 + j) = 1 ↔ M TA r0 + j = M TL r0 + 3 := by
+    rw [z_iff hsat hl, ezE_eval hl, m0, hpos, tl]; simp [sub_eq_zero]
+  rw [← hz]
+  constructor
+  · intro z
+    by_contra hne
+    have hcont : M CONT (r0 + j) = 1 := by
+      rcases hc j (by omega) with c | c
+      · exact c
+      · rw [(helpers hsat hl).2.1, m0] at c; simp at c
+    rw [(step_cont hsat (by
+      have := (row (j + 1) (by omega)).1; rw [← add_assoc] at this; exact this) hcont).1] at z
+    exact zero_ne_one z
+  · rintro rfl
+    obtain ⟨-, -, e⟩ := helpers hsat hl
+    rw [e, hd, one_mul] at he
+    rcases bool_col hsat (e := Z) (by simp) hl with z | z
+    · rw [z, (helpers hsat hl).2.1, z] at he; simp at he
+    · exact z
+
+
 /-- Row `r` is in piece `q` (one flag set). -/
 def inPiece (M : ℕ → ℕ → F) (r q : ℕ) : Prop :=
   M PC0 r = (if q = 0 then 1 else 0) ∧ M PC1 r = (if q = 1 then 1 else 0) ∧ M PC2 r = (if q = 2 then 1 else 0)

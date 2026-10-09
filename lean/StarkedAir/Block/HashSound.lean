@@ -4,6 +4,7 @@ second-hash digest is `Spec.Block.sha256d` of a message's data bytes.
 -/
 import StarkedAir.Block.Link
 import StarkedAir.Block.HashSpec
+import StarkedAir.Block.TxBytes
 
 namespace StarkedAir.Block
 
@@ -64,6 +65,13 @@ theorem chunk_get (l : Spec.Block.Bytes) (b t : ℕ) (ht : t < 16) :
 theorem val2 {x y : F} (hx : x.val < 256) (hy : y.val < 256) : (256 * x + y).val = 256 * x.val + y.val := by
   refine Fields.val_lt_of_eq_cast ?_ (Fields.lt_P (m := 256 * x.val + y.val) (by omega))
   push_cast; simp
+
+theorem slice_bb (Mb : ℕ → ℕ → F) {len a k : ℕ} (h : a + k ≤ len) :
+    Fields.slice (Fields.blockBytes Mb len) a k = (List.range k).map (fun j => UInt8.ofNat (Mb BYTE (a + j)).val) := by
+  apply List.ext_getElem
+  · simp [Fields.slice, Fields.blockBytes]; omega
+  · intro i h1 h2
+    simp [Fields.slice, Fields.blockBytes]
 
 section System
 
@@ -233,6 +241,45 @@ theorem digest_sha256d (hL25 : L ≤ 25) {q : ℕ} (hq : 1 ≤ q) (hn : 72 * q +
       exact block_word hL hsat hL25 hr0 f hc he hs (by omega) ht hfc (vj.1.trans hmid.symm) vj.2 (by omega)
   refine ⟨r0, d, f, hmid, hc, he, ?_⟩
   rw [hout, hfold _ le_rfl, dbl_digest, HashSpec.sha256d_eq _ _ hpl]
+
+/-- **A whole message's data is a block slice**: `msgData = R[TA, TA + d]`, and `TA + d = TL + 3`. -/
+theorem whole_data (hL25 : L ≤ 25) {r0 d : ℕ} (h0 : r0 < 2 ^ L) (f0 : (inst 2).main Msg.FIRSTM r0 = 1)
+    (hc0 : ∀ j < d, (inst 2).main Msg.CONT (r0 + j) = 1 ∨ (inst 2).main Msg.SW (r0 + j) = 1)
+    (he0 : (inst 2).main Msg.ENDD (r0 + d) = 1) (hmt : (inst 2).main Msg.MT r0 = 0) :
+    ((inst 2).main Msg.TA r0).val + d < (pub 0).val ∧
+      msgData inst r0 d = Fields.slice (Fields.blockBytes (inst 0).main (pub 0).val) ((inst 2).main Msg.TA r0).val (d + 1) ∧
+      ((((inst 2).main Msg.TA r0).val + d : ℕ) : F) = (inst 2).main Msg.TL r0 + 3 := by
+  have ms := hash_msg_sat hL hsat
+  have h25 : 2 ^ L ≤ 2 ^ 25 := Nat.pow_le_pow_right (by norm_num) hL25
+  norm_num at h25
+  have hLEN : (pub 0).val ≤ 2 ^ 25 :=
+    Fields.len_le hL25 (hash_fields_sat' hL hsat) (hash_bytes_sat hL hsat) (hash_fields_read hL hsat hL25)
+  have rows := Msg.whole_rows ms h0 f0 hmt hc0 he0
+  have rd : ∀ j ≤ d, ((inst 2).main Msg.TA r0).val + j < (pub 0).val ∧
+      (inst 2).main Msg.BYTE (r0 + j) = (inst 0).main BYTE (((inst 2).main Msg.TA r0).val + j) := by
+    have r00 := rows 0 (Nat.zero_le _)
+    obtain ⟨l0, -⟩ := Msg.data_walk ms h0 f0 0 (fun i hi => absurd hi (Nat.not_lt_zero _))
+    obtain ⟨ρ0, hρ0, p0, -⟩ := msg_read hL hsat hL25 l0 r00.1
+    have hta : ((inst 2).main Msg.TA r0).val = ρ0 := by
+      rw [r00.2.2.1] at p0; simp at p0
+      exact Fields.val_lt_of_eq_cast p0 (by unfold P; omega)
+    intro j hj
+    obtain ⟨hd, -, hpos, -⟩ := rows j hj
+    obtain ⟨lj, -⟩ := Msg.data_walk ms h0 f0 j (fun i hi => hc0 i (by omega))
+    obtain ⟨ρ, hρ, pj, bj⟩ := msg_read hL hsat hL25 lj hd
+    have e : ((inst 2).main Msg.TA r0).val + j = ρ := by
+      refine natCast_inj_of_lt (a := ((inst 2).main Msg.TA r0).val + j) (b := ρ) (by rw [hta]; unfold P; omega)
+        (lt_of_lt_of_le hρ (hLEN.trans (by unfold P; norm_num))) ?_
+      rw [← pj, hpos]; push_cast; rw [ZMod.natCast_zmod_val]
+    exact ⟨by omega, by rw [bj, e]⟩
+  have hb := (rd d le_rfl).1
+  refine ⟨hb, ?_, ?_⟩
+  · rw [slice_bb _ (by omega)]
+    unfold msgData
+    refine List.map_congr_left (fun j hj => ?_)
+    rw [(rd j (by simp at hj; omega)).2]
+  · have := ((rows d le_rfl).2.2.2).mpr rfl
+    push_cast; rw [ZMod.natCast_zmod_val]; exact this
 
 end System
 
