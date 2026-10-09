@@ -10,6 +10,15 @@ namespace StarkedAir.Block.Sha
 open StarkedAir
 open StarkedAir.Sha256 (col pre cst boolC limb ShaSat shaPre inputAt messageAt outputAt compress_sound)
 
+/-- The chaining value after `j` blocks of a message whose periods start at `s0`. -/
+def fold (M : ℕ → ℕ → F) (s0 : ℕ) : ℕ → Spec.Sha256.State
+  | 0 => Spec.Sha256.IV
+  | j + 1 => Spec.Sha256.compress (fold M s0 j) (messageAt M (s0 + 72 * j))
+
+/-- The second hash's message block over a digest `d`. -/
+def dblBlock (d : Spec.Sha256.State) (t : ℕ) : Spec.Sha256.Word :=
+  if t < 8 then Spec.Bitcoin.stateWord d t else BitVec.ofNat 32 (dblWord t)
+
 section Period
 
 variable {n : ℕ} {pub : ℕ → F} {M : ℕ → ℕ → F}
@@ -208,6 +217,42 @@ theorem dbl_message {s : ℕ} (hs : s % 72 = 0) (h72 : 72 ≤ s) (hsn : s + 72 �
         if_pos (by omega), show 4 + t - 4 = t by omega, HeaderChain.half16_ofNat hlt 0 (by norm_num)]; simp
     · rw [ev (DC_LO + 1) (fun q => if 12 ≤ q ∧ q < 20 then dblWord (q - 4) / 2 ^ 16 else 0) rfl, hq,
         if_pos (by omega), show 4 + t - 4 = t by omega, HeaderChain.half16_ofNat hlt 1 (by norm_num)]; simp
+
+theorem flags_excl {r : ℕ} (hr : r < n) : M FST r * M DBL r = 0 ∧ M FST r * M NILS r = 0 ∧ M DBL r * M NILS r = 0 := by
+  have e := fun (c : Expr) (h : c ∈ flagC) => flag_sat hsat h hr
+  have h1 := e (.mul (k FST) (k DBL)) (by simp [flagC])
+  have h2 := e (.mul (k FST) (k NILS)) (by simp [flagC])
+  have h3 := e (.mul (k DBL) (k NILS)) (by simp [flagC])
+  simp only [Expr.eval, k, Sha256.eval_col, wrap_zero hr] at h1 h2 h3
+  exact ⟨h1, h2, h3⟩
+
+/-- **A message's blocks**: from a first block through continuations, the outputs chain. -/
+theorem chain_out {s0 b : ℕ} (hs0 : s0 % 72 = 0) (hn : s0 + 72 * b ≤ n) (hf : M FST s0 = 1)
+    (hc : ∀ j, 1 ≤ j → j < b → M CHN (s0 + 72 * j) = 1) :
+    ∀ j, 1 ≤ j → j ≤ b → outputAt M (s0 + 72 * (j - 1)) = fold M s0 j := by
+  intro j
+  induction j with
+  | zero => intro h; omega
+  | succ j ih =>
+    intro _ hj
+    rcases Nat.eq_zero_or_pos j with rfl | hj0
+    · have hd : M DBL s0 = 0 := by
+        have := (flags_excl hsat (show s0 < n by omega)).1; rw [hf, one_mul] at this; exact this
+      simp only [Nat.zero_add, Nat.sub_self, Nat.mul_zero, Nat.add_zero, fold]
+      rw [← period_compress hsat hs0 (by omega), input_iv hsat hs0 (by omega) (by rw [hf, hd, add_zero])]
+    · have hs : (s0 + 72 * j) % 72 = 0 := by omega
+      rw [show j + 1 - 1 = j by omega, ← period_compress hsat hs (by omega),
+        input_chain hsat hs (by omega) (by omega) (hc j hj0 (by omega)),
+        show s0 + 72 * j - 72 = s0 + 72 * (j - 1) by omega, ih (by omega) (by omega), fold]
+
+/-- **The second hash**: its output is the compression of the IV with the previous digest and the
+constant padding, i.e. SHA-256 of that digest. -/
+theorem dbl_out {s : ℕ} (hs : s % 72 = 0) (h72 : 72 ≤ s) (hsn : s + 72 ≤ n) (h : M DBL s = 1) :
+    outputAt M s = Spec.Sha256.compress Spec.Sha256.IV (dblBlock (outputAt M (s - 72))) := by
+  have hf : M FST s = 0 := by
+    have := (flags_excl hsat (show s < n by omega)).1; rw [h, mul_one] at this; exact this
+  rw [← period_compress hsat hs hsn, input_iv hsat hs hsn (by rw [hf, h, zero_add])]
+  exact HeaderChain.compress_congr _ (fun t ht => by rw [dbl_message hsat hs h72 hsn h t ht]; rfl)
 
 end Period
 
