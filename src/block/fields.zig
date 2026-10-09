@@ -148,6 +148,13 @@ pub fn tokenize(a: std.mem.Allocator, raw: []const u8) ![]Row {
     return rows.toOwnedSlice(a);
 }
 
+/// Sets each transaction tuple's multiplicity (at its locktime row) to `uses`.
+pub fn setTxUses(cols: [][]M31, rows: []const Row, uses: u32) void {
+    for (rows, 0..) |r, i| if (r.kind == K_LOCK) {
+        cols[TXM][i] = M31.fromCanonical(uses);
+    };
+}
+
 /// The positions the fields component reads (for the byte table's multiplicities).
 pub fn reads(a: std.mem.Allocator, rows: []const Row) ![]u32 {
     var out = std.ArrayList(u32).empty;
