@@ -473,6 +473,26 @@ theorem walk : ∀ q, 72 * q + 72 ≤ n → (M FST (72 * q) = 1 ∨ M CHN (72 * 
       simp only [Expr.eval, k, Sha256.eval_col, wrap_zero hr, hf, one_mul] at this
       simpa using this
 
+/-- Period 0 is no second hash. -/
+theorem dbl_pos {q : ℕ} (hn : 72 * q + 72 ≤ n) (hd : M DBL (72 * q) = 1) : 1 ≤ q := by
+  by_contra h
+  have e : q = 0 := by omega
+  subst e
+  have h0 : 0 < n := by omega
+  have := order_sat hsat (c := .mul (pre FIRST) (.add (k CHN) (k DBL))) (by simp [orderC]) h0
+  have hfirst : (pre FIRST).eval n preCols pub M 0 = 1 := by
+    simp only [pre, Expr.eval, wrap_zero h0]
+    rw [show preCols.getD FIRST (.periodic [0]) = .isFirst from rfl]; simp [PreCol.eval]
+  simp only [Nat.mul_zero] at hd
+  simp only [Expr.eval, hfirst, one_mul, k, Sha256.eval_col, wrap_zero h0, hd] at this
+  rcases kbool hsat (c := DBL) (by simp) h0 with d | d
+  · rw [d] at hd; exact zero_ne_one hd
+  · have hc := chn_eq hsat h0
+    obtain ⟨e1, -, e3, -, e5, -, -, -, e9, -⟩ := kinds_excl hsat h0
+    rw [hd, mul_one] at e1 e5 e9; rw [hd, one_mul] at e3
+    rw [hc, e1, e3, e5, e9, hd] at this
+    norm_num at this
+
 /-- A node's padding block follows its first block, with the same id. -/
 theorem npad_prev {q : ℕ} (hn : 72 * q + 72 ≤ n) (hp : M NPAD (72 * q) = 1) :
     1 ≤ q ∧ M NODE (72 * (q - 1)) = 1 ∧ M MID (72 * (q - 1)) = M MID (72 * q) := by

@@ -4,6 +4,7 @@ each Merkle node id's second hash outputs SHA256d of its children's digests, and
 header's Merkle field.
 -/
 import StarkedAir.Block.HashSound
+import StarkedAir.Spec.MerkleLevels
 
 namespace StarkedAir.Block
 
@@ -21,6 +22,19 @@ theorem word_of_halves {y z : Spec.Sha256.Word} (h0 : Sha256.half16 y 0 = Sha256
 theorem half16_lt (y : Spec.Sha256.Word) (h : ℕ) : Sha256.half16 y h < 2 ^ 16 := by
   have := y.isLt
   rcases h with _ | h <;> simp only [Sha256.half16] <;> omega
+
+theorem lvs_len (l0 : List Spec.Block.Bytes) : ∀ k, (Spec.Block.lvs l0 k).length = Merkle.cntL l0.length k
+  | 0 => rfl
+  | k + 1 => by rw [Spec.Block.lvs_length, lvs_len l0 k]; rfl
+
+theorem npad_eq : Sha.npadBlock = HashSpec.npadBlk := by
+  funext t
+  unfold Sha.npadBlock HashSpec.npadBlk Sha.npadWord
+  by_cases h0 : t = 0
+  · subst h0; rfl
+  · by_cases h15 : t = 15
+    · subst h15; rfl
+    · simp [h0, h15]
 
 section System
 
@@ -253,6 +267,122 @@ theorem node_children (hL25 : L ≤ 25) {p : ℕ} (hp : 72 * p + 72 ≤ 2 ^ L) (
     have hb : ∀ (y : Spec.Sha256.Word) (h : ℕ), Sha256.half16 y h < P := fun y h =>
       Fields.lt_P (by have := half16_lt y h; omega)
     exact word_of_halves (natCast_inj_of_lt (hb _ 0) (hb _ 0) h0) (natCast_inj_of_lt (hb _ 1) (hb _ 1) h1)
+
+/-- **Every tree entry's second hash.** With `b` the parsed block (`N` transactions, public input 1), a
+second hash whose id is tree entry `(l, i)` outputs entry `i` of level `l` of the txid Merkle tree. -/
+theorem id_digest (hL25 : L ≤ 25) {b : Spec.Block.Blk}
+    (hb : Spec.Block.parseBlock (Fields.blockBytes (inst 0).main (pub 0).val) = some b)
+    (hN : pub 1 = (b.txs.length : F)) (hN1 : 1 ≤ b.txs.length) (hN25 : b.txs.length < 2 ^ L) :
+    ∀ l, (l = 0 ∨ (1 ≤ l ∧ 2 ≤ Merkle.cntL b.txs.length (l - 1))) → ∀ i < Merkle.cntL b.txs.length l,
+      ∀ q, 72 * q + 72 ≤ 2 ^ L → (inst 3).main Sha.DBL (72 * q) = 1 →
+        (inst 3).main Sha.MID (72 * q) = (Merkle.idOf b.txs.length l i : F) →
+        Spec.Block.stateBytes (outputAt (inst 3).main (72 * q)) =
+          (Spec.Block.lvs (b.txs.map Spec.Block.txid) l).getD i [] := by
+  have ms := hash_msg_sat hL hsat
+  have ss := hash_sha_sat hL hsat
+  have ks := hash_merkle_sat hL hsat
+  have h25 : 2 ^ L ≤ 2 ^ 25 := Nat.pow_le_pow_right (by norm_num) hL25
+  norm_num at h25
+  set N := b.txs.length with hNdef
+  have tr := Merkle.tree_rows ks (show 0 < 2 ^ L by positivity) (by omega) hN hN1 (by omega)
+  intro l
+  induction l with
+  | zero =>
+    intro _ i hi q hq hd hm
+    simp only [Merkle.cntL] at hi
+    simp only [Merkle.idOf, if_true] at hm
+    have hmid : ((inst 3).main Sha.MID (72 * q)).val < Merkle.NB := by
+      rw [hm, ZMod.val_natCast_of_lt (Fields.lt_P (m := 1 + 2 * i) (by omega))]; unfold Merkle.NB; omega
+    obtain ⟨b', hp', r0, h0, f0, hm0, -, hnh⟩ := digest_tx hL hsat hL25 (Sha.dbl_pos ss hq hd) hq hd hmid
+    rw [hb] at hp'; cases hp'
+    -- the message is a txid message of transaction `i`
+    have hh : (inst 2).main Msg.HDR r0 = 0 := by
+      rcases Msg.bool_col ms (e := Msg.HDR) (by simp) h0 with h | h
+      · exact h
+      · exfalso
+        rw [Msg.mid_eq ms h0, h, sub_self, zero_mul, hm] at hm0
+        have := natCast_inj_of_lt (a := 0) (b := 1 + 2 * i) (Fields.lt_P (by norm_num)) (Fields.lt_P (by omega))
+          (by simpa using hm0)
+        omega
+    obtain ⟨i', tx, hti, hget, hout⟩ := hnh hh
+    have hi' : i' < N := by
+      have := List.getElem?_eq_some_iff.mp hget; exact this.1
+    have hw := Fields.bool_val (Msg.bool_col ms (e := Msg.WTX) (by simp) h0)
+    rw [Msg.mid_eq ms h0, hh, sub_zero, one_mul, hti, hw.1, hm] at hm0
+    have e : ((1 + 2 * i' + ((inst 2).main Msg.WTX r0).val : ℕ) : F) = ((1 + 2 * i : ℕ) : F) := by
+      push_cast at hm0 ⊢; linear_combination hm0
+    have en := natCast_inj_of_lt (Fields.lt_P (by omega)) (Fields.lt_P (by omega)) e
+    have hw0 : (inst 2).main Msg.WTX r0 = 0 := by
+      rw [hw.1, show ((inst 2).main Msg.WTX r0).val = 0 by omega]; simp
+    have hii : i' = i := by omega
+    subst hii
+    rw [hout, if_neg (by rw [hw0]; exact zero_ne_one)]
+    simp [Spec.Block.lvs, List.getD_eq_getElem?_getD, hget]
+  | succ l ih =>
+    intro hl i hi q hq hd hm
+    have hc2 : 2 ≤ Merkle.cntL N l := by rcases hl with h | ⟨-, h⟩ <;> simp_all
+    have hil : i < (Merkle.cntL N l + 1) / 2 := hi
+    -- the node's second hash, padding block and node block
+    have hmv : ((inst 3).main Sha.MID (72 * q)).val = Merkle.NB + Merkle.baseL N (l + 1) + i := by
+      rw [hm, Merkle.idOf, if_neg (by omega), ZMod.val_natCast_of_lt (Fields.lt_P (by
+        have := (tr.1 (l + 1) (by omega) (by simpa using hc2)).1; unfold Merkle.NB; omega))]
+    obtain ⟨hq2, hnp, hno, hme⟩ := node_period hL hsat hL25 hq hd (by omega)
+    set s := 72 * (q - 2) with hs
+    have hsr : s < 2 ^ L := by omega
+    obtain ⟨r', hr', ha', hmr, hlr, hrr, hdr⟩ := node_row hL hsat hL25 hsr (by
+      simp only [Expr.eval, Sha.k, StarkedAir.Sha256.eval_col, wrap_zero hsr, hno, mul_one]
+      rw [Sha.eval_per72 ss (i := Sha.ROW0) (f := fun q => if q = 0 then 1 else 0) rfl hsr,
+        show s % 72 = 0 by omega]; simp)
+    -- the Merkle row is entry `(l + 1, i)`
+    obtain ⟨hlt, rows⟩ := tr.1 (l + 1) (by omega) (by simpa using hc2)
+    have hrow : r' = Merkle.baseL N (l + 1) + i := by
+      have e : ((Merkle.NB + r' : ℕ) : F) = ((Merkle.NB + Merkle.baseL N (l + 1) + i : ℕ) : F) := by
+        rw [← hmr, hme, hm, Merkle.idOf, if_neg (by omega)]
+      have := natCast_inj_of_lt (Fields.lt_P (by unfold Merkle.NB; omega)) (Fields.lt_P (by unfold Merkle.NB; omega)) e
+      omega
+    subst hrow
+    obtain ⟨-, rI, -, rL1, rPB, rOdd, rLast, -⟩ := rows i hi
+    obtain ⟨kd, kl, kr⟩ := Merkle.kids ks hr' (show 1 ≤ l + 1 by omega) (rfl : Merkle.cntL N l = Merkle.cntL N (l + 1 - 1))
+      hil (by simpa using rL1) (fun h => by simpa using rPB h) rI (by simpa using rOdd) (by
+        rw [rLast]; rfl)
+    simp only [Nat.add_sub_cancel] at kl kr
+    -- the children's digests
+    have ihl : l = 0 ∨ (1 ≤ l ∧ 2 ≤ Merkle.cntL N (l - 1)) := by
+      rcases Nat.eq_zero_or_pos l with h | h
+      · exact Or.inl h
+      · right; refine ⟨h, ?_⟩
+        have := Merkle.cntL_le (N := N) (l - 1); rw [show l - 1 + 1 = l by omega] at this; omega
+    have child : ∀ half ≤ 1, ∃ o : Spec.Sha256.State,
+        (∀ t < 8, messageAt (inst 3).main s (8 * half + t) = Spec.Bitcoin.stateWord o t) ∧
+        Spec.Block.stateBytes o = (Spec.Block.lvs (b.txs.map Spec.Block.txid) l).getD
+          (if half = 0 then 2 * i else min (2 * i + 1) (Merkle.cntL N l - 1)) [] := by
+      intro half hh
+      obtain ⟨q', hq', hd', hmid', hw⟩ := node_children hL hsat hL25 (p := q - 2) (by omega) hno half hh
+      refine ⟨outputAt (inst 3).main (72 * q'), hw, ?_⟩
+      apply ih ihl _ (by split_ifs <;> omega) q' hq' hd'
+      rw [hmid']
+      interval_cases half
+      · simp only [if_true]; rw [hlr, kl]
+      · simp only [show (1 : ℕ) ≠ 0 by decide, if_false]; rw [hrr, kr]
+    obtain ⟨oL, wL, bL⟩ := child 0 (by norm_num)
+    obtain ⟨oR, wR, bR⟩ := child 1 (by norm_num)
+    simp only [if_true, show (1 : ℕ) ≠ 0 by decide, if_false] at bL bR
+    -- the node's output
+    have hout := Sha.node_out ss hq2 hq hd (by rw [show q - 1 = q - 1 by rfl]; exact hnp) hno
+    have hmsg : Spec.Sha256.compress Spec.Sha256.IV (messageAt (inst 3).main s) =
+        Spec.Sha256.compress Spec.Sha256.IV (HashSpec.pairWords oL oR) := by
+      apply StarkedAir.HeaderChain.compress_congr
+      intro t ht
+      unfold HashSpec.pairWords
+      split_ifs with h8
+      · have := wL t h8; simpa using this
+      · have := wR (t - 8) (by omega); rw [show 8 * 1 + (t - 8) = t by omega] at this; exact this
+    rw [hout, hmsg, npad_eq, dbl_digest, ← HashSpec.sha256d_pair, bL, bR]
+    have hlen := lvs_len (b.txs.map Spec.Block.txid) l
+    simp only [List.length_map] at hlen
+    have hg := Spec.Block.level_get (Spec.Block.lvs (b.txs.map Spec.Block.txid) l) i (by rw [hlen]; exact hil)
+    simp only [Spec.Block.lvs, List.getD_eq_getElem?_getD, hg, Option.getD_some]
+    rw [hlen]
 
 end System
 
