@@ -811,6 +811,89 @@ theorem split_msg {r0 : ℕ} (hr0 : r0 < n) (hf : M FIRSTM r0 = 1) (hmt : M MT r
       rw [(step_cont hsat h1 c).1] at z; exact zero_ne_one z
     · rintro rfl; exact (endd_z hsat hl hd he).1
 
+/-- The kind transitions from the cyclic predecessor (any row, including row 0). -/
+theorem trans_prv {r : ℕ} (hr : r < n) :
+    M D r - M FIRSTM r = M CONT (prv n r) + M SW (prv n r) ∧ M P80 r = M ENDD (prv n r) ∧
+    M ZR r = (M P80 (prv n r) + M ZR (prv n r)) * (1 - (if r % 64 = 56 then 1 else 0)) ∧
+    M LN r = (M P80 (prv n r) + M ZR (prv n r)) * (if r % 64 = 56 then 1 else 0) +
+      M LN (prv n r) * (1 - (if r % 64 = 0 then 1 else 0)) := by
+  have t := fun (e : Expr) (h : e ∈ transC) => sat hsat (mem_transC h) hr
+  have i56 : (pre IS56).eval n preCols pub M r = if r % 64 = 56 then 1 else 0 := by
+    rw [ev_per64 (p := (· = 56)) rfl hr]; simp
+  have i0 : (pre IS0).eval n preCols pub M r = if r % 64 = 0 then 1 else 0 := by
+    rw [ev_per64 (p := (· = 0)) rfl hr]; simp
+  refine ⟨?_, ?_, ?_, ?_⟩
+  · have := t (.sub (.sub (k D) (k FIRSTM)) (.add (kp CONT) (kp SW))) (by simp [transC])
+    simp only [Expr.eval, ev_k hr, ev_kpp hr] at this; exact sub_eq_zero.mp this
+  · have := t (.sub (k P80) (kp ENDD)) (by simp [transC])
+    simp only [Expr.eval, ev_k hr, ev_kpp hr] at this; exact sub_eq_zero.mp this
+  · have := t (.sub (k ZR) (.mul (.add (kp P80) (kp ZR)) (om (pre IS56)))) (by simp [transC])
+    simp only [Expr.eval, ev_k hr, ev_kpp hr, om, one, eval_cst, Nat.cast_one, i56] at this; exact sub_eq_zero.mp this
+  · have := t (.sub (k LN) (.add (.mul (.add (kp P80) (kp ZR)) (pre IS56)) (.mul (kp LN) (om (pre IS0))))) (by simp [transC])
+    simp only [Expr.eval, ev_k hr, ev_kpp hr, om, one, eval_cst, Nat.cast_one, i56, i0] at this; exact sub_eq_zero.mp this
+
+/-- A non-data row has no continue / switch / end. -/
+theorem nodata_helpers {r : ℕ} (hr : r < n) (hd : M D r = 0) : M CONT r = 0 ∧ M SW r = 0 ∧ M ENDD r = 0 := by
+  obtain ⟨c, w, e⟩ := helpers hsat hr
+  obtain ⟨p0, p1, -⟩ := pieces_zero hsat hr hd
+  have hw : M SW r = 0 := by rw [w, p0, p1]; ring
+  exact ⟨by rw [c, hd, zero_mul], hw, by rw [e, hd, hw]; ring⟩
+
+/-- After an unused row comes an unused row or a message start. -/
+theorem after_nil {r : ℕ} (hr : r < n) (hp : M NIL (prv n r) = 1) (hf : M FIRSTM r = 0) : M NIL r = 1 := by
+  have hpn : prv n r < n := Nat.mod_lt _ (by omega)
+  have u := fun b (hb : b < 5) (hne : NIL ≠ b) => kind_unique hsat hpn (a := NIL) (b := b) (by simp [NIL]) hb hne hp
+  have pd := u D (by simp [D]) (by simp [NIL, D])
+  have pp := u P80 (by simp [P80]) (by simp [NIL, P80])
+  have pz := u ZR (by simp [ZR]) (by simp [NIL, ZR])
+  have pl := u LN (by simp [LN]) (by simp [NIL, LN])
+  obtain ⟨c, w, e⟩ := nodata_helpers hsat hpn pd
+  obtain ⟨t1, t2, t3, t4⟩ := trans_prv hsat hr
+  rw [c, w, hf, add_zero, sub_zero] at t1
+  rw [e] at t2
+  rw [pp, pz, add_zero, zero_mul] at t3
+  rw [pp, pz, pl, add_zero, zero_mul, zero_mul, add_zero] at t4
+  obtain ⟨a, ha, h1⟩ := kind_exists hsat hr
+  interval_cases a
+  · rw [show (0 : ℕ) = D from rfl, t1] at h1; exact absurd h1 zero_ne_one
+  · rw [show (1 : ℕ) = P80 from rfl, t2] at h1; exact absurd h1 zero_ne_one
+  · rw [show (2 : ℕ) = ZR from rfl, t3] at h1; exact absurd h1 zero_ne_one
+  · rw [show (3 : ℕ) = LN from rfl, t4] at h1; exact absurd h1 zero_ne_one
+  · exact h1
+
+/-- **Every used row belongs to a message**: it is `IDX` rows after a message start `r0`, with no
+start or unused row in between. -/
+theorem belongs {r : ℕ} (hr : r < n) (hnil : M NIL r = 0) :
+    ∃ r0 ≤ r, M FIRSTM r0 = 1 ∧ M IDX r = ((r - r0 : ℕ) : F) ∧
+      ∀ i, r0 < i → i ≤ r → M FIRSTM i = 0 ∧ M NIL i = 0 := by
+  induction r with
+  | zero =>
+    have hf : M FIRSTM 0 = 1 := by
+      rcases bool_col hsat (e := FIRSTM) (by simp) hr with f | f
+      · have hp : prv n 0 = n - 1 := by unfold prv; rw [Nat.mod_eq_of_lt (by omega)]; omega
+        have := after_nil hsat hr (by rw [hp]; exact last_nil hsat (by omega)) f
+        rw [hnil] at this; exact absurd this zero_ne_one
+      · exact f
+    have := sat hsat (mem_msgC (c := .mul (k FIRSTM) (k IDX)) (by simp [msgC])) hr
+    simp only [Expr.eval, ev_k hr, hf, one_mul] at this
+    exact ⟨0, le_rfl, hf, by simpa using this, fun i h1 h2 => absurd h2 (by omega)⟩
+  | succ r ih =>
+    rcases bool_col hsat (e := FIRSTM) (by simp) hr with f | f
+    · have hpr : prv n (r + 1) = r := by unfold prv; rw [show r + 1 + n - 1 = r + n by omega]; simp [Nat.mod_eq_of_lt (by omega : r < n)]
+      have hn0 : M NIL r = 0 := by
+        rcases bool_col hsat (e := NIL) (by simp) (by omega : r < n) with z | z
+        · exact z
+        · have := after_nil hsat hr (by rw [hpr]; exact z) f; rw [hnil] at this; exact absurd this zero_ne_one
+      obtain ⟨r0, h0, hf0, hx, hb⟩ := ih (by omega) hn0
+      refine ⟨r0, by omega, hf0, ?_, fun i h1 h2 => ?_⟩
+      · rw [(in_msg hsat hr f).1, hx, show r + 1 - r0 = (r - r0) + 1 by omega]; push_cast; ring
+      · rcases Nat.lt_or_ge i (r + 1) with h | h
+        · exact hb i h1 (by omega)
+        · rw [show i = r + 1 by omega]; exact ⟨f, hnil⟩
+    · have := sat hsat (mem_msgC (c := .mul (k FIRSTM) (k IDX)) (by simp [msgC])) hr
+      simp only [Expr.eval, ev_k hr, f, one_mul] at this
+      exact ⟨r + 1, le_rfl, f, by simpa using this, fun i h1 h2 => absurd h2 (by omega)⟩
+
 end Rows
 
 end StarkedAir.Block.Msg
