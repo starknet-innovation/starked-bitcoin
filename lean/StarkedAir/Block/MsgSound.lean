@@ -1132,13 +1132,20 @@ theorem msg_pad {r0 d : ℕ} (hr0 : r0 < n) (hf : M FIRSTM r0 = 1)
 /-- A data row's position and end flag are functions of its pieces, index and tuple. -/
 theorem row_det {a b : ℕ} (ha : a < n) (hb : b < n) (da : M D a = 1) (db : M D b = 1)
     (p0 : M PC0 a = M PC0 b) (p1 : M PC1 a = M PC1 b) (p2 : M PC2 a = M PC2 b) (hx : M IDX a = M IDX b)
-    (hmt : M MT a = M MT b) (hta : M TA a = M TA b) (htw : M TW a = M TW b) (htl : M TL a = M TL b) :
+    (hmt : M MT a = M MT b) (hta : M TA a = M TA b) (htw : M TW a = M TW b ∨ (M PC1 a = 0 ∧ M PC2 a = 0))
+    (htl : M TL a = M TL b) :
     M POS a = M POS b ∧ M Z a = M Z b := by
   have pos : M POS a = M POS b := by
-    rw [data_pos hsat ha da, data_pos hsat hb db, p1, p2, hx, hta, htw, htl]
+    rw [data_pos hsat ha da, data_pos hsat hb db, p1, p2, hx, hta, htl]
+    rcases htw with h | ⟨z1, z2⟩
+    · rw [h]
+    · rw [← p1, ← p2, z1, z2]; ring
   refine ⟨pos, ?_⟩
   have ez : ezE.eval n preCols pub M a = ezE.eval n preCols pub M b := by
-    rw [ezE_eval ha, ezE_eval hb, p0, p1, p2, hx, hmt, pos, htw, htl]
+    rw [ezE_eval ha, ezE_eval hb, p0, p1, p2, hx, hmt, pos, htl]
+    rcases htw with h | ⟨z1, z2⟩
+    · rw [h]
+    · rw [← p1, ← p2, z1, z2]; ring
   have ia := z_iff hsat ha; have ib := z_iff hsat hb
   rcases bool_col hsat (e := Z) (by simp) ha with z | z <;> rcases bool_col hsat (e := Z) (by simp) hb with w | w
   · rw [z, w]
@@ -1168,12 +1175,13 @@ theorem exit_unique {r0 d d' : ℕ} (hr0 : r0 < n) (hf : M FIRSTM r0 = 1)
 theorem same_layout {r0 r1 d0 d1 : ℕ} (h0 : r0 < n) (h1 : r1 < n) (f0 : M FIRSTM r0 = 1) (f1 : M FIRSTM r1 = 1)
     (hc0 : ∀ j < d0, M CONT (r0 + j) = 1 ∨ M SW (r0 + j) = 1) (he0 : M ENDD (r0 + d0) = 1)
     (hc1 : ∀ j < d1, M CONT (r1 + j) = 1 ∨ M SW (r1 + j) = 1) (he1 : M ENDD (r1 + d1) = 1)
-    (hmt : M MT r0 = M MT r1) (hta : M TA r0 = M TA r1) (htw : M TW r0 = M TW r1) (htl : M TL r0 = M TL r1) :
+    (hmt : M MT r0 = M MT r1) (hta : M TA r0 = M TA r1) (htw : M MT r0 = 1 → M TW r0 = M TW r1)
+    (htl : M TL r0 = M TL r1) :
     d0 = d1 ∧ ∀ j ≤ d0, M POS (r0 + j) = M POS (r1 + j) := by
   -- the tuple, index and data flag agree on rows `j ≤ min d0 d1`
   have rf : ∀ j, j ≤ d0 → j ≤ d1 → r0 + j < n ∧ r1 + j < n ∧ M D (r0 + j) = 1 ∧ M D (r1 + j) = 1 ∧
       M IDX (r0 + j) = M IDX (r1 + j) ∧ M MT (r0 + j) = M MT (r1 + j) ∧ M TA (r0 + j) = M TA (r1 + j) ∧
-      M TW (r0 + j) = M TW (r1 + j) ∧ M TL (r0 + j) = M TL (r1 + j) ∧
+      (M MT r0 = 1 → M TW (r0 + j) = M TW (r1 + j)) ∧ M TL (r0 + j) = M TL (r1 + j) ∧ M MT (r0 + j) = M MT r0 ∧
       (0 < j → M FIRSTM (r0 + j) = 0 ∧ M FIRSTM (r1 + j) = 0) := by
     intro j hj0 hj1
     obtain ⟨l0, dd0, x0, g0, t0⟩ := data_walk hsat h0 f0 j (fun i hi => hc0 i (by omega))
@@ -1183,27 +1191,39 @@ theorem same_layout {r0 r1 d0 d1 : ℕ} (h0 : r0 < n) (h1 : r1 < n) (f0 : M FIRS
     have mt : M MT (r0 + j) = M MT (r1 + j) := by
       rw [mt_eq hsat l0, mt_eq hsat l1, t0 WTX (by simp), t1 WTX (by simp), t0 HDR (by simp),
         t1 HDR (by simp), t0 SEG (by simp), t1 SEG (by simp), ← mt_eq hsat h0, ← mt_eq hsat h1, hmt]
-    exact ⟨l0, l1, dd0, dd1, x0.trans x1.symm, mt, e TA (by simp) hta, e TW (by simp) htw, e TL (by simp) htl,
-      fun h => ⟨g0 h, g1 h⟩⟩
+    have mt0 : M MT (r0 + j) = M MT r0 := by
+      rw [mt_eq hsat l0, t0 WTX (by simp), t0 HDR (by simp), t0 SEG (by simp), ← mt_eq hsat h0]
+    exact ⟨l0, l1, dd0, dd1, x0.trans x1.symm, mt, e TA (by simp) hta, fun h => e TW (by simp) (htw h),
+      e TL (by simp) htl, mt0, fun h => ⟨g0 h, g1 h⟩⟩
   have st : ∀ j, j ≤ d0 → j ≤ d1 →
       M PC0 (r0 + j) = M PC0 (r1 + j) ∧ M PC1 (r0 + j) = M PC1 (r1 + j) ∧ M PC2 (r0 + j) = M PC2 (r1 + j) ∧
-      M POS (r0 + j) = M POS (r1 + j) ∧ M Z (r0 + j) = M Z (r1 + j) := by
+      M POS (r0 + j) = M POS (r1 + j) ∧ M Z (r0 + j) = M Z (r1 + j) ∧
+      (M MT r0 ≠ 1 → M PC1 (r0 + j) = 0 ∧ M PC2 (r0 + j) = 0) := by
+    have tw_or : ∀ j, j ≤ d0 → j ≤ d1 → (M MT r0 ≠ 1 → M PC1 (r0 + j) = 0 ∧ M PC2 (r0 + j) = 0) →
+        M TW (r0 + j) = M TW (r1 + j) ∨ (M PC1 (r0 + j) = 0 ∧ M PC2 (r0 + j) = 0) := by
+      intro j hj0 hj1 hz
+      by_cases h : M MT r0 = 1
+      · exact Or.inl ((rf j hj0 hj1).2.2.2.2.2.2.2.1 h)
+      · exact Or.inr (hz h)
     intro j hj0 hj1
     induction j with
     | zero =>
       obtain ⟨a0, b0, c0⟩ := first_pieces hsat h0 f0
       obtain ⟨a1, b1, c1⟩ := first_pieces hsat h1 f1
-      obtain ⟨l0, l1, dd0, dd1, x, mt, ta, tw, tl, -⟩ := rf 0 hj0 hj1
+      have tw := tw_or 0 hj0 hj1 (fun _ => by simp only [add_zero]; exact ⟨b0, c0⟩)
+      obtain ⟨l0, l1, dd0, dd1, x, mt, ta, -, tl, -⟩ := rf 0 hj0 hj1
       simp only [add_zero] at *
       have p0 := a0.trans a1.symm; have p1 := b0.trans b1.symm; have p2 := c0.trans c1.symm
-      exact ⟨p0, p1, p2, row_det hsat l0 l1 dd0 dd1 p0 p1 p2 x mt ta tw tl⟩
+      obtain ⟨u, v⟩ := row_det hsat l0 l1 dd0 dd1 p0 p1 p2 x mt ta tw tl
+      exact ⟨p0, p1, p2, u, v, fun _ => ⟨b0, c0⟩⟩
     | succ j ih =>
-      obtain ⟨p0, p1, p2, -, z⟩ := ih (by omega) (by omega)
-      obtain ⟨l0, l1, dd0, dd1, -, mt, -⟩ := rf j (by omega) (by omega)
-      obtain ⟨m0, m1, ee0, ee1, x, mt', ta, tw, tl, hf⟩ := rf (j + 1) hj0 hj1
+      obtain ⟨p0, p1, p2, -, z, zz⟩ := ih (by omega) (by omega)
+      obtain ⟨l0, l1, dd0, dd1, -, mt, -, -, -, mtc, -⟩ := rf j (by omega) (by omega)
+      obtain ⟨m0, m1, ee0, ee1, x, mt', ta, -, tl, -, hf⟩ := rf (j + 1) hj0 hj1
+      have twr := tw_or (j + 1) hj0 hj1
       obtain ⟨g0, g1⟩ := hf (by omega)
-      rw [show r0 + (j + 1) = r0 + j + 1 by ring] at m0 ee0 x mt' ta tw tl g0 ⊢
-      rw [show r1 + (j + 1) = r1 + j + 1 by ring] at m1 ee1 x mt' ta tw tl g1 ⊢
+      rw [show r0 + (j + 1) = r0 + j + 1 by ring] at m0 ee0 x mt' ta tl g0 twr ⊢
+      rw [show r1 + (j + 1) = r1 + j + 1 by ring] at m1 ee1 x mt' ta tl g1 twr ⊢
       obtain ⟨c0, s0, -⟩ := helpers hsat l0
       obtain ⟨c1, s1, -⟩ := helpers hsat l1
       have cc : M CONT (r0 + j) = M CONT (r1 + j) := by rw [c0, c1, dd0, dd1, z]
@@ -1214,11 +1234,21 @@ theorem same_layout {r0 r1 d0 d1 : ℕ} (h0 : r0 < n) (h1 : r1 < n) (f0 : M FIRS
         rw [g0, sub_zero] at u0; rw [g1, sub_zero] at u1; rw [u0, u1, cc, p0]
       have q1 : M PC1 (r0 + j + 1) = M PC1 (r1 + j + 1) := by rw [v0, v1, cc, ss, p1, p0]
       have q2 : M PC2 (r0 + j + 1) = M PC2 (r1 + j + 1) := by rw [w0, w1, cc, ss, p2, p1]
-      exact ⟨q0, q1, q2, row_det hsat m0 m1 ee0 ee1 q0 q1 q2 x mt' ta tw tl⟩
+      have zz' : M MT r0 ≠ 1 → M PC1 (r0 + j + 1) = 0 ∧ M PC2 (r0 + j + 1) = 0 := by
+        intro hm
+        have sw0 : M SW (r0 + j) = 0 := by
+          rw [s0, mtc]
+          rcases mt_bool hsat h0 with m | m
+          · rw [m]; ring
+          · exact absurd m hm
+        obtain ⟨y1, y2⟩ := zz hm
+        exact ⟨by rw [v0, sw0, y1]; ring, by rw [w0, sw0, y2]; ring⟩
+      obtain ⟨u, v⟩ := row_det hsat m0 m1 ee0 ee1 q0 q1 q2 x mt' ta (twr zz') tl
+      exact ⟨q0, q1, q2, u, v, zz'⟩
   -- the end: `ENDD` is a function of the state, so neither message ends first
   have endd_eq : ∀ j, j ≤ d0 → j ≤ d1 → M ENDD (r0 + j) = M ENDD (r1 + j) := by
     intro j hj0 hj1
-    obtain ⟨p0, p1, -, -, z⟩ := st j hj0 hj1
+    obtain ⟨p0, p1, -, -, z, -⟩ := st j hj0 hj1
     obtain ⟨l0, l1, dd0, dd1, -, mt, -⟩ := rf j hj0 hj1
     obtain ⟨-, s0, e0⟩ := helpers hsat l0
     obtain ⟨-, s1, e1⟩ := helpers hsat l1
