@@ -50,5 +50,6 @@ import StarkedAir.Block.Msg
 import StarkedAir.Block.MsgSound
 import StarkedAir.Block.Sha
 import StarkedAir.Block.ShaSound
+import StarkedAir.Block.Link
 import StarkedAir.Spec.BlockTokens
 import StarkedAir.Testing.BlockReader
