@@ -7,6 +7,11 @@ import StarkedAir.Spec.BlockTokens
 
 namespace StarkedAir.Spec.Block
 
+/-- Output tokens. -/
+def Tok.isOut : Tok → Bool
+  | .out _ _ => true
+  | _ => false
+
 /-- Witness-section tokens. -/
 def Tok.isWit : Tok → Bool
   | .wcnt _ => true
@@ -31,7 +36,7 @@ theorem insT_split : ∀ (k : ℕ) (ts : List Tok) (ins : List TxIn) (rest : Lis
     | _ => simp [insT] at h
 
 theorem outsT_split : ∀ (k : ℕ) (ts : List Tok) (outs : List TxOut) (rest : List Tok),
-    outsT k ts = some (outs, rest) → ∃ pre, ts = pre ++ rest
+    outsT k ts = some (outs, rest) → ∃ pre, ts = pre ++ rest ∧ ∀ t ∈ pre, t.isOut
   | 0, ts, outs, rest, h => by simp [outsT] at h; exact ⟨[], by simp [h.2]⟩
   | k + 1, [], _, _, h => by simp [outsT] at h
   | k + 1, t :: ts, outs, rest, h => by
@@ -43,8 +48,11 @@ theorem outsT_split : ∀ (k : ℕ) (ts : List Tok) (outs : List TxOut) (rest : 
       | none => simp [hk] at h
       | some r =>
         rw [hk] at h; simp only [Option.map_some, Option.some.injEq, Prod.mk.injEq] at h
-        obtain ⟨pre, hp⟩ := outsT_split k ts r.1 r.2 (by rw [hk])
-        exact ⟨.out v s :: pre, by rw [hp, ← h.2]; rfl⟩
+        obtain ⟨pre, hp, ho⟩ := outsT_split k ts r.1 r.2 (by rw [hk])
+        refine ⟨.out v s :: pre, by rw [hp, ← h.2]; rfl, ?_⟩
+        intro t ht; rcases List.mem_cons.mp ht with rfl | ht
+        · rfl
+        · exact ho t ht
     | _ => simp [outsT] at h
 
 theorem itemsT_split : ∀ (k : ℕ) (ts : List Tok) (w : List Bytes) (rest : List Tok),
@@ -104,7 +112,8 @@ tokens, witness tokens (none without the segwit flag), the lock time. `serNoWit`
 flag and the witness tokens. -/
 theorem txT_split {v : Bytes} {seg : Bool} {nIn : ℕ} {ts : List Tok} {t : Tx} {rest : List Tok}
     (h : txT (.txh v seg nIn :: ts) = some (t, rest)) :
-    ∃ pin k pout pw l, ts = pin ++ .nout k :: (pout ++ (pw ++ .lock l :: rest)) ∧ (∀ x ∈ pw, x.isWit) ∧
+    ∃ pin k pout pw l, ts = pin ++ .nout k :: (pout ++ (pw ++ .lock l :: rest)) ∧ (∀ x ∈ pout, x.isOut) ∧
+      (∀ x ∈ pw, x.isWit) ∧
       (seg = false → pw = []) ∧ v.length = 4 ∧ l.length = 4 ∧
       serNoWit t = v ++ serCompact nIn ++ toksBytes pin ++ serCompact k ++ toksBytes pout ++ l := by
   simp only [txT] at h
@@ -130,7 +139,7 @@ theorem txT_split {v : Bytes} {seg : Bool} {nIn : ℕ} {ts : List Tok} {t : Tx} 
       | some r =>
         obtain ⟨outs, ts2⟩ := r
         obtain ⟨ol, -, ob⟩ := outsT_sound k ts1 outs ts2 houts
-        obtain ⟨pout, hpout⟩ := outsT_split k ts1 outs ts2 houts
+        obtain ⟨pout, hpout, hout⟩ := outsT_split k ts1 outs ts2 houts
         rw [houts] at h
         simp only at h
         have hw : ∃ ws ts3 pw, (if seg then witsT nIn ts2 else some (List.replicate nIn [], ts2)) = some (ws, ts3) ∧
@@ -156,7 +165,7 @@ theorem txT_split {v : Bytes} {seg : Bool} {nIn : ℕ} {ts : List Tok} {t : Tx} 
           simp only [Option.some.injEq, Prod.mk.injEq] at h
           obtain ⟨rfl, rfl⟩ := h
           obtain ⟨a1, a2, -⟩ := attach_props ins ws (by rw [il, wl])
-          refine ⟨pin, k, pout, pw, l, by rw [hpin, hpout, hpw], hwit, hnil, hv, hl4, ?_⟩
+          refine ⟨pin, k, pout, pw, l, by rw [hpin, hpout, hpw], hout, hwit, hnil, hv, hl4, ?_⟩
           have bi : toksBytes pin = ins.flatMap serTxIn := by
             rw [hpin, toksBytes_append] at ib; simpa using ib
           have bo : toksBytes pout = outs.flatMap serTxOut := by
