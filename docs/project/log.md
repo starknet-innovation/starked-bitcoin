@@ -22,6 +22,23 @@ Next: <the exact next step; must match status.md>
 ---
 
 
+## 2026-10-09 (session 3) — M3a.3 done: digests are txids, wtxids and the header hash
+Who: Claude (agent, Opus 5.5)
+Roadmap: BLOCK-AIR → in progress (M3a.3 BLK-SHA done)
+Done:
+- `digest_sha256d`, `HashSpec.sha256d_eq`, `TxIndex.lock_unique`, `mid_tuple`, `same_bytes`, `block_word`.
+- Transaction ranges: `TxSplit.txT_split`, `tx_layout`, `tx_cols`, `tx_bytes`, `lock_tx`. FieldsSound's
+  byte-read lemmas are now generic over a read oracle (`Reads` section). `Link.hash_read` and
+  `hash_fields_read` supply the oracle for `hashSys`.
+- `whole_data`, `whole_tx`, `split_pieces`, `split_tx`, and the headline `digest_tx`.
+Evidence:
+- `lake build` OK (8,769 jobs). `#print axioms` on every new theorem: `propext`, `Classical.choice`,
+  `Quot.sound` only.
+Problems / lessons:
+- `unfold P` inside goals with `ZMod.val` makes `omega` fail with bogus counterexamples (recorded in
+  reference/lean.md).
+Next: M3a.4. First bind transaction index `i` to `b.txs[i]` and the header message to `b.header`.
+
 ## 2026-10-09 (session 2) — M3a.3: message and SHA components built; component soundness proven
 Who: Claude (agent, Opus 5.5), with the owner
 Roadmap: BLOCK-AIR → in progress (M3a.3 BLK-SHA: AIRs, witnesses, component proofs done; linking next)

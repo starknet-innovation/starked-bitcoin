@@ -111,6 +111,13 @@ These rules are mandatory. Each one cost real time when it was broken.
 - **Normalize offset literals** (`-3` vs `-↑3`) with `wrapN` plus
   `simp only [Nat.cast_ofNat]` before rewriting.
 - **Avoid name clashes:** Mathlib `round` vs `Spec.Sha256.round`.
+- **Don't `unfold P` in a goal that mentions `ZMod.val`.** It also unfolds `P` inside `ZMod.val`'s
+  implicit argument, so `omega` sees the goal's `x.val` and the hypotheses' `x.val` as different atoms
+  and reports a bogus counterexample. Bound with `Fields.lt_P (h : m ≤ 2^30) : m < P` instead.
+- **Implicit arguments decided by a later `?_`:** in `natCast_inj_of_lt (by omega) (by omega) ?_`, the
+  `by omega` blocks run before `a`, `b` are known. Pass `(a := …) (b := …)` explicitly.
+- **A `have` of a lemma whose statement starts with `∀ {r}`** instantiates the implicit at once. Pass the
+  term inline where the expected type is known.
 - **Large proofs** go in their own file, with
   `set_option maxHeartbeats N in` scoped to the theorem. If a build takes
   more than ~2 minutes, bisect it: copy truncated variants of the file into

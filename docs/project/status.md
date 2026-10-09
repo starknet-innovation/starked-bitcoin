@@ -5,9 +5,9 @@ If `HEAD at last update` doesn't match `git log -1`, this file is stale:
 follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work).
 
 - **Updated:** 2026-10-09
-- **HEAD at last update (prev):** 3756ffc (plus this status commit)
+- **HEAD at last update:** see the status commit
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
-- **Current item:** M3a.3 `BLK-SHA` ([block-data.md](../design/block-data.md)): AIRs, witnesses and component proofs done; spec tie-in and system linking next. HC-HASHTREE done (full chain re-proven 2026-10-09).
+- **Current item:** M3a.4 `BLK-MERKLE` next; M3a.3 `BLK-SHA` done (2026-10-09). HC-HASHTREE done (full chain re-proven 2026-10-09).
 
 ## State in one paragraph
 
@@ -21,16 +21,10 @@ standard axioms only); the in-circuit verifiers and node code stay trusted
 
 ## Next step (concrete)
 
-1. M3a.3 `BLK-SHA`. `block_msg` and `block_sha` are built and tested, and their component proofs are
-   done (`digest_sound`, `whole_msg`, `split_msg`, `pad_bytes`, `word_yield`, `len_yield`; see
-   [airs/block.md](../airs/block.md)). Next:
-   - (a) done: `msg_pad`, a message's rows are `Spec.Block.pad` of its data bytes;
-   - (b) done: system linking and the headline `digest_sha256d` (`Block/HashSound.lean`): each digest
-     is `Spec.Block.sha256d` of its message's data bytes;
-   - (c) in progress: `TxSplit.txT_split` (spec), `TxRanges.tx_layout`/`tx_cols` (rows: TXA = tx start,
-     WST = witness start, serNoWit over input/output rows) done. Next: generalize FieldsSound's System
-     section (compact_read … fields_sound) over a `sys_read` hypothesis so `hashSys` can use it, then turn
-     rows into block slices and conclude txid/wtxid messages = `serNoWit`/`serWit`.
+1. M3a.3 `BLK-SHA` is done and proven (`digest_tx`: each digest is a transaction's `wtxid`/`txid` or the
+   hash of the block's first 80 bytes; see [airs/block.md](../airs/block.md)). Next is M3a.4 `BLK-MERKLE`:
+   first tie transaction index `TI = i` to `b.txs[i]` of the parsed block and the header message to
+   `b.header`, then design the Merkle component.
 2. Proposed: REC-FUZZ (differential fuzzing of the plain verifier).
 
 ## In flight

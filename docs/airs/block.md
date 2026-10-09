@@ -109,7 +109,7 @@ witness item, locktime; then padding (at least one row).
 - Negative cases are rejected: a script length off by one breaks the tiling, and a tampered
   CompactSize byte leaves the lookups unbalanced.
 
-## `block_msg` and `block_sha` (M3a.3 `BLK-SHA`, AIRs, witnesses and component proofs done; linking to do)
+## `block_msg` and `block_sha` (M3a.3 `BLK-SHA`, done and proven)
 
 Lean: `Block/Msg.lean`, `Block/Sha.lean`; proofs `Block/MsgSound.lean`, `Block/ShaSound.lean`. Zig: `src/block/msg.zig`, `src/block/sha.zig`.
 
@@ -170,7 +170,13 @@ block index, and first-block / second-hash / unused flags.
   rows), each second-hash period outputs `Spec.Block.sha256d` of the data bytes of a message with the
   period's id. `HashSpec.sha256d_eq` restates the spec as block compressions plus the digest block.
 
-**To prove:**
-1. The fields' tx yield semantics: on transaction `i`'s lock-time row, the tuple is that transaction's
-   byte ranges (start, witness section, lock time). This extends `fields_sound`.
-2. Hence the txid and wtxid messages are `serNoWit` and `serWit`, and the header message is the header.
+- **Transaction serializations** (`Spec/TxSplit.lean`, `Block/TxRanges.lean`, `Block/TxBytes.lean`):
+  on a transaction's lock-time row, `serWit = R[TXA, START + 4)`, and for segwit
+  `serNoWit = R[TXA, TXA + 4) ++ R[TXA + 6, WST) ++ R[START, START + 4)` (`tx_bytes`, `lock_tx`). The
+  fields' byte-read lemmas are generic over a read oracle, so `hashSys` uses them too.
+- **Messages are those serializations** (`whole_tx`, `split_tx`), and **`digest_tx`**: each second-hash
+  digest is SHA256d of the block's first 80 bytes (the header message) or the `wtxid`/`txid` of a
+  transaction serialized in the block.
+
+**Left for M3a.4:** tie each transaction to its index in the parsed block (`b.txs[i]`, with `TI = i`) and
+the header message to `b.header`; then the Merkle root.
