@@ -1325,6 +1325,139 @@ theorem same_layout {r0 r1 d0 d1 : ℕ} (h0 : r0 < n) (h1 : r1 < n) (f0 : M FIRS
       exact absurd ((endd_eq d1 h.le le_rfl).trans he1) (not_end l0 dd0 (hc0 d1 h))
   exact ⟨hd, fun j hj => (st j hj (hd ▸ hj)).2.2.2.1⟩
 
+omit hsat in
+theorem inPiece_unique {r q q' : ℕ} (h : inPiece M r q) (h' : inPiece M r q') (hq : q ≤ 2) (hq' : q' ≤ 2) :
+    q = q' := by
+  obtain ⟨a, b, c⟩ := h; obtain ⟨a', b', c'⟩ := h'
+  interval_cases q <;> interval_cases q' <;> simp_all
+
+/-- **Split messages, by index.** For a split message with data exit `d`: rows `0..3` read
+`TA + j`, rows `4..d1` read `TA + j + 2` with `TA + d1 + 2 = TW − 1`, rows `d1 + 1..d` read
+`TA + j + (TL − TW + 2)` with the last at `TL + 3`. -/
+theorem split_pieces {r0 d : ℕ} (hr0 : r0 < n) (hf : M FIRSTM r0 = 1) (hmt : M MT r0 = 1)
+    (hc : ∀ j < d, M CONT (r0 + j) = 1 ∨ M SW (r0 + j) = 1) (he : M ENDD (r0 + d) = 1) :
+    ∃ d1, 4 ≤ d1 ∧ d1 < d ∧ (∀ j ≤ d, r0 + j < n ∧ M D (r0 + j) = 1) ∧
+      (∀ j ≤ 3, M POS (r0 + j) = M TA r0 + j) ∧
+      (∀ j, 4 ≤ j → j ≤ d1 → M POS (r0 + j) = M TA r0 + j + 2) ∧ M TA r0 + d1 + 2 = M TW r0 - 1 ∧
+      (∀ j, d1 < j → j ≤ d → M POS (r0 + j) = M TA r0 + j + (M TL r0 - M TW r0 + 2)) ∧
+      M TA r0 + d + (M TL r0 - M TW r0 + 2) = M TL r0 + 3 := by
+  classical
+  have W := split_walk hsat hr0 hf hmt hc
+  -- the piece of row `j`, and its position
+  have pos : ∀ j ≤ d, ∀ q ≤ 2, inPiece M (r0 + j) q →
+      M POS (r0 + j) = M TA r0 + j + (if q = 1 then 2 else 0) + (if q = 2 then M TL r0 - M TW r0 + 2 else 0) := by
+    intro j hj q hq ⟨p0, p1, p2⟩
+    obtain ⟨hl, hd, hx, -, ta, tw, tl, -⟩ := W j hj
+    rw [data_pos hsat hl hd, p1, p2, hx, ta, tw, tl]
+    interval_cases q <;> simp
+  have ez : ∀ j ≤ d, ∀ q ≤ 2, inPiece M (r0 + j) q → (M Z (r0 + j) = 1 ↔
+      (if q = 0 then (j : F) - 3 else if q = 1 then M POS (r0 + j) - M TW r0 + 1 else M POS (r0 + j) - (M TL r0 + 3)) = 0) := by
+    intro j hj q hq ⟨p0, p1, p2⟩
+    obtain ⟨hl, hd, hx, m1, ta, tw, tl, -⟩ := W j hj
+    rw [z_iff hsat hl, ezE_eval hl, m1, p0, p1, p2, hx, tw, tl]
+    interval_cases q <;> simp
+  -- the last row is piece 2
+  have hq2 : inPiece M (r0 + d) 2 := by
+    obtain ⟨hl, hd, -, m1, -, -, -, q, hq, hp, -⟩ := W d le_rfl
+    obtain ⟨z, sw⟩ := endd_z hsat hl hd he
+    obtain ⟨p0, p1, p2⟩ := hp
+    interval_cases q
+    · rw [(helpers hsat hl).2.1, z, m1, p0, p1] at sw; simp at sw
+    · rw [(helpers hsat hl).2.1, z, m1, p0, p1] at sw; simp at sw
+    · exact ⟨p0, p1, p2⟩
+  have ex : ∃ j, j ≤ d ∧ inPiece M (r0 + j) 2 := ⟨d, le_rfl, hq2⟩
+  set j2 := Nat.find ex with hj2
+  obtain ⟨hj2d, hj2p⟩ := Nat.find_spec ex
+  rw [← hj2] at hj2d hj2p
+  have hmin : ∀ j < j2, j ≤ d → ¬ inPiece M (r0 + j) 2 := fun j h hd hp => Nat.find_min ex h ⟨hd, hp⟩
+  have piece : ∀ j ≤ d, ∃ q ≤ 2, inPiece M (r0 + j) q ∧ (q = 0 ↔ j ≤ 3) := fun j hj => (W j hj).2.2.2.2.2.2.2
+  have h4 : 4 ≤ j2 := by
+    obtain ⟨q, hq, hp, h0⟩ := piece j2 hj2d
+    have := inPiece_unique hp hj2p hq (by norm_num); subst this
+    by_contra h; exact absurd (h0.mpr (by omega)) (by norm_num)
+  -- row 3 switches: row 4 is piece 1
+  have hp4 : inPiece M (r0 + 4) 1 := by
+    obtain ⟨q, hq, hp, h0⟩ := piece 3 (by omega)
+    have q0 : q = 0 := h0.mpr le_rfl
+    subst q0
+    have hz : M Z (r0 + 3) = 1 := (ez 3 (by omega) 0 (by norm_num) hp).mpr (by simp)
+    obtain ⟨hl, hd, -, m1, -⟩ := W 3 (by omega)
+    obtain ⟨p0, p1, p2⟩ := hp
+    have sw : M SW (r0 + 3) = 1 := by rw [(helpers hsat hl).2.1, hz, m1, p0, p1]; simp
+    obtain ⟨-, -, -, -, q0', q1', q2'⟩ := step_sw hsat (by have := (W 4 (by omega)).1; omega) sw
+    exact ⟨by rw [show r0 + 4 = r0 + 3 + 1 by ring, q0']; simp, by rw [show r0 + 4 = r0 + 3 + 1 by ring, q1', p0]; simp,
+      by rw [show r0 + 4 = r0 + 3 + 1 by ring, q2', p1]; simp⟩
+  have h5 : 5 ≤ j2 := by
+    by_contra h
+    have e : j2 = 4 := by omega
+    rw [e] at hj2p
+    have := inPiece_unique hp4 hj2p (by norm_num) (by norm_num); simp at this
+  -- rows `4 … j2 − 1` are piece 1
+  have p1rows : ∀ j, 4 ≤ j → j < j2 → inPiece M (r0 + j) 1 := by
+    intro j a b
+    obtain ⟨q, hq, hp, h0⟩ := piece j (by omega)
+    have hq0 : q ≠ 0 := fun e => by have := h0.mp e; omega
+    have hq2 : q ≠ 2 := fun e => hmin j b (by omega) (e ▸ hp)
+    have : q = 1 := by omega
+    exact this ▸ hp
+  -- rows `j2 … d` are piece 2
+  have p2rows : ∀ i, j2 + i ≤ d → inPiece M (r0 + (j2 + i)) 2 := by
+    intro i
+    induction i with
+    | zero => intro _; simpa using hj2p
+    | succ i ih =>
+      intro hi
+      have hp := ih (by omega)
+      obtain ⟨hl, hd, -, m1, -⟩ := W (j2 + i) (by omega)
+      obtain ⟨p0, p1, p2⟩ := hp
+      have c : M CONT (r0 + (j2 + i)) = 1 := by
+        rcases hc (j2 + i) (by omega) with c | c
+        · exact c
+        · rw [(helpers hsat hl).2.1, m1, p0, p1] at c; simp at c
+      have hn : r0 + (j2 + i) + 1 < n := by have := (W (j2 + i + 1) (by omega)).1; omega
+      obtain ⟨-, -, -, q0, q1, q2⟩ := step_cont hsat hn c
+      rw [show r0 + (j2 + (i + 1)) = r0 + (j2 + i) + 1 by ring]
+      exact ⟨q0.trans p0, q1.trans p1, q2.trans p2⟩
+  -- the switch at `d1 = j2 − 1`
+  have hsw : M TA r0 + (j2 - 1 : ℕ) + 2 = M TW r0 - 1 := by
+    have hp1 := p1rows (j2 - 1) (by omega) (by omega)
+    obtain ⟨hl, hd, -, m1, -⟩ := W (j2 - 1) (by omega)
+    have hpos := pos (j2 - 1) (by omega) 1 (by norm_num) hp1
+    simp only [if_true, show (1 : ℕ) ≠ 2 by norm_num, if_false, add_zero] at hpos
+    have c : M SW (r0 + (j2 - 1)) = 1 := by
+      rcases hc (j2 - 1) (by omega) with c | c
+      · exfalso
+        obtain ⟨p0, p1, p2⟩ := hp1
+        have hn : r0 + (j2 - 1) + 1 < n := by have := (W j2 hj2d).1; omega
+        obtain ⟨-, -, -, -, -, q2⟩ := step_cont hsat hn c
+        rw [show r0 + (j2 - 1) + 1 = r0 + j2 by omega, p2] at q2
+        have := hj2p.2.2; rw [q2] at this; simp at this
+      · exact c
+    have hz : M Z (r0 + (j2 - 1)) = 1 := by
+      rcases bool_col hsat (e := Z) (by simp) hl with z | z
+      · rw [(helpers hsat hl).2.1, z] at c; simp at c
+      · exact z
+    have := (ez (j2 - 1) (by omega) 1 (by norm_num) hp1).mp hz
+    simp only [show (1 : ℕ) ≠ 0 by norm_num, if_false, if_true] at this
+    rw [hpos] at this; linear_combination this
+  have hend : M TA r0 + d + (M TL r0 - M TW r0 + 2) = M TL r0 + 3 := by
+    obtain ⟨hl, hd, -⟩ := W d le_rfl
+    have hz := (endd_z hsat hl hd he).1
+    have := (ez d le_rfl 2 (by norm_num) hq2).mp hz
+    simp only [show (2 : ℕ) ≠ 0 by norm_num, show (2 : ℕ) ≠ 1 by norm_num, if_false] at this
+    rw [pos d le_rfl 2 (by norm_num) hq2] at this
+    simp only [show (2 : ℕ) ≠ 1 by norm_num, if_false, if_true, add_zero] at this
+    linear_combination this
+  refine ⟨j2 - 1, by omega, by omega, fun j hj => ⟨(W j hj).1, (W j hj).2.1⟩, fun j hj => ?_, fun j a b => ?_, hsw,
+    fun j a b => ?_, hend⟩
+  · obtain ⟨q, hq, hp, h0⟩ := piece j (by omega)
+    have := h0.mpr hj; subst this
+    rw [pos j (by omega) 0 (by norm_num) hp]; simp
+  · rw [pos j (by omega) 1 (by norm_num) (p1rows j a (by omega))]; simp
+  · have := p2rows (j - j2) (by omega)
+    rw [show j2 + (j - j2) = j by omega] at this
+    rw [pos j b 2 (by norm_num) this]; simp
+
 end Rows
 
 end StarkedAir.Block.Msg
