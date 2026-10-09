@@ -4,12 +4,13 @@
 serializes to `serWit`, and the txid message (split around marker/flag and witnesses for segwit) to
 `serNoWit`.
 -/
-import StarkedAir.Block.FieldsSound
+import StarkedAir.Block.TxIndex
 import StarkedAir.Spec.TxSplit
 
 namespace StarkedAir.Block.Fields
 
 open StarkedAir
+open StarkedAir.Sha256 (eval_cst)
 
 /-! ### Token kinds give row kinds -/
 
@@ -76,7 +77,7 @@ theorem tx_layout {rh : ℕ} (hr : rh < m) (ht : M K_TXH rh = 1) :
       tokOf M R rh = .txh v (decide (M SEG rh = 1)) nIn ∧ tokOf M R r' = .lock l ∧
       (∀ j, rw ≤ j → j < r' → M K_WCNT j = 1 ∨ M K_WITEM j = 1) ∧
       (M K_NOUT (rw - 1) = 1 ∨ M K_OUT (rw - 1) = 1) ∧
-      (M SEG rh ≠ 1 → rw = r') ∧
+      (M SEG rh ≠ 1 → rw = r') ∧ (∀ j, rh ≤ j → j < r' → ∀ l', tokOf M R j ≠ .lock l') ∧
       Spec.Block.serNoWit tx = v ++ Spec.Block.serCompact nIn ++ Spec.Block.toksBytes (toksFrom M R rw (rh + 1)) ++ l := by
   obtain ⟨tx, r', htx, hrr', hr'm, hl, -⟩ := tx_sim hsat R hcs hmn hpad hfit hr ht
   have hrn : rh < n := by omega
@@ -86,7 +87,7 @@ theorem tx_layout {rh : ℕ} (hr : rh < m) (ht : M K_TXH rh = 1) :
   have htok : tokOf M R rh = .txh (slice R (M START rh).val 4) (decide (M SEG rh = 1)) (M VAL rh).val := by
     simp [tokOf, hblk, ht]
   rw [toksFrom_cons hr, htok] at htx
-  obtain ⟨pin, k, pout, pw, l, hsplit, hout, hwit, hnil, -, -, hnw⟩ := Spec.Block.txT_split htx
+  obtain ⟨pin, k, pout, pw, l, hsplit, hinp, hout, hwit, hnil, -, -, hnw⟩ := Spec.Block.txT_split htx
   have hlen := congrArg List.length hsplit
   simp only [toksFrom_length, List.length_append, List.length_cons] at hlen
   set rw := rh + 2 + pin.length + pout.length with hrw
@@ -106,7 +107,8 @@ theorem tx_layout {rh : ℕ} (hr : rh < m) (ht : M K_TXH rh = 1) :
     simp only [List.length_append, List.length_cons] at this
     rw [show rh + 1 + (pin.length + (pout.length + 1) + pw.length + 0) = r' by omega] at this
     simpa using this
-  refine ⟨tx, r', rw, _, _, l, ?_, by omega, by omega, hr'm, hl, htok, hlock, fun j h1 h2 => ?_, ?_, fun hs => ?_, ?_⟩
+  refine ⟨tx, r', rw, _, _, l, ?_, by omega, by omega, hr'm, hl, htok, hlock, fun j h1 h2 => ?_, ?_, fun hs => ?_,
+    fun j h1 h2 l' => ?_, ?_⟩
   · rw [toksFrom_cons hr, htok]; exact htx
   · -- witness rows
     have e : pin ++ Spec.Block.Tok.nout k :: (pout ++ (pw ++ .lock l :: toksFrom M R m (r' + 1))) =
@@ -135,6 +137,23 @@ theorem tx_layout {rh : ℕ} (hr : rh < m) (ht : M K_TXH rh = 1) :
       exact tokk_out (by rw [this]; exact hout last (by rw [hpl]; simp))
   · have : pw = [] := hnil (by simpa using hs)
     rw [hr', this]; simp
+  · -- rows before the lock time are not lock-time rows
+    rcases Nat.eq_or_lt_of_le h1 with e | e
+    · subst e; rw [htok]; simp
+    · have e2 : pin ++ Spec.Block.Tok.nout k :: (pout ++ (pw ++ .lock l :: toksFrom M R m (r' + 1))) =
+          (pin ++ .nout k :: pout ++ pw) ++ (.lock l :: toksFrom M R m (r' + 1)) := by simp
+      have := hsplit.trans e2
+      have g : (toksFrom M R m (rh + 1))[j - (rh + 1)]? = _ := congrArg (fun L => L[j - (rh + 1)]?) this
+      rw [tk _ (by omega), List.getElem?_append_left (by simp; omega),
+        show rh + 1 + (j - (rh + 1)) = j by omega] at g
+      have hm : tokOf M R j ∈ pin ++ .nout k :: pout ++ pw := List.mem_of_getElem? g.symm
+      intro hj; rw [hj] at hm
+      simp only [List.mem_append, List.mem_cons] at hm
+      rcases hm with ((h | h | h) | h)
+      · have := hinp _ h; simp [Spec.Block.Tok.isInp] at this
+      · cases h
+      · have := hout _ h; simp [Spec.Block.Tok.isOut] at this
+      · have := hwit _ h; simp [Spec.Block.Tok.isWit] at this
   · rw [hnw]
     have e : (toksFrom M R m (rh + 1)).take (pin.length + 1 + pout.length) = pin ++ .nout k :: pout := by
       rw [hsplit, List.take_append, List.take_of_length_le (by omega),
@@ -143,6 +162,133 @@ theorem tx_layout {rh : ℕ} (hr : rh < m) (ht : M K_TXH rh = 1) :
     rw [toksFrom_take (by omega), show rh + 1 + (pin.length + 1 + pout.length) = rw by omega] at e
     rw [e]
     simp [Spec.Block.toksBytes, Spec.Block.Tok.bytes, List.append_assoc]
+
+omit hcs hmn hpad hfit in
+theorem tok_lock_of {r : ℕ} (hr : r < n) (h : M K_LOCK r = 1) : ∃ l, tokOf M R r = .lock l := by
+  have ka := kinds_at hsat hr (a := K_LOCK) (by simp [K_LOCK]) h
+  have z : ∀ c, c < 9 → c ≠ K_LOCK → M c r ≠ 1 := fun c hc hne => by rw [ka c hc, if_neg hne]; exact zero_ne_one
+  refine ⟨slice R (M START r).val 4, ?_⟩
+  unfold tokOf
+  rw [if_neg (z K_BLK (by simp [K_BLK]) (by simp [K_BLK, K_LOCK])), if_neg (z K_TXH (by simp [K_TXH]) (by simp [K_TXH, K_LOCK])),
+    if_neg (z K_IN (by simp [K_IN]) (by simp [K_IN, K_LOCK])), if_neg (z K_NOUT (by simp [K_NOUT]) (by simp [K_NOUT, K_LOCK])),
+    if_neg (z K_OUT (by simp [K_OUT]) (by simp [K_OUT, K_LOCK])), if_neg (z K_WCNT (by simp [K_WCNT]) (by simp [K_WCNT, K_LOCK])),
+    if_neg (z K_WITEM (by simp [K_WITEM]) (by simp [K_WITEM, K_LOCK]))]
+
+/-- **The tuple on the lock-time row**: `TXA` is the transaction's start and `WST` the start of row `rw`
+(the witness section, or the lock time without witnesses). -/
+theorem tx_cols {rh : ℕ} (hr : rh < m) (ht : M K_TXH rh = 1) :
+    ∃ tx r' rw v nIn l, Spec.Block.txT (toksFrom M R m rh) = some (tx, toksFrom M R m (r' + 1)) ∧
+      rh + 1 < rw ∧ rw ≤ r' ∧ r' < m ∧ M K_LOCK r' = 1 ∧
+      tokOf M R rh = .txh v (decide (M SEG rh = 1)) nIn ∧ tokOf M R r' = .lock l ∧
+      (M SEG rh ≠ 1 → rw = r') ∧
+      Spec.Block.serNoWit tx = v ++ Spec.Block.serCompact nIn ++ Spec.Block.toksBytes (toksFrom M R rw (rh + 1)) ++ l ∧
+      M TXA r' = M START rh ∧ M WST r' = M START rw ∧ M SEG r' = M SEG rh ∧
+      (∀ j, rh < j → j ≤ r' → M K_TXH j = 0) := by
+  obtain ⟨tx, r', rw, v, nIn, l, htx, h1, h2, hr'm, hl, htok, hlock, hwit, hpre, hseg, hnl, hnw⟩ :=
+    tx_layout hsat R hcs hmn hpad hfit hr ht
+  have hrn : r' < n := by omega
+  have rh0 : 0 < rh := by
+    rcases Nat.eq_zero_or_pos rh with e | e
+    · subst e
+      have := kind_unique hsat (by omega : 0 < n) (a := K_BLK) (b := K_TXH) (by simp [K_BLK]) (by simp [K_TXH])
+        (by simp [K_BLK, K_TXH]) (first_blk hsat (by omega))
+      rw [ht] at this; exact absurd this one_ne_zero
+    · exact e
+  have nolock : ∀ j, rh ≤ j → j < r' → M K_LOCK j = 0 := by
+    intro j a b
+    rcases kind_bool hsat (c := K_LOCK) (by simp [kinds]) (by omega : j < n) with z | z
+    · exact z
+    · obtain ⟨l', e⟩ := tok_lock_of hsat R (by omega) z; exact absurd e (hnl j a b l')
+  have notxh : ∀ j, rh < j → j ≤ r' → M K_TXH j = 0 := by
+    intro j a b
+    obtain ⟨t1, -⟩ := trans_all hsat (r := j - 1) (by omega)
+    rw [show j - 1 + 1 = j by omega] at t1
+    have hb : M K_BLK (j - 1) = 0 := by
+      have := not_blk hsat (r := j - 2) (by omega); rwa [show j - 2 + 1 = j - 1 by omega] at this
+    rw [t1, hb, nolock (j - 1) (by omega) (by omega)]; ring
+  have c := fun (e : Expr) (h : e ∈ txC) {j : ℕ} (hj : j < n) => sat hsat (mem_txC h) hj
+  -- TXA and SEG hold the header row's values
+  have txa : ∀ i, i ≤ r' - rh → M TXA (rh + i) = M START rh ∧ M SEG (rh + i) = M SEG rh := by
+    intro i hi
+    induction i with
+    | zero =>
+      have := c (.mul (k K_TXH) (.sub (k TXA) (k START))) (by simp [txC]) (by omega : rh < n)
+      simp only [Expr.eval, ev_k (show rh < n by omega), ht, one_mul, sub_eq_zero, add_zero] at this ⊢
+      exact ⟨this, trivial⟩
+    | succ i ih =>
+      obtain ⟨a, b⟩ := ih (by omega)
+      have hj : rh + i + 1 < n := by omega
+      have h0 := notxh (rh + i + 1) (by omega) (by omega)
+      have := c (.mul (oneMinus (k K_TXH)) (.mul notFirst (.sub (k TXA) (kp TXA)))) (by simp [txC]) hj
+      simp only [Expr.eval, ev_notFirst hj, ev_k hj, ev_kp hj, oneMinus, one, eval_cst, Nat.cast_one, h0,
+        sub_zero, one_mul, sub_eq_zero] at this
+      rw [show rh + (i + 1) = rh + i + 1 by ring, this, a]
+      refine ⟨rfl, ?_⟩
+      rw [(counters hsat hj).2.2.2.2.2.2.2.1 h0, b]
+  obtain ⟨hta, hsg⟩ := txa (r' - rh) le_rfl
+  rw [show rh + (r' - rh) = r' by omega] at hta hsg
+  -- WST: set at the first witness (or lock-time) row, then held
+  have hp : rw - 1 + 1 < n := by omega
+  obtain ⟨-, -, -, -, t5, -, t7, -⟩ := trans_all hsat hp
+  rw [show rw - 1 + 1 = rw by omega] at t5 t7
+  have hpn : rw - 1 < n := by omega
+  have hesc : M ESC (rw - 1) = 0 := by
+    rw [esc_eq hsat hpn]
+    rcases hpre with h | h
+    · rw [kind_unique hsat hpn (a := K_NOUT) (b := K_WCNT) (by simp [K_NOUT]) (by simp [K_WCNT]) (by simp [K_NOUT, K_WCNT]) h,
+        kind_unique hsat hpn (a := K_NOUT) (b := K_WITEM) (by simp [K_NOUT]) (by simp [K_WITEM]) (by simp [K_NOUT, K_WITEM]) h]
+      ring
+    · rw [kind_unique hsat hpn (a := K_OUT) (b := K_WCNT) (by simp [K_OUT]) (by simp [K_WCNT]) (by simp [K_OUT, K_WCNT]) h,
+        kind_unique hsat hpn (a := K_OUT) (b := K_WITEM) (by simp [K_OUT]) (by simp [K_WITEM]) (by simp [K_OUT, K_WITEM]) h]
+      ring
+  have hsum : M K_WCNT rw + M K_LOCK rw = 1 := by
+    have hrw : rw < n := by omega
+    rcases Nat.eq_or_lt_of_le h2 with e | e
+    · rw [e, hl, kind_unique hsat hrn (a := K_LOCK) (b := K_WCNT) (by simp [K_LOCK]) (by simp [K_WCNT])
+        (by simp [K_LOCK, K_WCNT]) hl]; ring
+    · have hw : M K_WCNT rw = 1 := by
+        rcases hwit rw le_rfl e with h | h
+        · exact h
+        · obtain ⟨-, -, -, -, -, t6, -, -⟩ := trans_all hsat hp
+          rw [show rw - 1 + 1 = rw by omega] at t6
+          rcases hpre with g | g
+          · rw [t6, kind_unique hsat hpn (a := K_NOUT) (b := K_WCNT) (by simp [K_NOUT]) (by simp [K_WCNT])
+              (by simp [K_NOUT, K_WCNT]) g, kind_unique hsat hpn (a := K_NOUT) (b := K_WITEM) (by simp [K_NOUT])
+              (by simp [K_WITEM]) (by simp [K_NOUT, K_WITEM]) g] at h; simp at h
+          · rw [t6, kind_unique hsat hpn (a := K_OUT) (b := K_WCNT) (by simp [K_OUT]) (by simp [K_WCNT])
+              (by simp [K_OUT, K_WCNT]) g, kind_unique hsat hpn (a := K_OUT) (b := K_WITEM) (by simp [K_OUT])
+              (by simp [K_WITEM]) (by simp [K_OUT, K_WITEM]) g] at h; simp at h
+      rw [hw, kind_unique hsat hrw (a := K_WCNT) (b := K_LOCK) (by simp [K_WCNT]) (by simp [K_LOCK])
+        (by simp [K_LOCK, K_WCNT]) hw]; ring
+  have heoc : M EOC (rw - 1) = 1 := by
+    rw [t5, t7, hesc] at hsum; linear_combination hsum
+  have wst : ∀ i, i ≤ r' - rw → M WST (rw + i) = M START rw := by
+    intro i hi
+    induction i with
+    | zero =>
+      have hj : rw - 1 + 1 < n := hp
+      have := c (.mul (kp EOC) (.sub (k WST) (k START))) (by simp [txC]) hj
+      simp only [Expr.eval, ev_k hj, ev_kp hj, heoc, one_mul, sub_eq_zero] at this
+      rw [show rw - 1 + 1 = rw by omega] at this; simpa using this
+    | succ i ih =>
+      have hj : rw + i + 1 < n := by omega
+      have hrj : rw + i < n := by omega
+      have he0 : M EOC (rw + i) = 0 := by
+        rw [eoc_eq hsat hrj]
+        rcases hwit (rw + i) (by omega) (by omega) with g | g
+        · rw [kind_unique hsat hrj (a := K_WCNT) (b := K_NOUT) (by simp [K_WCNT]) (by simp [K_NOUT]) (by simp [K_WCNT, K_NOUT]) g,
+            kind_unique hsat hrj (a := K_WCNT) (b := K_OUT) (by simp [K_WCNT]) (by simp [K_OUT]) (by simp [K_WCNT, K_OUT]) g]
+          ring
+        · rw [kind_unique hsat hrj (a := K_WITEM) (b := K_NOUT) (by simp [K_WITEM]) (by simp [K_NOUT]) (by simp [K_WITEM, K_NOUT]) g,
+            kind_unique hsat hrj (a := K_WITEM) (b := K_OUT) (by simp [K_WITEM]) (by simp [K_OUT]) (by simp [K_WITEM, K_OUT]) g]
+          ring
+      have := c (.mul (oneMinus (kp EOC)) (.mul notFirst (.sub (k WST) (kp WST)))) (by simp [txC]) hj
+      simp only [Expr.eval, ev_notFirst hj, ev_k hj, ev_kp hj, oneMinus, one, eval_cst, Nat.cast_one, he0,
+        sub_zero, one_mul, sub_eq_zero] at this
+      rw [show rw + (i + 1) = rw + i + 1 by ring, this, ih (by omega)]
+  have hws := wst (r' - rw) le_rfl
+  rw [show rw + (r' - rw) = r' by omega] at hws
+  exact ⟨tx, r', rw, v, nIn, l, htx, h1, h2, hr'm, hl, htok, hlock, hseg, hnw, hta, hws, hsg, notxh⟩
 
 end Layout
 
