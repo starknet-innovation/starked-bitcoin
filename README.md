@@ -19,7 +19,10 @@ interpreted by the Zig prover and verifier.
 |---|---|
 | SHA-256 compression AIR | Implemented; **proven** equal to FIPS 180-4 |
 | Header chain: SHA256d, linkage, proof of work, height/period state, difficulty retarget, median time past, exact chainwork, minimum block version | Implemented; **proven**: `header_chain_sound` shows any accepted segment satisfies every Bitcoin Core mainnet header rule except wall-clock `time-too-new` (audited against Core, 2026-10-07) |
-| Recursion / aggregation, CUDA, UTXO state | Not yet |
+| Recursion / aggregation: the whole chain folded into one proof, with an MMR commitment `T` over all block hashes | Implemented; glue and composition **proven** (`chain_from_genesis_T`); in-circuit verifiers trusted and mutation-tested |
+| Chain proof as a file (`chainproof`): saved, standalone-verifiable, extendable at the tip | Implemented (PROOF-STORE, D-036) |
+| Block data (M3a): parsing, txid/wtxid, Merkle root | In progress; M3a.1–M3a.4 **proven** |
+| CUDA, UTXO state | Not yet |
 
 - Exact guarantees and trust assumptions:
   [docs/reference/verification.md](docs/reference/verification.md).
@@ -35,6 +38,21 @@ cd lean && lake exe cache get && lake build   # Lean v4.33.1 + Mathlib
 
 Details and benchmarks: [docs/guides/setup.md](docs/guides/setup.md).
 
+### The chain proof file
+
+```sh
+zig build -Doptimize=ReleaseFast
+zig-out/bin/chainproof prove mainnet data/headers.bin <to> chain.sbchain        # headers [0, to)
+zig-out/bin/chainproof prove mainnet data/headers.bin <to2> chain2.sbchain --from chain.sbchain
+zig-out/bin/chainproof verify mainnet chain2.sbchain --min-work <hex>
+zig-out/bin/chainproof inclusion mainnet chain2.sbchain data/headers.bin <height>
+```
+
+`mainnet` is the pinned production VK (`vk/`, 70 FRI queries, 26 PoW bits). `prove` checkpoints
+after every segment and resumes. **A verifier must compare the chainwork with a trusted minimum:**
+a valid proof alone does not show that this is the real chain. Design:
+[docs/design/proof-store.md](docs/design/proof-store.md).
+
 ## Repository layout
 
 ```
@@ -43,7 +61,11 @@ airs/              Exported AIRs (JSON, schema starked-air-v1). Generated; never
 src/air/           IR parser, constraint interpreter, Stwo component, prove/verify
 src/sha256/        SHA-256 reference and AIR witness
 src/btc/           Header-chain and retarget witnesses
+src/recursion/     Plain in-circuit verifier, leaf/node recursion, proof store, REC-FUZZ
+src/bin/chainproof.zig  Chain proof file CLI (setup, prove/extend, verify, inclusion)
 src/bin/spike.zig  Benchmark CLI (macOS / Metal)
+vk/                Pinned production verifying key
+tools/specfuzz/    Differential fuzzing of the Lean spec against Bitcoin Core's C++
 testdata/          Mainnet headers used by the tests
 bench/             External benchmarks (raito-sha256: Raito's Cairo SHA-256 under `scarb prove`)
 third_party/       stwo-zig (pinned submodule; do not edit in place)
