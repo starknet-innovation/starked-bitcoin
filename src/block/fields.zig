@@ -47,7 +47,11 @@ const E1C = 110;
 const E2C = 111;
 const C4B0 = 112;
 const C4B1 = 113;
-pub const N_MAIN = 114;
+const TXA = 114;
+const WST = 115;
+const TXI = 116;
+const TXM = 117;
+pub const N_MAIN = 118;
 const MAX_SIZE: u64 = 0x02000000;
 
 /// One token row.
@@ -229,6 +233,10 @@ pub fn generate(a: std.mem.Allocator, log_size: u32, raw: []const u8, rows: []co
             if (kind == K_NOUT) cols[OUTL][i] = cols[VAL][i] else if (i > 0) cols[OUTL][i] = cols[OUTL][p].sub(cols[K_OUT][p]);
             if (cols[EOC][p].eql(one)) cols[WINL][i] = cols[NIN][i] else cols[WINL][i] = cols[WINL][p].sub(cols[ESC][p]);
             if (kind == K_WCNT) cols[ITEML][i] = cols[VAL][i] else if (i > 0) cols[ITEML][i] = cols[ITEML][p].sub(cols[K_WITEM][p]);
+            // Per-transaction values: start, witness-section start, index.
+            if (kind == K_TXH) cols[TXA][i] = cols[START][i] else if (i > 0) cols[TXA][i] = cols[TXA][p];
+            if (cols[EOC][p].eql(one)) cols[WST][i] = cols[START][i] else if (i > 0) cols[WST][i] = cols[WST][p];
+            if (kind == K_BLK) cols[TXI][i] = M31.zero() else if (i > 0) cols[TXI][i] = cols[TXI][p].add(cols[K_LOCK][p]);
             // Decisions.
             const e1 = switch (kind) {
                 K_BLK, K_TXH, K_NOUT, K_WCNT => cols[VAL][i],

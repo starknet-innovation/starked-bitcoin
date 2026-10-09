@@ -1689,7 +1689,7 @@ theorem bytes_sat : bytes.air.Satisfied L pub (inst 0).main := by
 theorem rows_lt_P : 2 ^ L < P := lt_of_le_of_lt (Nat.pow_le_pow_right (by norm_num) hL) (by unfold P; norm_num)
 
 omit hL hsat in
-theorem sites_len : (sites blockSys inst).length = 8 * 2 ^ L := by
+theorem sites_len : (sites blockSys inst).length = 9 * 2 ^ L := by
   simp [sites, blockSys, h0L, h1L, List.length_flatMap, bytes, fields, lookups, List.sum_range_succ]
   ring
 
@@ -1725,13 +1725,18 @@ theorem sys_read {r : ℕ} (hr : r < 2 ^ L) {kk : ℕ} (hk : kk < 7)
       simp only at h0
       have hi1 : i' = 1 := by simp [blockSys] at hi'; omega
       subst hi1
-      have hk7 : k'' < 7 := by simpa [blockSys, fields, lookups] using hk''
+      have hk7 : k'' < 7 := by
+        have h8 : k'' < 8 := by simpa [blockSys, fields, lookups] using hk''
+        by_contra hc
+        have e7 : k'' = 7 := by omega
+        subst e7
+        simp [siteRel, siteLookup, blockSys, fields, lookups, REL_TX, REL_BYTE] at hrel
       rw [h1L] at hr''
       have := mult_vals fs hr'' hk7
       simpa [siteMult, siteEval, siteLookup, blockSys, fields, h1L] using this)
     (by
       calc _ ≤ (sites blockSys inst).length := List.length_filter_le _ _
-        _ = 8 * 2 ^ L := sites_len h0L h1L
+        _ = 9 * 2 ^ L := sites_len h0L h1L
         _ < P := by
           have : 2 ^ L ≤ 2 ^ 25 := Nat.pow_le_pow_right (by norm_num) hL
           unfold P; omega)

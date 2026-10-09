@@ -61,7 +61,16 @@ def E2C : ℕ := 111
 decoded sum stays below `2^26` and never wraps modulo `P`. -/
 def C4B0 : ℕ := 112
 def C4B1 : ℕ := 113
-def N_MAIN : ℕ := 114
+/-- Per-transaction values carried down its rows (M3a.3): its start, the witness section's start (the
+row after the outputs), its index; and the multiplicity of its `tx` tuple. -/
+def TXA : ℕ := 114
+def WST : ℕ := 115
+def TXI : ℕ := 116
+def TXM : ℕ := 117
+def N_MAIN : ℕ := 118
+
+/-- `tx(i, a, seg, w, l)`: transaction `i` starts at `a`, its witness section at `w`, its locktime at `l`. -/
+def REL_TX : ℕ := 4
 
 def kinds : List ℕ := [K_BLK, K_TXH, K_IN, K_NOUT, K_OUT, K_WCNT, K_WITEM, K_LOCK, K_PAD]
 
@@ -193,7 +202,16 @@ def bitC : List Expr :=
   [CP1, CP3, CP5, C4B0, C4B1].map (fun c => boolC (k c)) ++
   (List.range 25).flatMap (fun j => [boolC (k (RA j)), boolC (k (RB j)), boolC (k (RS j))])
 
-def constraints : List Expr := kindC ++ transC ++ tileC ++ compactC ++ segC ++ countC ++ zeroC ++ bitC
+/-- Per-transaction values (M3a.3). -/
+def txC : List Expr :=
+  [ .mul (k K_TXH) (.sub (k TXA) (k START)),
+    .mul (oneMinus (k K_TXH)) (.mul notFirst (.sub (k TXA) (kp TXA))),
+    .mul (kp EOC) (.sub (k WST) (k START)),
+    .mul (oneMinus (kp EOC)) (.mul notFirst (.sub (k WST) (kp WST))),
+    .mul (k K_BLK) (k TXI),
+    .mul notFirst (.sub (k TXI) (.add (kp TXI) (kp K_LOCK))) ]
+
+def constraints : List Expr := kindC ++ transC ++ tileC ++ compactC ++ segC ++ countC ++ zeroC ++ bitC ++ txC
 
 /-- Byte reads: the CompactSize's bytes, and a segwit head's marker and flag. -/
 def lookups : List Lookup :=
@@ -203,7 +221,8 @@ def lookups : List Lookup :=
     ⟨REL_BYTE, .neg (k CP5), [.add (.add (k START) (k OFF)) (cst 3), k (CB 3)]⟩,
     ⟨REL_BYTE, .neg (k CP5), [.add (.add (k START) (k OFF)) (cst 4), k (CB 4)]⟩,
     ⟨REL_BYTE, .neg (.mul (k K_TXH) (k SEG)), [.add (k START) (cst 4), cst 0]⟩,
-    ⟨REL_BYTE, .neg (.mul (k K_TXH) (k SEG)), [.add (k START) (cst 5), cst 1]⟩ ]
+    ⟨REL_BYTE, .neg (.mul (k K_TXH) (k SEG)), [.add (k START) (cst 5), cst 1]⟩,
+    ⟨REL_TX, .mul (k K_LOCK) (k TXM), [k TXI, k TXA, k SEG, k WST, k START]⟩ ]
 
 def fields : Comp where
   air := { name := "block_fields", nMain := N_MAIN, pre := preCols, constraints := constraints }
