@@ -108,3 +108,43 @@ witness item, locktime; then padding (at least one row).
 
 - Negative cases are rejected: a script length off by one breaks the tiling, and a tampered
   CompactSize byte leaves the lookups unbalanced.
+
+## `block_msg` and `block_sha` (M3a.3 `BLK-SHA`, AIRs and witnesses done; proofs to do)
+
+Lean: `Block/Msg.lean`, `Block/Sha.lean`. Zig: `src/block/msg.zig`, `src/block/sha.zig`.
+
+**`block_msg`** has one row per byte of a padded SHA-256 message.
+- **Messages:**
+  - the header: id 0, bytes `[0, 80)`;
+  - per transaction `i`, the txid message (id `1 + 2i`) and the wtxid message (id `2 + 2i`), with
+    ranges from the fields tuple `tx(i, a, seg, w, l)`. A segwit txid message is split around the
+    marker/flag and the witness section.
+- **Bytes:** data bytes come from the byte table. The SHA padding is checked in the AIR: `80`, zeros up
+  to byte 56 of a block, then the 64-bit length.
+- **Alignment:** messages start at rows `≡ 0 (mod 64)`.
+- **Yields:** 32-bit words `msgw(id, index, lo, hi)`, and padded lengths `mlen(id, len)`.
+- **Shape:** 38 columns.
+
+**`block_sha`** is the proven SHA-256 compression AIR, unchanged, plus per-period values: message id,
+block index, and first-block / second-hash / unused flags.
+- Continuation periods chain with constant offsets.
+- First blocks and second hashes start from the IV.
+- Message words are looked up from `block_msg`.
+- A second hash checks the padded length first, so hashing can't stop early. Its message is the
+  previous digest plus constant padding.
+- It yields `digest(id, 16 limbs)` = SHA256d.
+- Shape: 132 columns.
+
+**Tests:**
+- (bytes, fields, msg, sha) proves and verifies for blocks 0, 170 and 91812. The header digest equals
+  Core's block hash, and the txid digests reproduce the header's Merkle root.
+- On two segwit blocks (481824 and 709632, with 7 and 1,714 split txid messages, about 2.4 M message
+  rows and up to 41,386 compressions, 2²²), the traces satisfy the constraints, and the txid digests
+  reproduce the header roots.
+- Rejected: a wrong message word, and a message hashed one block short.
+
+**To prove:**
+1. Each message's words are its padded bytes.
+2. The digests are SHA256d of the messages, reusing `compress_sound_air`.
+3. The fields tuples are the transactions' ranges, so the txid and wtxid messages are `serNoWit` and
+   `serWit`.
