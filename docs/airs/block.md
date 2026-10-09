@@ -161,11 +161,13 @@ block index, and first-block / second-hash / unused flags.
   - `sha_use_linked`: every SHA word or length use is matched by a message yield;
   - `sha_word`: each SHA message word is bytes `j − 3 .. j` of a message with the same id, where
     `j − 3 = 64 · BLKI + 4 · (row − 4)`;
-  - `sha_len`: a second hash's message has padded length `64 · (blocks hashed)`.
+  - `sha_len`: a second hash's message has padded length `64 · (blocks hashed)`;
+  - `msg_read`: a message data row reads the block byte at its position;
+  - `msg_tuple_linked`: a non-header message's tuple is yielded by a fields row.
 
 **To prove:**
-1. Linking, rest: message byte reads match the byte table (as `sys_read` does for fields); tx tuples
-   match the fields; one message per id. Then compose with `digest_sound` and `msg_pad`: each digest is
-   `Spec.Block.sha256d` of its message's data bytes.
-2. The fields tuples are the transactions' ranges, so the txid and wtxid messages are `serNoWit` and
-   `serWit`.
+1. The fields' tx yield semantics: a yielding row's tuple is transaction `i`'s ranges. This extends
+   `fields_sound`.
+2. One message per id (the tuple is a function of the id), then compose with `digest_sound` and
+   `msg_pad`: each digest is `Spec.Block.sha256d` of its message's data bytes.
+3. Hence the txid and wtxid messages are `serNoWit` and `serWit`.
