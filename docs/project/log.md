@@ -32,14 +32,17 @@ Done:
   words, read block by block from the first block.
 - Message soundness (c129f50..60968c0): `whole_msg`, `split_msg`, `pad_ok`, `pad_bytes`, `belongs`,
   `word_yield`, `len_yield`.
+- `msg_pad`: a message's rows are `Spec.Block.pad` of its data bytes. Linking (`Block/Link.lean`):
+  `sha_word`, `sha_len`, `msg_read`, `msg_tuple_linked`.
 - Soundness fix (1fffa02): the length rows were checked only mod `P`, and a top length byte up to 255
   allowed `8 · len + P`. Bits 3..7 of that byte must now be clear; `top_lt` proves the bound.
 - The owner's `bitcoind` node is reachable over SSH and an RPC tunnel. It is a data source only: the
   machine is too small to prove on. Credentials stay in `prove-any-chain/.env.local`, which is gitignored
   here.
 Evidence:
-- `lake build`: 8,762 jobs, OK. `#print axioms` on `digest_sound`, `whole_msg`, `split_msg`,
-  `pad_bytes`, `word_yield`, `len_yield`, `belongs`: only `propext`, `Classical.choice`, `Quot.sound`.
+- `lake build`: 8,763 jobs, OK. `#print axioms` on `digest_sound`, `whole_msg`, `split_msg`,
+  `pad_bytes`, `word_yield`, `len_yield`, `belongs`, `msg_pad`, `sha_word`, `sha_len`, `msg_read`,
+  `msg_tuple_linked`: only `propext`, `Classical.choice`, `Quot.sound`.
 - `zig build test -Dtest-filter=block` passes (exit 0). (bytes, fields, msg, sha) proves and verifies
   on blocks 0, 170 and 91812. Txid digests reproduce the Merkle roots, including on segwit blocks
   481824 and 709632.
@@ -48,8 +51,8 @@ Problems / lessons:
   Use an extra periodic indicator for the shifted row instead (`IS56`, `IS0`).
 - Proving the length rows against the spec exposed the mod-`P` gap. Check for wrap-around whenever a
   constraint compares a multi-byte value.
-Next: tie the message rows to `Spec.Block.pad`, then link the system's lookups (SHA ↔ msg, msg ↔ byte
-table, msg ↔ fields).
+Next: one message per id, then compose into "digest = `Spec.Block.sha256d` of the message"; the fields' tx
+yield semantics (tuples are `serNoWit`/`serWit` ranges).
 
 ## 2026-10-09 — Full chain re-proven with the header tree
 Who: Claude (agent, Opus 5.5)
