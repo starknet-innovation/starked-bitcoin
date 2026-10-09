@@ -5,6 +5,7 @@ padded lengths come from the message component, whose bytes come from the byte t
 -/
 import StarkedAir.Block.MsgSound
 import StarkedAir.Block.ShaSound
+import StarkedAir.Block.TxIndex
 
 namespace StarkedAir.Block
 
@@ -340,6 +341,102 @@ theorem msg_tuple_linked (hL25 : L ≤ 25) {r : ℕ} (hr : r < 2 ^ L) (hf : (ins
         Sha.REL_DIGEST, Fields.REL_TX] at hrel
   obtain ⟨rfl, rfl⟩ := hik
   exact ⟨r', hr', hsm, hsv⟩
+
+/-- The tuple a non-header message start reads, from the fields' lock-time row of its transaction. -/
+theorem msg_tuple_row (hL25 : L ≤ 25) {r : ℕ} (hr : r < 2 ^ L) (hf : (inst 2).main Msg.FIRSTM r = 1)
+    (hh : (inst 2).main Msg.HDR r = 0) :
+    ∃ ρ < 2 ^ L, (inst 1).main Fields.K_LOCK ρ = 1 ∧
+      (inst 1).main Fields.TXI ρ = (inst 2).main Msg.TI r ∧ (inst 1).main Fields.TXA ρ = (inst 2).main Msg.TA r ∧
+      (inst 1).main Fields.SEG ρ = (inst 2).main Msg.SEG r ∧ (inst 1).main Fields.WST ρ = (inst 2).main Msg.TW r ∧
+      (inst 1).main Fields.START ρ = (inst 2).main Msg.TL r := by
+  obtain ⟨ρ, hρ, hm, hv⟩ := msg_tuple_linked hL hsat hL25 hr hf hh
+  have fs := hash_fields_sat' hL hsat
+  have hlock : (inst 1).main Fields.K_LOCK ρ = 1 := by
+    have hm' : (inst 1).main Fields.K_LOCK ρ * (inst 1).main Fields.TXM ρ ≠ 0 := by
+      simpa [siteMult, siteEval, siteLookup, hashSys, hL 1 (by decide), Fields.fields, Fields.lookups, Expr.eval,
+        Fields.k, StarkedAir.Sha256.eval_col, wrap_zero hρ] using hm
+    rcases Fields.kind_bool fs (c := Fields.K_LOCK) (by simp [Fields.kinds]) hρ with h | h
+    · rw [h, zero_mul] at hm'; exact absurd rfl hm'
+    · exact h
+  have e1 : siteVals hashSys inst pub (1, ρ, 7) = [(inst 1).main Fields.TXI ρ, (inst 1).main Fields.TXA ρ,
+      (inst 1).main Fields.SEG ρ, (inst 1).main Fields.WST ρ, (inst 1).main Fields.START ρ] := by
+    simp [siteVals, siteEval, siteLookup, hashSys, hL 1 (by decide), Fields.fields, Fields.lookups, Fields.k,
+      StarkedAir.Sha256.eval_col, wrap_zero hρ]
+  have e2 : siteVals hashSys inst pub (2, r, 1) = [(inst 2).main Msg.TI r, (inst 2).main Msg.TA r,
+      (inst 2).main Msg.SEG r, (inst 2).main Msg.TW r, (inst 2).main Msg.TL r] := by
+    simp [siteVals, siteEval, siteLookup, hashSys, hL 2 (by decide), Msg.msg, Msg.lookups, Msg.k,
+      StarkedAir.Sha256.eval_col, wrap_zero hr]
+  rw [e1, e2] at hv
+  simp only [List.cons.injEq, and_true] at hv
+  exact ⟨ρ, hρ, hlock, hv.1, hv.2.1, hv.2.2.1, hv.2.2.2.1, hv.2.2.2.2⟩
+
+/-- The header message's tuple: `TA = 0`, `TL = 76`, `WTX = 0`. -/
+theorem hdr_tuple {r : ℕ} (hr : r < 2 ^ L) (hh : (inst 2).main Msg.HDR r = 1) :
+    (inst 2).main Msg.TA r = 0 ∧ (inst 2).main Msg.TL r = 76 ∧ (inst 2).main Msg.WTX r = 0 := by
+  have ms := hash_msg_sat hL hsat
+  have c := fun (e : Expr) (h : e ∈ Msg.msgC) => Msg.sat ms (Msg.mem_msgC h) hr
+  have h1 := c (.mul (Msg.k Msg.HDR) (Msg.k Msg.TA)) (by simp [Msg.msgC])
+  have h2 := c (.mul (Msg.k Msg.HDR) (.sub (Msg.k Msg.TL) (cst 76))) (by simp [Msg.msgC])
+  have h3 := c (.mul (Msg.k Msg.WTX) (Msg.k Msg.HDR)) (by simp [Msg.msgC])
+  simp only [Expr.eval, Msg.ev_k hr, hh, one_mul, mul_one, StarkedAir.Sha256.eval_cst, sub_eq_zero] at h1 h2 h3
+  exact ⟨h1, by rw [h2]; norm_num, h3⟩
+
+/-- **One tuple per message id.** Two message starts with the same id agree on the header flag, the
+wtxid flag and the data range `TA`, `TL`; non-header ones also on `SEG` and `TW`. -/
+theorem mid_tuple (hL25 : L ≤ 25) {r0 r1 : ℕ} (h0 : r0 < 2 ^ L) (h1 : r1 < 2 ^ L)
+    (f0 : (inst 2).main Msg.FIRSTM r0 = 1) (f1 : (inst 2).main Msg.FIRSTM r1 = 1)
+    (hm : (inst 2).main Msg.MID r0 = (inst 2).main Msg.MID r1) :
+    (inst 2).main Msg.HDR r0 = (inst 2).main Msg.HDR r1 ∧ (inst 2).main Msg.WTX r0 = (inst 2).main Msg.WTX r1 ∧
+      (inst 2).main Msg.TA r0 = (inst 2).main Msg.TA r1 ∧ (inst 2).main Msg.TL r0 = (inst 2).main Msg.TL r1 ∧
+      ((inst 2).main Msg.HDR r0 = 0 →
+        (inst 2).main Msg.SEG r0 = (inst 2).main Msg.SEG r1 ∧ (inst 2).main Msg.TW r0 = (inst 2).main Msg.TW r1) := by
+  have ms := hash_msg_sat hL hsat
+  have fs := hash_fields_sat' hL hsat
+  have hP : 2 ^ L < P := by have := hash_rows_lt_P hL hL25; omega
+  have h25 : 2 ^ L ≤ 2 ^ 25 := Nat.pow_le_pow_right (by norm_num) hL25
+  norm_num at h25
+  rw [Msg.mid_eq ms h0, Msg.mid_eq ms h1] at hm
+  -- a non-header message: its lock-time row `ρ` and its id as a natural number
+  have nat_id : ∀ {r}, r < 2 ^ L → (inst 2).main Msg.FIRSTM r = 1 → (inst 2).main Msg.HDR r = 0 →
+      ∃ ρ < 2 ^ L, ∃ w ≤ 1, (inst 1).main Fields.K_LOCK ρ = 1 ∧
+        (1 + 2 * (inst 2).main Msg.TI r + (inst 2).main Msg.WTX r) =
+          ((1 + 2 * Fields.locks (inst 1).main ρ + w : ℕ) : F) ∧ (inst 2).main Msg.WTX r = (w : F) ∧
+        Fields.locks (inst 1).main ρ ≤ ρ ∧
+        (inst 1).main Fields.TXA ρ = (inst 2).main Msg.TA r ∧ (inst 1).main Fields.SEG ρ = (inst 2).main Msg.SEG r ∧
+        (inst 1).main Fields.WST ρ = (inst 2).main Msg.TW r ∧ (inst 1).main Fields.START ρ = (inst 2).main Msg.TL r := by
+    intro r hr hf hh
+    obtain ⟨ρ, hρ, hl, ti, ta, sg, tw, tl⟩ := msg_tuple_row hL hsat hL25 hr hf hh
+    have hw := Fields.bool_val (Msg.bool_col ms (e := Msg.WTX) (by simp) hr)
+    refine ⟨ρ, hρ, ((inst 2).main Msg.WTX r).val, hw.2, hl, ?_, hw.1, Fields.locks_le ρ, ta, sg, tw, tl⟩
+    rw [← ti, Fields.txi_count fs ρ hρ]; push_cast; rw [← hw.1]
+  have pos_id : ∀ {r}, r < 2 ^ L → (inst 2).main Msg.FIRSTM r = 1 → (inst 2).main Msg.HDR r = 0 →
+      (1 - (inst 2).main Msg.HDR r) * (1 + 2 * (inst 2).main Msg.TI r + (inst 2).main Msg.WTX r) ≠ 0 := by
+    intro r hr hf hh e
+    obtain ⟨ρ, hρ, w, hw, -, e0, -, b0, -⟩ := nat_id hr hf hh
+    rw [hh, sub_zero, one_mul, e0] at e
+    have hb : 1 + 2 * Fields.locks (inst 1).main ρ + w ≤ 2 ^ 30 := by
+      have := b0; have := hρ; omega
+    have := natCast_inj_of_lt (b := 0) (Fields.lt_P hb) (by unfold P; norm_num) (by rw [e]; simp)
+    omega
+  rcases Msg.bool_col ms (e := Msg.HDR) (by simp) h0 with a0 | a0 <;>
+    rcases Msg.bool_col ms (e := Msg.HDR) (by simp) h1 with a1 | a1
+  · obtain ⟨ρ0, hρ0, w0, hw0, l0, e0, x0, b0, ta0, sg0, tw0, tl0⟩ := nat_id h0 f0 a0
+    obtain ⟨ρ1, hρ1, w1, hw1, l1, e1, x1, b1, ta1, sg1, tw1, tl1⟩ := nat_id h1 f1 a1
+    rw [a0, a1, sub_zero, one_mul, one_mul, e0, e1] at hm
+    have hn := natCast_inj_of_lt (Fields.lt_P (by omega)) (Fields.lt_P (by omega)) hm
+    have hw : w0 = w1 := by omega
+    have hl : Fields.locks (inst 1).main ρ0 = Fields.locks (inst 1).main ρ1 := by omega
+    have hρ : ρ0 = ρ1 := Fields.lock_unique fs hP hρ0 hρ1 l0 l1
+      (by rw [Fields.txi_count fs ρ0 hρ0, Fields.txi_count fs ρ1 hρ1, hl])
+    subst hρ hw
+    exact ⟨a0.trans a1.symm, x0.trans x1.symm, ta0.symm.trans ta1, tl0.symm.trans tl1,
+      fun _ => ⟨sg0.symm.trans sg1, tw0.symm.trans tw1⟩⟩
+  · exact absurd (by rw [hm, a1]; ring) (pos_id h0 f0 a0)
+  · exact absurd (by rw [← hm, a0]; ring) (pos_id h1 f1 a1)
+  · obtain ⟨ta0, tl0, w0⟩ := hdr_tuple hL hsat h0 a0
+    obtain ⟨ta1, tl1, w1⟩ := hdr_tuple hL hsat h1 a1
+    exact ⟨a0.trans a1.symm, w0.trans w1.symm, ta0.trans ta1.symm, tl0.trans tl1.symm,
+      fun h => absurd (h.symm.trans a0) zero_ne_one⟩
 
 end System
 
