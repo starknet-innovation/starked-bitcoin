@@ -471,7 +471,7 @@ the header message) or, for a transaction message with index `TI = i`, the `wtxi
 theorem digest_tx (hL25 : L ≤ 25) {q : ℕ} (hq : 1 ≤ q) (hn : 72 * q + 72 ≤ 2 ^ L)
     (hd : (inst 3).main Sha.DBL (72 * q) = 1) (hmid : ((inst 3).main Sha.MID (72 * q)).val < Merkle.NB) :
     ∃ b, Spec.Block.parseBlock (Fields.blockBytes (inst 0).main (pub 0).val) = some b ∧
-      ∃ r0, (inst 2).main Msg.FIRSTM r0 = 1 ∧ (inst 2).main Msg.MID r0 = (inst 3).main Sha.MID (72 * q) ∧
+      ∃ r0, r0 < 2 ^ L ∧ (inst 2).main Msg.FIRSTM r0 = 1 ∧ (inst 2).main Msg.MID r0 = (inst 3).main Sha.MID (72 * q) ∧
       ((inst 2).main Msg.HDR r0 = 1 → Spec.Block.stateBytes (outputAt (inst 3).main (72 * q)) =
         Spec.Block.sha256d b.header) ∧
       ((inst 2).main Msg.HDR r0 = 0 → ∃ (i : ℕ) (tx : Spec.Block.Tx), (inst 2).main Msg.TI r0 = (i : F) ∧ b.txs[i]? = some tx ∧
@@ -482,10 +482,10 @@ theorem digest_tx (hL25 : L ≤ 25) {q : ℕ} (hq : 1 ≤ q) (hn : 72 * q + 72 �
   have hb0 := hash_bytes_sat hL hsat
   obtain ⟨m, hmn, hnp, hpad, hfit, hcs, cat, mono, hSm⟩ :=
     Fields.block_ctx hL25 fs hb0 (hash_fields_read hL hsat hL25)
-  obtain ⟨b, hparse, hhead, -, hidx⟩ :=
+  obtain ⟨b, hparse, hhead, -, -, hidx⟩ :=
     Fields.block_index hL25 fs hb0 (hash_fields_read hL hsat hL25) hmn hnp hpad hfit hcs cat mono hSm
   obtain ⟨r0, d, h0, f, hmid', hc, he, hdig⟩ := digest_sha256d hL hsat hL25 hq hn hd hmid
-  refine ⟨b, hparse, r0, f, hmid', fun hh => ?_, fun hh => ?_⟩
+  refine ⟨b, hparse, r0, h0, f, hmid', fun hh => ?_, fun hh => ?_⟩
   · -- the header message: bytes `[0, 80)`
     obtain ⟨ta, tl, w0⟩ := hdr_tuple hL hsat h0 hh
     have hmt : (inst 2).main Msg.MT r0 = 0 := by rw [Msg.mt_eq ms h0, w0, hh]; ring

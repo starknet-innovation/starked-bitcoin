@@ -271,7 +271,7 @@ theorem block_index {m : ℕ} (hmn : m < 2 ^ L) (hnp : ∀ r < m, (inst 1).main 
     (hSm : ((inst 1).main START m).val = (blockBytes (inst 0).main (pub 0).val).length) :
     ∃ b, Spec.Block.parseBlock (blockBytes (inst 0).main (pub 0).val) = some b ∧
       b.header = slice (blockBytes (inst 0).main (pub 0).val) 0 80 ∧
-      b.txs.length = ((inst 1).main VAL 0).val ∧
+      b.txs.length = ((inst 1).main VAL 0).val ∧ b.txs.length < 2 ^ L ∧
       ∀ ρ < 2 ^ L, (inst 1).main K_LOCK ρ = 1 → ∀ tx, TxAt (inst 1).main (blockBytes (inst 0).main (pub 0).val) m ρ tx →
         b.txs[locks (inst 1).main ρ]? = some tx := by
   set R := blockBytes (inst 0).main (pub 0).val with hR
@@ -315,7 +315,6 @@ theorem block_index {m : ℕ} (hmn : m < 2 ^ L) (hnp : ∀ r < m, (inst 1).main 
     simp [Spec.Block.txsT, Spec.Block.txT] at htxs
   have ht1 : (inst 1).main K_TXH 1 = 1 := (next_kind fs (r := 0) (by omega)).1 hblk0
   obtain ⟨hlen, rows, e, he, hrest, hle⟩ := txs_rows fs R hcs hmn hpad hfit n0 1 txs [] h1m ht1 htxs
-  refine ⟨_, hparse, rfl, by simpa [hnv] using hlen, ?_⟩
   have hl1 : locks (inst 1).main 1 = 0 := by
     rw [locks_succ, if_neg (by
       rw [kind_unique fs hn (a := K_BLK) (b := K_LOCK) (by simp [K_BLK]) (by simp [K_LOCK]) (by simp [K_BLK, K_LOCK]) hblk0]
@@ -325,6 +324,9 @@ theorem block_index {m : ℕ} (hmn : m < 2 ^ L) (hnp : ∀ r < m, (inst 1).main 
     have := congrArg List.length hrest
     simp [toksFrom_length] at this; omega
   subst hem
+  refine ⟨_, hparse, rfl, by simpa [hnv] using hlen, ?_, ?_⟩
+  · have := locks_le (M := (inst 1).main) e
+    simp only at hlen ⊢; rw [hlen]; omega
   intro ρ0 hρ0 hl0 tx0 hat0
   have hpρ : (inst 1).main K_PAD ρ0 = 0 :=
     kind_unique fs hρ0 (a := K_LOCK) (b := K_PAD) (by simp [K_LOCK]) (by simp [K_PAD]) (by simp [K_LOCK, K_PAD]) hl0
