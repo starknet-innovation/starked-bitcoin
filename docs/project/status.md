@@ -5,7 +5,7 @@ If `HEAD at last update` doesn't match `git log -1`, this file is stale:
 follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work).
 
 - **Updated:** 2026-10-09
-- **HEAD at last update:** 4f03043 (plus this status commit)
+- **HEAD at last update:** 8d90ad6 (plus this status commit)
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
 - **Current item:** M3a.3 `BLK-SHA` ([block-data.md](../design/block-data.md)). HC-HASHTREE done (full chain re-proven 2026-10-09).
 
