@@ -47,6 +47,7 @@ import StarkedAir.Block.Bytes
 import StarkedAir.Block.Fields
 import StarkedAir.Block.FieldsSound
 import StarkedAir.Block.Msg
+import StarkedAir.Block.MsgSound
 import StarkedAir.Block.Sha
 import StarkedAir.Block.ShaSound
 import StarkedAir.Spec.BlockTokens
