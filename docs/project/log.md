@@ -22,6 +22,19 @@ Next: <the exact next step; must match status.md>
 ---
 
 
+## 2026-10-09 — Full chain re-proven with the header tree
+Who: Claude (agent, Opus 5.5)
+Roadmap: HC-HASHTREE → done
+Done:
+- `spike chain 20 70 26`: 243 leaves, 242 nodes, root verified with the public-data VK; `T` equals the natively
+  recomputed MMR root over 970,348 block hashes ([report](../reports/2026-10-09-full-chain-tree.md)).
+Evidence:
+- Log `data/chain_full_tree.log`: leaves 45,317 s, fold 5,098 s, verify 1.09 s, root proof 981,000 bytes.
+Problems / lessons:
+- Leaves cost about 2.5× the previous run: the segment proof now includes the tree component at the same row
+  count (no lifting yet).
+Next: M3a.3 BLK-SHA.
+
 ## 2026-10-08 (session 4) — M3a.1 and M3a.2 done and proven
 Who: Claude (agent, Opus 5.5), with the owner
 Roadmap: BLOCK-AIR → in progress (M3a.1 BLK-BYTES, M3a.2 BLK-FIELDS done)

@@ -4,10 +4,10 @@ Rewritten at the end of every session; see [README.md](README.md#ending-a-sessio
 If `HEAD at last update` doesn't match `git log -1`, this file is stale:
 follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work).
 
-- **Updated:** 2026-10-08
+- **Updated:** 2026-10-09
 - **HEAD at last update:** 4f03043 (plus this status commit)
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
-- **Current item:** `HC-HASHTREE` ([header-tree.md](../design/header-tree.md)): built and proven, full-chain re-run pending. Then M3a ([block-data.md](../design/block-data.md)).
+- **Current item:** M3a.3 `BLK-SHA` ([block-data.md](../design/block-data.md)). HC-HASHTREE done (full chain re-proven 2026-10-09).
 
 ## State in one paragraph
 
@@ -21,15 +21,13 @@ standard axioms only); the in-circuit verifiers and node code stay trusted
 
 ## Next step (concrete)
 
-1. When the full-chain run finishes (see In flight), record `T`, timings and proof size in a report.
-2. M3a.3 `BLK-SHA` per [block-data.md](../design/block-data.md): message-byte walker plus multi-message
+1. M3a.3 `BLK-SHA` per [block-data.md](../design/block-data.md): message-byte walker plus multi-message
    SHA-256 (txid, wtxid, header hash). M3a.1–2 are done and proven ([airs/block.md](../airs/block.md)).
-3. Proposed: REC-FUZZ (differential fuzzing of the plain verifier).
+2. Proposed: REC-FUZZ (differential fuzzing of the plain verifier).
 
 ## In flight
 
-- Full-chain re-run with the tree: `spike chain 20 70 26 data/headers.bin`, started 2026-10-08 ~16:40
-  (PID was 98247; log `data/chain_full_tree.log`, about 16 h). The glue work since does not change circuits.
+- Nothing.
 
 ## Needs owner
 
