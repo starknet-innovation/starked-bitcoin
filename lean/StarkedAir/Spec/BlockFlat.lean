@@ -537,4 +537,68 @@ theorem walk_eq_sigOps (s : Bytes) : walk .op s = sigOps s := by
         simp only [h76, h77, h78, ite_false, List.drop_zero, hgt, false_and, List.map_cons, List.sum_cons]
         rw [ihr r hr]
 
+/-! ### Coinbase and commitment shapes -/
+
+/-- No null prevout among the later transactions' inputs makes none of them a coinbase
+(`bad-cb-multiple` follows from the AIR's per-input check). -/
+theorem not_coinbase_of_inputs (t : Tx) (h : ∀ i ∈ t.vin, i.prevout.isNull = false) : t.isCoinbase = false := by
+  unfold Tx.isCoinbase
+  split
+  · rename_i i hv; exact h i (by simp [hv])
+  · rfl
+
+/-- The last index below `n` satisfying `p`, as a left fold. -/
+theorem foldl_last (p : ℕ → Prop) [DecidablePred p] : ∀ n,
+    (List.range n).foldl (fun acc o => if p o then some o else acc) none =
+      if h : ∃ o < n, p o then some (Nat.findGreatest p (n - 1)) else none
+  | 0 => by simp
+  | n + 1 => by
+    rw [List.range_succ, List.foldl_append, foldl_last p n]
+    simp only [List.foldl_cons, List.foldl_nil, Nat.add_sub_cancel]
+    by_cases hp : p n
+    · simp only [hp, ite_true]
+      rw [dif_pos ⟨n, by omega, hp⟩, Nat.findGreatest_eq hp]
+    · simp only [hp, ite_false]
+      by_cases hex : ∃ o < n, p o
+      · obtain ⟨o, ho, hpo⟩ := hex
+        rw [dif_pos ⟨o, ho, hpo⟩, dif_pos ⟨o, by omega, hpo⟩]
+        congr 1
+        rcases n with _ | n
+        · omega
+        · rw [Nat.findGreatest_succ, if_neg hp]; simp
+      · rw [dif_neg hex, dif_neg]
+        rintro ⟨o, ho, hpo⟩
+        rcases Nat.lt_succ_iff_lt_or_eq.mp ho with h | h
+        · exact hex ⟨o, h, hpo⟩
+        · exact hp (h ▸ hpo)
+
+/-- The commitment pattern on output `o` of `cb`. -/
+def IsCommit (cb : Tx) (o : ℕ) : Prop :=
+  ((cb.vout.getD o ⟨0, []⟩).scriptPubKey.length ≥ 38 ∧
+    (cb.vout.getD o ⟨0, []⟩).scriptPubKey.take 6 = [0x6a, 0x24, 0xaa, 0x21, 0xa9, 0xed])
+
+instance (cb : Tx) : DecidablePred (IsCommit cb) := fun _ => by unfold IsCommit; infer_instance
+
+/-- **The witness commitment is the last matching output**: `commitmentIndex` is `some pos`
+iff output `pos` matches and no later output does; `none` iff no output matches. -/
+theorem commitmentIndex_eq (cb : Tx) :
+    commitmentIndex cb = if h : ∃ o < cb.vout.length, IsCommit cb o
+      then some (Nat.findGreatest (IsCommit cb) (cb.vout.length - 1)) else none := by
+  unfold commitmentIndex
+  rw [← foldl_last]
+  rfl
+
+theorem commitmentIndex_some {cb : Tx} {pos : ℕ} (h : commitmentIndex cb = some pos) :
+    pos < cb.vout.length ∧ IsCommit cb pos ∧ ∀ o, pos < o → o < cb.vout.length → ¬ IsCommit cb o := by
+  rw [commitmentIndex_eq] at h
+  split at h
+  · rename_i hex
+    obtain ⟨o, ho, hpo⟩ := hex
+    simp only [Option.some.injEq] at h
+    subst h
+    refine ⟨?_, Nat.findGreatest_spec (m := o) (by omega) hpo, fun o' h1 h2 => Nat.findGreatest_is_greatest h1 (by omega)⟩
+    have := Nat.findGreatest_le (P := IsCommit cb) (cb.vout.length - 1)
+    omega
+  · exact absurd h (by simp)
+
 end StarkedAir.Spec.Block
