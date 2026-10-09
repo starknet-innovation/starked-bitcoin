@@ -3,3 +3,6 @@ zig-out/
 .venv-fv/
 data/
 __pycache__/
+.env
+.env.local
+.env.*.local
