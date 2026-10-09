@@ -389,6 +389,82 @@ theorem pad_ok {p : ℕ} (hp : p < n) (h : M P80 p = 1) :
     · exact hf (by omega)
   · exact (step_ln hsat h8 l7).2 (by omega)
 
+omit hsat in
+theorem ev_byte {r j : ℕ} (hj : j ≤ r) (hr : r < n) :
+    (byteE (-(j : ℤ))).eval n preCols pub M r = M BYTE (r - j) := by
+  simp only [byteE, eval_col]; rw [wrap_back hj hr]
+
+theorem pad_rows {p : ℕ} (hp : p < n) (h : M P80 p = 1) {j : ℕ} (hj1 : p < j)
+    (hj2 : j < p + 1 + (119 - p % 64) % 64 + 8) :
+    j < n ∧ M P80 j = 0 ∧ M FIRSTM j = 0 ∧ (M ZR j = 1 ∨ M LN j = 1) := by
+  obtain ⟨-, h8, hz, hl, -⟩ := pad_ok hsat hp h
+  have hjn : j < n := by omega
+  by_cases hjs : j < p + 1 + (119 - p % 64) % 64
+  · obtain ⟨z, f⟩ := hz j hj1 hjs
+    exact ⟨hjn, kind_unique hsat hjn (a := ZR) (b := P80) (by simp [ZR]) (by simp [P80]) (by simp [ZR, P80]) z, f, Or.inl z⟩
+  · obtain ⟨l, f⟩ := hl j (by omega) hj2
+    exact ⟨hjn, kind_unique hsat hjn (a := LN) (b := P80) (by simp [LN]) (by simp [P80]) (by simp [LN, P80]) l, f, Or.inr l⟩
+
+/-- Through the padding the index counts on and `DLC` holds the data length (the index at `0x80`). -/
+theorem pad_idx {p : ℕ} (hp : p < n) (h : M P80 p = 1) (i : ℕ) (hi : i < (119 - p % 64) % 64 + 9) :
+    M DLC (p + i) = M IDX p ∧ M IDX (p + i) = M IDX p + i := by
+  induction i with
+  | zero =>
+    have := sat hsat (mem_padC (c := .mul (k P80) (.sub (k DLC) (k IDX))) (by simp [padC])) hp
+    simp only [Expr.eval, ev_k hp, h, one_mul, sub_eq_zero] at this
+    simpa using this
+  | succ i ih =>
+    obtain ⟨d, x⟩ := ih (by omega)
+    obtain ⟨hjn, p0, f0, -⟩ := pad_rows hsat hp h (j := p + i + 1) (by omega) (by omega)
+    have hjn' : p + i + 1 < n := hjn
+    rw [show p + (i + 1) = p + i + 1 by ring]
+    constructor
+    · have := sat hsat (mem_padC (c := .mul (om (k P80)) (.mul notFirst (.sub (k DLC) (kp DLC)))) (by simp [padC])) hjn'
+      simp only [Expr.eval, om, one, notFirst, eval_cst, Nat.cast_one, ev_k hjn', ev_kp hjn', p0, first_off hjn',
+        sub_zero, one_mul] at this
+      rw [sub_eq_zero.mp this, d]
+    · rw [(in_msg hsat hjn' f0).1, x]; push_cast; ring
+
+/-- **Padding bytes**: `0x80`, zeros, then the bit length `8 · (data length)` big-endian in the last
+four rows. -/
+theorem pad_bytes {p : ℕ} (hp : p < n) (h : M P80 p = 1) :
+    let s := p + 1 + (119 - p % 64) % 64
+    M BYTE p = 128 ∧ (∀ j, p < j → j < s + 4 → M BYTE j = 0) ∧
+    16777216 * M BYTE (s + 4) + 65536 * M BYTE (s + 5) + 256 * M BYTE (s + 6) + M BYTE (s + 7) = 8 * M IDX p := by
+  intro s
+  obtain ⟨hs, h8, -, hl, -⟩ := pad_ok hsat hp h
+  refine ⟨?_, fun j hj1 hj2 => ?_, ?_⟩
+  · have := sat hsat (mem_padC (c := .mul (k P80) (.sub (k BYTE) (cst 128))) (by simp [padC])) hp
+    simp only [Expr.eval, ev_k hp, h, one_mul, eval_cst, sub_eq_zero] at this
+    rw [this]; norm_num
+  · obtain ⟨hjn, -, -, zl⟩ := pad_rows hsat hp h (j := j) hj1 (by omega)
+    by_cases hjs : j < s
+    · have z := (pad_ok hsat hp h).2.2.1 j hj1 hjs |>.1
+      have := sat hsat (mem_padC (c := .mul (k ZR) (k BYTE)) (by simp [padC])) hjn
+      simp only [Expr.eval, ev_k hjn, z, one_mul] at this; exact this
+    · have l := (hl j (by omega) (by omega)).1
+      have hc := sat hsat (mem_padC (c := .mul (k LN) (.mul (pre LZ) (k BYTE))) (by simp [padC])) hjn
+      rw [show Expr.eval n preCols pub M j (.mul (k LN) (.mul (pre LZ) (k BYTE))) =
+        M LN j * ((pre LZ).eval n preCols pub M j * M BYTE j) by simp [Expr.eval, ev_k hjn],
+        ev_per64 (p := fun q => 56 ≤ q && q < 60) rfl hjn, l, one_mul] at hc
+      have hm : 56 ≤ j % 64 ∧ j % 64 < 60 := by omega
+      simpa [hm] using hc
+  · have hr : s + 7 < n := by omega
+    have l := (hl (s + 7) (by omega) (by omega)).1
+    have := sat hsat (mem_padC (c := .mul (pre IS63) (.mul (k LN) (.sub (.add (.add (.add (.mul (cst 16777216) (byteE (-3)))
+      (.mul (cst 65536) (byteE (-2)))) (.mul (cst 256) (byteE (-1)))) (k BYTE)) (.mul (cst 8) (k DLC))))) (by simp [padC])) hr
+    rw [show (-3 : ℤ) = -((3 : ℕ) : ℤ) by simp, show (-2 : ℤ) = -((2 : ℕ) : ℤ) by simp,
+      show (-1 : ℤ) = -((1 : ℕ) : ℤ) by simp] at this
+    simp only [Expr.eval, ev_k hr, ev_byte (by omega : 3 ≤ s + 7) hr, ev_byte (by omega : 2 ≤ s + 7) hr,
+      ev_byte (by omega : 1 ≤ s + 7) hr, ev_per64 (i := IS63) (p := (· = 63)) rfl hr, l, eval_cst, one_mul] at this
+    have h63 : (s + 7) % 64 = 63 := by omega
+    simp only [h63, decide_true, if_true, one_mul, sub_eq_zero] at this
+    rw [show s + 7 - 3 = s + 4 by omega, show s + 7 - 2 = s + 5 by omega, show s + 7 - 1 = s + 6 by omega] at this
+    have hd := (pad_idx hsat hp h (s + 7 - p) (by omega)).1
+    rw [show p + (s + 7 - p) = s + 7 by omega] at hd
+    rw [hd] at this
+    push_cast at this ⊢; linear_combination this
+
 end Rows
 
 end StarkedAir.Block.Msg
