@@ -378,6 +378,25 @@ theorem walk : ∀ q, 72 * q + 72 ≤ n → (M FST (72 * q) = 1 ∨ M CHN (72 * 
       simp only [Expr.eval, k, Sha256.eval_col, wrap_zero hr, hf, one_mul] at this
       simpa using this
 
+/-- **The SHA component's digest.** A second-hash period `q` hashes the digest of its message's
+blocks: periods `q0 … q − 1` (`b = q − q0 ≥ 1` blocks, the first a first block, the rest
+continuations, all with the same id), and its output is
+`compress IV (dblBlock (fold over those blocks))`, i.e. SHA256d of the blocks' words. -/
+theorem digest_sound {q : ℕ} (hq : 1 ≤ q) (hn : 72 * q + 72 ≤ n) (hd : M DBL (72 * q) = 1) :
+    ∃ q0 < q, M FST (72 * q0) = 1 ∧ (∀ j, q0 < j → j < q → M CHN (72 * j) = 1) ∧
+      (∀ j, q0 ≤ j → j < q → M MID (72 * j) = M MID (72 * q) ∧ M BLKI (72 * j) = ((j - q0 : ℕ) : F)) ∧
+      outputAt M (72 * q) =
+        Spec.Sha256.compress Spec.Sha256.IV (dblBlock (fold M (72 * q0) (q - q0))) := by
+  obtain ⟨hm, hdn⟩ := (prev_facts hsat hq hn).2 hd
+  obtain ⟨hpd, hpn⟩ := not_dn hsat (by omega) hdn
+  obtain ⟨q0, hq0, f0, c0, v0⟩ := walk hsat (q - 1) (by omega) (fst_or_chn hsat (by omega) hpd hpn)
+  refine ⟨q0, by omega, f0, fun j h1 h2 => c0 j h1 (by omega),
+    fun j h1 h2 => ⟨(v0 j h1 (by omega)).1.trans hm.symm, (v0 j h1 (by omega)).2⟩, ?_⟩
+  have hb := chain_out hsat (s0 := 72 * q0) (b := q - q0) (by omega) (by omega) f0
+    (fun j h1 h2 => by rw [show 72 * q0 + 72 * j = 72 * (q0 + j) by ring]; exact c0 _ (by omega) (by omega))
+    (q - q0) (by omega) le_rfl
+  rw [dbl_out hsat (by omega) (by omega) hn hd, show 72 * q - 72 = 72 * q0 + 72 * (q - q0 - 1) by omega, hb]
+
 end Period
 
 end StarkedAir.Block.Sha
