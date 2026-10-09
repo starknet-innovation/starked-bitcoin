@@ -36,7 +36,7 @@ standard axioms only); the in-circuit verifiers and node code stay trusted
 ## Needs owner
 
 - **Push / remote:** private repo starknet-innovation/starked-bitcoin exists; nothing pushed. Wait for the owner's go.
-- **M3 node:** available (data source only; proving stays on the Mac). See memory/notes; credentials are in `prove-any-chain/.env.local`, never committed.
+- **M3 node:** available (data source only; proving stays on the Mac). Credentials are in `prove-any-chain/.env.local`, never committed.
 - **LICENSE:** none chosen.
 - **STWO-225-FU:** follow up on stwo-zig#225 upstream? This is outward-facing.
 
