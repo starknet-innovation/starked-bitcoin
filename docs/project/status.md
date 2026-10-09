@@ -24,7 +24,7 @@ standard axioms only); the in-circuit verifiers and node code stay trusted
 1. M3a.3 `BLK-SHA`. `block_msg` and `block_sha` are built and tested, and their component proofs are
    done (`digest_sound`, `whole_msg`, `split_msg`, `pad_bytes`, `word_yield`, `len_yield`; see
    [airs/block.md](../airs/block.md)). Next:
-   - (a) tie the message rows to `Spec.Block.pad`;
+   - (a) done: `msg_pad`, a message's rows are `Spec.Block.pad` of its data bytes;
    - (b) system linking: SHA `msgw`/`mlen` ↔ message yields, message bytes ↔ byte table, tuples ↔ fields;
    - (c) the fields tuples are the transactions' `serNoWit`/`serWit` ranges.
 2. Proposed: REC-FUZZ (differential fuzzing of the plain verifier).

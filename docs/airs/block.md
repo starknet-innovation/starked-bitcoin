@@ -154,10 +154,11 @@ block index, and first-block / second-hash / unused flags.
   - `pad_ok`, `pad_bytes`, `top_lt`: then `0x80`, zeros to byte 56 of a block, and the length bytes;
   - `belongs`, `word_yield`, `len_yield`: every used row belongs to a message. A word yield is the
     message's bytes `j − 3 .. j`, and a length yield is the padded length.
+  - `msg_pad`: a message's rows are `Spec.Block.pad` of its data bytes. This assumes at most `2^27`
+    rows, so the bit length stays below `P`.
 
 **To prove:**
-1. Tie the rows to `Spec.Block.pad`: the message's bytes are `pad data`.
-2. System linking: the SHA `msgw`/`mlen` uses match the message yields; message byte reads match the
+1. System linking: the SHA `msgw`/`mlen` uses match the message yields; message byte reads match the
    byte table; tx tuples match the fields.
-3. The fields tuples are the transactions' ranges, so the txid and wtxid messages are `serNoWit` and
+2. The fields tuples are the transactions' ranges, so the txid and wtxid messages are `serNoWit` and
    `serWit`.
