@@ -9,8 +9,9 @@
 //!       every segment to <out.sbchain>.ckpt and resumes from it. Writes the file, then reloads and
 //!       verifies it.
 //!   chainproof verify <vk> <file.sbchain> [--min-work <hex>]
-//!       Standalone verification with the VK pinned. The chainwork must be compared with a trusted
-//!       minimum: it is the only defence against a cheap low-difficulty chain.
+//!       Standalone verification with the VK pinned. The chainwork must reach a trusted minimum (it
+//!       is the only defence against a cheap low-difficulty chain): by default Bitcoin Core's
+//!       mainnet `nMinimumChainWork`; `--min-work 0` disables the check (e.g. for a short test chain).
 //!   chainproof inclusion <file.sbchain> <headers.bin> <height>
 //!       Prints and checks the MMR inclusion path of a block hash in the (verified) file's `T`.
 //!
@@ -31,7 +32,7 @@ fn usage() noreturn {
         \\usage:
         \\  chainproof setup <n_queries> <pow_bits> <max_log> <headers.bin> <out.vk>
         \\  chainproof prove <vk> <headers.bin> <to> <out.sbchain> [--from <in.sbchain>]
-        \\  chainproof verify <vk> <file.sbchain> [--min-work <hex>]
+        \\  chainproof verify <vk> <file.sbchain> [--min-work <hex> | --min-work 0]
         \\  chainproof inclusion <vk> <file.sbchain> <headers.bin> <height>
         \\
     , .{});
@@ -39,9 +40,13 @@ fn usage() noreturn {
 }
 
 pub fn main() !void {
+    // Debug builds check for leaks; release builds use libc malloc, which returns freed memory
+    // (DebugAllocator's growth made a full-chain run swap, 2026-10-10).
     var gpa_state: std.heap.DebugAllocator(.{}) = .init;
-    defer _ = gpa_state.deinit();
-    const gpa = gpa_state.allocator();
+    defer if (@import("builtin").mode == .Debug) {
+        _ = gpa_state.deinit();
+    };
+    const gpa = if (@import("builtin").mode == .Debug) gpa_state.allocator() else std.heap.c_allocator;
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
     const a = arena.allocator();
@@ -52,7 +57,7 @@ pub fn main() !void {
     if (std.mem.eql(u8, cmd, "prove") and (args.len == 6 or (args.len == 8 and std.mem.eql(u8, args[6], "--from"))))
         return prove(gpa, a, args[2], args[3], try std.fmt.parseInt(usize, args[4], 10), args[5], if (args.len == 8) args[7] else null);
     if (std.mem.eql(u8, cmd, "verify") and (args.len == 4 or (args.len == 6 and std.mem.eql(u8, args[4], "--min-work"))))
-        return verify(gpa, a, args[2], args[3], if (args.len == 6) try std.fmt.parseInt(u256, args[5], 16) else null);
+        return verify(gpa, a, args[2], args[3], if (args.len == 6) try std.fmt.parseInt(u256, args[5], 16) else core_min_work);
     if (std.mem.eql(u8, cmd, "inclusion") and args.len == 6) return inclusion(gpa, a, args[2], args[3], args[4], try std.fmt.parseInt(usize, args[5], 10));
     usage();
 }
@@ -102,6 +107,11 @@ fn setup(gpa: std.mem.Allocator, a: std.mem.Allocator, n_queries: u32, pow_bits:
     printWords("  node hash  ", su.vk.node.hash);
     std.debug.print("  wrote {s}\n", .{out});
 }
+
+/// Bitcoin Core's mainnet `nMinimumChainWork` (kernel/chainparams.cpp at c067aa716f8c, 2026-10-09;
+/// the work at about height 966143): the default minimum `verify` requires, as Core refuses to sync
+/// a lower-work chain. Checked by `tools/specfuzz/check_constants.py`.
+const core_min_work: u256 = 0x145ec036acc5ba740052af1a0;
 
 /// The pinned production VK (`vk/mainnet-q70-p26-l20.vk`): 70 queries, 26 PoW bits, segment log
 /// sizes 9..20. `mainnet` as the VK argument selects it.
@@ -168,7 +178,7 @@ fn prove(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8, head
     // Write first, then verify the file as read back from disk.
     try S.writeFileAtomic(out, try c.encode(a));
     std.debug.print("wrote {s} ({d} headers, {d} peaks)\n", .{ out, n, c.peaks.len });
-    try verify(gpa, a, vk_path, out, null);
+    try verify(gpa, a, vk_path, out, if (n > 966143) core_min_work else 0);
     std.fs.cwd().deleteFile(ckpt) catch {};
 }
 
@@ -188,12 +198,12 @@ fn verify(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8, pat
     std.debug.print("  chainwork  0x{x}\n", .{s.work});
     printWords("  MMR root T ", s.t);
     std.debug.print("  provenance {s}\n", .{c.provenance});
-    if (min_work) |w| {
+    if (min_work) |w| if (w != 0) {
         if (s.work < w) {
             std.debug.print("REJECTED: chainwork below the required minimum 0x{x}\n", .{w});
             return error.InsufficientWork;
         }
-        std.debug.print("  chainwork >= required minimum 0x{x}\n", .{w});
+        std.debug.print("  chainwork >= required minimum 0x{x}{s}\n", .{ w, if (w == core_min_work) " (Bitcoin Core's nMinimumChainWork)" else "" });
     } else std.debug.print("  NOTE: compare the chainwork with a trusted minimum (--min-work); a valid proof alone does not show this is the real chain\n", .{});
 }
 

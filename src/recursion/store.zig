@@ -587,7 +587,7 @@ pub const Prover = struct {
         try self.logs.append(self.a, log);
         self.work += segments.workBefore(all[h0 .. h0 + n], n);
         self.next = h0 + n;
-        if (self.verbose) std.debug.print("  segment {d}..{d} (log {d}): leaf {d:.1}s, merges {d:.1}s; {d} peaks\n", .{ h0, h0 + n - 1, log, ns(t_leaf), ns(timer.read()), self.stack.items.len });
+        if (self.verbose) std.debug.print("  segment {d}..{d} (log {d}): leaf {d:.1}s, merges {d:.1}s; {d} peaks; peak RSS {d:.1} GB\n", .{ h0, h0 + n - 1, log, ns(t_leaf), ns(timer.read()), self.stack.items.len, peakRssGb() });
     }
 
     /// Bags the peaks into the root (proving the bagging nodes); the peaks stay. `null` when a
@@ -611,10 +611,14 @@ pub const Prover = struct {
 
     /// The chain file content (borrowing the prover's peaks). `all` gives the genesis path.
     pub fn chain(self: *Prover, root: ?Proved, all: []const H.Header, provenance: []const u8) !Chain {
+        return self.chainIn(self.a, root, all, provenance, true);
+    }
+
+    /// The chain file content, allocated in `out`; `genesis`: include leaf 0's path (a checkpoint
+    /// does not need it).
+    fn chainIn(self: *Prover, out: std.mem.Allocator, root: ?Proved, all: []const H.Header, provenance: []const u8, genesis: bool) !Chain {
         const n = self.next;
-        const hashes = try self.a.alloc(HT.Words, n);
-        for (hashes, all[0..n]) |*h, *hd| h.* = HT.blockHash(hd);
-        const peaks = try self.a.alloc(Proved, self.stack.items.len);
+        const peaks = try out.alloc(Proved, self.stack.items.len);
         for (peaks, self.stack.items) |*p, s| p.* = s.e;
         return .{
             .fri = self.vk.fri,
@@ -624,17 +628,17 @@ pub const Prover = struct {
             .peaks = peaks,
             .root_kind = if (root != null) .own else if (peaks.len == 1) .peak else .none,
             .root = root,
-            .genesis = if (n > 0) try HT.inclusionProof(self.a, hashes, 0) else &.{},
+            .genesis = if (genesis and n > 0) try genesisPath(out, all[0..n]) else &.{},
             .provenance = provenance,
         };
     }
 
     /// A checkpoint: the chain so far without a root (no bagging).
     pub fn checkpoint(self: *Prover, all: []const H.Header, path: []const u8) !void {
-        var c = try self.chain(null, all, "checkpoint");
-        c.root_kind = .none;
         var tmp = std.heap.ArenaAllocator.init(self.gpa);
         defer tmp.deinit();
+        var c = try self.chainIn(tmp.allocator(), null, all, "checkpoint", false);
+        c.root_kind = .none;
         try writeFileAtomic(path, try c.encode(tmp.allocator()));
     }
 
@@ -643,6 +647,24 @@ pub const Prover = struct {
         self.stack.items.len = 0;
     }
 };
+
+/// Leaf 0's inclusion path in the MMR over `headers`' block hashes (scratch freed; the path lives
+/// in `out`).
+fn genesisPath(out: std.mem.Allocator, headers: []const H.Header) ![]const HT.Step {
+    var scratch = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer scratch.deinit();
+    const hashes = try scratch.allocator().alloc(HT.Words, headers.len);
+    for (hashes, headers) |*h, *hd| h.* = HT.blockHash(hd);
+    return out.dupe(HT.Step, try HT.inclusionProof(scratch.allocator(), hashes, 0));
+}
+
+/// Peak resident memory of this process so far, in GB.
+pub fn peakRssGb() f64 {
+    const ru = std.posix.getrusage(std.posix.rusage.SELF);
+    const bytes: f64 = @floatFromInt(ru.maxrss);
+    // macOS reports bytes, Linux kilobytes.
+    return if (@import("builtin").os.tag == .macos) bytes / 1e9 else bytes / 1e6;
+}
 
 fn ns(x: u64) f64 {
     return @as(f64, @floatFromInt(x)) / 1e9;

@@ -30,4 +30,8 @@ internal = bytes.fromhex(g)[::-1]
 words = [int.from_bytes(internal[4*i:4*i+4], "big") for i in range(8)]
 zig = re.search(r"GENESIS_HASH: HT.Words = \.\{ ([^}]*) \}", store).group(1)
 check(f"genesis hash {g[:16]}… = store.GENESIS_HASH", [int(x.strip(), 16) for x in zig.split(",")] == words)
+mw = re.search(r'consensus\.nMinimumChainWork = uint256\{"([0-9a-f]{64})"\}', main).group(1)
+cp_src = (root / "src/bin/chainproof.zig").read_text()
+zmw = re.search(r"const core_min_work: u256 = 0x([0-9a-f]+);", cp_src).group(1)
+check(f"nMinimumChainWork 0x{int(mw,16):x} = chainproof's default --min-work", int(mw, 16) == int(zmw, 16))
 sys.exit(0 if all(ok for _, ok in checks) else 1)
