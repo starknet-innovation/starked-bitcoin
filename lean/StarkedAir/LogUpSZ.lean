@@ -346,6 +346,36 @@ theorem balancedExt_of_poly (ext : PubEntries)
   rw [List.filter_append, List.map_append, List.sum_append] at this
   exact this
 
+/-! ### Static side conditions (decidable per system) -/
+
+/-- Lookup shapes: `(relation, arity)` of every lookup of every component. -/
+def shapes (sys : System) : List (ℕ × ℕ) :=
+  (List.range sys.m).flatMap fun i => (sys.comp i).lookups.map fun l => (l.rel, l.vals.length)
+
+/-- Each relation has one arity, and ids are below `P`: checkable by `decide` on a concrete system. -/
+def StaticOk (sys : System) : Bool :=
+  (shapes sys).all fun a => decide (a.1 < P) && (shapes sys).all fun b => a.1 != b.1 || a.2 == b.2
+
+theorem siteRaw_shape {sys : System} {inst : ℕ → Inst} {pub : ℕ → F} {e : Raw} (he : e ∈ siteRaw sys inst pub) :
+    (e.1, e.2.1.length) ∈ shapes sys := by
+  simp only [siteRaw, List.mem_map] at he
+  obtain ⟨s, hs, rfl⟩ := he
+  simp only [sites, List.mem_flatMap, List.mem_range, List.mem_map] at hs
+  obtain ⟨i, hi, r, -, k, hk, rfl⟩ := hs
+  simp only [shapes, List.mem_flatMap, List.mem_range, List.mem_map]
+  refine ⟨i, hi, (sys.comp i).lookups[k], List.getElem_mem hk, ?_⟩
+  simp [siteRel, siteVals, siteLookup, List.getElem?_eq_getElem hk]
+
+theorem static_ok {sys : System} (h : StaticOk sys = true) {inst : ℕ → Inst} {pub : ℕ → F} :
+    (∀ e ∈ siteRaw sys inst pub, ∀ e' ∈ siteRaw sys inst pub, e.1 = e'.1 → e.2.1.length = e'.2.1.length) ∧
+    (∀ e ∈ siteRaw sys inst pub, e.1 < P) := by
+  simp only [StaticOk, List.all_eq_true, Bool.and_eq_true, decide_eq_true_eq, Bool.or_eq_true, bne_iff_ne,
+    ne_eq, beq_iff_eq] at h
+  refine ⟨fun e he e' he' hr => ?_, fun e he => (h _ (siteRaw_shape he)).1⟩
+  rcases (h _ (siteRaw_shape he)).2 _ (siteRaw_shape he') with h1 | h1
+  · exact absurd hr h1
+  · exact h1
+
 end System
 
 end StarkedAir.LogUpSZ

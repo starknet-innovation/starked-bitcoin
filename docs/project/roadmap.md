@@ -85,7 +85,7 @@ history module · browser/phone verifier.
 | VERIFIER-LEAN | Prove our circuits (plain verifier, node) in Lean against a spec of the native verifier | **Parked** by the owner 2026-10-08; notes and plan in [verifier-formalization.md](../design/verifier-formalization.md) |
 | REC-FUZZ | Mutation testing of `plain_verifier.zig` | **done (2026-10-10)**: `src/recursion/fuzz.zig`, every guessed value and statement input of a header-chain and a LogUp-system proof; all mutations rejected by the circuit. Follow-up: a native-verifier oracle on the same mutations |
 | SPEC-FUZZ | Differential fuzzing of the Lean header spec against Bitcoin Core's own C++ | **done (2026-10-10)**: `tools/specfuzz`, 600k mainnet-domain cases (SetCompact, GetCompact, retarget, block proof, CheckProofOfWork, MTP), 0 mismatches; constants checked against `chainparams.cpp` |
-| LOGUP-SZ | LogUp's Schwartz–Zippel step in Lean | **done (2026-10-10)**: `LogUpSZ.lean` (`logup_sz`, `balancedExt_of_poly`). Follow-up: discharge the arity/id side conditions per system |
+| LOGUP-SZ | LogUp's Schwartz–Zippel step in Lean | **done (2026-10-10)**: `LogUpSZ.lean` (`logup_sz`, `balancedExt_of_poly`); side conditions discharged per system by `decide` (`LogUpSZSystems.lean`) |
 | MMR-LEAN | The MMR and inclusion proofs in Lean | **done (2026-10-10)**: `Spec/Mmr.lean` (`mmr_inclusion`, `fold_eq_mmr`), Zig sides cross-checked; genesis checks from Lean (`Gadgets/RootChecks.lean`) |
 | DRIFT-CI | Automate the JSON drift check and the sorry/axiom check in CI | Manual commands are in status.md for now |
 | LICENSE | Choose a license | Needs an owner decision (possibly legal) |
