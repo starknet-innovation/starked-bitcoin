@@ -99,6 +99,57 @@ theorem kind_exists {r : ℕ} (hr : r < n) : ∃ a < 5, M a r = 1 := by
   · rw [h] at hne; simp at hne
   · exact h
 
+theorem defn {a : ℕ} {e : Expr} (h : Expr.sub (k a) e ∈ constraints) {r : ℕ} (hr : r < n) :
+    M a r = e.eval n preCols pub M r := by
+  have := sat hsat h hr
+  simp only [Expr.eval, ev_k hr] at this
+  exact sub_eq_zero.mp this
+
+theorem helpers {r : ℕ} (hr : r < n) :
+    M CONT r = M D r * (1 - M Z r) ∧ M SW r = M Z r * (M MT r * (M PC0 r + M PC1 r)) ∧
+    M ENDD r = M D r * M Z r - M SW r := by
+  refine ⟨?_, ?_, ?_⟩
+  · rw [defn hsat (a := CONT) (e := .mul (k D) (om (k Z))) (mem_transC (by simp [transC])) hr]
+    simp [Expr.eval, ev_k hr, om, one, eval_cst]
+  · rw [defn hsat (a := SW) (e := .mul (k Z) (.mul (k MT) (.add (k PC0) (k PC1)))) (mem_transC (by simp [transC])) hr]
+    simp [Expr.eval, ev_k hr]
+  · rw [defn hsat (a := ENDD) (e := .sub (.mul (k D) (k Z)) (k SW)) (mem_transC (by simp [transC])) hr]
+    simp [Expr.eval, ev_k hr]
+
+/-- The transitions, at row `r + 1` from row `r`. -/
+theorem trans_all {r : ℕ} (hr : r + 1 < n) :
+    M D (r + 1) - M FIRSTM (r + 1) = M CONT r + M SW r ∧
+    M P80 (r + 1) = M ENDD r ∧
+    M ZR (r + 1) = (M P80 r + M ZR r) * (1 - (if (r + 1) % 64 = 56 then 1 else 0)) ∧
+    M LN (r + 1) = (M P80 r + M ZR r) * (if (r + 1) % 64 = 56 then 1 else 0) +
+      M LN r * (1 - (if (r + 1) % 64 = 0 then 1 else 0)) ∧
+    M NIL (r + 1) + M FIRSTM (r + 1) = M LN r * (if (r + 1) % 64 = 0 then 1 else 0) + M NIL r ∧
+    M PC0 (r + 1) - M FIRSTM (r + 1) = M CONT r * M PC0 r ∧
+    M PC1 (r + 1) = M CONT r * M PC1 r + M SW r * M PC0 r ∧
+    M PC2 (r + 1) = M CONT r * M PC2 r + M SW r * M PC1 r := by
+  have t := fun (e : Expr) (h : e ∈ transC) => sat hsat (mem_transC h) hr
+  have i56 : (pre IS56).eval n preCols pub M (r + 1) = if (r + 1) % 64 = 56 then 1 else 0 := by
+    rw [ev_per64 (p := (· = 56)) rfl hr]; simp
+  have i0 : (pre IS0).eval n preCols pub M (r + 1) = if (r + 1) % 64 = 0 then 1 else 0 := by
+    rw [ev_per64 (p := (· = 0)) rfl hr]; simp
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  · have := t (.sub (.sub (k D) (k FIRSTM)) (.add (kp CONT) (kp SW))) (by simp [transC])
+    simp only [Expr.eval, ev_k hr, ev_kp hr] at this; exact sub_eq_zero.mp this
+  · have := t (.sub (k P80) (kp ENDD)) (by simp [transC])
+    simp only [Expr.eval, ev_k hr, ev_kp hr] at this; exact sub_eq_zero.mp this
+  · have := t (.sub (k ZR) (.mul (.add (kp P80) (kp ZR)) (om (pre IS56)))) (by simp [transC])
+    simp only [Expr.eval, ev_k hr, ev_kp hr, om, one, eval_cst, Nat.cast_one, i56] at this; exact sub_eq_zero.mp this
+  · have := t (.sub (k LN) (.add (.mul (.add (kp P80) (kp ZR)) (pre IS56)) (.mul (kp LN) (om (pre IS0))))) (by simp [transC])
+    simp only [Expr.eval, ev_k hr, ev_kp hr, om, one, eval_cst, Nat.cast_one, i56, i0] at this; exact sub_eq_zero.mp this
+  · have := t (.sub (.add (k NIL) (k FIRSTM)) (.add (.mul (kp LN) (pre IS0)) (kp NIL))) (by simp [transC])
+    simp only [Expr.eval, ev_k hr, ev_kp hr, i0] at this; exact sub_eq_zero.mp this
+  · have := t (.sub (.sub (k PC0) (k FIRSTM)) (.mul (kp CONT) (kp PC0))) (by simp [transC])
+    simp only [Expr.eval, ev_k hr, ev_kp hr] at this; exact sub_eq_zero.mp this
+  · have := t (.sub (k PC1) (.add (.mul (kp CONT) (kp PC1)) (.mul (kp SW) (kp PC0)))) (by simp [transC])
+    simp only [Expr.eval, ev_k hr, ev_kp hr] at this; exact sub_eq_zero.mp this
+  · have := t (.sub (k PC2) (.add (.mul (kp CONT) (kp PC2)) (.mul (kp SW) (kp PC1)))) (by simp [transC])
+    simp only [Expr.eval, ev_k hr, ev_kp hr] at this; exact sub_eq_zero.mp this
+
 end Rows
 
 end StarkedAir.Block.Msg
