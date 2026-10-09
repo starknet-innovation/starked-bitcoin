@@ -10,6 +10,18 @@ namespace StarkedAir.Block
 open StarkedAir
 open StarkedAir.Sha256 (pre cst limb word messageAt outputAt)
 
+/-- A word is its two 16-bit limbs. -/
+theorem word_of_halves {y z : Spec.Sha256.Word} (h0 : Sha256.half16 y 0 = Sha256.half16 z 0)
+    (h1 : Sha256.half16 y 1 = Sha256.half16 z 1) : y = z := by
+  apply BitVec.eq_of_toNat_eq
+  simp only [Sha256.half16] at h0 h1
+  have := y.isLt; have := z.isLt
+  omega
+
+theorem half16_lt (y : Spec.Sha256.Word) (h : ℕ) : Sha256.half16 y h < 2 ^ 16 := by
+  have := y.isLt
+  rcases h with _ | h <;> simp only [Sha256.half16] <;> omega
+
 section System
 
 variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ}
@@ -180,6 +192,67 @@ theorem node_period (hL25 : L ≤ 25) {q : ℕ} (hn : 72 * q + 72 ≤ 2 ^ L) (hd
   · obtain ⟨hq2, hno, hme⟩ := Sha.npad_prev ss (q := q - 1) (by omega) hnp
     refine ⟨by omega, hnp, by rw [show q - 2 = q - 1 - 1 by omega]; exact hno, ?_⟩
     rw [show q - 2 = q - 1 - 1 by omega, hme, ← hp.1]
+
+/-- **A node block's children.** Words `0..7` (`8..15`) of a node block at `s` are the output state of a
+second hash whose id is the node's left (right) child. -/
+theorem node_children (hL25 : L ≤ 25) {p : ℕ} (hp : 72 * p + 72 ≤ 2 ^ L) (ho : (inst 3).main Sha.NODE (72 * p) = 1) :
+    ∀ half ≤ 1, ∃ q', 72 * q' + 72 ≤ 2 ^ L ∧ (inst 3).main Sha.DBL (72 * q') = 1 ∧
+      (inst 3).main Sha.MID (72 * q') = (if half = 0 then (inst 3).main Sha.LID (72 * p) else (inst 3).main Sha.RID (72 * p)) ∧
+      ∀ t < 8, messageAt (inst 3).main (72 * p) (8 * half + t) = Spec.Bitcoin.stateWord (outputAt (inst 3).main (72 * q')) t := by
+  intro half hh
+  have ss := hash_sha_sat hL hsat
+  have hs : (72 * p) % 72 = 0 := by omega
+  set x := 72 * p + 11 + 8 * half with hx
+  have hxr : x < 2 ^ L := by omega
+  have hxs : x = 72 * p + (11 + 8 * half) := by omega
+  have hnode : (inst 3).main Sha.NODE x = 1 := by
+    rw [hxs, Sha.per_const ss (X := Sha.NODE) (by simp) hs _ (by omega) (by omega), ho]
+  have hm : siteMult hashSys inst pub (3, x, 4 + half) = -1 := by
+    simp only [siteMult, siteEval, siteLookup, hashSys, hL 3 (by decide)]
+    simp only [show (3 : ℕ) ≠ 0 by decide, show (3 : ℕ) ≠ 1 by decide, show (3 : ℕ) ≠ 2 by decide, ↓reduceIte]
+    interval_cases half
+    · simp only [Sha.sha, Sha.lookups, List.getD_cons_succ, List.getD_cons_zero, Expr.eval, Sha.k,
+        StarkedAir.Sha256.eval_col, wrap_zero hxr, hnode, mul_one]
+      rw [Sha.eval_per72 ss (i := Sha.DLR) (f := fun q => if q = 11 then 1 else 0) rfl hxr,
+        show x % 72 = 11 by omega]; simp
+    · simp only [Sha.sha, Sha.lookups, List.getD_cons_succ, List.getD_cons_zero, Expr.eval, Sha.k,
+        StarkedAir.Sha256.eval_col, wrap_zero hxr, hnode, mul_one]
+      rw [Sha.eval_per72 ss (i := Sha.DRR) (f := fun q => if q = 19 then 1 else 0) rfl hxr,
+        show x % 72 = 19 by omega]; simp
+  obtain ⟨q', hq', hd', hv⟩ := digest_linked hL hsat hL25 (i := 3) (k := 4 + half)
+    (Or.inl ⟨rfl, by interval_cases half <;> simp⟩) hxr hm
+  have hu : siteVals hashSys inst pub (3, x, 4 + half) =
+      ((if half = 0 then Sha.k Sha.LID else Sha.k Sha.RID) :: Sha.nodeWordLimbs).map
+        (Expr.eval (2 ^ L) Sha.preCols pub (inst 3).main x) := by
+    interval_cases half <;> simp [siteVals, siteEval, siteLookup, hashSys, hL 3 (by decide), Sha.sha, Sha.lookups]
+  rw [digest_vals hL hsat hq', hu, List.map_cons] at hv
+  simp only [List.cons.injEq] at hv
+  obtain ⟨hmid, hlimbs⟩ := hv
+  refine ⟨q', hq', hd', ?_, fun t ht => ?_⟩
+  · rw [hmid]
+    interval_cases half
+    · simp only [if_true, Sha.k, StarkedAir.Sha256.eval_col, wrap_zero hxr]
+      rw [hxs, Sha.per_const ss (X := Sha.LID) (by simp) hs (11 + 8 * 0) (by omega) (by omega)]
+    · simp only [show (1 : ℕ) ≠ 0 by decide, if_false, Sha.k, StarkedAir.Sha256.eval_col, wrap_zero hxr]
+      rw [hxs, Sha.per_const ss (X := Sha.RID) (by simp) hs (11 + 8 * 1) (by omega) (by omega)]
+  · -- compare limbs `2t` and `2t + 1`
+    have lj : ∀ j < 16, ((Sha256.half16 (Spec.Bitcoin.stateWord (outputAt (inst 3).main (72 * q')) (j / 2)) (j % 2) : ℕ) : F)
+        = ((Sha256.half16 (messageAt (inst 3).main (72 * p) (8 * half + j / 2)) (j % 2) : ℕ) : F) := by
+      intro j hj
+      have e := congrArg (fun l => l[j]?) hlimbs
+      have hjl : j < Sha.nodeWordLimbs.length := by simp [Sha.nodeWordLimbs]; exact hj
+      simp only [List.getElem?_map, List.getElem?_range hj, Option.map_some, List.getElem?_eq_getElem hjl,
+        Option.some.injEq] at e
+      rw [e, ← List.getD_eq_getElem _ (cst 0) hjl, show x = 72 * p + 11 + 8 * half by rfl,
+        Sha.node_tuple ss (s := 72 * p) (by omega) hj half hh]
+    have h0 := lj (2 * t) (by omega)
+    have h1 := lj (2 * t + 1) (by omega)
+    rw [show 2 * t / 2 = t by omega, show 2 * t % 2 = 0 by omega] at h0
+    rw [show (2 * t + 1) / 2 = t by omega, show (2 * t + 1) % 2 = 1 by omega] at h1
+    symm
+    have hb : ∀ (y : Spec.Sha256.Word) (h : ℕ), Sha256.half16 y h < P := fun y h =>
+      Fields.lt_P (by have := half16_lt y h; omega)
+    exact word_of_halves (natCast_inj_of_lt (hb _ 0) (hb _ 0) h0) (natCast_inj_of_lt (hb _ 1) (hb _ 1) h1)
 
 end System
 
