@@ -60,15 +60,22 @@ theorem flag_sat {c : Expr} (hc : c ∈ flagC) {r : ℕ} (hr : r < n) : c.eval n
   hsat r hr c (by simp only [constraints, List.mem_append]; tauto)
 
 /-- Per-period values are constant down the period. -/
-theorem per_const {X : ℕ} (hX : X = MID ∨ X = BLKI ∨ X = FST ∨ X = DBL ∨ X = NILS) {s : ℕ} (hs : s % 72 = 0) :
+theorem nflag_sat {c : Expr} (hc : c ∈ nodeFlagC) {r : ℕ} (hr : r < n) : c.eval n preCols pub M r = 0 :=
+  hsat r hr c (by simp only [constraints, List.mem_append]; tauto)
+
+theorem per_const {X : ℕ} (hX : X ∈ [MID, BLKI, FST, DBL, NILS, NODE, NPAD, LID, RID, NDUP]) {s : ℕ} (hs : s % 72 = 0) :
     ∀ p < 72, s + p < n → M X (s + p) = M X s := by
   intro p
   induction p with
   | zero => intro _ _; rfl
   | succ p ih =>
     intro hp hr
-    have hc := flag_sat hsat (c := .mul (om (pre ROW0)) (.sub (k X) (kp X)))
-      (by simp only [flagC, List.mem_append, List.mem_map]; right; exact ⟨X, by rcases hX with h | h | h | h | h <;> simp [h], rfl⟩) hr
+    have hc : (Expr.mul (om (pre ROW0)) (.sub (k X) (kp X))).eval n preCols pub M (s + (p + 1)) = 0 := by
+      have h5 : X ∈ [MID, BLKI, FST, DBL, NILS] ∨ X ∈ [NODE, NPAD, LID, RID, NDUP] := by
+        simp only [List.mem_cons, List.not_mem_nil, or_false] at hX ⊢; tauto
+      rcases h5 with h5 | h5
+      · exact flag_sat hsat (by simp only [flagC, List.mem_append, List.mem_map]; right; exact ⟨X, h5, rfl⟩) hr
+      · exact nflag_sat hsat (by simp only [nodeFlagC, List.mem_append, List.mem_map]; right; exact ⟨X, h5, rfl⟩) hr
     have h0 := eval_per72 hsat (i := ROW0) (f := fun q => if q = 0 then 1 else 0) rfl hr
     rw [show (s + (p + 1)) % 72 = p + 1 by omega, if_neg (by omega)] at h0
     simp only [Expr.eval, om, one, Sha256.eval_cst, h0, k, kp, Sha256.eval_col, wrap_zero hr] at hc
@@ -92,15 +99,16 @@ theorem init_row {s q : ℕ} (hs : s % 72 = 0) (hq : q < 4) (hr : s + q < n) :
   simp [hq]
 
 /-- **A first block or a second hash starts from the IV.** -/
-theorem input_iv {s : ℕ} (hs : s % 72 = 0) (hsn : s + 72 ≤ n) (h : M FST s + M DBL s = 1) :
+theorem input_iv {s : ℕ} (hs : s % 72 = 0) (hsn : s + 72 ≤ n) (h : M FST s + (M DBL s + M NODE s) = 1) :
     inputAt M s = Spec.Sha256.IV := by
   have row : ∀ q < 4, Sha256.word M Sha256.A (s + q) = BitVec.ofNat 32 (HeaderChain.ivWords.getD (3 - q) 0) ∧
       Sha256.word M Sha256.E (s + q) = BitVec.ofNat 32 (HeaderChain.ivWords.getD (7 - q) 0) := by
     intro q hq
     have hr : s + q < n := by omega
-    have hsel : (Expr.mul (pre INIT) (.add (k FST) (k DBL))).eval n preCols pub M (s + q) = 1 := by
+    have hsel : (Expr.mul (pre INIT) (.add (k FST) (.add (k DBL) (k NODE)))).eval n preCols pub M (s + q) = 1 := by
       simp only [Expr.eval, init_row hsat hs hq hr, k, Sha256.eval_col, wrap_zero hr, one_mul,
-        per_const hsat (X := FST) (by simp) hs q (by omega) hr, per_const hsat (X := DBL) (by simp) hs q (by omega) hr, h]
+        per_const hsat (X := FST) (by simp) hs q (by omega) hr, per_const hsat (X := DBL) (by simp) hs q (by omega) hr,
+        per_const hsat (X := NODE) (by simp) hs q (by omega) hr, h]
     have ev := fun (i : ℕ) (f : ℕ → ℕ) (hi : preCols.getD i (.periodic [0]) = per72 f) => eval_per72 hsat hi hr
     constructor
     · refine HeaderChain.eqLimbs_word _ (fun c hc => init_sat hsat (by simp only [initC, List.mem_append]; tauto) hr)
@@ -124,15 +132,79 @@ theorem input_iv {s : ℕ} (hs : s % 72 = 0) (hsn : s + 72 ≤ n) (h : M FST s +
     show s + 3 - 3 = s by omega, a0, e0, a1, e1, a2, e2, a3, e3]
   rfl
 
-theorem chn_eq {r : ℕ} (hr : r < n) : M CHN r = 1 - (M FST r + (M DBL r + M NILS r)) := by
-  have := flag_sat hsat (c := .sub (k CHN) (om (.add (k FST) (.add (k DBL) (k NILS))))) (by simp [flagC]) hr
+theorem chn_eq {r : ℕ} (hr : r < n) :
+    M CHN r = 1 - (M FST r + (M DBL r + (M NILS r + (M NODE r + M NPAD r)))) := by
+  have := flag_sat hsat (c := .sub (k CHN) (om (.add (k FST) (.add (k DBL) (.add (k NILS) (.add (k NODE) (k NPAD)))))))
+    (by simp [flagC]) hr
   simp only [Expr.eval, om, one, Sha256.eval_cst, k, Sha256.eval_col, wrap_zero hr, Nat.cast_one] at this
   linear_combination this
 
-theorem usew_eq {r : ℕ} (hr : r < n) : M USEW r = 1 - (M DBL r + M NILS r) := by
-  have := flag_sat hsat (c := .sub (k USEW) (om (.add (k DBL) (k NILS)))) (by simp [flagC]) hr
+theorem usew_eq {r : ℕ} (hr : r < n) : M USEW r = 1 - (M DBL r + (M NILS r + (M NODE r + M NPAD r))) := by
+  have := flag_sat hsat (c := .sub (k USEW) (om (.add (k DBL) (.add (k NILS) (.add (k NODE) (k NPAD)))))) (by simp [flagC]) hr
   simp only [Expr.eval, om, one, Sha256.eval_cst, k, Sha256.eval_col, wrap_zero hr, Nat.cast_one] at this
   linear_combination this
+
+theorem kbool {c : ℕ} (hc : c ∈ [FST, DBL, NILS, NODE, NPAD, NDUP]) {r : ℕ} (hr : r < n) :
+    M c r = 0 ∨ M c r = 1 := by
+  have e : (boolC (k c)).eval n preCols pub M r = 0 := by
+    have h3 : c ∈ [FST, DBL, NILS] ∨ c ∈ [NODE, NPAD, NDUP] := by
+      simp only [List.mem_cons, List.not_mem_nil, or_false] at hc ⊢; tauto
+    rcases h3 with h3 | h3
+    · exact flag_sat hsat (by simp only [flagC, List.mem_append, List.mem_map]; left; left; exact ⟨c, h3, rfl⟩) hr
+    · exact nflag_sat hsat (by simp only [nodeFlagC, List.mem_append, List.mem_map]; left; left; exact ⟨c, h3, rfl⟩) hr
+  simp only [boolC, Expr.eval, k, Sha256.eval_col, Sha256.eval_cst, wrap_zero hr, Nat.cast_one] at e
+  rcases mul_eq_zero.mp e with h | h
+  · exact Or.inl h
+  · exact Or.inr (sub_eq_zero.mp h)
+
+/-- The period kinds `FST`, `DBL`, `NILS`, `NODE`, `NPAD` exclude each other. -/
+theorem kinds_excl {r : ℕ} (hr : r < n) :
+    M FST r * M DBL r = 0 ∧ M FST r * M NILS r = 0 ∧ M DBL r * M NILS r = 0 ∧
+    M NODE r * M FST r = 0 ∧ M NODE r * M DBL r = 0 ∧ M NODE r * M NILS r = 0 ∧ M NODE r * M NPAD r = 0 ∧
+    M NPAD r * M FST r = 0 ∧ M NPAD r * M DBL r = 0 ∧ M NPAD r * M NILS r = 0 := by
+  have e := fun (c : Expr) (h : c ∈ flagC) => flag_sat hsat h hr
+  have f := fun (c : Expr) (h : c ∈ nodeFlagC) => nflag_sat hsat h hr
+  have h1 := e (.mul (k FST) (k DBL)) (by simp [flagC])
+  have h2 := e (.mul (k FST) (k NILS)) (by simp [flagC])
+  have h3 := e (.mul (k DBL) (k NILS)) (by simp [flagC])
+  have h4 := f (.mul (k NODE) (k FST)) (by simp [nodeFlagC])
+  have h5 := f (.mul (k NODE) (k DBL)) (by simp [nodeFlagC])
+  have h6 := f (.mul (k NODE) (k NILS)) (by simp [nodeFlagC])
+  have h7 := f (.mul (k NODE) (k NPAD)) (by simp [nodeFlagC])
+  have h8 := f (.mul (k NPAD) (k FST)) (by simp [nodeFlagC])
+  have h9 := f (.mul (k NPAD) (k DBL)) (by simp [nodeFlagC])
+  have h10 := f (.mul (k NPAD) (k NILS)) (by simp [nodeFlagC])
+  simp only [Expr.eval, k, Sha256.eval_col, wrap_zero hr] at h1 h2 h3 h4 h5 h6 h7 h8 h9 h10
+  exact ⟨h1, h2, h3, h4, h5, h6, h7, h8, h9, h10⟩
+
+/-- A continuation is no other kind. -/
+theorem chn_one {r : ℕ} (hr : r < n) (h : M CHN r = 1) :
+    M FST r = 0 ∧ M DBL r = 0 ∧ M NILS r = 0 ∧ M NODE r = 0 ∧ M NPAD r = 0 := by
+  have hc := chn_eq hsat hr
+  rw [h] at hc
+  have bv : ∀ {x : F}, x = 0 ∨ x = 1 → x = ((x.val : ℕ) : F) ∧ x.val ≤ 1 := fun hx => by
+    rcases hx with rfl | rfl
+    · simp
+    · rw [ZMod.val_one]; simp
+  have b1 := bv (kbool hsat (c := FST) (by simp) hr)
+  have b2 := bv (kbool hsat (c := DBL) (by simp) hr)
+  have b3 := bv (kbool hsat (c := NILS) (by simp) hr)
+  have b4 := bv (kbool hsat (c := NODE) (by simp) hr)
+  have b5 := bv (kbool hsat (c := NPAD) (by simp) hr)
+  have hs : (M FST r).val + (M DBL r).val + (M NILS r).val + (M NODE r).val + (M NPAD r).val = 0 := by
+    refine natCast_inj_of_lt (a := (M FST r).val + (M DBL r).val + (M NILS r).val + (M NODE r).val + (M NPAD r).val)
+      (b := 0) (lt_of_le_of_lt (show _ ≤ 5 by omega) (by unfold P; norm_num)) (by unfold P; norm_num) ?_
+    push_cast; rw [← b1.1, ← b2.1, ← b3.1, ← b4.1, ← b5.1]; linear_combination hc
+  refine ⟨(ZMod.val_eq_zero _).mp (by omega), (ZMod.val_eq_zero _).mp (by omega), (ZMod.val_eq_zero _).mp (by omega),
+    (ZMod.val_eq_zero _).mp (by omega), (ZMod.val_eq_zero _).mp (by omega)⟩
+
+theorem usew_bool {r : ℕ} (hr : r < n) : M USEW r = 0 ∨ M USEW r = 1 := by
+  obtain ⟨-, -, e3, -, e5, e6, e7, -, e9, e10⟩ := kinds_excl hsat hr
+  rcases kbool hsat (c := DBL) (by simp) hr with a | a <;> rcases kbool hsat (c := NILS) (by simp) hr with b | b <;>
+    rcases kbool hsat (c := NODE) (by simp) hr with c | c <;> rcases kbool hsat (c := NPAD) (by simp) hr with d | d <;>
+    simp only [usew_eq hsat hr, a, b, c, d] at e3 e5 e6 e7 e9 e10 ⊢ <;>
+    first | (norm_num; done) | (norm_num at e3; done) | (norm_num at e5; done) | (norm_num at e6; done) |
+      (norm_num at e7; done) | (norm_num at e9; done) | (norm_num at e10; done)
 
 /-- **A continuation starts from the previous period's output.** -/
 theorem input_chain {s : ℕ} (hs : s % 72 = 0) (h72 : 72 ≤ s) (hsn : s + 72 ≤ n) (h : M CHN s = 1) :
@@ -144,9 +216,12 @@ theorem input_chain {s : ℕ} (hs : s % 72 = 0) (h72 : 72 ≤ s) (hsn : s + 72 �
     have hc : M CHN (s + q) = 1 := by
       rw [chn_eq hsat hr, per_const hsat (X := FST) (by simp) hs q (by omega) hr,
         per_const hsat (X := DBL) (by simp) hs q (by omega) hr, per_const hsat (X := NILS) (by simp) hs q (by omega) hr,
+        per_const hsat (X := NODE) (by simp) hs q (by omega) hr, per_const hsat (X := NPAD) (by simp) hs q (by omega) hr,
         ← chn_eq hsat (by omega), h]
-    have hsel : (Expr.mul (pre INIT) (k CHN)).eval n preCols pub M (s + q) = 1 := by
-      simp only [Expr.eval, init_row hsat hs hq hr, k, Sha256.eval_col, wrap_zero hr, one_mul, hc]
+    have hnp : M NPAD (s + q) = 0 := by
+      rw [per_const hsat (X := NPAD) (by simp) hs q (by omega) hr]; exact (chn_one hsat (by omega) h).2.2.2.2
+    have hsel : (Expr.mul (pre INIT) (.add (k CHN) (k NPAD))).eval n preCols pub M (s + q) = 1 := by
+      simp only [Expr.eval, init_row hsat hs hq hr, k, Sha256.eval_col, wrap_zero hr, one_mul, hc, hnp, add_zero]
     have hw : wrap n (s + q) (-4) = s - 4 + q := by
       rw [show (-4 : ℤ) = -((4 : ℕ) : ℤ) by simp, Sha256.wrap_back (by omega) hr]; omega
     constructor
@@ -244,8 +319,10 @@ theorem chain_out {s0 b : ℕ} (hs0 : s0 % 72 = 0) (hn : s0 + 72 * b ≤ n) (hf 
     rcases Nat.eq_zero_or_pos j with rfl | hj0
     · have hd : M DBL s0 = 0 := by
         have := (flags_excl hsat (show s0 < n by omega)).1; rw [hf, one_mul] at this; exact this
+      have hno : M NODE s0 = 0 := by
+        have := (kinds_excl hsat (show s0 < n by omega)).2.2.2.1; rw [hf, mul_one] at this; exact this
       simp only [Nat.zero_add, Nat.sub_self, Nat.mul_zero, Nat.add_zero, fold]
-      rw [← period_compress hsat hs0 (by omega), input_iv hsat hs0 (by omega) (by rw [hf, hd, add_zero])]
+      rw [← period_compress hsat hs0 (by omega), input_iv hsat hs0 (by omega) (by rw [hf, hd, hno]; ring)]
     · have hs : (s0 + 72 * j) % 72 = 0 := by omega
       rw [show j + 1 - 1 = j by omega, ← period_compress hsat hs (by omega),
         input_chain hsat hs (by omega) (by omega) (hc j hj0 (by omega)),
@@ -257,7 +334,9 @@ theorem dbl_out {s : ℕ} (hs : s % 72 = 0) (h72 : 72 ≤ s) (hsn : s + 72 ≤ n
     outputAt M s = Spec.Sha256.compress Spec.Sha256.IV (dblBlock (outputAt M (s - 72))) := by
   have hf : M FST s = 0 := by
     have := (flags_excl hsat (show s < n by omega)).1; rw [h, mul_one] at this; exact this
-  rw [← period_compress hsat hs hsn, input_iv hsat hs hsn (by rw [hf, h, zero_add])]
+  have hno : M NODE s = 0 := by
+    have := (kinds_excl hsat (show s < n by omega)).2.2.2.2.1; rw [h, mul_one] at this; exact this
+  rw [← period_compress hsat hs hsn, input_iv hsat hs hsn (by rw [hf, h, hno]; ring)]
   exact HeaderChain.compress_congr _ (fun t ht => by rw [dbl_message hsat hs h72 hsn h t ht]; rfl)
 
 theorem order_sat {c : Expr} (hc : c ∈ orderC) {r : ℕ} (hr : r < n) : c.eval n preCols pub M r = 0 :=
@@ -277,19 +356,20 @@ theorem row0_at {q : ℕ} (hr : 72 * q < n) : (pre ROW0).eval n preCols pub M (7
 /-- What a period start says about the previous period. -/
 theorem prev_facts {q : ℕ} (hq : 1 ≤ q) (hn : 72 * q + 72 ≤ n) :
     (M CHN (72 * q) = 1 → M MID (72 * q) = M MID (72 * (q - 1)) ∧
-      M BLKI (72 * q) = M BLKI (72 * (q - 1)) + 1 ∧ M DBL (72 * (q - 1)) + M NILS (72 * (q - 1)) = 0) ∧
+      M BLKI (72 * q) = M BLKI (72 * (q - 1)) + 1 ∧ M DBL (72 * (q - 1)) + M NILS (72 * (q - 1)) = 0 ∧
+      M NODE (72 * (q - 1)) + M NPAD (72 * (q - 1)) = 0) ∧
     (M DBL (72 * q) = 1 → M MID (72 * q) = M MID (72 * (q - 1)) ∧
       M DBL (72 * (q - 1)) + M NILS (72 * (q - 1)) = 0) := by
   have hr : 72 * q < n := by omega
   have r0 := row0_at hsat hr
   have hw : wrap n (72 * q) (-1) = 72 * (q - 1) + 71 := by
     rw [show (-1 : ℤ) = -((1 : ℕ) : ℤ) by simp, Sha256.wrap_back (by omega) hr]; omega
-  have pc := fun (X : ℕ) (hX : X = MID ∨ X = BLKI ∨ X = FST ∨ X = DBL ∨ X = NILS) =>
+  have pc := fun (X : ℕ) (hX : X ∈ [MID, BLKI, FST, DBL, NILS, NODE, NPAD, LID, RID, NDUP]) =>
     per_const hsat hX (s := 72 * (q - 1)) (by omega) 71 (by norm_num) (by omega)
   have e := fun (c : Expr) (h : c ∈ orderC) => order_sat hsat h hr
   have ev : ∀ X, (kp X).eval n preCols pub M (72 * q) = M X (72 * (q - 1) + 71) := fun X => by
     simp [kp, Sha256.eval_col, hw]
-  refine ⟨fun hc => ⟨?_, ?_, ?_⟩, fun hd => ⟨?_, ?_⟩⟩
+  refine ⟨fun hc => ⟨?_, ?_, ?_, ?_⟩, fun hd => ⟨?_, ?_⟩⟩
   · have := e _ (show Expr.mul (pre ROW0) (.mul (k CHN) (.sub (k MID) (kp MID))) ∈ orderC by simp [orderC])
     simp only [Expr.eval, r0, one_mul, k, Sha256.eval_col, wrap_zero hr, hc, ev, pc MID (by simp)] at this
     exact sub_eq_zero.mp this
@@ -299,6 +379,11 @@ theorem prev_facts {q : ℕ} (hq : 1 ≤ q) (hn : 72 * q + 72 ≤ n) :
     linear_combination this
   · have := e _ (show Expr.mul (pre ROW0) (.mul (k CHN) (.add (kp DBL) (kp NILS))) ∈ orderC by simp [orderC])
     simp only [Expr.eval, r0, one_mul, k, Sha256.eval_col, wrap_zero hr, hc, ev, pc DBL (by simp), pc NILS (by simp)] at this
+    exact this
+  · have hm : Expr.mul (pre ROW0) (.mul (k CHN) (.add (kp NODE) (kp NPAD))) ∈ nodeOrderC := by simp [nodeOrderC]
+    have := hsat _ hr (Expr.mul (pre ROW0) (.mul (k CHN) (.add (kp NODE) (kp NPAD))))
+      (by simp only [constraints, List.mem_append]; tauto)
+    simp only [Expr.eval, r0, one_mul, k, Sha256.eval_col, wrap_zero hr, hc, ev, pc NODE (by simp), pc NPAD (by simp)] at this
     exact this
   · have := e _ (show Expr.mul (pre ROW0) (.mul (k DBL) (.sub (k MID) (kp MID))) ∈ orderC by simp [orderC])
     simp only [Expr.eval, r0, one_mul, k, Sha256.eval_col, wrap_zero hr, hd, ev, pc MID (by simp)] at this
@@ -312,9 +397,15 @@ theorem not_dn {r : ℕ} (hr : r < n) (h : M DBL r + M NILS r = 0) : M DBL r = 0
     rw [a, b] at h <;> simp_all
   exact absurd h one_add_one_ne
 
-theorem fst_or_chn {r : ℕ} (hr : r < n) (hd : M DBL r = 0) (hn : M NILS r = 0) : M FST r = 1 ∨ M CHN r = 1 := by
+theorem not_np {r : ℕ} (hr : r < n) (h : M NODE r + M NPAD r = 0) : M NODE r = 0 ∧ M NPAD r = 0 := by
+  rcases kbool hsat (c := NODE) (by simp) hr with a | a <;> rcases kbool hsat (c := NPAD) (by simp) hr with b | b <;>
+    rw [a, b] at h <;> simp_all
+  exact absurd h one_add_one_ne
+
+theorem fst_or_chn {r : ℕ} (hr : r < n) (hd : M DBL r = 0) (hn : M NILS r = 0) (ho : M NODE r = 0)
+    (hp : M NPAD r = 0) : M FST r = 1 ∨ M CHN r = 1 := by
   rcases fbool hsat (c := FST) (by simp) hr with a | a
-  · right; rw [chn_eq hsat hr, a, hd, hn]; ring
+  · right; rw [chn_eq hsat hr, a, hd, hn, ho, hp]; ring
   · left; exact a
 
 /-- **Back to the first block.** From a period that is a first block or a continuation, the walk
@@ -355,10 +446,11 @@ theorem walk : ∀ q, 72 * q + 72 ≤ n → (M FST (72 * q) = 1 ∨ M CHN (72 * 
     rcases fbool hsat (c := FST) (by simp) hr with hf | hf
     · -- A continuation: step back.
       have hc : M CHN (72 * (q + 1)) = 1 := by rcases h with h | h; rw [hf] at h; exact absurd h zero_ne_one; exact h
-      obtain ⟨hm, hb, hdn⟩ := (prev_facts hsat (q := q + 1) (by omega) (by omega)).1 hc
-      simp only [Nat.add_sub_cancel] at hm hb hdn
+      obtain ⟨hm, hb, hdn, hnp⟩ := (prev_facts hsat (q := q + 1) (by omega) (by omega)).1 hc
+      simp only [Nat.add_sub_cancel] at hm hb hdn hnp
       obtain ⟨hd, hnl⟩ := not_dn hsat (by omega) hdn
-      obtain ⟨q0, hq0, f0, c0, v0⟩ := ih (by omega) (fst_or_chn hsat (by omega) hd hnl)
+      obtain ⟨ho, hp⟩ := not_np hsat (by omega) hnp
+      obtain ⟨q0, hq0, f0, c0, v0⟩ := ih (by omega) (fst_or_chn hsat (by omega) hd hnl ho hp)
       refine ⟨q0, by omega, f0, fun j h1 h2 => ?_, fun j h1 h2 => ?_⟩
       · rcases Nat.lt_or_ge j (q + 1) with hj | hj
         · exact c0 j h1 (by omega)
@@ -378,18 +470,51 @@ theorem walk : ∀ q, 72 * q + 72 ≤ n → (M FST (72 * q) = 1 ∨ M CHN (72 * 
       simp only [Expr.eval, k, Sha256.eval_col, wrap_zero hr, hf, one_mul] at this
       simpa using this
 
+/-- A node's padding block follows its first block, with the same id. -/
+theorem npad_prev {q : ℕ} (hn : 72 * q + 72 ≤ n) (hp : M NPAD (72 * q) = 1) :
+    1 ≤ q ∧ M NODE (72 * (q - 1)) = 1 ∧ M MID (72 * (q - 1)) = M MID (72 * q) := by
+  have hr : 72 * q < n := by omega
+  have hq : 1 ≤ q := by
+    by_contra h
+    have e : q = 0 := by omega
+    subst e
+    have := hsat _ hr (Expr.mul (pre FIRST) (k NPAD)) (by
+      have hm : Expr.mul (pre FIRST) (k NPAD) ∈ nodeOrderC := by simp [nodeOrderC]
+      simp only [constraints, List.mem_append]; tauto)
+    have hfirst : (pre FIRST).eval n preCols pub M 0 = 1 := by
+      simp only [pre, Expr.eval, wrap_zero (show 0 < n by omega)]
+      rw [show preCols.getD FIRST (.periodic [0]) = .isFirst from rfl]; simp [PreCol.eval]
+    simp only [Nat.mul_zero] at this hp
+    simp only [Expr.eval, hfirst, one_mul, k, Sha256.eval_col, wrap_zero (show 0 < n by omega), hp] at this
+    exact one_ne_zero this
+  have r0 := row0_at hsat hr
+  have hw : wrap n (72 * q) (-1) = 72 * (q - 1) + 71 := by
+    rw [show (-1 : ℤ) = -((1 : ℕ) : ℤ) by simp, Sha256.wrap_back (by omega) hr]; omega
+  have pc := fun (X : ℕ) (hX : X ∈ [MID, BLKI, FST, DBL, NILS, NODE, NPAD, LID, RID, NDUP]) =>
+    per_const hsat hX (s := 72 * (q - 1)) (by omega) 71 (by norm_num) (by omega)
+  have ev : ∀ X, (kp X).eval n preCols pub M (72 * q) = M X (72 * (q - 1) + 71) := fun X => by
+    simp [kp, Sha256.eval_col, hw]
+  have e := fun (c : Expr) (h : c ∈ nodeOrderC) =>
+    hsat _ hr c (by simp only [constraints, List.mem_append]; tauto)
+  have h1 := e (.mul (pre ROW0) (.mul (k NPAD) (.sub (k MID) (kp MID)))) (by simp [nodeOrderC])
+  have h2 := e (.mul (pre ROW0) (.mul (k NPAD) (om (kp NODE)))) (by simp [nodeOrderC])
+  simp only [Expr.eval, r0, one_mul, k, Sha256.eval_col, wrap_zero hr, hp, ev, pc MID (by simp), pc NODE (by simp),
+    om, one, Sha256.eval_cst, Nat.cast_one] at h1 h2
+  exact ⟨hq, (sub_eq_zero.mp h2).symm, (sub_eq_zero.mp h1).symm⟩
+
 /-- **The SHA component's digest.** A second-hash period `q` hashes the digest of its message's
 blocks: periods `q0 … q − 1` (`b = q − q0 ≥ 1` blocks, the first a first block, the rest
 continuations, all with the same id), and its output is
 `compress IV (dblBlock (fold over those blocks))`, i.e. SHA256d of the blocks' words. -/
-theorem digest_sound {q : ℕ} (hq : 1 ≤ q) (hn : 72 * q + 72 ≤ n) (hd : M DBL (72 * q) = 1) :
+theorem digest_sound {q : ℕ} (hq : 1 ≤ q) (hn : 72 * q + 72 ≤ n) (hd : M DBL (72 * q) = 1)
+    (hpo : M NODE (72 * (q - 1)) = 0) (hpp : M NPAD (72 * (q - 1)) = 0) :
     ∃ q0 < q, M FST (72 * q0) = 1 ∧ (∀ j, q0 < j → j < q → M CHN (72 * j) = 1) ∧
       (∀ j, q0 ≤ j → j < q → M MID (72 * j) = M MID (72 * q) ∧ M BLKI (72 * j) = ((j - q0 : ℕ) : F)) ∧
       outputAt M (72 * q) =
         Spec.Sha256.compress Spec.Sha256.IV (dblBlock (fold M (72 * q0) (q - q0))) := by
   obtain ⟨hm, hdn⟩ := (prev_facts hsat hq hn).2 hd
   obtain ⟨hpd, hpn⟩ := not_dn hsat (by omega) hdn
-  obtain ⟨q0, hq0, f0, c0, v0⟩ := walk hsat (q - 1) (by omega) (fst_or_chn hsat (by omega) hpd hpn)
+  obtain ⟨q0, hq0, f0, c0, v0⟩ := walk hsat (q - 1) (by omega) (fst_or_chn hsat (by omega) hpd hpn hpo hpp)
   refine ⟨q0, by omega, f0, fun j h1 h2 => c0 j h1 (by omega),
     fun j h1 h2 => ⟨(v0 j h1 (by omega)).1.trans hm.symm, (v0 j h1 (by omega)).2⟩, ?_⟩
   have hb := chain_out hsat (s0 := 72 * q0) (b := q - q0) (by omega) (by omega) f0

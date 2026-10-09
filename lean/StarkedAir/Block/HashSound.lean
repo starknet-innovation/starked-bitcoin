@@ -39,10 +39,12 @@ theorem word_limbs {x : ℕ} (hx : x < n) :
 /-- A period that starts or continues a message reads words. -/
 theorem usew_one {r : ℕ} (hr : r < n) (h : M FST r = 1 ∨ M CHN r = 1) : M USEW r = 1 := by
   rw [usew_eq hsat hr]
-  obtain ⟨e1, e2, e3⟩ := flags_excl hsat hr
-  have cq := chn_eq hsat hr
-  rcases fbool hsat (c := FST) (by simp) hr with a | a <;> rcases fbool hsat (c := DBL) (by simp) hr with b | b <;>
-    rcases fbool hsat (c := NILS) (by simp) hr with c | c <;> simp_all
+  rcases h with h | h
+  · obtain ⟨e1, e2, -, e4, -, -, -, e8, -, -⟩ := kinds_excl hsat hr
+    rw [h, one_mul] at e1 e2; rw [h, mul_one] at e4 e8
+    rw [e1, e2, e4, e8]; ring
+  · obtain ⟨-, b, c, d, g⟩ := chn_one hsat hr h
+    rw [b, c, d, g]; ring
 
 end Words
 
@@ -76,7 +78,7 @@ theorem slice_bb (Mb : ℕ → ℕ → F) {len a k : ℕ} (h : a + k ≤ len) :
 section System
 
 variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ}
-  (hL : ∀ i < 4, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub [])
+  (hL : ∀ i < 5, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub [])
 include hL hsat
 
 /-- The data bytes of the message starting at message row `r0` (data rows `0..d`). -/
@@ -129,8 +131,12 @@ theorem block_word (hL25 : L ≤ 25) {r0 d : ℕ} (h0 : r0 < 2 ^ L) (f0 : (inst 
     rw [hxs]; exact Sha.per_const ss (by simp) hs (4 + t) (by omega) (by omega)
   have hnil : (inst 3).main Sha.NILS x = (inst 3).main Sha.NILS s := by
     rw [hxs]; exact Sha.per_const ss (by simp) hs (4 + t) (by omega) (by omega)
+  have hnod : (inst 3).main Sha.NODE x = (inst 3).main Sha.NODE s := by
+    rw [hxs]; exact Sha.per_const ss (by simp) hs (4 + t) (by omega) (by omega)
+  have hnpd : (inst 3).main Sha.NPAD x = (inst 3).main Sha.NPAD s := by
+    rw [hxs]; exact Sha.per_const ss (by simp) hs (4 + t) (by omega) (by omega)
   have hu : (inst 3).main Sha.USEW x = 1 := by
-    rw [Sha.usew_eq ss hx, hdbl, hnil, ← Sha.usew_eq ss (by omega)]; exact Sha.usew_one ss (by omega) hfc
+    rw [Sha.usew_eq ss hx, hdbl, hnil, hnod, hnpd, ← Sha.usew_eq ss (by omega)]; exact Sha.usew_one ss (by omega) hfc
   have hrow : (Expr.mul (pre Sha.MSGROW) (Sha.k Sha.USEW)).eval (2 ^ L) Sha.preCols pub (inst 3).main x = 1 := by
     simp only [Expr.eval, Sha.k, StarkedAir.Sha256.eval_col, wrap_zero hx, hu, mul_one]
     rw [Sha.eval_per72 ss (i := Sha.MSGROW) (f := fun q => if 4 ≤ q ∧ q < 20 then 1 else 0) rfl hx]
@@ -187,7 +193,7 @@ theorem dbl_digest (h : Spec.Sha256.State) : Sha.dblBlock h = Spec.Bitcoin.diges
 /-- **Block hashing soundness.** In a satisfied hashing system with at most `2^25` rows, a second-hash
 period `q` outputs `SHA256d` of the data bytes of a message with the period's id. -/
 theorem digest_sha256d (hL25 : L ≤ 25) {q : ℕ} (hq : 1 ≤ q) (hn : 72 * q + 72 ≤ 2 ^ L)
-    (hd : (inst 3).main Sha.DBL (72 * q) = 1) :
+    (hd : (inst 3).main Sha.DBL (72 * q) = 1) (hmid : ((inst 3).main Sha.MID (72 * q)).val < Merkle.NB) :
     ∃ r0 d, r0 < 2 ^ L ∧ (inst 2).main Msg.FIRSTM r0 = 1 ∧ (inst 2).main Msg.MID r0 = (inst 3).main Sha.MID (72 * q) ∧
       (∀ j < d, (inst 2).main Msg.CONT (r0 + j) = 1 ∨ (inst 2).main Msg.SW (r0 + j) = 1) ∧
       (inst 2).main Msg.ENDD (r0 + d) = 1 ∧
@@ -196,14 +202,34 @@ theorem digest_sha256d (hL25 : L ≤ 25) {q : ℕ} (hq : 1 ≤ q) (hn : 72 * q +
   have ms := hash_msg_sat hL hsat
   have h25 : 2 ^ L ≤ 2 ^ 25 := Nat.pow_le_pow_right (by norm_num) hL25
   norm_num at h25
-  obtain ⟨q0, hq0, f0, chn, vals, hout⟩ := Sha.digest_sound ss hq hn hd
+  -- the period before is no node block: node ids are at least `NB`
+  have hpm : (inst 3).main Sha.MID (72 * (q - 1)) = (inst 3).main Sha.MID (72 * q) :=
+    ((Sha.prev_facts ss hq hn).2 hd).1.symm
+  have nodeAt : ∀ p, 72 * p + 72 ≤ 2 ^ L → (inst 3).main Sha.NODE (72 * p) = 1 →
+      (inst 3).main Sha.MID (72 * p) = (inst 3).main Sha.MID (72 * q) → False := by
+    intro p hp hno he
+    have hx' : 72 * p < 2 ^ L := by omega
+    have := node_mid hL hsat hL25 hx' (by
+      simp only [Expr.eval, Sha.k, StarkedAir.Sha256.eval_col, wrap_zero hx', hno, mul_one]
+      rw [Sha.eval_per72 ss (i := Sha.ROW0) (f := fun q => if q = 0 then 1 else 0) rfl hx']; simp)
+    rw [he] at this; omega
+  have hpo : (inst 3).main Sha.NODE (72 * (q - 1)) = 0 := by
+    rcases Sha.kbool ss (c := Sha.NODE) (by simp) (show 72 * (q - 1) < 2 ^ L by omega) with h | h
+    · exact h
+    · exact (nodeAt (q - 1) (by omega) h hpm).elim
+  have hpp : (inst 3).main Sha.NPAD (72 * (q - 1)) = 0 := by
+    rcases Sha.kbool ss (c := Sha.NPAD) (by simp) (show 72 * (q - 1) < 2 ^ L by omega) with h | h
+    · exact h
+    · obtain ⟨hq1, hno, hme⟩ := Sha.npad_prev ss (q := q - 1) (by omega) h
+      exact (nodeAt (q - 1 - 1) (by omega) hno (hme.trans hpm)).elim
+  obtain ⟨q0, hq0, f0, chn, vals, hout⟩ := Sha.digest_sound ss hq hn hd hpo hpp
   -- the length check of the second hash
   have hx : 72 * q < 2 ^ L := by omega
   have hrow : (Expr.mul (pre Sha.ROW0) (Sha.k Sha.DBL)).eval (2 ^ L) Sha.preCols pub (inst 3).main (72 * q) = 1 := by
     simp only [Expr.eval, Sha.k, StarkedAir.Sha256.eval_col, wrap_zero hx, hd, mul_one]
     rw [Sha.eval_per72 ss (i := Sha.ROW0) (f := fun q => if q = 0 then 1 else 0) rfl hx]
     simp
-  obtain ⟨r0, d, f, he, hc, hmid, hlt, hlen⟩ := sha_len hL hsat hL25 hx hrow
+  obtain ⟨r0, d, f, he, hc, hmid', hlt, hlen⟩ := sha_len hL hsat hL25 hx hrow hmid
   have hr0 : r0 < 2 ^ L := by omega
   have hal := Msg.first_align ms hr0 f
   -- the padded length is `64 (q − q0)`
@@ -238,8 +264,8 @@ theorem digest_sha256d (hL25 : L ≤ 25) {q : ℕ} (hq : 1 ≤ q) (hn : 72 * q +
         · right; rw [show 72 * q0 + 72 * b = 72 * (q0 + b) by ring]; exact chn _ (by omega) (by omega)
       have vj := vals (q0 + b) (by omega) (by omega)
       rw [show 72 * (q0 + b) = 72 * q0 + 72 * b by ring, show q0 + b - q0 = b by omega] at vj
-      exact block_word hL hsat hL25 hr0 f hc he hs (by omega) ht hfc (vj.1.trans hmid.symm) vj.2 (by omega)
-  refine ⟨r0, d, hr0, f, hmid, hc, he, ?_⟩
+      exact block_word hL hsat hL25 hr0 f hc he hs (by omega) ht hfc (vj.1.trans hmid'.symm) vj.2 (by omega)
+  refine ⟨r0, d, hr0, f, hmid', hc, he, ?_⟩
   rw [hout, hfold _ le_rfl, dbl_digest, HashSpec.sha256d_eq _ _ hpl]
 
 /-- **A whole message's data is a block slice**: `msgData = R[TA, TA + d]`, and `TA + d = TL + 3`. -/
@@ -443,7 +469,7 @@ block's bytes parse as a block `b`, and each second-hash period `q` outputs `SHA
 the header message) or, for a transaction message with index `TI = i`, the `wtxid` (`WTX = 1`) or the
 `txid` (`WTX = 0`) of `b.txs[i]`. -/
 theorem digest_tx (hL25 : L ≤ 25) {q : ℕ} (hq : 1 ≤ q) (hn : 72 * q + 72 ≤ 2 ^ L)
-    (hd : (inst 3).main Sha.DBL (72 * q) = 1) :
+    (hd : (inst 3).main Sha.DBL (72 * q) = 1) (hmid : ((inst 3).main Sha.MID (72 * q)).val < Merkle.NB) :
     ∃ b, Spec.Block.parseBlock (Fields.blockBytes (inst 0).main (pub 0).val) = some b ∧
       ∃ r0, (inst 2).main Msg.FIRSTM r0 = 1 ∧ (inst 2).main Msg.MID r0 = (inst 3).main Sha.MID (72 * q) ∧
       ((inst 2).main Msg.HDR r0 = 1 → Spec.Block.stateBytes (outputAt (inst 3).main (72 * q)) =
@@ -458,8 +484,8 @@ theorem digest_tx (hL25 : L ≤ 25) {q : ℕ} (hq : 1 ≤ q) (hn : 72 * q + 72 �
     Fields.block_ctx hL25 fs hb0 (hash_fields_read hL hsat hL25)
   obtain ⟨b, hparse, hhead, hidx⟩ :=
     Fields.block_index hL25 fs hb0 (hash_fields_read hL hsat hL25) hmn hnp hpad hfit hcs cat mono hSm
-  obtain ⟨r0, d, h0, f, hmid, hc, he, hdig⟩ := digest_sha256d hL hsat hL25 hq hn hd
-  refine ⟨b, hparse, r0, f, hmid, fun hh => ?_, fun hh => ?_⟩
+  obtain ⟨r0, d, h0, f, hmid', hc, he, hdig⟩ := digest_sha256d hL hsat hL25 hq hn hd hmid
+  refine ⟨b, hparse, r0, f, hmid', fun hh => ?_, fun hh => ?_⟩
   · -- the header message: bytes `[0, 80)`
     obtain ⟨ta, tl, w0⟩ := hdr_tuple hL hsat h0 hh
     have hmt : (inst 2).main Msg.MT r0 = 0 := by rw [Msg.mt_eq ms h0, w0, hh]; ring

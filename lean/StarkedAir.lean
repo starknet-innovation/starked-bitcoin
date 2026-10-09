@@ -53,6 +53,7 @@ import StarkedAir.Block.Msg
 import StarkedAir.Block.MsgSound
 import StarkedAir.Block.Sha
 import StarkedAir.Block.Merkle
+import StarkedAir.Block.MerkleSound
 import StarkedAir.Block.ShaSound
 import StarkedAir.Block.HashSpec
 import StarkedAir.Block.Link
