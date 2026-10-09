@@ -5,7 +5,7 @@ If `HEAD at last update` doesn't match `git log -1`, this file is stale:
 follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work).
 
 - **Updated:** 2026-10-09
-- **HEAD at last update:** 3756ffc (plus this status commit)
+- **HEAD at last update (prev):** 3756ffc (plus this status commit)
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
 - **Current item:** M3a.3 `BLK-SHA` ([block-data.md](../design/block-data.md)): AIRs, witnesses and component proofs done; spec tie-in and system linking next. HC-HASHTREE done (full chain re-proven 2026-10-09).
 
@@ -27,8 +27,10 @@ standard axioms only); the in-circuit verifiers and node code stay trusted
    - (a) done: `msg_pad`, a message's rows are `Spec.Block.pad` of its data bytes;
    - (b) done: system linking and the headline `digest_sha256d` (`Block/HashSound.lean`): each digest
      is `Spec.Block.sha256d` of its message's data bytes;
-   - (c) the fields' tx yield semantics: the tuples are the transactions' `serNoWit`/`serWit` ranges
-     (extend `fields_sound`).
+   - (c) in progress: `TxSplit.txT_split` (spec), `TxRanges.tx_layout`/`tx_cols` (rows: TXA = tx start,
+     WST = witness start, serNoWit over input/output rows) done. Next: generalize FieldsSound's System
+     section (compact_read … fields_sound) over a `sys_read` hypothesis so `hashSys` can use it, then turn
+     rows into block slices and conclude txid/wtxid messages = `serNoWit`/`serWit`.
 2. Proposed: REC-FUZZ (differential fuzzing of the plain verifier).
 
 ## In flight
