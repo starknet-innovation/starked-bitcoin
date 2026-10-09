@@ -140,7 +140,10 @@ def padC : List Expr :=
     .mul (om (k P80)) (.mul notFirst (.sub (k DLC) (kp DLC))),
     .mul (k WM) (k NIL),
     .mul (k MM) (om (pre IS63)),
-    .mul (k MM) (om (k LN)) ]
+    .mul (k MM) (om (k LN)),
+    -- the top length byte is below 8 (bits 3..7 clear), so the length bytes match `8 · DLC` as
+    -- integers (`< 2^27 < P`), not only mod `P`
+    .mul (pre IS63) (.mul (k LN) ((List.range 5).foldr (fun j acc => .add (col (BIT0 + 3 + j) (-3)) acc) (cst 0))) ]
 
 def constraints : List Expr := kindC ++ transC ++ msgC ++ padC
 

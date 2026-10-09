@@ -1000,6 +1000,51 @@ theorem len_yield {r : ℕ} (hr : r < n) (hy : M LN r * M MM r ≠ 0) :
   · rw [mid_eq hsat hr, mid_eq hsat hr0, ht HDR (by simp), ht TI (by simp), ht WTX (by simp)]
   · rw [hx, show r + 1 - r0 = (r - r0) + 1 by omega]; push_cast; ring
 
+theorem bit_bool {r : ℕ} (hr : r < n) {j : ℕ} (hj : j < 8) : M (BIT0 + j) r = 0 ∨ M (BIT0 + j) r = 1 :=
+  bool_of hsat (mem_kindC (List.mem_append.mpr (Or.inl (List.mem_map.mpr
+    ⟨BIT0 + j, List.mem_append.mpr (Or.inr (List.mem_map.mpr ⟨j, List.mem_range.mpr hj, rfl⟩)), rfl⟩)))) hr
+
+/-- A row's byte is the value of its eight bits. -/
+theorem byte_ofBits {r : ℕ} (hr : r < n) :
+    M BYTE r = ((ofBits (fun j => decide (M (BIT0 + j) r = 1)) 8 : ℕ) : F) := by
+  rw [defn hsat (a := BYTE) (e := sumPow (fun j => k (BIT0 + j)) 8) (mem_padC (by simp [padC])) hr]
+  refine StarkedAir.Sha256.eval_sumPow_bits _ _ 8 (fun j hj => ?_)
+  rw [ev_k hr]
+  rcases bit_bool hsat hr hj with b | b <;> simp [b]
+
+theorem byte_lt {r : ℕ} (hr : r < n) : (M BYTE r).val < 256 := by
+  rw [val_lt_of_eq_cast (byte_ofBits hsat hr) (lt_P (by have := ofBits_lt (fun j => decide (M (BIT0 + j) r = 1)) 8; omega))]
+  exact ofBits_lt _ 8
+
+/-- The top length byte (row 60 of the last block) is below 8. -/
+theorem top_lt {q : ℕ} (hq : q < n) (h63 : q % 64 = 63) (hl : M LN q = 1) : (M BYTE (q - 3)).val < 8 := by
+  have hq3 : q - 3 < n := by omega
+  have hc := sat hsat (mem_padC (c := .mul (pre IS63) (.mul (k LN)
+    ((List.range 5).foldr (fun j acc => .add (col (BIT0 + 3 + j) (-3)) acc) (cst 0)))) (by simp [padC])) hq
+  rw [show (-3 : ℤ) = -((3 : ℕ) : ℤ) by simp] at hc
+  simp only [List.range_succ, List.range_zero, List.nil_append, List.cons_append, List.foldr_cons, List.foldr_nil,
+    Expr.eval, eval_col, wrap_back (by omega : 3 ≤ q) hq, ev_k hq, hl, eval_cst,
+    ev_per64 (i := IS63) (p := (· = 63)) rfl hq, h63, decide_true, if_true, one_mul, Nat.cast_zero, add_zero] at hc
+  have bv := fun j (hj : j < 8) => bool_val (bit_bool hsat hq3 hj)
+  have hs : (M (BIT0 + 3) (q - 3)).val + (M (BIT0 + 4) (q - 3)).val + (M (BIT0 + 5) (q - 3)).val +
+      (M (BIT0 + 6) (q - 3)).val + (M (BIT0 + 7) (q - 3)).val = 0 := by
+    have := (bv 3 (by norm_num)).2; have := (bv 4 (by norm_num)).2; have := (bv 5 (by norm_num)).2
+    have := (bv 6 (by norm_num)).2; have := (bv 7 (by norm_num)).2
+    refine natCast_inj_of_lt (lt_P (by omega)) (by unfold P; norm_num) ?_
+    push_cast
+    rw [← (bv 3 (by norm_num)).1, ← (bv 4 (by norm_num)).1, ← (bv 5 (by norm_num)).1, ← (bv 6 (by norm_num)).1,
+      ← (bv 7 (by norm_num)).1]
+    linear_combination hc
+  have z : ∀ j, 3 ≤ j → j < 8 → decide (M (BIT0 + j) (q - 3) = 1) = false := fun j h1 h2 => by
+    have : (M (BIT0 + j) (q - 3)).val = 0 := by interval_cases j <;> omega
+    rw [(ZMod.val_eq_zero _).mp this]; simp
+  rw [val_lt_of_eq_cast (byte_ofBits hsat hq3) (lt_P (by have := ofBits_lt (fun j => decide (M (BIT0 + j) (q - 3) = 1)) 8; omega))]
+  simp only [ofBits, z 3 (by norm_num) (by norm_num), z 4 (by norm_num) (by norm_num), z 5 (by norm_num) (by norm_num),
+    z 6 (by norm_num) (by norm_num), z 7 (by norm_num) (by norm_num), Bool.toNat_false, mul_zero, add_zero]
+  have := Bool.toNat_le (decide (M BIT0 (q - 3) = 1)); have := Bool.toNat_le (decide (M (BIT0 + 1) (q - 3) = 1))
+  have := Bool.toNat_le (decide (M (BIT0 + 2) (q - 3) = 1))
+  omega
+
 end Rows
 
 end StarkedAir.Block.Msg
