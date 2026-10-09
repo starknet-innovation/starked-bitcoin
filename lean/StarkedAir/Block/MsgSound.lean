@@ -4,6 +4,7 @@ helpers; then a forward walk over one message.
 -/
 import StarkedAir.Block.Msg
 import StarkedAir.Block.FieldsSound
+import StarkedAir.Spec.Block
 
 namespace StarkedAir.Block.Msg
 
@@ -1044,6 +1045,89 @@ theorem top_lt {q : ℕ} (hq : q < n) (h63 : q % 64 = 63) (hl : M LN q = 1) : (M
   have := Bool.toNat_le (decide (M BIT0 (q - 3) = 1)); have := Bool.toNat_le (decide (M (BIT0 + 1) (q - 3) = 1))
   have := Bool.toNat_le (decide (M (BIT0 + 2) (q - 3) = 1))
   omega
+
+omit hsat in
+theorem getD_app {α : Type} (l1 l2 : List α) (i : ℕ) (x : α) :
+    (l1 ++ l2).getD i x = if i < l1.length then l1.getD i x else l2.getD (i - l1.length) x := by
+  split_ifs with h
+  · simp [List.getD_eq_getElem?_getD, List.getElem?_append_left h]
+  · simp [List.getD_eq_getElem?_getD, List.getElem?_append_right (by omega : l1.length ≤ i)]
+
+omit hsat in
+theorem beBytes_getD (k m i : ℕ) (hi : i < k) :
+    ((Spec.Block.beBytes k m).getD i 0).toNat = m / 2 ^ (8 * (k - 1 - i)) % 256 := by
+  simp [Spec.Block.beBytes, List.getD_eq_getElem?_getD, hi]
+
+/-- **A message's rows are its padded bytes** (`Spec.Block.pad`): the data bytes (rows `0..d`), then
+the FIPS 180-4 padding. Needs `n ≤ 2^27` so the bit length stays below `P`. -/
+theorem msg_pad {r0 d : ℕ} (hr0 : r0 < n) (hf : M FIRSTM r0 = 1)
+    (hc : ∀ j < d, M CONT (r0 + j) = 1 ∨ M SW (r0 + j) = 1) (he : M ENDD (r0 + d) = 1) (hn : n ≤ 2 ^ 27) :
+    let data : Spec.Block.Bytes := (List.range (d + 1)).map (fun j => UInt8.ofNat (M BYTE (r0 + j)).val)
+    r0 + (Spec.Block.pad data).length ≤ n ∧
+      ∀ i < (Spec.Block.pad data).length, (M BYTE (r0 + i)).val = ((Spec.Block.pad data).getD i 0).toNat := by
+  intro data
+  have hdl : data.length = d + 1 := by simp [data]
+  obtain ⟨hdl', hdd, hix, -⟩ := data_walk hsat hr0 hf d hc
+  have hp1 := succ_lt hsat hdl' (a := D) (by simp [D]) (by simp [D, NIL]) hdd
+  obtain ⟨p80, pf⟩ := step_end hsat hp1 he
+  have hal := first_align hsat hr0 hf
+  obtain ⟨hs, h8, -, hln, -⟩ := pad_ok hsat hp1 p80
+  obtain ⟨b80, bz, blen⟩ := pad_bytes hsat hp1 p80
+  have hidx : M IDX (r0 + d + 1) = ((d + 1 : ℕ) : F) := by
+    rw [(in_msg hsat hp1 pf).1, hix]; push_cast; ring
+  have hzz : (119 - (r0 + d + 1) % 64) % 64 = (119 - (d + 1) % 64) % 64 := by omega
+  rw [hzz] at hs h8 hln bz blen
+  set z := (119 - (d + 1) % 64) % 64 with hz
+  have hpad : Spec.Block.pad data = ((data ++ [0x80]) ++ List.replicate z 0) ++ Spec.Block.beBytes 8 (8 * (d + 1)) := by
+    simp only [Spec.Block.pad, hdl, hz]
+  have L1 : ((data ++ [0x80]) ++ List.replicate z 0).length = d + 1 + 1 + z := by simp [hdl]; omega
+  have L2 : (data ++ [0x80]).length = d + 1 + 1 := by simp [hdl]
+  have hlen : (Spec.Block.pad data).length = d + 1 + 1 + z + 8 := by
+    rw [hpad, List.length_append, L1]; simp [Spec.Block.beBytes]
+  -- the bit length, as integers
+  have hq : r0 + d + 1 + 1 + z + 7 < n := by omega
+  have t4 := top_lt hsat hq (by omega) (hln _ (by omega) (by omega)).1
+  rw [show r0 + d + 1 + 1 + z + 7 - 3 = r0 + d + 1 + 1 + z + 4 by omega] at t4
+  have b5 := byte_lt hsat (r := r0 + d + 1 + 1 + z + 5) (by omega)
+  have b6 := byte_lt hsat (r := r0 + d + 1 + 1 + z + 6) (by omega)
+  have b7 := byte_lt hsat (r := r0 + d + 1 + 1 + z + 7) (by omega)
+  have hnat : 16777216 * (M BYTE (r0 + d + 1 + 1 + z + 4)).val + 65536 * (M BYTE (r0 + d + 1 + 1 + z + 5)).val +
+      256 * (M BYTE (r0 + d + 1 + 1 + z + 6)).val + (M BYTE (r0 + d + 1 + 1 + z + 7)).val = 8 * (d + 1) := by
+    refine natCast_inj_of_lt (lt_P (by omega)) (lt_P (by omega)) ?_
+    push_cast
+    simp only [ZMod.natCast_val, ZMod.cast_id', id]
+    rw [blen, hidx]; push_cast; ring
+  refine ⟨by omega, fun i hi => ?_⟩
+  rw [hlen] at hi
+  rw [hpad, getD_app, L1]
+  by_cases h3 : i < d + 1 + 1 + z
+  · rw [if_pos h3, getD_app, L2]
+    by_cases h2 : i < d + 1 + 1
+    · rw [if_pos h2, getD_app, hdl]
+      by_cases h1 : i < d + 1
+      · rw [if_pos h1]
+        simp only [data, List.getD_eq_getElem?_getD, List.getElem?_map, List.getElem?_range h1, Option.map_some,
+          Option.getD_some, UInt8.toNat_ofNat]
+        exact (Nat.mod_eq_of_lt (byte_lt hsat (by omega))).symm
+      · rw [if_neg h1, show i = d + 1 by omega, Nat.sub_self]
+        rw [val_lt_of_eq_cast (m := 128) (by rw [show r0 + (d + 1) = r0 + d + 1 by ring, b80]; norm_num)
+          (lt_P (by norm_num))]
+        rfl
+    · rw [if_neg h2]
+      rw [show r0 + i = r0 + d + 1 + (i - d - 1) by omega, bz _ (by omega) (by omega)]
+      simp [List.getD_eq_getElem?_getD, List.getElem?_replicate, show i - (d + 1 + 1) < z by omega]
+  · rw [if_neg h3, beBytes_getD 8 _ _ (by omega)]
+    obtain ⟨k, hk, rfl⟩ : ∃ k < 8, i = d + 1 + 1 + z + k := ⟨i - (d + 1 + 1 + z), by omega, by omega⟩
+    rw [show d + 1 + 1 + z + k - (d + 1 + 1 + z) = k by omega, show r0 + (d + 1 + 1 + z + k) = r0 + d + 1 + 1 + z + k by ring]
+    interval_cases k
+    · rw [bz _ (by omega) (by omega)]; simp; omega
+    · rw [bz _ (by omega) (by omega)]; simp; omega
+    · rw [bz _ (by omega) (by omega)]; simp; omega
+    · rw [bz _ (by omega) (by omega)]; simp; omega
+    · norm_num; omega
+    · norm_num; omega
+    · norm_num; omega
+    · norm_num; omega
 
 end Rows
 
