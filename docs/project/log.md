@@ -22,6 +22,35 @@ Next: <the exact next step; must match status.md>
 ---
 
 
+## 2026-10-09 (session 2) — M3a.3: message and SHA components built; component soundness proven
+Who: Claude (agent, Opus 5.5), with the owner
+Roadmap: BLOCK-AIR → in progress (M3a.3 BLK-SHA: AIRs, witnesses, component proofs done; linking next)
+Done:
+- Fields yield each transaction's byte ranges (62f8838). `block_msg` (bf260ea) and `block_sha` (b7b0d3b)
+  AIRs, witnesses and tests, plus negative tests (0c1f74d).
+- SHA soundness `digest_sound` (37bc8ab..275fc02): a second hash's digest is SHA256d of its message's
+  words, read block by block from the first block.
+- Message soundness (c129f50..60968c0): `whole_msg`, `split_msg`, `pad_ok`, `pad_bytes`, `belongs`,
+  `word_yield`, `len_yield`.
+- Soundness fix (1fffa02): the length rows were checked only mod `P`, and a top length byte up to 255
+  allowed `8 · len + P`. Bits 3..7 of that byte must now be clear; `top_lt` proves the bound.
+- The owner's `bitcoind` node is reachable over SSH and an RPC tunnel. It is a data source only: the
+  machine is too small to prove on. Credentials stay in `prove-any-chain/.env.local`, which is gitignored
+  here.
+Evidence:
+- `lake build`: 8,762 jobs, OK. `#print axioms` on `digest_sound`, `whole_msg`, `split_msg`,
+  `pad_bytes`, `word_yield`, `len_yield`, `belongs`: only `propext`, `Classical.choice`, `Quot.sound`.
+- `zig build test -Dtest-filter=block` passes (exit 0). (bytes, fields, msg, sha) proves and verifies
+  on blocks 0, 170 and 91812. Txid digests reproduce the Merkle roots, including on segwit blocks
+  481824 and 709632.
+Problems / lessons:
+- The prover rejects preprocessed columns read at a nonzero offset (`PreprocessedOffsetUnsupported`).
+  Use an extra periodic indicator for the shifted row instead (`IS56`, `IS0`).
+- Proving the length rows against the spec exposed the mod-`P` gap. Check for wrap-around whenever a
+  constraint compares a multi-byte value.
+Next: tie the message rows to `Spec.Block.pad`, then link the system's lookups (SHA ↔ msg, msg ↔ byte
+table, msg ↔ fields).
+
 ## 2026-10-09 — Full chain re-proven with the header tree
 Who: Claude (agent, Opus 5.5)
 Roadmap: HC-HASHTREE → done

@@ -5,9 +5,9 @@ If `HEAD at last update` doesn't match `git log -1`, this file is stale:
 follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work).
 
 - **Updated:** 2026-10-09
-- **HEAD at last update:** 8d90ad6 (plus this status commit)
+- **HEAD at last update:** eee2e07 (plus this status commit)
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
-- **Current item:** M3a.3 `BLK-SHA` ([block-data.md](../design/block-data.md)). HC-HASHTREE done (full chain re-proven 2026-10-09).
+- **Current item:** M3a.3 `BLK-SHA` ([block-data.md](../design/block-data.md)): AIRs, witnesses and component proofs done; spec tie-in and system linking next. HC-HASHTREE done (full chain re-proven 2026-10-09).
 
 ## State in one paragraph
 
@@ -21,8 +21,12 @@ standard axioms only); the in-circuit verifiers and node code stay trusted
 
 ## Next step (concrete)
 
-1. M3a.3 `BLK-SHA` per [block-data.md](../design/block-data.md): message-byte walker plus multi-message
-   SHA-256 (txid, wtxid, header hash). M3a.1–2 are done and proven ([airs/block.md](../airs/block.md)).
+1. M3a.3 `BLK-SHA`. `block_msg` and `block_sha` are built and tested, and their component proofs are
+   done (`digest_sound`, `whole_msg`, `split_msg`, `pad_bytes`, `word_yield`, `len_yield`; see
+   [airs/block.md](../airs/block.md)). Next:
+   - (a) tie the message rows to `Spec.Block.pad`;
+   - (b) system linking: SHA `msgw`/`mlen` ↔ message yields, message bytes ↔ byte table, tuples ↔ fields;
+   - (c) the fields tuples are the transactions' `serNoWit`/`serWit` ranges.
 2. Proposed: REC-FUZZ (differential fuzzing of the plain verifier).
 
 ## In flight
@@ -32,7 +36,7 @@ standard axioms only); the in-circuit verifiers and node code stay trusted
 ## Needs owner
 
 - **Push / remote:** private repo starknet-innovation/starked-bitcoin exists; nothing pushed. Wait for the owner's go.
-- **M3 node:** the owner sets up `bitcoind`.
+- **M3 node:** available (data source only; proving stays on the Mac). See memory/notes; credentials are in `prove-any-chain/.env.local`, never committed.
 - **LICENSE:** none chosen.
 - **STWO-225-FU:** follow up on stwo-zig#225 upstream? This is outward-facing.
 

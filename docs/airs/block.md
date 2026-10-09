@@ -109,9 +109,9 @@ witness item, locktime; then padding (at least one row).
 - Negative cases are rejected: a script length off by one breaks the tiling, and a tampered
   CompactSize byte leaves the lookups unbalanced.
 
-## `block_msg` and `block_sha` (M3a.3 `BLK-SHA`, AIRs and witnesses done; proofs to do)
+## `block_msg` and `block_sha` (M3a.3 `BLK-SHA`, AIRs, witnesses and component proofs done; linking to do)
 
-Lean: `Block/Msg.lean`, `Block/Sha.lean`. Zig: `src/block/msg.zig`, `src/block/sha.zig`.
+Lean: `Block/Msg.lean`, `Block/Sha.lean`; proofs `Block/MsgSound.lean`, `Block/ShaSound.lean`. Zig: `src/block/msg.zig`, `src/block/sha.zig`.
 
 **`block_msg`** has one row per byte of a padded SHA-256 message.
 - **Messages:**
@@ -143,8 +143,21 @@ block index, and first-block / second-hash / unused flags.
   reproduce the header roots.
 - Rejected: a wrong message word, and a message hashed one block short.
 
+**Proven (Lean, standard axioms only):**
+- `block_sha`, `digest_sound`: a `DBL` period's digest is SHA256d of its message's words, read block by
+  block from the first block, using `compress_sound_air`.
+- `block_msg`, row level:
+  - `whole_msg`: a header, wtxid or legacy txid message reads bytes `TA, TA + 1, …` and ends exactly
+    at `TL + 3`;
+  - `split_msg`: a segwit txid message reads `[TA, TA + 4)`, then piece 1 from `TA + 6` up to `TW − 1`,
+    then piece 2 from `TL` up to `TL + 3`, each piece ending exactly at its boundary;
+  - `pad_ok`, `pad_bytes`, `top_lt`: then `0x80`, zeros to byte 56 of a block, and the length bytes;
+  - `belongs`, `word_yield`, `len_yield`: every used row belongs to a message. A word yield is the
+    message's bytes `j − 3 .. j`, and a length yield is the padded length.
+
 **To prove:**
-1. Each message's words are its padded bytes.
-2. The digests are SHA256d of the messages, reusing `compress_sound_air`.
+1. Tie the rows to `Spec.Block.pad`: the message's bytes are `pad data`.
+2. System linking: the SHA `msgw`/`mlen` uses match the message yields; message byte reads match the
+   byte table; tx tuples match the fields.
 3. The fields tuples are the transactions' ranges, so the txid and wtxid messages are `serNoWit` and
    `serWit`.
