@@ -25,9 +25,8 @@ standard axioms only); the in-circuit verifiers and node code stay trusted
    done (`digest_sound`, `whole_msg`, `split_msg`, `pad_bytes`, `word_yield`, `len_yield`; see
    [airs/block.md](../airs/block.md)). Next:
    - (a) done: `msg_pad`, a message's rows are `Spec.Block.pad` of its data bytes;
-   - (b) system linking done at the lookup level (`Block/Link.lean`: `sha_word`, `sha_len`, `msg_read`,
-     `msg_tuple_linked`). Still to do: one message per id, then compose into "digest =
-     `Spec.Block.sha256d` of the message";
+   - (b) done: system linking and the headline `digest_sha256d` (`Block/HashSound.lean`): each digest
+     is `Spec.Block.sha256d` of its message's data bytes;
    - (c) the fields' tx yield semantics: the tuples are the transactions' `serNoWit`/`serWit` ranges
      (extend `fields_sound`).
 2. Proposed: REC-FUZZ (differential fuzzing of the plain verifier).

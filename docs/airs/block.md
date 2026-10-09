@@ -163,11 +163,14 @@ block index, and first-block / second-hash / unused flags.
     `j − 3 = 64 · BLKI + 4 · (row − 4)`;
   - `sha_len`: a second hash's message has padded length `64 · (blocks hashed)`;
   - `msg_read`: a message data row reads the block byte at its position;
-  - `msg_tuple_linked`: a non-header message's tuple is yielded by a fields row.
+  - `msg_tuple_linked`: a non-header message's tuple is yielded by a fields row;
+  - `lock_unique` (`Block/TxIndex.lean`): one lock-time row per transaction index; `mid_tuple`,
+    `same_bytes`: messages with the same id have the same tuple and the same bytes.
+- **Headline, `digest_sha256d`** (`Block/HashSound.lean`): in a satisfied hashing system (at most `2^25`
+  rows), each second-hash period outputs `Spec.Block.sha256d` of the data bytes of a message with the
+  period's id. `HashSpec.sha256d_eq` restates the spec as block compressions plus the digest block.
 
 **To prove:**
-1. The fields' tx yield semantics: a yielding row's tuple is transaction `i`'s ranges. This extends
-   `fields_sound`.
-2. One message per id (the tuple is a function of the id), then compose with `digest_sound` and
-   `msg_pad`: each digest is `Spec.Block.sha256d` of its message's data bytes.
-3. Hence the txid and wtxid messages are `serNoWit` and `serWit`.
+1. The fields' tx yield semantics: on transaction `i`'s lock-time row, the tuple is that transaction's
+   byte ranges (start, witness section, lock time). This extends `fields_sound`.
+2. Hence the txid and wtxid messages are `serNoWit` and `serWit`, and the header message is the header.
