@@ -292,11 +292,10 @@ fn buildSegmentLeafWith(gpa: std.mem.Allocator, a: std.mem.Allocator, log_size: 
     const ext = [_]system.PubEntry{try HT.rootEntry(a, k, tw.root)};
     const cfg = try prove_rec.config(log_size);
     const E = prove_rec.Engine(@import("stwo_cpu_backend").CpuBackend);
-    // Proved twice: the capture consumes one copy (see plain_verifier tests).
-    const proof_a = try system.prove(E, a, cfg, &parts, &mains);
+    // One proof: verified natively with a borrowed capture (it stays intact), then converted.
     const proof_b = try system.prove(E, a, cfg, &parts, &mains);
     var capture: core.verifier.ProofCapture(prove_rec.Hasher) = undefined;
-    try system.verifyCapture(a, cfg, &parts, &ext, proof_a, &capture);
+    try system.verifyCaptureBorrowed(a, cfg, &parts, &ext, &proof_b, &capture);
     const config = pv.PlainConfig{ .log_trace_size = log_size, .fri = cfg.fri_config, .system = true, .parts = &.{
         .{ .n_preprocessed = hair.n_preprocessed, .main_offsets = try pv.mainOffsets(a, hair), .n_inter = 4 },
         .{ .n_preprocessed = tair.n_preprocessed, .main_offsets = try pv.mainOffsets(a, tair), .n_inter = 8 },

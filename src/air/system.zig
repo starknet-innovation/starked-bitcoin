@@ -209,17 +209,24 @@ pub fn prove(comptime E: type, caller_allocator: std.mem.Allocator, cfg: rec.Con
 
 /// Verifies a system proof. `a` should be an arena.
 pub fn verify(a: std.mem.Allocator, cfg: rec.Config, parts: []const Part, proof: Proof) !void {
-    return verifyImpl(a, cfg, parts, &.{}, proof, null);
+    return verifyImpl(a, cfg, parts, &.{}, proof, null, false);
 }
 
 /// `verify` with public lookup entries: the relations balance with them included.
 pub fn verifyExt(a: std.mem.Allocator, cfg: rec.Config, parts: []const Part, ext: []const PubEntry, proof: Proof) !void {
-    return verifyImpl(a, cfg, parts, ext, proof, null);
+    return verifyImpl(a, cfg, parts, ext, proof, null, false);
 }
 
 /// `verify`, also capturing what the in-circuit verifier needs (`plain_verifier.fromCapture`).
+/// Consumes `proof`; see `verifyCaptureBorrowed` to keep it.
 pub fn verifyCapture(a: std.mem.Allocator, cfg: rec.Config, parts: []const Part, ext: []const PubEntry, proof: Proof, capture: *core.verifier.ProofCapture(rec.Hasher)) !void {
-    return verifyImpl(a, cfg, parts, ext, proof, capture);
+    return verifyImpl(a, cfg, parts, ext, proof, capture, false);
+}
+
+/// `verifyCapture` without consuming `proof` (stwo-zig's borrowed capture), so the same proof can
+/// then be converted for the in-circuit verifier: one proof per segment instead of two.
+pub fn verifyCaptureBorrowed(a: std.mem.Allocator, cfg: rec.Config, parts: []const Part, ext: []const PubEntry, proof: *const Proof, capture: *core.verifier.ProofCapture(rec.Hasher)) !void {
+    return verifyImpl(a, cfg, parts, ext, proof.*, capture, true);
 }
 
 /// `Σ mult / (Σ eᵢ αⁱ − z)` over public entries.
@@ -235,7 +242,7 @@ pub fn extSum(ext: []const PubEntry, el: lookup_transcript.LookupElements) !QM31
     return sum;
 }
 
-fn verifyImpl(a: std.mem.Allocator, cfg: rec.Config, parts: []const Part, ext: []const PubEntry, proof: Proof, capture: ?*core.verifier.ProofCapture(rec.Hasher)) !void {
+fn verifyImpl(a: std.mem.Allocator, cfg: rec.Config, parts: []const Part, ext: []const PubEntry, proof: Proof, capture: ?*core.verifier.ProofCapture(rec.Hasher), borrowed: bool) !void {
     _ = try checkSizes(parts);
     const lookups = hasLookups(parts);
     const n_trees: usize = if (lookups) 3 else 2;
@@ -283,9 +290,12 @@ fn verifyImpl(a: std.mem.Allocator, cfg: rec.Config, parts: []const Part, ext: [
     }
     const verifiers = try a.alloc(core.air.components.Component, comps.len);
     for (comps, verifiers) |*c, *v| v.* = c.asVerifierComponent();
-    if (capture) |c|
-        try core.verifier.verifyWithProofCapture(rec.Hasher, rec.MerkleChannel, a, verifiers, &channel, &scheme, proof.stark, c)
-    else
+    if (capture) |c| {
+        if (borrowed)
+            try core.verifier.verifyBorrowedWithProofCapture(rec.Hasher, rec.MerkleChannel, a, verifiers, &channel, &scheme, &proof.stark, c)
+        else
+            try core.verifier.verifyWithProofCapture(rec.Hasher, rec.MerkleChannel, a, verifiers, &channel, &scheme, proof.stark, c);
+    } else
         try core.verifier.verify(rec.Hasher, rec.MerkleChannel, a, verifiers, &channel, &scheme, proof.stark);
 }
 
