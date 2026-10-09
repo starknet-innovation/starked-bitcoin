@@ -89,7 +89,7 @@ and lock-time row `r'`, with `a = TXA r'`, `w = WST r'`, `l = START r'`: `serWit
 `serNoWit = R[a, a + 4) ++ R[a + 6, w) ++ R[l, l + 4)` for segwit, else `R[a, l + 4)`. -/
 theorem tx_bytes {rh : ℕ} (hr : rh < 2 ^ L) (ht : (inst 1).main K_TXH rh = 1) :
     ∃ tx r', r' < 2 ^ L ∧ rh < r' ∧ (inst 1).main K_LOCK r' = 1 ∧
-      (∀ j, rh < j → j ≤ r' → (inst 1).main K_TXH j = 0) ∧
+      (∀ j, rh < j → j ≤ r' → (inst 1).main K_TXH j = 0) ∧ (∀ j, rh ≤ j → j < r' → (inst 1).main K_LOCK j = 0) ∧
       Spec.Block.serWit tx = slice (blockBytes (inst 0).main (pub 0).val) ((inst 1).main TXA r').val
         (((inst 1).main START r').val + 4 - ((inst 1).main TXA r').val) ∧
       ((inst 1).main SEG r' = 1 → Spec.Block.serNoWit tx =
@@ -104,7 +104,7 @@ theorem tx_bytes {rh : ℕ} (hr : rh < 2 ^ L) (ht : (inst 1).main K_TXH rh = 1) 
   have hpad0 : M K_PAD rh = 0 := by
     rw [kind_unique fs hr (a := K_TXH) (b := K_PAD) (by simp [K_TXH]) (by simp [K_PAD]) (by simp [K_TXH, K_PAD]) ht]
   have hrm : rh < m := lt_m fs R hcs hmn hpad hfit hr hpad0
-  obtain ⟨tx, r', rw, v, nIn, l, htx, h1, h2, hr'm, hl, htok, hlock, hseg, hnw, hta, hws, hsg, notxh⟩ :=
+  obtain ⟨tx, r', rw, v, nIn, l, htx, h1, h2, hr'm, hl, htok, hlock, hseg, hnw, hta, hws, hsg, notxh, nolock⟩ :=
     tx_cols fs R hcs hmn hpad hfit hrm ht
   -- the header token
   have hblk : M K_BLK rh ≠ 1 := by
@@ -141,7 +141,7 @@ theorem tx_bytes {rh : ℕ} (hr : rh < 2 ^ L) (ht : (inst 1).main K_TXH rh = 1) 
     rw [hw, rs (by omega) (by omega), hlv, show (M START r').val + 4 - (M START rh).val =
       ((M START r').val - (M START rh).val) + 4 by omega, slice_add, show (M START rh).val + ((M START r').val -
       (M START rh).val) = (M START r').val by omega]
-  refine ⟨tx, r', by omega, by omega, hl, notxh, by rw [hta']; exact hwit, fun hs => ?_, fun hs => ?_⟩
+  refine ⟨tx, r', by omega, by omega, hl, notxh, nolock, by rw [hta']; exact hwit, fun hs => ?_, fun hs => ?_⟩
   · -- segwit: drop the marker and flag, and the witness rows
     have hs' : M SEG rh = 1 := hsegr ▸ hs
     simp only [Spec.Block.Tok.bytes, hs', decide_true, if_true] at hhd
@@ -166,6 +166,54 @@ theorem tx_bytes {rh : ℕ} (hr : rh < 2 ^ L) (ht : (inst 1).main K_TXH rh = 1) 
     simp only [Spec.Block.Tok.bytes, hs', decide_false, if_false, Bool.false_eq_true, List.append_nil] at hhd
     rw [hnw, hw, hrw, bytes_split (a := rh) (b := rh + 1) (by omega) (by omega), one hrm, htok]
     simp only [Spec.Block.Tok.bytes, hs', decide_false, if_false, Bool.false_eq_true, List.append_nil, List.append_assoc]
+
+/-- **A lock-time row ends a transaction** whose serializations are the row's block slices. -/
+theorem lock_tx {ρ : ℕ} (hρ : ρ < 2 ^ L) (hl : (inst 1).main K_LOCK ρ = 1) :
+    ∃ tx, Spec.Block.serWit tx = slice (blockBytes (inst 0).main (pub 0).val) ((inst 1).main TXA ρ).val
+        (((inst 1).main START ρ).val + 4 - ((inst 1).main TXA ρ).val) ∧
+      ((inst 1).main SEG ρ = 1 → Spec.Block.serNoWit tx =
+        slice (blockBytes (inst 0).main (pub 0).val) ((inst 1).main TXA ρ).val 4 ++
+        slice (blockBytes (inst 0).main (pub 0).val) (((inst 1).main TXA ρ).val + 6)
+          (((inst 1).main WST ρ).val - (((inst 1).main TXA ρ).val + 6)) ++
+        slice (blockBytes (inst 0).main (pub 0).val) ((inst 1).main START ρ).val 4) ∧
+      ((inst 1).main SEG ρ ≠ 1 → Spec.Block.serNoWit tx = Spec.Block.serWit tx) := by
+  classical
+  have hρ0 : 0 < ρ := by
+    rcases Nat.eq_zero_or_pos ρ with e | e
+    · subst e
+      have := kind_unique fs hρ (a := K_BLK) (b := K_LOCK) (by simp [K_BLK]) (by simp [K_LOCK])
+        (by simp [K_BLK, K_LOCK]) (first_blk fs (by omega))
+      rw [hl] at this; exact absurd this one_ne_zero
+    · exact e
+  have h1 : (inst 1).main K_TXH 1 = 1 := (next_kind fs (r := 0) (by omega)).1 (first_blk fs (by omega))
+  set rh := Nat.findGreatest (fun j => (inst 1).main K_TXH j = 1) ρ with hrh
+  have hrht : (inst 1).main K_TXH rh = 1 := Nat.findGreatest_spec (P := fun j => (inst 1).main K_TXH j = 1) (m := 1) (by omega) h1
+  have hrhle : rh ≤ ρ := Nat.findGreatest_le ρ
+  have hgr : ∀ j, rh < j → j ≤ ρ → (inst 1).main K_TXH j ≠ 1 := fun j a b => Nat.findGreatest_is_greatest a b
+  obtain ⟨tx, r', hr', hrr', hlr', notxh, nolock, hw, hnw, hnn⟩ := tx_bytes hL fs hb0 hread (by omega) hrht
+  have heq : r' = ρ := by
+    rcases lt_trichotomy ρ r' with h | h | h
+    · have := nolock ρ hrhle h; rw [hl] at this; exact absurd this one_ne_zero
+    · exact h.symm
+    · exfalso
+      have hn : r' + 1 < 2 ^ L := by omega
+      rcases (z1_spec fs (by omega : r' < 2 ^ L)).1 with z | z
+      · exact hgr (r' + 1) (by omega) (by omega) ((next_kind fs hn).2.2.2.2.2.2.2.2.2.2.1 hlr' z)
+      · have hp : ∀ i, r' + 1 + i ≤ ρ → (inst 1).main K_PAD (r' + 1 + i) = 1 := by
+          intro i
+          induction i with
+          | zero => intro _; exact (next_kind fs hn).2.2.2.2.2.2.2.2.2.2.2.1 hlr' z
+          | succ i ih =>
+            intro hi
+            have := (next_kind fs (r := r' + 1 + i) (by omega)).2.2.2.2.2.2.2.2.2.2.2.2 (ih (by omega))
+            rwa [show r' + 1 + i + 1 = r' + 1 + (i + 1) by ring] at this
+        have := hp (ρ - (r' + 1)) (by omega)
+        rw [show r' + 1 + (ρ - (r' + 1)) = ρ by omega] at this
+        have := kind_unique fs hρ (a := K_LOCK) (b := K_PAD) (by simp [K_LOCK]) (by simp [K_PAD])
+          (by simp [K_LOCK, K_PAD]) hl
+        rw [‹(inst 1).main K_PAD ρ = 1›] at this; exact absurd this one_ne_zero
+  subst heq
+  exact ⟨tx, hw, hnw, hnn⟩
 
 end Reads
 

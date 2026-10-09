@@ -183,7 +183,7 @@ theorem tx_cols {rh : ℕ} (hr : rh < m) (ht : M K_TXH rh = 1) :
       (M SEG rh ≠ 1 → rw = r') ∧
       Spec.Block.serNoWit tx = v ++ Spec.Block.serCompact nIn ++ Spec.Block.toksBytes (toksFrom M R rw (rh + 1)) ++ l ∧
       M TXA r' = M START rh ∧ M WST r' = M START rw ∧ M SEG r' = M SEG rh ∧
-      (∀ j, rh < j → j ≤ r' → M K_TXH j = 0) := by
+      (∀ j, rh < j → j ≤ r' → M K_TXH j = 0) ∧ (∀ j, rh ≤ j → j < r' → M K_LOCK j = 0) := by
   obtain ⟨tx, r', rw, v, nIn, l, htx, h1, h2, hr'm, hl, htok, hlock, hwit, hpre, hseg, hnl, hnw⟩ :=
     tx_layout hsat R hcs hmn hpad hfit hr ht
   have hrn : r' < n := by omega
@@ -288,7 +288,7 @@ theorem tx_cols {rh : ℕ} (hr : rh < m) (ht : M K_TXH rh = 1) :
       rw [show rw + (i + 1) = rw + i + 1 by ring, this, ih (by omega)]
   have hws := wst (r' - rw) le_rfl
   rw [show rw + (r' - rw) = r' by omega] at hws
-  exact ⟨tx, r', rw, v, nIn, l, htx, h1, h2, hr'm, hl, htok, hlock, hseg, hnw, hta, hws, hsg, notxh⟩
+  exact ⟨tx, r', rw, v, nIn, l, htx, h1, h2, hr'm, hl, htok, hlock, hseg, hnw, hta, hws, hsg, notxh, nolock⟩
 
 end Layout
 
