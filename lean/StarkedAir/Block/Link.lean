@@ -279,6 +279,68 @@ theorem msg_read (hL25 : L ≤ 25) {r : ℕ} (hr : r < 2 ^ L) (hd : (inst 2).mai
     hs0 (by simp) (by simp [siteRel, siteLookup, hashSys, Msg.msg, Msg.lookups]) hm hv
   exact ⟨r0, hr0, hp, hb⟩
 
+/-- **A message's transaction tuple comes from the fields.** A non-header message start reads its
+tuple `tx(i, a, seg, w, l)` from a fields row yielding it (lock-time row, multiplicity `K_LOCK · TXM`). -/
+theorem msg_tuple_linked (hL25 : L ≤ 25) {r : ℕ} (hr : r < 2 ^ L) (hf : (inst 2).main Msg.FIRSTM r = 1)
+    (hh : (inst 2).main Msg.HDR r = 0) :
+    ∃ r' < 2 ^ L, siteMult hashSys inst pub (1, r', 7) ≠ 0 ∧
+      siteVals hashSys inst pub (1, r', 7) = siteVals hashSys inst pub (2, r, 1) := by
+  classical
+  have mem : ∀ {i r k}, ((i, r, k) : Site) ∈ sites hashSys inst ↔
+      i < 4 ∧ r < 2 ^ L ∧ k < (hashSys.comp i).lookups.length := by
+    intro i r k
+    simp only [sites, List.mem_flatMap, List.mem_range, List.mem_map, Prod.mk.injEq]
+    constructor
+    · rintro ⟨i', hi, r', hr', k', hk', rfl, rfl, rfl⟩
+      exact ⟨hi, by rw [← hL i' hi]; exact hr', hk'⟩
+    · rintro ⟨hi, hr', hk'⟩
+      exact ⟨i, hi, r, by rw [hL i hi]; exact hr', k, hk', rfl, rfl, rfl⟩
+  have ms := hash_msg_sat hL hsat
+  have hs1 : ((2, r, 1) : Site) ∈ sites hashSys inst := mem.mpr ⟨by decide, hr, by simp [hashSys, Msg.msg, Msg.lookups]⟩
+  have hm : siteMult hashSys inst pub (2, r, 1) = -1 := by
+    simp [siteMult, siteEval, siteLookup, hashSys, hL 2 (by decide), Msg.msg, Msg.lookups, Expr.eval, Msg.k, Msg.om,
+      Msg.one, StarkedAir.Sha256.eval_col, StarkedAir.Sha256.eval_cst, wrap_zero hr, hf, hh]
+  have huse : ∀ s ∈ sites hashSys inst, (fun i k => i = 2 ∧ k = 1) s.1 s.2.2 →
+      siteMult hashSys inst pub s = -1 ∨ siteMult hashSys inst pub s = 0 := by
+    intro s hs hu
+    obtain ⟨i, r', k⟩ := s
+    obtain ⟨rfl, rfl⟩ := hu
+    have hr' := (mem.mp hs).2.1
+    have b1 := Msg.bool_col ms (e := Msg.FIRSTM) (by simp) hr'
+    have b2 := Msg.bool_col ms (e := Msg.HDR) (by simp) hr'
+    simp [siteMult, siteEval, siteLookup, hashSys, hL 2 (by decide), Msg.msg, Msg.lookups, Expr.eval, Msg.k, Msg.om,
+      Msg.one, StarkedAir.Sha256.eval_col, StarkedAir.Sha256.eval_cst, wrap_zero hr']
+    rcases b1 with h1 | h1 <;> rcases b2 with h2 | h2 <;> simp [h1, h2]
+  have hcount : ((sites hashSys inst).filter fun s => s.1 = 2 ∧ s.2.2 = 1).length + ([] : PubEntries).length < P := by
+    have := List.length_filter_le (fun s : Site => decide (s.1 = 2 ∧ s.2.2 = 1)) (sites hashSys inst)
+    rw [hash_sites_len hL] at this
+    have := hash_rows_lt_P hL hL25
+    simp only [List.length_nil, add_zero]; omega
+  obtain ⟨s, hs, hnu, hsm, hsr, hsv⟩ := used_in_table_ext hsat.2 (use := fun i k => i = 2 ∧ k = 1) huse
+    (by simp) hcount (Or.inl ⟨(2, r, 1), hs1, ⟨rfl, rfl⟩, hm, rfl, rfl⟩)
+  obtain ⟨i, r', k⟩ := s
+  obtain ⟨hi, hr', hk'⟩ := mem.mp hs
+  have hrel : siteRel hashSys (i, r', k) = Fields.REL_TX := by
+    rw [hsr]; simp [siteRel, siteLookup, hashSys, Msg.msg, Msg.lookups]
+  have hik : i = 1 ∧ k = 7 := by
+    interval_cases i
+    · simp [hashSys, bytes] at hk'; subst hk'
+      simp [siteRel, siteLookup, hashSys, bytes, REL_BYTE, Fields.REL_TX] at hrel
+    · simp [hashSys, Fields.fields, Fields.lookups] at hk'
+      interval_cases k <;> first | exact ⟨rfl, rfl⟩ | simp [siteRel, siteLookup, hashSys, Fields.fields,
+        Fields.lookups, REL_BYTE, Fields.REL_TX] at hrel
+    · simp [hashSys, Msg.msg, Msg.lookups] at hk'
+      interval_cases k
+      · simp [siteRel, siteLookup, hashSys, Msg.msg, Msg.lookups, REL_BYTE, Fields.REL_TX] at hrel
+      · exact absurd ⟨rfl, rfl⟩ hnu
+      all_goals simp [siteRel, siteLookup, hashSys, Msg.msg, Msg.lookups, Fields.REL_TX, Msg.REL_MSGW,
+        Msg.REL_MLEN] at hrel
+    · simp [hashSys, Sha.sha, Sha.lookups] at hk'
+      interval_cases k <;> simp [siteRel, siteLookup, hashSys, Sha.sha, Sha.lookups, Msg.REL_MSGW, Msg.REL_MLEN,
+        Sha.REL_DIGEST, Fields.REL_TX] at hrel
+  obtain ⟨rfl, rfl⟩ := hik
+  exact ⟨r', hr', hsm, hsv⟩
+
 end System
 
 end StarkedAir.Block
