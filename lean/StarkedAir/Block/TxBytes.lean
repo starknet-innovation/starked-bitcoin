@@ -271,7 +271,7 @@ theorem block_index {m : ℕ} (hmn : m < 2 ^ L) (hnp : ∀ r < m, (inst 1).main 
     (hSm : ((inst 1).main START m).val = (blockBytes (inst 0).main (pub 0).val).length) :
     ∃ b, Spec.Block.parseBlock (blockBytes (inst 0).main (pub 0).val) = some b ∧
       b.header = slice (blockBytes (inst 0).main (pub 0).val) 0 80 ∧
-      b.txs.length = ((inst 1).main VAL 0).val ∧ b.txs.length < 2 ^ L ∧
+      b.txs.length = ((inst 1).main VAL 0).val ∧ 1 ≤ b.txs.length ∧ b.txs.length < 2 ^ L ∧
       ∀ ρ < 2 ^ L, (inst 1).main K_LOCK ρ = 1 → ∀ tx, TxAt (inst 1).main (blockBytes (inst 0).main (pub 0).val) m ρ tx →
         b.txs[locks (inst 1).main ρ]? = some tx := by
   set R := blockBytes (inst 0).main (pub 0).val with hR
@@ -324,7 +324,7 @@ theorem block_index {m : ℕ} (hmn : m < 2 ^ L) (hnp : ∀ r < m, (inst 1).main 
     have := congrArg List.length hrest
     simp [toksFrom_length] at this; omega
   subst hem
-  refine ⟨_, hparse, rfl, by simpa [hnv] using hlen, ?_, ?_⟩
+  refine ⟨_, hparse, rfl, by simpa [hnv] using hlen, by simp only at hlen ⊢; omega, ?_, ?_⟩
   · have := locks_le (M := (inst 1).main) e
     simp only at hlen ⊢; rw [hlen]; omega
   intro ρ0 hρ0 hl0 tx0 hat0

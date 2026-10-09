@@ -445,6 +445,32 @@ theorem tree_rows (hn0 : 0 < n) (hn : n ≤ 2 ^ 25) {N : ℕ} (hN : pub 1 = (N :
       exact hp1 (by rw [r0.2.2.2.1, hN]; simp)
     · exact t
 
+/-- **The root row** reads tree entry `(H, 0)`, the top of the tree (`cnt H = 1`). -/
+theorem root_row (hn0 : 0 < n) (hn : n ≤ 2 ^ 25) {N : ℕ} (hN : pub 1 = (N : F)) (hN1 : 1 ≤ N) (hN25 : N < 2 ^ 25)
+    {H : ℕ} (hH : cntL N H = 1) (hHl : ∀ l < H, 2 ≤ cntL N l) :
+    ∃ r < n, M RT r = 1 ∧ M RIDC r = (idOf N H 0 : F) := by
+  have tr := tree_rows hsat hn0 hn hN hN1 hN25
+  rcases Nat.eq_zero_or_pos H with h0 | hpos
+  · subst h0
+    have h1 : N = 1 := by simpa [cntL] using hH
+    have hrt := tr.2 h1
+    refine ⟨0, hn0, hrt, ?_⟩
+    have := sat hsat (mem_childC (c := .mul (pre FIRST) (.mul (k RT) (.sub (k RIDC) one))) (by simp [childC])) hn0
+    simp only [Expr.eval, ev_first hn0, if_true, one_mul, ev_k hn0, hrt, one, eval_cst, Nat.cast_one,
+      sub_eq_zero] at this
+    rw [this, idOf, if_pos rfl]; simp
+  · obtain ⟨hlt, rows⟩ := tr.1 H hpos (hHl (H - 1) (by omega))
+    obtain ⟨-, -, -, -, -, -, -, rt⟩ := rows 0 (by omega)
+    have hrt := rt hH
+    have hr : baseL N H + 1 < n := by rw [hH] at hlt; exact hlt
+    refine ⟨baseL N H + 1, hr, hrt, ?_⟩
+    have := sat hsat (mem_childC (c := .mul notFirst (.mul (k RT) (.sub (.add (k RIDC) one) (.add (cst NB) (k RIX)))))
+      (by simp [childC])) hr
+    simp only [Expr.eval, notFirst, om, one, eval_cst, Nat.cast_one, ev_first hr, show baseL N H + 1 ≠ 0 by omega,
+      if_false, sub_zero, one_mul, ev_k hr, hrt, rix_eq hsat _ hr, sub_eq_zero] at this
+    rw [idOf, if_neg (by omega)]
+    push_cast at this ⊢; linear_combination this
+
 /-- **A node row's children** in terms of tree entries: `left = (l − 1, 2i)`, `right = (l − 1, 2i + 1)`, or the
 left again when `2i + 1` is the previous level's size (`dup`). -/
 theorem kids {N l i r c : ℕ} (hr : r < n) (hl : 1 ≤ l) (hc : c = cntL N (l - 1)) (hi : i < (c + 1) / 2)

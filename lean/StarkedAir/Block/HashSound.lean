@@ -482,7 +482,7 @@ theorem digest_tx (hL25 : L ≤ 25) {q : ℕ} (hq : 1 ≤ q) (hn : 72 * q + 72 �
   have hb0 := hash_bytes_sat hL hsat
   obtain ⟨m, hmn, hnp, hpad, hfit, hcs, cat, mono, hSm⟩ :=
     Fields.block_ctx hL25 fs hb0 (hash_fields_read hL hsat hL25)
-  obtain ⟨b, hparse, hhead, -, -, hidx⟩ :=
+  obtain ⟨b, hparse, hhead, -, -, -, hidx⟩ :=
     Fields.block_index hL25 fs hb0 (hash_fields_read hL hsat hL25) hmn hnp hpad hfit hcs cat mono hSm
   obtain ⟨r0, d, h0, f, hmid', hc, he, hdig⟩ := digest_sha256d hL hsat hL25 hq hn hd hmid
   refine ⟨b, hparse, r0, h0, f, hmid', fun hh => ?_, fun hh => ?_⟩
