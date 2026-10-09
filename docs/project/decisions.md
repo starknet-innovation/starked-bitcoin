@@ -219,3 +219,22 @@ Why:
   three checks per output.
 - Public activation bits avoid comparisons on public values inside the AIR.
 - Reusing the SHA and Merkle components keeps the proven compression untouched.
+
+### D-036 — The chain proof is a file of MMR peaks under a pinned, frozen VK
+Date: 2026-10-10 · By: Claude (agent), on the owner's "get started" (owner chose extendable over re-verifiable only) · Status: active
+Decision:
+- **The node shape is frozen.** It covers leaves of every segment log size 9..20, so the VK never
+  changes with the run.
+- **The production VK is pinned.** It is committed in `vk/` and built into `chainproof`.
+- **The file is extendable.** It stores the segment plan, the MMR peaks and the bagged root, plus
+  leaf 0's path. Extension pushes aligned segments onto the peaks.
+- **The verifier pins the root's request.** It checks the PCS config and the columns, the plan's
+  alignment, every peak, the Lean-exported genesis-state checks and Bitcoin's genesis hash as leaf 0.
+- **Writes are atomic,** and long runs checkpoint after every segment.
+
+Design: [proof-store.md](../design/proof-store.md).
+
+Why:
+- The first full run kept nothing.
+- An unpinned request let a stored proof claim weaker FRI parameters.
+- A run-dependent node shape would have orphaned the stored peaks at the first extension.
