@@ -218,10 +218,12 @@ theorem hash_fields_sat' : ∀ r < 2 ^ L, ∀ c ∈ Fields.constraints,
     c.eval (2 ^ L) Fields.preCols pub (inst 1).main r = 0 := by
   have := hsat.1 1 (by decide); rw [hL 1 (by decide)] at this; exact this
 
-/-- **Message data bytes are the block's.** A message data row reads the block byte at its position. -/
-theorem msg_read (hL25 : L ≤ 25) {r : ℕ} (hr : r < 2 ^ L) (hd : (inst 2).main Msg.D r = 1) :
-    ∃ r0, r0 < (pub 0).val ∧ (inst 2).main Msg.POS r = (r0 : F) ∧
-      (inst 2).main Msg.BYTE r = (inst 0).main BYTE r0 := by
+/-- **Every byte read is the block's.** A byte-read site of a non-table component with multiplicity
+`−1` reads `(r0, byte r0)` with `r0 < LEN`. -/
+theorem hash_read (hL25 : L ≤ 25) {i r k : ℕ} (hs0 : ((i, r, k) : Site) ∈ sites hashSys inst) (hi : i ≠ 0)
+    (hrel : siteRel hashSys (i, r, k) = REL_BYTE) (hm : siteMult hashSys inst pub (i, r, k) = -1) {p b : F}
+    (hv : siteVals hashSys inst pub (i, r, k) = [p, b]) :
+    ∃ r0, r0 < (pub 0).val ∧ p = (r0 : F) ∧ b = (inst 0).main BYTE r0 := by
   classical
   have mem : ∀ {i r k}, ((i, r, k) : Site) ∈ sites hashSys inst ↔
       i < 4 ∧ r < 2 ^ L ∧ k < (hashSys.comp i).lookups.length := by
@@ -234,13 +236,6 @@ theorem msg_read (hL25 : L ≤ 25) {r : ℕ} (hr : r < 2 ^ L) (hd : (inst 2).mai
       exact ⟨i, hi, r, by rw [hL i hi]; exact hr', k, hk', rfl, rfl, rfl⟩
   have ms := hash_msg_sat hL hsat
   have fs := hash_fields_sat' hL hsat
-  have hs0 : ((2, r, 0) : Site) ∈ sites hashSys inst := mem.mpr ⟨by decide, hr, by simp [hashSys, Msg.msg, Msg.lookups]⟩
-  have hm : siteMult hashSys inst pub (2, r, 0) = -1 := by
-    simp [siteMult, siteEval, siteLookup, hashSys, hL 2 (by decide), Msg.msg, Msg.lookups, Expr.eval, Msg.k,
-      StarkedAir.Sha256.eval_col, wrap_zero hr, hd]
-  have hv : siteVals hashSys inst pub (2, r, 0) = [(inst 2).main Msg.POS r, (inst 2).main Msg.BYTE r] := by
-    simp [siteVals, siteEval, siteLookup, hashSys, hL 2 (by decide), Msg.msg, Msg.lookups, Msg.k,
-      StarkedAir.Sha256.eval_col, wrap_zero hr]
   have hb0 : bytes.air.Satisfied (inst 0).logSize pub (inst 0).main := by
     have := hash_bytes_sat hL hsat; rw [hL 0 (by decide)]; exact this
   have hP : 2 ^ (inst 0).logSize < P := by
@@ -277,9 +272,47 @@ theorem msg_read (hL25 : L ≤ 25) {r : ℕ} (hr : r < 2 ^ L) (hd : (inst 2).mai
       rw [hash_sites_len hL] at this
       have := hash_rows_lt_P hL hL25
       omega
-  obtain ⟨r0, hr0, hp, hb⟩ := read_byte hsat.2 rfl hb0 hP huse hcount
-    hs0 (by simp) (by simp [siteRel, siteLookup, hashSys, Msg.msg, Msg.lookups]) hm hv
-  exact ⟨r0, hr0, hp, hb⟩
+  exact read_byte hsat.2 rfl hb0 hP huse hcount hs0 hi hrel hm hv
+
+/-- **Fields reads are the block's bytes** (the read oracle `Fields.Reads` needs, for the hashing system). -/
+theorem hash_fields_read (hL25 : L ≤ 25) : ∀ {r : ℕ}, r < 2 ^ L → ∀ {kk : ℕ}, kk < 7 →
+    (Fields.lookups.getD kk ⟨0, .const 0, []⟩).mult.eval (2 ^ L) Fields.preCols pub (inst 1).main r = -1 →
+    ∃ r0, r0 < (pub 0).val ∧
+      ((Fields.lookups.getD kk ⟨0, .const 0, []⟩).vals.map (Expr.eval (2 ^ L) Fields.preCols pub (inst 1).main r)) =
+        [(r0 : F), (inst 0).main BYTE r0] := by
+  intro r hr kk hk hm
+  have hs1 : ((1, r, kk) : Site) ∈ sites hashSys inst := by
+    simp only [sites, List.mem_flatMap, List.mem_range, List.mem_map]
+    exact ⟨1, by decide, r, by rw [hL 1 (by decide)]; exact hr, kk,
+      by simp [hashSys, Fields.fields, Fields.lookups]; omega, rfl⟩
+  have hrel : siteRel hashSys ((1, r, kk) : Site) = REL_BYTE := by
+    simp only [siteRel, siteLookup, hashSys, Fields.fields]; interval_cases kk <;> rfl
+  have hmult : siteMult hashSys inst pub ((1, r, kk) : Site) = -1 := by
+    simpa [siteMult, siteEval, siteLookup, hashSys, Fields.fields, hL 1 (by decide)] using hm
+  have e : siteVals hashSys inst pub ((1, r, kk) : Site) =
+      (Fields.lookups.getD kk ⟨0, .const 0, []⟩).vals.map (Expr.eval (2 ^ L) Fields.preCols pub (inst 1).main r) := by
+    simp [siteVals, siteEval, siteLookup, hashSys, Fields.fields, hL 1 (by decide)]
+  obtain ⟨p, b, hpb⟩ : ∃ p b, siteVals hashSys inst pub ((1, r, kk) : Site) = [p, b] := by
+    simp only [siteVals, siteLookup, hashSys, Fields.fields]
+    interval_cases kk <;> exact ⟨_, _, rfl⟩
+  obtain ⟨r0, hr0, hp, hb⟩ := hash_read hL hsat hL25 hs1 (by decide) hrel hmult hpb
+  exact ⟨r0, hr0, by rw [← e, hpb, hp, hb]⟩
+
+/-- **Message data bytes are the block's.** A message data row reads the block byte at its position. -/
+theorem msg_read (hL25 : L ≤ 25) {r : ℕ} (hr : r < 2 ^ L) (hd : (inst 2).main Msg.D r = 1) :
+    ∃ r0, r0 < (pub 0).val ∧ (inst 2).main Msg.POS r = (r0 : F) ∧
+      (inst 2).main Msg.BYTE r = (inst 0).main BYTE r0 := by
+  classical
+  have hs0 : ((2, r, 0) : Site) ∈ sites hashSys inst := by
+    simp only [sites, List.mem_flatMap, List.mem_range, List.mem_map]
+    exact ⟨2, by decide, r, by rw [hL 2 (by decide)]; exact hr, 0, by simp [hashSys, Msg.msg, Msg.lookups], rfl⟩
+  have hm : siteMult hashSys inst pub (2, r, 0) = -1 := by
+    simp [siteMult, siteEval, siteLookup, hashSys, hL 2 (by decide), Msg.msg, Msg.lookups, Expr.eval, Msg.k,
+      StarkedAir.Sha256.eval_col, wrap_zero hr, hd]
+  have hv : siteVals hashSys inst pub (2, r, 0) = [(inst 2).main Msg.POS r, (inst 2).main Msg.BYTE r] := by
+    simp [siteVals, siteEval, siteLookup, hashSys, hL 2 (by decide), Msg.msg, Msg.lookups, Msg.k,
+      StarkedAir.Sha256.eval_col, wrap_zero hr]
+  exact hash_read hL hsat hL25 hs0 (by decide) (by simp [siteRel, siteLookup, hashSys, Msg.msg, Msg.lookups]) hm hv
 
 /-- **A message's transaction tuple comes from the fields.** A non-header message start reads its
 tuple `tx(i, a, seg, w, l)` from a fields row yielding it (lock-time row, multiplicity `K_LOCK · TXM`). -/
