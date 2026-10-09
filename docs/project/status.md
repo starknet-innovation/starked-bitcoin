@@ -7,7 +7,7 @@ follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work)
 - **Updated:** 2026-10-09
 - **HEAD at last update:** 3c29769 (plus this status commit)
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
-- **Current item:** M3a.5 `BLK-CHECKS`: design drafted (D-035, proposed), awaiting owner review; M3a.3 `BLK-SHA` and M3a.4 `BLK-MERKLE` done (2026-10-09). HC-HASHTREE done (full chain re-proven 2026-10-09).
+- **Current item:** M3a.5 `BLK-CHECKS` **parked** (2026-10-09, owner): design drafted (D-035, proposed), awaiting owner review; M3a.3 `BLK-SHA` and M3a.4 `BLK-MERKLE` done (2026-10-09). HC-HASHTREE done (full chain re-proven 2026-10-09).
 
 ## State in one paragraph
 
@@ -28,7 +28,34 @@ standard axioms only); the in-circuit verifiers and node code stay trusted
    `BLK-CHECKS` (`CheckTransaction`, coinbase rules, finality, BIP34, sigops, sizes and weight, the witness
    tree and commitment). Its design is drafted ([block-data.md § M3a.5](../design/block-data.md#m3a5-blk-checks-design-draft-2026-10-09), D-035 proposed);
    on the owner's confirmation, start stage M3a.5a (the flattened spec `BlockFlat`). See [airs/block.md](../airs/block.md).
-2. Proposed: REC-FUZZ (differential fuzzing of the plain verifier).
+2. **Next requested (owner, 2026-10-09): a full-chain run whose proof is saved to disk and reusable.**
+   Prerequisites, from the review of [2026-10-09-proof-review.md](../reports/2026-10-09-proof-review.md), checked
+   in the code:
+   - **Save before verifying.** Today `spike chain` frees the root (`defer root.proof.deinit()`) and keeps only
+     a log.
+   - **What to save:**
+     - the proof `bytes` and the full `request` (`pcs_config`, preprocessed column ids and log sizes,
+       preprocessed root, output digest), with `writeVerifyRequest` and `parseVerifyRequest` in
+       stwo-zig `interop/circuit_recursion`;
+     - the circuit hash and the 124 public inputs;
+     - the VK (node identity, `leaf_hashes`, `sizes`);
+     - provenance: the repo commit, the stwo-zig commit, the SHA-256 of `headers.bin`, the FRI
+       parameters and the tip.
+   - **File format:** versioned (magic and version), length-prefixed, with a checksum. Write to a temporary
+     file, then rename it, so a crash never leaves a half-written file.
+   - **Pin the configuration in a standalone `verify` command.** Compare the loaded `pcs_config` and the
+     column log sizes with expected constants, and never trust the file's own values (review finding 2).
+     The VK is loaded from constants or the file, not re-derived (947 s today).
+   - **Reuse for extending at the tip** (`PROOF-STORE`) needs the MMR peak proofs, not only the bagged
+     root, and a way to rebuild `prepared` from bytes. Candidate: `circuit_serialize.deserializeProof`;
+     its format compatibility with `VerifierProof.serialize` is not yet checked. Save the peaks and
+     checkpoint the leaf and node proofs as they finish, so a crash late in a 14 h run loses little.
+   - **Validate on a small chain first** (the 52-header test):
+     - save, reload in a fresh process and verify;
+     - the result must be rejected after flipping a proof byte, lowering the query count in the file, or
+       changing one public input;
+     - only then run the full chain.
+3. Proposed: REC-FUZZ (differential fuzzing of the plain verifier).
 
 ## In flight
 
