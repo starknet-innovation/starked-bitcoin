@@ -177,6 +177,41 @@ theorem sha_word (hL25 : L ≤ 25) {x : ℕ} (hx : x < 2 ^ L)
   obtain ⟨e1, e2, e3, e4⟩ := hyv
   exact ⟨r0, j, hr', hj, ha, hf, hb, e1, e2, e3.symm, e4.symm⟩
 
+/-- **A second hash checks its message's padded length.** At a `DBL` period's first row `x`, the
+message with its id (starting at message row `r0`, data ending at index `d`) has padded length
+`64 · BLKI(x − 1) + 64`. -/
+theorem sha_len (hL25 : L ≤ 25) {x : ℕ} (hx : x < 2 ^ L)
+    (hm : (Expr.mul (pre Sha.ROW0) (Sha.k Sha.DBL)).eval (2 ^ L) Sha.preCols pub (inst 3).main x = 1) :
+    ∃ r0 d, (inst 2).main Msg.FIRSTM r0 = 1 ∧ (inst 2).main Msg.ENDD (r0 + d) = 1 ∧
+      (∀ j < d, (inst 2).main Msg.CONT (r0 + j) = 1 ∨ (inst 2).main Msg.SW (r0 + j) = 1) ∧
+      (inst 2).main Msg.MID r0 = (inst 3).main Sha.MID x ∧
+      (((r0 + d + 1 + 1 + (119 - (r0 + d + 1) % 64) % 64 + 7) + 1 - r0 : ℕ) : F) =
+        (Expr.add (.mul (cst 64) (Sha.kp Sha.BLKI)) (cst 64)).eval (2 ^ L) Sha.preCols pub (inst 3).main x := by
+  have hm' : siteMult hashSys inst pub (3, x, 1) = -1 := by
+    simp only [siteMult, siteEval, siteLookup, hashSys, hL 3 (by decide)]
+    simp only [show (3 : ℕ) ≠ 0 by decide, show (3 : ℕ) ≠ 1 by decide, show (3 : ℕ) ≠ 2 by decide, if_false]
+    simp only [Sha.sha, Sha.lookups, List.getD_cons_succ, List.getD_cons_zero, Expr.eval]
+    rw [show Expr.eval (2 ^ L) Sha.preCols pub (inst 3).main x (pre Sha.ROW0) *
+      Expr.eval (2 ^ L) Sha.preCols pub (inst 3).main x (Sha.k Sha.DBL) = 1 from hm]
+  obtain ⟨r', hr', hym, hyv⟩ := sha_use_linked hL hsat hL25 hx (kk := 1) (by norm_num) hm'
+  have ms := hash_msg_sat hL hsat
+  have hmult : (inst 2).main Msg.LN r' * (inst 2).main Msg.MM r' ≠ 0 := by
+    simpa [siteMult, siteEval, siteLookup, hashSys, hL 2 (by decide), Msg.msg, Msg.lookups, Expr.eval, Msg.k,
+      StarkedAir.Sha256.eval_col, wrap_zero hr'] using hym
+  obtain ⟨r0, d, hf, he, hc, heq, hmid, hidx⟩ := Msg.len_yield ms hr' hmult
+  have hv2 : siteVals hashSys inst pub (2, r', 1 + 2) = [(inst 2).main Msg.MID r', (inst 2).main Msg.IDX r' + 1] := by
+    simp [siteVals, siteEval, siteLookup, hashSys, hL 2 (by decide), Msg.msg, Msg.lookups, Msg.k, Msg.one,
+      StarkedAir.Sha256.eval_col, wrap_zero hr', Expr.eval, StarkedAir.Sha256.eval_cst]
+  have hv3 : siteVals hashSys inst pub (3, x, 1) = [(inst 3).main Sha.MID x,
+      (Expr.add (.mul (cst 64) (Sha.kp Sha.BLKI)) (cst 64)).eval (2 ^ L) Sha.preCols pub (inst 3).main x] := by
+    simp [siteVals, siteEval, siteLookup, hashSys, hL 3 (by decide), Sha.sha, Sha.lookups, Sha.k,
+      StarkedAir.Sha256.eval_col, wrap_zero hx]
+  rw [hv2, hv3] at hyv
+  simp only [List.cons.injEq, and_true] at hyv
+  obtain ⟨e1, e2⟩ := hyv
+  refine ⟨r0, d, hf, he, hc, hmid.symm.trans e1, ?_⟩
+  rw [← heq, ← e2, hidx]
+
 end System
 
 end StarkedAir.Block
