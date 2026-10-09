@@ -13,7 +13,9 @@
 //!       Standalone verification with the VK pinned. The chainwork must reach a trusted minimum (it
 //!       is the only defence against a cheap low-difficulty chain): by default Bitcoin Core's
 //!       mainnet `nMinimumChainWork`; `--min-work 0` disables the check (e.g. for a short test chain).
-//!   chainproof inclusion <file.sbchain> <headers.bin> <height>
+//!   chainproof info <file.sbchain>
+//!       What a file holds (plan, peaks, provenance), without verifying it.
+//!   chainproof inclusion <vk> <file.sbchain> <headers.bin> <height>
 //!       Prints and checks the MMR inclusion path of a block hash in the (verified) file's `T`.
 //!
 //! `headers.bin`: raw 80-byte headers from height 0. CPU only.
@@ -35,6 +37,7 @@ fn usage() noreturn {
         \\  chainproof prove <vk> <headers.bin> <to> <out.sbchain> [--from <in.sbchain>] [--segments K] [--max-log L]
         \\  chainproof verify <vk> <file.sbchain> [--min-work <hex> | --min-work 0]
         \\  chainproof inclusion <vk> <file.sbchain> <headers.bin> <height>
+        \\  chainproof info <file.sbchain>
         \\
     , .{});
     std.process.exit(2);
@@ -71,6 +74,7 @@ pub fn main() !void {
     }
     if (std.mem.eql(u8, cmd, "verify") and (args.len == 4 or (args.len == 6 and std.mem.eql(u8, args[4], "--min-work"))))
         return verify(gpa, a, args[2], args[3], if (args.len == 6) try std.fmt.parseInt(u256, args[5], 16) else core_min_work);
+    if (std.mem.eql(u8, cmd, "info") and args.len == 3) return info(gpa, a, args[2]);
     if (std.mem.eql(u8, cmd, "inclusion") and args.len == 6) return inclusion(gpa, a, args[2], args[3], args[4], try std.fmt.parseInt(usize, args[5], 10));
     usage();
 }
@@ -248,4 +252,21 @@ fn inclusion(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8, 
         printWords("  ", st.sibling);
         std.debug.print("    {s}\n", .{if (st.left) "left" else "right"});
     }
+}
+
+fn info(gpa: std.mem.Allocator, a: std.mem.Allocator, path: []const u8) !void {
+    const bytes = try S.readFile(a, path);
+    var c = try S.Chain.decode(gpa, a, bytes);
+    defer c.deinit();
+    std.debug.print("{s}: {d} bytes, NOT verified (use `verify`)\n", .{ path, bytes.len });
+    printWords("  VK digest   ", c.vk_digest);
+    std.debug.print("  FRI         queries {d}, pow {d}; segment logs up to {d}\n", .{ c.fri.n_queries, c.fri.pow_bits, c.max_log });
+    std.debug.print("  headers     0..{d} in {d} segments; {d} peaks; root {s}\n", .{ c.headers() - 1, c.logs.len, c.peaks.len, @tagName(c.root_kind) });
+    var counts = [_]usize{0} ** 21;
+    for (c.logs) |l| counts[l] += 1;
+    std.debug.print("  segment logs", .{});
+    for (counts, 0..) |n, l| if (n > 0) std.debug.print(" {d}x{d}", .{ n, l });
+    std.debug.print("\n  peaks (headers each):", .{});
+    for (c.peaks) |p| std.debug.print(" {d}", .{sb.recursion.node.headerCount(p.pubs)});
+    std.debug.print("\n  provenance  {s}\n", .{c.provenance});
 }
