@@ -313,6 +313,102 @@ theorem whole_tx (hL25 : L ≤ 25) {r0 d : ℕ} (h0 : r0 < 2 ^ L) (f0 : (inst 2)
     rw [Msg.mt_eq ms h0, hw0, hh, ← sg, h1] at hmt; simp at hmt
   rw [hdat, hnn hseg]
 
+omit hL hsat in
+theorem map_range_add {α : Type} (f : ℕ → α) (x y : ℕ) :
+    (List.range (x + y)).map f = (List.range x).map f ++ (List.range y).map (fun i => f (x + i)) := by
+  rw [List.range_add, List.map_append, List.map_map]; rfl
+
+/-- **Segwit txid messages are `serNoWit`.** -/
+theorem split_tx (hL25 : L ≤ 25) {r0 d : ℕ} (h0 : r0 < 2 ^ L) (f0 : (inst 2).main Msg.FIRSTM r0 = 1)
+    (hh : (inst 2).main Msg.HDR r0 = 0)
+    (hc0 : ∀ j < d, (inst 2).main Msg.CONT (r0 + j) = 1 ∨ (inst 2).main Msg.SW (r0 + j) = 1)
+    (he0 : (inst 2).main Msg.ENDD (r0 + d) = 1) (hmt : (inst 2).main Msg.MT r0 = 1) :
+    ∃ tx, (inst 2).main Msg.WTX r0 = 0 ∧ msgData inst r0 d = Spec.Block.serNoWit tx := by
+  have ms := hash_msg_sat hL hsat
+  have fs := hash_fields_sat' hL hsat
+  have hb0 := hash_bytes_sat hL hsat
+  have h25 : 2 ^ L ≤ 2 ^ 25 := Nat.pow_le_pow_right (by norm_num) hL25
+  norm_num at h25
+  have hLEN : (pub 0).val ≤ 2 ^ 25 := Fields.len_le hL25 fs hb0 (hash_fields_read hL hsat hL25)
+  -- the flags: a txid message of a segwit transaction
+  have hwseg : (inst 2).main Msg.WTX r0 = 0 ∧ (inst 2).main Msg.SEG r0 = 1 := by
+    rw [Msg.mt_eq ms h0, hh] at hmt
+    rcases Msg.bool_col ms (e := Msg.WTX) (by simp) h0 with w | w <;>
+      rcases Msg.bool_col ms (e := Msg.SEG) (by simp) h0 with g | g <;> simp_all
+  obtain ⟨ρ, hρ, hl, ti, ta, sg, tw, tl⟩ := msg_tuple_row hL hsat hL25 h0 f0 hh
+  obtain ⟨tx, -, hnw, -⟩ := Fields.lock_tx hL25 fs hb0 (hash_fields_read hL hsat hL25) hρ hl
+  have hsegρ : (inst 1).main Fields.SEG ρ = 1 := sg.trans hwseg.2
+  obtain ⟨d1, h4, hd1, rowsD, pos0, pos1, hsw, pos2, hend⟩ := Msg.split_pieces ms h0 f0 hmt hc0 he0
+  -- every data row reads the block byte at its position
+  have rd : ∀ j ≤ d, ∀ p : ℕ, (inst 2).main Msg.POS (r0 + j) = (p : F) → p < 2 ^ 26 →
+      p < (pub 0).val ∧ (inst 2).main Msg.BYTE (r0 + j) = (inst 0).main BYTE p := by
+    intro j hj p hp hp26
+    obtain ⟨hl', hd'⟩ := rowsD j hj
+    obtain ⟨ρ', hρ', p', b'⟩ := msg_read hL hsat hL25 hl' hd'
+    have e : p = ρ' := natCast_inj_of_lt (Fields.lt_P (by omega)) (Fields.lt_P (by omega)) (hp.symm.trans p')
+    subst e; exact ⟨hρ', b'⟩
+  set a := ((inst 2).main Msg.TA r0).val with ha
+  set l := ((inst 2).main Msg.TL r0).val with hlv
+  have hTA : (inst 2).main Msg.TA r0 = (a : F) := by rw [ha, ZMod.natCast_zmod_val]
+  have hTL : (inst 2).main Msg.TL r0 = (l : F) := by rw [hlv, ZMod.natCast_zmod_val]
+  have hl25 : l < 2 ^ 25 := by rw [hlv, ← tl]; exact Fields.start_lt fs hρ
+  -- `a` is small: row 0 reads it
+  have ha25 : a < 2 ^ 25 := by
+    obtain ⟨hl', hd'⟩ := rowsD 0 (by omega)
+    obtain ⟨ρ', hρ', p', -⟩ := msg_read hL hsat hL25 hl' hd'
+    rw [pos0 0 (by norm_num), Nat.cast_zero, add_zero] at p'
+    have : a = ρ' := by rw [ha, p']; exact ZMod.val_natCast_of_lt (Fields.lt_P (by omega))
+    omega
+  have hdL : r0 + d < 2 ^ L := (rowsD d le_rfl).1
+  -- the witness start and the data length
+  have hTW : (inst 2).main Msg.TW r0 = ((a + d1 + 3 : ℕ) : F) := by
+    rw [hTA] at hsw
+    rw [show ((a + d1 + 3 : ℕ) : F) = (a : F) + d1 + 3 by push_cast; ring]
+    linear_combination -hsw
+  have hdd : d = d1 + 4 := by
+    rw [hTA, hTW, hTL] at hend
+    push_cast at hend
+    have e : ((d : ℕ) : F) = ((d1 + 4 : ℕ) : F) := by push_cast; linear_combination hend
+    exact natCast_inj_of_lt (Fields.lt_P (by omega)) (Fields.lt_P (by omega)) e
+  subst hdd
+  -- positions as naturals
+  have b0' : ∀ j < 4, (inst 2).main Msg.BYTE (r0 + j) = (inst 0).main BYTE (a + j) ∧ a + j < (pub 0).val := by
+    intro j hj
+    obtain ⟨x, y⟩ := rd j (by omega) (a + j) (by rw [pos0 j (by omega), hTA]; push_cast; ring) (by omega)
+    exact ⟨y, x⟩
+  have b1' : ∀ i < d1 - 3, (inst 2).main Msg.BYTE (r0 + (4 + i)) = (inst 0).main BYTE (a + 6 + i) ∧
+      a + 6 + i < (pub 0).val := by
+    intro i hi
+    obtain ⟨x, y⟩ := rd (4 + i) (by omega) (a + 6 + i)
+      (by rw [pos1 (4 + i) (by omega) (by omega), hTA]; push_cast; ring) (by omega)
+    exact ⟨y, x⟩
+  have b2' : ∀ i < 4, (inst 2).main Msg.BYTE (r0 + (d1 + 1 + i)) = (inst 0).main BYTE (l + i) ∧ l + i < (pub 0).val := by
+    intro i hi
+    obtain ⟨x, y⟩ := rd (d1 + 1 + i) (by omega) (l + i)
+      (by rw [pos2 (d1 + 1 + i) (by omega) (by omega), hTA, hTW, hTL]; push_cast; ring) (by omega)
+    exact ⟨y, x⟩
+  refine ⟨tx, hwseg.1, ?_⟩
+  rw [hnw hsegρ]
+  have eTXA : ((inst 1).main Fields.TXA ρ).val = a := by rw [ta]
+  have eWST : ((inst 1).main Fields.WST ρ).val = a + d1 + 3 := by
+    rw [tw, hTW]; exact ZMod.val_natCast_of_lt (Fields.lt_P (by omega))
+  have eST : ((inst 1).main Fields.START ρ).val = l := by rw [tl]
+  rw [eTXA, eWST, eST, show a + d1 + 3 - (a + 6) = d1 - 3 by omega,
+    slice_bb _ (by have := (b0' 3 (by norm_num)).2; omega),
+    slice_bb _ (by have := (b1' (d1 - 3 - 1) (by omega)).2; omega),
+    slice_bb _ (by have := (b2' 3 (by norm_num)).2; omega)]
+  unfold msgData
+  rw [show d1 + 4 + 1 = 4 + ((d1 - 3) + 4) by omega, map_range_add, map_range_add]
+  simp only [List.append_assoc]
+  congr 1
+  · refine List.map_congr_left (fun j hj => ?_)
+    rw [(b0' j (by simpa using hj)).1]
+  · congr 1
+    · refine List.map_congr_left (fun i hi => ?_)
+      rw [(b1' i (by simpa using hi)).1]
+    · refine List.map_congr_left (fun i hi => ?_)
+      rw [show 4 + (d1 - 3 + i) = d1 + 1 + i by omega, (b2' i (by simpa using hi)).1]
+
 end System
 
 end StarkedAir.Block
