@@ -28,7 +28,14 @@ standard axioms only); the in-circuit verifiers and node code stay trusted
    `BLK-CHECKS` (`CheckTransaction`, coinbase rules, finality, BIP34, sigops, sizes and weight, the witness
    tree and commitment). Its design is drafted ([block-data.md § M3a.5](../design/block-data.md#m3a5-blk-checks-design-draft-2026-10-09), D-035 proposed);
    on the owner's confirmation, start stage M3a.5a (the flattened spec `BlockFlat`). See [airs/block.md](../airs/block.md).
-2. **Next requested (owner, 2026-10-09): a full-chain run whose proof is saved to disk and reusable.**
+2. **Next requested (owner, 2026-10-09): a full-chain run whose proof is saved to disk and extendable at the
+   tip (owner chose extendable, not only re-verifiable).** Do the core of `PROOF-STORE` first, then the run:
+   - **Freeze the node shape.** Today `spike chain` derives it (the elementwise max over the first leaf of every
+     segment size in *this* plan), so a later extension that uses a new segment size could change the node
+     identity and orphan the stored peaks. Fix it as a constant covering every allowed segment size.
+   - **Save the `mmrFold` stack** (the peaks and their sizes), not only the bagged root.
+   - **Test extension on a small chain first**: prove N headers and save; extend by k in a fresh process; check
+     that the root equals a from-scratch root over N + k and verifies.
    Prerequisites, from the review of [2026-10-09-proof-review.md](../reports/2026-10-09-proof-review.md), checked
    in the code:
    - **Save before verifying.** Today `spike chain` frees the root (`defer root.proof.deinit()`) and keeps only
