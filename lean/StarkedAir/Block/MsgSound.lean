@@ -541,6 +541,37 @@ theorem data_exit {r0 : ℕ} (hr0 : r0 < n) (hf : M FIRSTM r0 = 1) :
     obtain ⟨hl, hd, -⟩ := data_walk hsat hr0 hf (Nat.find ex) hmin
     exact data_next hsat hl hd hm.1 hm.2
 
+/-- A data row reads the byte at `TA + IDX`, shifted by 2 in piece 1 and by `TL − TW + 2` in piece 2. -/
+theorem data_pos {r : ℕ} (hr : r < n) (hd : M D r = 1) :
+    M POS r = M TA r + M IDX r + 2 * M PC1 r + M PC2 r * (M TL r - M TW r + 2) := by
+  have := sat hsat (mem_msgC (c := .mul (k D) (.sub (k POS) (.add (.add (.add (k TA) (k IDX)) (.mul (cst 2) (k PC1)))
+      (.mul (k PC2) (.add (.sub (k TL) (k TW)) (cst 2)))))) (by simp [msgC])) hr
+  simp only [Expr.eval, ev_k hr, hd, one_mul, eval_cst, sub_eq_zero] at this
+  rw [this]; push_cast; ring
+
+/-- `Z` is the is-zero flag of `ezE`. -/
+theorem z_iff {r : ℕ} (hr : r < n) : M Z r = 1 ↔ ezE.eval n preCols pub M r = 0 := by
+  have he := defn hsat (a := EZ) (e := ezE) (mem_msgC (by simp [msgC])) hr
+  have h1 := sat hsat (mem_msgC (c := .mul (k Z) (k EZ)) (by simp [msgC])) hr
+  have h2 := sat hsat (mem_msgC (c := .mul (om (k Z)) (.sub (.mul (k EZ) (k INV)) one)) (by simp [msgC])) hr
+  simp only [Expr.eval, om, one, eval_cst, Nat.cast_one, ev_k hr] at h1 h2
+  rw [← he]
+  rcases bool_col hsat (e := Z) (by simp) hr with z | z
+  · rw [z] at h2 ⊢
+    simp only [sub_zero, one_mul, sub_eq_zero] at h2
+    constructor
+    · intro h; exact absurd h zero_ne_one
+    · intro h; rw [h, zero_mul] at h2; exact absurd h2 zero_ne_one
+  · rw [z, one_mul] at h1; exact ⟨fun _ => h1, fun _ => z⟩
+
+omit hsat in
+/-- `ezE` on a row, by piece. -/
+theorem ezE_eval {r : ℕ} (hr : r < n) :
+    ezE.eval n preCols pub M r =
+      M MT r * (M PC0 r * (M IDX r - 3) + (M PC1 r * (M POS r - M TW r + 1) + M PC2 r * (M POS r - (M TL r + 3)))) +
+      (1 - M MT r) * (M POS r - (M TL r + 3)) := by
+  simp only [ezE, Expr.eval, ev_k hr, om, one, eval_cst, Nat.cast_one]; push_cast; ring
+
 end Rows
 
 end StarkedAir.Block.Msg
