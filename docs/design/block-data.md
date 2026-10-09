@@ -139,6 +139,40 @@ Core's branchy parser.
 2. The AIR layer: rows ⇒ a grammar-accepted token list whose bytes tile `raw`, using
    `read_byte` for the bytes that are read.
 
+### M3a.3 `BLK-SHA` design (draft, 2026-10-09)
+
+**Target.** For transaction `t` of the parsed block `b` (from `fields_sound`), the system yields
+`txid(t) = sha256d(serNoWit t)` and `wtxid(t) = sha256d(serWit t)`, and also the header hash
+`sha256d(header)`. These feed the Merkle trees (M3a.4) and link the block to `T` (HC-HASHTREE).
+
+**Byte ranges per transaction.** The fields component already knows the boundaries. At each locktime row
+it yields `tx(i, a, seg, w, l)`:
+- `a`: the transaction start (copied down from its head row);
+- `seg`: the segwit flag;
+- `w`: where the witness section starts (the row after the outputs);
+- `l`: the locktime start.
+
+Then:
+- `serWit t` is raw bytes `[a, l + 4)`.
+- `serNoWit t` is `[a, a + 4) ++ [a + 6, w) ++ [l, l + 4)` for segwit, and `[a, l + 4)` for legacy.
+
+**Components.**
+
+| Component | Rows | Does |
+|---|---|---|
+| `block_msg` | one per message byte (padding included) | Walks a message's ranges: raw position +1 per byte, jumping at the range boundaries taken from the `tx` tuple. Reads each byte from the byte table, appends SHA padding (`80`, zeros, the bit length), and yields 32-bit words every 4 rows |
+| `block_sha` | 72 per compression | The proven SHA-256 compression AIR. Consecutive blocks of a message chain with constant offsets, as in the header chain. Each message gets one extra block that hashes the 32-byte digest, with constant padding words, giving SHA256d. Yields the final digest |
+
+**Proof plan.**
+1. The fields proof exposes each transaction's ranges: `tx_sim` already walks them.
+2. The message stream equals `pad(serNoWit t)` (respectively `serWit`, or the header).
+3. The compression chain equals `sha256d`, reusing `compress_sound_air`.
+
+**Cost.** Hashing about two passes over the block (txid plus wtxid), plus padding, gives about
+2 × size message rows and about 2.25 × size SHA rows. For a 4 MB block that is about 2²³ rows per
+component. Without lifting (mixed component sizes), the byte table and fields must also pad to 2²³.
+This is the M3 performance wall (D-027); see the decision below.
+
 **Duplicate inputs.** `bad-txns-inputs-duplicate` needs a uniqueness argument (sorting).
 Within a block, M3b's UTXO update rejects a second spend of the same coin, so M3a may leave this
 rule to M3b. The statement then says so explicitly: `BlockValid` minus duplicate inputs, plus
