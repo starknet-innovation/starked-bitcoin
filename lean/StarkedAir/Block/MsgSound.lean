@@ -465,6 +465,82 @@ theorem pad_bytes {p : ℕ} (hp : p < n) (h : M P80 p = 1) :
     rw [hd] at this
     push_cast at this ⊢; linear_combination this
 
+/-- On a data row exactly one piece flag is set; in particular `PC0 + PC1` is a bit. -/
+theorem pieces_one {r : ℕ} (hr : r < n) (hd : M D r = 1) : M PC0 r + M PC1 r = 0 ∨ M PC0 r + M PC1 r = 1 := by
+  have := sat hsat (mem_transC (c := .sub (.add (k PC0) (.add (k PC1) (k PC2))) (k D)) (by simp [transC])) hr
+  simp only [Expr.eval, ev_k hr, hd] at this
+  have b0 := bool_val (bool_col hsat (e := PC0) (by simp) hr)
+  have b1 := bool_val (bool_col hsat (e := PC1) (by simp) hr)
+  have b2 := bool_val (bool_col hsat (e := PC2) (by simp) hr)
+  have hs : (M PC0 r).val + (M PC1 r).val + (M PC2 r).val = 1 := by
+    refine natCast_inj_of_lt ?_ (by unfold P; norm_num) ?_
+    · have := b0.2; have := b1.2; have := b2.2; exact lt_P (by omega)
+    · push_cast; rw [← b0.1, ← b1.1, ← b2.1]; linear_combination this
+  rw [b0.1, b1.1, ← Nat.cast_add]
+  have : (M PC0 r).val + (M PC1 r).val ≤ 1 := by omega
+  interval_cases h : (M PC0 r).val + (M PC1 r).val <;> simp
+
+theorem mt_bool {r : ℕ} (hr : r < n) : M MT r = 0 ∨ M MT r = 1 := by
+  have hm := defn hsat (a := MT) (e := .mul (.sub (om (k WTX)) (k HDR)) (k SEG)) (mem_msgC (by simp [msgC])) hr
+  have hx := sat hsat (mem_msgC (c := .mul (k WTX) (k HDR)) (by simp [msgC])) hr
+  simp only [Expr.eval, om, one, eval_cst, Nat.cast_one, ev_k hr] at hm hx
+  rw [hm]
+  rcases bool_col hsat (e := WTX) (by simp) hr with w | w <;> rcases bool_col hsat (e := HDR) (by simp) hr with h | h <;>
+    rcases bool_col hsat (e := SEG) (by simp) hr with g | g <;> simp_all
+
+/-- A data row continues, switches piece, or ends the data; when it neither continues nor switches it
+ends. -/
+theorem data_next {r : ℕ} (hr : r < n) (hd : M D r = 1) (hc : M CONT r ≠ 1) (hs : M SW r ≠ 1) : M ENDD r = 1 := by
+  obtain ⟨c, w, e⟩ := helpers hsat hr
+  have hz : M Z r = 1 := by
+    rcases bool_col hsat (e := Z) (by simp) hr with z | z
+    · exact absurd (by rw [c, hd, z]; ring) hc
+    · exact z
+  have hsw : M SW r = 0 := by
+    rw [w, hz, one_mul]
+    rcases mt_bool hsat hr with m | m <;> rcases pieces_one hsat hr hd with q | q
+    · rw [m, zero_mul]
+    · rw [m, zero_mul]
+    · rw [m, q, mul_zero]
+    · exact absurd (by rw [w, hz, m, q]; ring) hs
+  rw [e, hd, hz, hsw]; ring
+
+/-- **Data walk.** From a message's first row `r0`, while no earlier row ended the data, each row is a
+data row of the same message, at index `i`. -/
+theorem data_walk {r0 : ℕ} (hr0 : r0 < n) (hf : M FIRSTM r0 = 1) (i : ℕ)
+    (hi : ∀ j < i, M CONT (r0 + j) = 1 ∨ M SW (r0 + j) = 1) :
+    r0 + i < n ∧ M D (r0 + i) = 1 ∧ M IDX (r0 + i) = i ∧ (0 < i → M FIRSTM (r0 + i) = 0) ∧
+    ∀ c ∈ [HDR, WTX, SEG, TI, TA, TW, TL], M c (r0 + i) = M c r0 := by
+  induction i with
+  | zero =>
+    have := sat hsat (mem_msgC (c := .mul (k FIRSTM) (k IDX)) (by simp [msgC])) hr0
+    simp only [Expr.eval, ev_k hr0, hf, one_mul] at this
+    exact ⟨hr0, firstm_d hsat hr0 hf, by simpa using this, fun h => absurd h (lt_irrefl 0), fun _ _ => rfl⟩
+  | succ i ih =>
+    obtain ⟨hl, hd, hx, -, ht⟩ := ih (fun j hj => hi j (by omega))
+    have h2 := succ_lt hsat hl (a := D) (by simp [D]) (by simp [D, NIL]) hd
+    have hd2 : M D (r0 + i + 1) = 1 ∧ M FIRSTM (r0 + i + 1) = 0 := by
+      rcases hi i (by omega) with c | c
+      · obtain ⟨-, d, f, -⟩ := step_cont hsat h2 c; exact ⟨d, f⟩
+      · obtain ⟨-, -, d, f, -⟩ := step_sw hsat h2 c; exact ⟨d, f⟩
+    obtain ⟨ix, tx⟩ := in_msg hsat h2 hd2.2
+    rw [show r0 + (i + 1) = r0 + i + 1 by ring]
+    refine ⟨h2, hd2.1, by rw [ix, hx]; push_cast; ring, fun _ => hd2.2, fun c hc => by rw [tx c hc, ht c hc]⟩
+
+/-- **The data ends**: some row `r0 + d` ends it, every earlier one continues or switches. -/
+theorem data_exit {r0 : ℕ} (hr0 : r0 < n) (hf : M FIRSTM r0 = 1) :
+    ∃ d, (∀ j < d, M CONT (r0 + j) = 1 ∨ M SW (r0 + j) = 1) ∧ M ENDD (r0 + d) = 1 := by
+  have ex : ∃ d, ¬ (M CONT (r0 + d) = 1 ∨ M SW (r0 + d) = 1) := by
+    by_contra hne
+    have := (data_walk hsat hr0 hf n (fun j _ => not_not.mp (not_exists.mp hne j))).1
+    omega
+  have hmin : ∀ j < Nat.find ex, M CONT (r0 + j) = 1 ∨ M SW (r0 + j) = 1 :=
+    fun j hj => not_not.mp (Nat.find_min ex hj)
+  refine ⟨Nat.find ex, hmin, ?_⟩
+  · have hm := not_or.mp (Nat.find_spec ex)
+    obtain ⟨hl, hd, -⟩ := data_walk hsat hr0 hf (Nat.find ex) hmin
+    exact data_next hsat hl hd hm.1 hm.2
+
 end Rows
 
 end StarkedAir.Block.Msg
