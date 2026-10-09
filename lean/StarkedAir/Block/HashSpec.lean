@@ -140,4 +140,38 @@ theorem stateBytes_inj {A B : State} (h : stateBytes A = stateBytes B) : A = B :
   simp only [StarkedAir.Spec.Bitcoin.stateWord] at h0 h1 h2 h3 h4 h5 h6 h7
   subst h0 h1 h2 h3 h4 h5 h6 h7; rfl
 
+set_option maxHeartbeats 4000000 in
+/-- Byte `i` of a state: byte `i % 4` (big-endian) of word `i / 4`. -/
+theorem stateBytes_get (S : State) {i : ℕ} (hi : i < 32) :
+    (stateBytes S).getD i 0 =
+      UInt8.ofNat ((StarkedAir.Spec.Bitcoin.stateWord S (i / 4)).toNat / 2 ^ (8 * (3 - i % 4))) := by
+  obtain ⟨a, b, c, d, e, f, g, h⟩ := S
+  interval_cases i <;> simp [stateBytes, beBytes, StarkedAir.Spec.Bitcoin.stateWord]
+
+/-- **A state from its bytes**: if each word is the big-endian word of bytes `4w … 4w + 3` of a 32-byte list,
+the state's bytes are that list. -/
+theorem stateBytes_of_words {S : State} {L : Bytes} (hL : L.length = 32)
+    (h : ∀ w < 8, StarkedAir.Spec.Bitcoin.stateWord S w = BitVec.ofNat 32
+      ((L.getD (4 * w) 0).toNat * 2 ^ 24 + (L.getD (4 * w + 1) 0).toNat * 2 ^ 16 +
+        (L.getD (4 * w + 2) 0).toNat * 2 ^ 8 + (L.getD (4 * w + 3) 0).toNat)) :
+    stateBytes S = L := by
+  apply List.ext_getElem
+  · rw [stateBytes_length, hL]
+  · intro i h1 h2
+    have hi : i < 32 := by rw [stateBytes_length] at h1; exact h1
+    have g1 := stateBytes_get S hi
+    rw [List.getD_eq_getElem _ _ h1] at g1
+    rw [g1, h (i / 4) (by omega)]
+    apply UInt8.toNat.inj
+    rw [UInt8.toNat_ofNat']
+    have b0 := (L.getD (4 * (i / 4)) 0).toNat_lt
+    have b1 := (L.getD (4 * (i / 4) + 1) 0).toNat_lt
+    have b2 := (L.getD (4 * (i / 4) + 2) 0).toNat_lt
+    have b3 := (L.getD (4 * (i / 4) + 3) 0).toNat_lt
+    have gi : L[i] = L.getD (4 * (i / 4) + i % 4) 0 := by
+      rw [show 4 * (i / 4) + i % 4 = i by omega, List.getD_eq_getElem _ _ h2]
+    rw [gi, BitVec.toNat_ofNat]
+    have hk : i % 4 < 4 := Nat.mod_lt _ (by norm_num)
+    interval_cases hm : i % 4 <;> (try simp only [Nat.add_zero]) <;> omega
+
 end StarkedAir.Block.HashSpec
