@@ -97,6 +97,17 @@ pub fn messages(a: std.mem.Allocator, txs: []const TxRange) ![]Message {
     return out.toOwnedSlice(a);
 }
 
+/// Sets the word and length multiplicities: every word of every message is read once by the SHA
+/// component, and every message's padded length once.
+pub fn setUses(cols: [][]M31) void {
+    const n = cols[0].len;
+    for (0..n) |r| {
+        if (cols[NIL][r].eql(M31.one())) continue;
+        if (r % 4 == 3) cols[WM][r] = M31.one();
+        if (r % 64 == 63 and cols[LN][r].eql(M31.one())) cols[MM][r] = M31.one();
+    }
+}
+
 /// Rows needed: each message padded to whole 64-byte blocks, plus one padding row.
 pub fn rowsNeeded(msgs: []const Message) usize {
     var n: usize = 0;
