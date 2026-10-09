@@ -3,6 +3,7 @@
 `pad`) to the AIR's view: compressions over 16-word blocks, then a second hash over the digest block.
 -/
 import StarkedAir.Spec.Block
+import StarkedAir.Gadgets.HeaderChainSound
 
 namespace StarkedAir.Block.HashSpec
 
@@ -84,5 +85,40 @@ theorem sha256d_eq (m : Bytes) (b : ℕ) (hm : (pad m).length = 64 * b) :
   have h1 : sha256 m = stateBytes (chunkFold IV (pad m) b) := by rw [sha256, compressAll_fold IV (pad m) b hm]
   rw [sha256d, h1, sha256, compressAll_fold IV _ 1 h2]
   simp only [chunkFold, Nat.mul_zero, List.drop_zero, chunk_state]
+
+/-- Two states' words: a Merkle node's message block. -/
+def pairWords (A B : State) (t : ℕ) : Word :=
+  if t < 8 then StarkedAir.Spec.Bitcoin.stateWord A t else StarkedAir.Spec.Bitcoin.stateWord B (t - 8)
+
+/-- The padding block of a 64-byte message. -/
+def npadBlk (t : ℕ) : Word := if t = 0 then 0x80000000#32 else if t = 15 then 512#32 else 0#32
+
+set_option maxHeartbeats 4000000 in
+/-- **A Merkle node's hash**: SHA256d of two digests is two compressions (the digests' words, then the
+padding) and the second hash. -/
+theorem sha256d_pair (A B : State) :
+    sha256d (stateBytes A ++ stateBytes B) =
+      stateBytes (compress IV (StarkedAir.Spec.Bitcoin.digestBlock (compress (compress IV (pairWords A B)) npadBlk))) := by
+  have hl : (pad (stateBytes A ++ stateBytes B)).length = 64 * 2 := by
+    rw [pad_length]; simp [stateBytes_length]
+  rw [sha256d_eq _ 2 hl]
+  simp only [chunkFold, Nat.mul_zero, List.drop_zero, Nat.mul_one]
+  have h1 : compress IV (chunkWords ((pad (stateBytes A ++ stateBytes B)).take 64)) = compress IV (pairWords A B) := by
+    apply StarkedAir.HeaderChain.compress_congr
+    intro t ht
+    obtain ⟨a, b, c, d, e, f, g, h⟩ := A
+    obtain ⟨a', b', c', d', e', f', g', h'⟩ := B
+    interval_cases t <;>
+      simp [chunkWords, pad, stateBytes, beBytes, pairWords, StarkedAir.Spec.Bitcoin.stateWord, be4']
+  have h2 : chunkWords (((pad (stateBytes A ++ stateBytes B)).drop 64).take 64) = npadBlk := by
+    funext t
+    by_cases ht : t < 16
+    · interval_cases t <;> simp [chunkWords, pad, stateBytes, beBytes, npadBlk]
+    · have z : ∀ k, 64 ≤ k → ((List.drop 64 (pad (stateBytes A ++ stateBytes B))).take 64).toArray.getD k 0 = 0 := by
+        intro k hk; simp [Array.getD]; intro hp; omega
+      simp only [chunkWords, z (4 * t) (by omega), z (4 * t + 1) (by omega), z (4 * t + 2) (by omega),
+        z (4 * t + 3) (by omega), npadBlk, if_neg (by omega : ¬ t = 0), if_neg (by omega : ¬ t = 15)]
+      rfl
+  rw [h1, h2]
 
 end StarkedAir.Block.HashSpec

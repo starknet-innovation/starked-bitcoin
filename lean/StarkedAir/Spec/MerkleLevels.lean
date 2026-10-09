@@ -48,3 +48,40 @@ theorem merkleRoot_one (a : Bytes) : merkleRoot [a] = (a, false) := by
   rw [merkleRoot]; simp
 
 end StarkedAir.Spec.Block
+
+namespace StarkedAir.Spec.Block
+
+/-- The levels of a Merkle tree over `l`. -/
+def lvs (l : List Bytes) : ℕ → List Bytes
+  | 0 => l
+  | k + 1 => level (lvs l k)
+
+/-- **`merkleRoot` by levels.** If levels `0 … H − 1` have at least two entries and level `H` one, the
+root is level `H`'s entry and the tree is mutated iff some level below `H` has an equal pair. -/
+theorem merkleRoot_lvs (l : List Bytes) : ∀ H, (∀ k < H, 2 ≤ (lvs l k).length) → (lvs l H).length = 1 →
+    merkleRoot l = ((lvs l H).headD [], (List.range H).any fun k => dupPair (lvs l k)) := by
+  intro H
+  induction H generalizing l with
+  | zero =>
+    intro _ h1
+    obtain ⟨a, ha⟩ : ∃ a, l = [a] := by
+      match l, h1 with
+      | [a], _ => exact ⟨a, rfl⟩
+    simp only [lvs] at h1 ⊢; rw [ha, merkleRoot_one]; simp
+  | succ H ih =>
+    intro h2 h1
+    have hl : lvs (level l) = fun k => lvs l (k + 1) := by
+      funext k; induction k with
+      | zero => rfl
+      | succ k ihk => simp only [lvs]; rw [ihk]; rfl
+    have e := ih (level l) (fun k hk => by rw [hl]; exact h2 (k + 1) (by omega)) (by rw [hl]; exact h1)
+    have h0 : 1 < l.length := by have := h2 0 (by omega); simp only [lvs] at this; omega
+    rw [merkleRoot_step h0, e, hl]
+    simp only [List.range_succ_eq_map, List.any_cons, List.any_map, Function.comp_def]
+    simp only [lvs, Prod.mk.injEq, true_and]
+    rw [Bool.or_comm]
+
+theorem lvs_length (l : List Bytes) : ∀ k, (lvs l (k + 1)).length = ((lvs l k).length + 1) / 2
+  | k => level_length _
+
+end StarkedAir.Spec.Block
