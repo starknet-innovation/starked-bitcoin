@@ -22,6 +22,20 @@ Next: <the exact next step; must match status.md>
 ---
 
 
+## 2026-10-09 (session 5) — M3a.5 design pass
+Who: Claude (agent, Opus 5.5), on the owner's request
+Roadmap: BLOCK-AIR → in progress (M3a.5 BLK-CHECKS designed, not started)
+Done:
+- Design: [block-data.md § M3a.5](../design/block-data.md#m3a5-blk-checks-design-draft-2026-10-09).
+  - It flattens `checkBlock` into `BlockOK`.
+  - It adds public inputs 2–6 for the context.
+  - It adds four components: a range table, an opcode table, the sigop walker and `ctx`.
+  - It extends the fields component with per-token checks.
+  - The witness tree and commitment reuse the Merkle and SHA components.
+- D-035 recorded as proposed.
+- Duplicate inputs stay with M3b (D-031, already settled).
+Next: owner review of D-035, then stage M3a.5a (`Spec/BlockFlat.lean`).
+
 ## 2026-10-09 (session 4) — M3a.4 done: the txid Merkle root is proven
 Who: Claude (agent, Opus 5.5), on the owner's "go ahead"
 Roadmap: BLOCK-AIR → in progress (M3a.4 BLK-MERKLE done for the txid tree; witness tree with M3a.5)

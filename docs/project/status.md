@@ -7,7 +7,7 @@ follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work)
 - **Updated:** 2026-10-09
 - **HEAD at last update:** 3c29769 (plus this status commit)
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
-- **Current item:** M3a.5 `BLK-CHECKS` next; M3a.3 `BLK-SHA` and M3a.4 `BLK-MERKLE` done (2026-10-09). HC-HASHTREE done (full chain re-proven 2026-10-09).
+- **Current item:** M3a.5 `BLK-CHECKS`: design drafted (D-035, proposed), awaiting owner review; M3a.3 `BLK-SHA` and M3a.4 `BLK-MERKLE` done (2026-10-09). HC-HASHTREE done (full chain re-proven 2026-10-09).
 
 ## State in one paragraph
 
@@ -26,7 +26,8 @@ standard axioms only); the in-circuit verifiers and node code stay trusted
    `SHA256d(b.header)` and the `wtxid`/`txid` of `b.txs[TI]`. M3a.4 `BLK-MERKLE` (txid tree) is done and proven:
    `merkle_sound` states `merkleRoot (b.txs.map txid) = (headerMerkle b, false)`. Next is M3a.5
    `BLK-CHECKS` (`CheckTransaction`, coinbase rules, finality, BIP34, sigops, sizes and weight, the witness
-   tree and commitment); it needs a design pass first. See [airs/block.md](../airs/block.md).
+   tree and commitment). Its design is drafted ([block-data.md § M3a.5](../design/block-data.md#m3a5-blk-checks-design-draft-2026-10-09), D-035 proposed);
+   on the owner's confirmation, start stage M3a.5a (the flattened spec `BlockFlat`). See [airs/block.md](../airs/block.md).
 2. Proposed: REC-FUZZ (differential fuzzing of the plain verifier).
 
 ## In flight

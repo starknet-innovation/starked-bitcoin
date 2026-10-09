@@ -1,6 +1,6 @@
 # Block data (M3a) — design
 
-Status: current · Updated: 2026-10-08
+Status: current · Updated: 2026-10-09
 
 Decisions taken (see the end): multi-component LogUp (D-028), spent-output slots from day one
 (D-029), Blake2s commitment (D-030), duplicate inputs left to M3b (D-031). `IR-LOGUP` and
@@ -227,7 +227,198 @@ height and is contextual, so it goes with the M3a.5 checks.
 **Duplicate inputs.** `bad-txns-inputs-duplicate` needs a uniqueness argument (sorting).
 Within a block, M3b's UTXO update rejects a second spend of the same coin, so M3a may leave this
 rule to M3b. The statement then says so explicitly: `BlockValid` minus duplicate inputs, plus
-M3b. Owner to confirm when M3a.5 starts.
+M3b. Settled by D-031 (owner, 2026-10-08): M3b's obligation.
+
+### M3a.5 `BLK-CHECKS` design (draft, 2026-10-09)
+
+**Target.** `block_sound`: a satisfied block system, with public inputs `blockPubs ctx len nTx`, gives
+`∃ b, parseBlock raw = some b`, and
+
+    (∀ t ∈ b.txs, nodupBy (t.vin.map (·.prevout))) → checkBlock ctx raw = none
+
+The duplicate-inputs premise is M3b's obligation (D-031). Side conditions on the context:
+`height < 2^23` (the BIP34 push is then 4 bytes; that height is about 140 years away) and
+`prevMtp < P` (until about 2038; revisit before then).
+
+**Step 0: flatten the spec (pure Lean, no AIR).** `checkBlock` is a chain of `if`s that returns the
+first error. Proving `= none` only needs every condition. `Spec/BlockFlat.lean` proves
+`checkBlock c raw = none ↔ ∃ b, parseBlock raw = some b ∧ BlockOK c b`, where `BlockOK` is a
+conjunction of independent per-block, per-tx, per-input and per-output facts. It also proves these
+simplifications, which shrink the AIR:
+
+| Spec rule | Equivalent fact the AIR checks | Why |
+|---|---|---|
+| per-output `vout-negative`, `vout-toolarge`, `txouttotal-toolarge` | every value `≥ 0` and the tx's total `≤ MAX_MONEY` | with non-negative values, every prefix sum and every value is at most the total |
+| `bad-txns-oversize`, `bad-blk-length` (count and stripped size) | `weight ≤ 4,000,000` | `4·stripped ≤ 3·stripped + total`; each tx's stripped size is at least 10 bytes and at most the block's |
+| `bad-cb-multiple` | no input of a tx with index `≥ 1` has a null prevout | that is already `bad-txns-prevout-null`; a second coinbase is such a tx |
+| `bad-txns-vin-empty` | nothing | excluded by `Tx.WF` (M3a.2) |
+| `sigOps` (the `ops` walk) | a byte automaton: skip push data, count `ac/ad` (+1) and `ae/af` (+20) | a truncated push (or truncated length bytes) ends `ops`. Skipping to the script's end does the same, since skipped bytes are never opcodes |
+| `isFinal` | per tx: `lockTime = 0`, or `lockTime < threshold`, or every sequence is `0xffffffff` | as written |
+| `commitmentIndex` | the last coinbase output matching the pattern; no later output matches | as written |
+
+Each simplification is a lemma, and `BlockCheck.lean` cross-checks `BlockOK` against `checkBlock` on
+the samples and the 9 mutations.
+
+**Public inputs.** These are added after `pub 0 = len` and `pub 1 = nTx`:
+
+- `pub 2 = height`
+- `pub 3 = prevMtp`
+- `pub 4..6`: the activation bits `[height ≥ BIP34]`, `[height ≥ CSV]` and `[height ≥ SEGWIT]`
+
+The verifier and glue compute all of them from the header chain, as they already do for the
+height. Making the bits public avoids comparisons on public values inside the AIR. The statement
+takes `pubs = blockPubs ctx len nTx` as a hypothesis.
+
+**New shared gadget: a 16-bit range table.** A fixed component with `2^16` rows: a preprocessed value
+column, a multiplicity column and relation `REL_R16`. A value `x` is in `[0, B]` when `x` and `B − x`
+are both in the table, or are split into in-table limbs. Bit columns, as in the fields component,
+would cost about 30 columns per comparison; this costs one or two lookup sites.
+
+**Fields component: per-token checks (rows: tens per tx; extra width is cheap).**
+
+- **`OUT`** reads the 8 value bytes, at `START … START+7`:
+  - byte 7 = 0, and bytes 3–6 form a hi limb `< 2^27` (range lookups), so the value is in
+    `[0, 2^51)`;
+  - a per-tx running total, two limbs with a carry, resets at `TXH`;
+  - `LOCK` checks `MAX_MONEY − total ≥ 0` in limbs.
+- **`NOUT`**: `VAL · INV = 1` (outputs are not empty).
+- **`IN` of a tx with `TXI ≥ 1`** (a flag carried from the first `LOCK` row) shows a non-null prevout.
+  The prover picks a position `q < 36` and the byte there, then shows either `q < 32` and the
+  byte `≠ 0`, or `q ≥ 32` and the byte `≠ 0xff`. That takes one byte lookup, an inverse and the bits
+  of `q`.
+- **Finality**, with a mode per tx (three bits, summing to 1):
+  - `ZERO`: the 4 lock-time bytes read as 0;
+  - `LT`: the bytes are read and `byte3 < 128`, so `lockTime < 2^31` is exact in the field. With
+    `TY = [lockTime ≥ 500,000,000]`, checked by two range comparisons, the threshold is
+    `T = TY·cutoff + (1−TY)·height`, and `T − 1 − lockTime ≥ 0`;
+  - `SEQ`: every `IN` row of the tx reads its 4 sequence bytes as the constant `0xff`, at
+    `START + LEN − 4`, with multiplicity `SEQ·K_IN`.
+
+  `cutoff` comes from a `ctx` tuple (below).
+- **Witness bytes**: `W += SEG·(2 + START − WST)` on `LOCK` rows. This is the marker, flag and
+  witness section, so `stripped = len − W` and `weight = 4·len − 3·W`.
+- **Segwit count**: `NSEG += SEG` on `TXH` rows.
+- **Script spans**: `IN` and `OUT` rows with a non-empty script yield `script(start, len)`, where
+  `start = START + OFF + csLen`, with multiplicity 1. These feed the sigop walker.
+- **Coinbase commitment candidates** (`OUT` rows of tx 0, segwit bit on):
+  - `MATCH` is either `len ≥ 38` with the 6 bytes `6a24aa21a9ed` read as constants, or a mismatch
+    witness: `len ≤ 37` (range), or a position `q < 6` whose byte differs from the pattern (inverse).
+  - `CPOS` carries the latest match's script start; `HASC` carries whether one was seen.
+- **Last row** yields `totals(W, NSEG, HASC, CPOS)` to the `ctx` component.
+
+**Sigop walker (new component, one row per script byte).**
+
+- Each script starts at a row using `script(start, len)` from the fields component.
+- Rows walk `pos = start … start+len−1` and read `byte(pos, b)`.
+- Classification is a lookup into a 256-row opcode table `(b, push_n, pd_k, sig)`:
+  - `push_n`: the direct push length for `b < 0x4c`;
+  - `pd_k`: 1, 2 or 4 length bytes for `4c/4d/4e`;
+  - `sig`: 0, 1 or 20.
+- State per row: `OP` (an opcode byte), `LB` (a length byte, with its index), `DATA` (a skipped
+  byte), and the remaining skip count `R`.
+  - A push sets `R`. The next row is `DATA` while `R ≠ 0`, via an is-zero test.
+  - The script may end while `R > 0`; that is the truncated-push case.
+  - `PUSHDATA4`'s length can exceed `P`. If its top byte is `≥ 2` the push is at least `2^25`, so it
+    always runs to the end; an `INF` flag replaces `R`.
+- `SIGOPS += OP·sig` across all scripts. The last row yields `sigops(total)` to `ctx`.
+
+Soundness needs every yielded span to be walked exactly once, not only membership. LogUp balance
+gives `#yields = #uses` per tuple when counts are below `P`. Spans are distinct, since their starts
+differ. The walker uses spans only on its first rows.
+
+Cost: one row per scriptSig and scriptPubKey byte, at most the block length, usually much less.
+Merging the walker into the msg component, which already walks these bytes, is a later
+optimization.
+
+**Witness tree and commitment (Merkle and SHA reuse; no SHA change).**
+
+- Two pseudo-digests come from the `ctx` component, with ids outside the message and node ranges:
+  `ZERO_ID = 2^28` (32 zero bytes) and `NONCE_ID = 2^28 + 1` (the coinbase nonce).
+- The Merkle component gains a tree bit `WT`. Witness-tree level 1 uses `left = 2 + 4i`, the wtxid
+  messages, except leaf 0, which is `ZERO_ID`.
+- Witness-tree nodes yield their node tuple with the 4th entry set to 1. In SHA that entry only
+  gates the mutation check (`NNE = NODE·(1 − NDUP)`). Core ignores mutation in the witness tree, so
+  this matches it. The txid tree keeps `WT = 0`, so `merkle_sound` is unchanged in substance.
+- One extra Merkle row is the commitment node: `(witroot, NONCE_ID)` with the check off. Its digest
+  is `sha256d(witroot ‖ nonce)`, which is exactly Core's check.
+- Built only when the commitment is active, that is when the segwit bit is on and `HASC` is set.
+  Otherwise there are no witness rows.
+
+**`ctx` component (new, small fixed layout).** It does the once-per-block reads and comparisons.
+Preferred layout: one row per read, with preprocessed offsets and constants, so the Lean proof is one
+uniform row lemma.
+
+- It uses `tx(0, A0, SEG0, W0, L0)` for the coinbase position, `totals` and `sigops`.
+- **Coinbase shape**:
+  - byte `A0 + 4 + 2·SEG0 = 0x01` (one input; the 1-byte CompactSize is canonical);
+  - 32 zero hash bytes, then `ff ff ff ff`;
+  - the scriptSig length byte `s` in `[2, 100]`, by two range lookups (a 1-byte CompactSize, since
+    `s < 253`).
+- **BIP34** (bit on): `s ≥ 4`, and the next 4 bytes are `03 h0 h1 h2`, with `h0 + 256·h1 + 65536·h2 =
+  pub 2`, bytes range-checked and `h2 < 128`. That is `pushHeight` for heights in `[2^15, 2^23)`;
+  BIP34 starts at 227,931.
+- **Cutoff**: `cutoff = csv·pub 3 + (1 − csv)·time`, where `time` is header bytes 68–71 read from the
+  byte table, with byte 71 `< 128` (true for every header before 2038) so it is exact in the field. It yields `ctx(cutoff)` for the fields' `LOCK` rows.
+- **Commitment** (segwit bit on and `HASC`):
+  - coinbase witness `W0`: `01 20` and 32 nonce bytes, `L0 = W0 + 34` (exactly one 32-byte item);
+  - it yields `digest(NONCE_ID, nonce limbs)`;
+  - it reads 32 bytes at `CPOS + 6`;
+  - it uses `digest(COMMIT_NODE, those limbs)`.
+- **No commitment** (bit off, or no `HASC`): `NSEG = 0`, since no tx has a witness
+  (`unexpected-witness`).
+- **Totals**:
+  - `4,000,000 − (4·pub 0 − 3·W) ≥ 0`;
+  - `20,000 − SIGOPS ≥ 0`, since the spec checks `sigops · 4 ≤ 80,000`;
+  - both in limbs.
+
+**System.** Today's five components are bytes, fields, msg, sha and merkle. This adds `r16`, `opc`,
+`walk` and `ctx`, for nine. New relations:
+
+| Relation | Tuple |
+|---|---|
+| `REL_R16` | `(x)` |
+| `REL_OPC` | the opcode table row |
+| `REL_SCRIPT` | `script(start, len)` |
+| `REL_TOT` | `totals(W, NSEG, HASC, CPOS)` |
+| `REL_SIGOPS` | `sigops(total)` |
+| `REL_CTX` | `ctx(cutoff)` |
+
+`REL_DIGEST` gains the two pseudo-ids.
+
+**Stages** (each with Lean AIR, Zig witness and tests, then the Lean proof):
+
+1. **M3a.5a, spec**: `BlockFlat` with the simplification lemmas, the sigop automaton equivalence, and
+   the `BlockCheck` cross-check.
+2. **M3a.5b, per-tx checks**: the range table, public inputs 2–6, and the fields extensions (values,
+   non-empty outputs, non-null prevouts, finality, `W`, `NSEG`, `totals`). Lean: per-tx facts of
+   `BlockOK`.
+3. **M3a.5c, coinbase and context**: the `ctx` component (coinbase shape, BIP34, cutoff, weight).
+   Lean: the coinbase, BIP34, finality and weight parts.
+4. **M3a.5d, sigops**: the opcode table and walker. Lean: `walk = Σ sigOps`, and the bound.
+5. **M3a.5e, witness**: the witness tree, the commitment node and pseudo-digests, and the
+   commitment check. Lean: the `checkBlockContextual` witness branch.
+6. **`block_sound`**: assemble `BlockOK` and the `BlockFlat` equivalence.
+
+**Tests.**
+
+- All 11 samples prove or satisfy, including 774628 (3.96 MB) for row counts.
+- Each of the 9 `BlockCheck neg` mutations is rejected at the expected constraint, plus new ones:
+  - a sigop-heavy synthetic script;
+  - a truncated `PUSHDATA4`;
+  - a commitment output followed by a later decoy;
+  - nonce length 33;
+  - a non-final tx with one non-`ff` sequence;
+  - `lockTime` exactly at the threshold.
+
+**Risks.**
+
+- The `ctx` row layout and the number of lookup sites. The component is tiny, so site count barely
+  matters for cost, but it grows the Lean site enumeration.
+- The walker's state machine is the largest new AIR. `ops`' spec is subtle: a truncated length
+  stops, and so does a truncated push. Stage 1 proves the automaton equivalence first, so the AIR
+  targets a simple spec.
+- The time-based thresholds (`prevMtp`, header time) are kept below `P` by hypothesis. Past about
+  2038 the comparison must move to limbs.
 
 ## Cost (rough, to be measured)
 

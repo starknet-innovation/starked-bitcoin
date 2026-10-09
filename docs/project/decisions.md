@@ -187,3 +187,35 @@ Why: The MMR follows the segments and the recursion naturally (no padding nodes 
 Date: 2026-10-09 · By: Claude (agent), on the owner's "go ahead" for M3a.4 · Status: active
 Decision: Inner Merkle nodes are hashed by the existing SHA component, with two new period kinds (`NODE`: words from the children's digests; `NPAD`: constant padding). A Merkle component lays out the tree level by level and yields node tuples and lengths. The block's transaction count becomes public input 1, checked by the fields' first row. The mutation check (CVE-2012-2459) runs in the `NODE` period. The witness tree reuses this; its commitment check moves to M3a.5. Design: [block-data.md](../design/block-data.md#m3a4-blk-merkle-design-draft-2026-10-09).
 Why: Reuses the proven compression and `digest_sound`; child digests are already state words, so no byte handling. Without a public (or otherwise bound) count, a prover could hash a prefix of the transactions.
+
+### D-035 — M3a.5 checks a flattened spec with four new components
+Date: 2026-10-09 · By: Claude (agent), design pass on the owner's request · Status: proposed (owner to confirm)
+Decision:
+- **The spec is flattened in Lean first.** `checkBlock = none` is proven equivalent to a conjunction
+  `BlockOK`, with simplifications:
+  - the value rules reduce to "values are non-negative and the total is at most `MAX_MONEY`";
+  - the size rules reduce to weight;
+  - `bad-cb-multiple` reduces to `prevout-null`;
+  - sigops become a byte automaton.
+- **The context is public.** Height, `prevMtp` and the three activation bits become public inputs 2–6,
+  computed by the verifier.
+- **Four new components:**
+  - a 16-bit range table;
+  - an opcode table;
+  - a sigop walker, one row per script byte;
+  - a small `ctx` component for once-per-block reads (coinbase shape, BIP34, cutoff, commitment,
+    weight and sigop totals).
+- **Per-token checks go in the fields component.**
+- **The witness tree reuses the Merkle and SHA components with no SHA change.** Its nodes turn the
+  mutation check off, as Core does. The commitment is one more node, `(witroot, nonce)`, with the
+  nonce and the zero leaf supplied as pseudo-digests.
+
+Duplicate inputs stay with M3b (D-031). Design:
+[block-data.md](../design/block-data.md#m3a5-blk-checks-design-draft-2026-10-09).
+
+Why:
+- Proving `= none` needs only the conditions, not Core's error order.
+- The simplifications cut the AIR work, for example one total comparison per transaction instead of
+  three checks per output.
+- Public activation bits avoid comparisons on public values inside the AIR.
+- Reusing the SHA and Merkle components keeps the proven compression untouched.
