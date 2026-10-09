@@ -210,6 +210,127 @@ theorem last_not_node (hn : 0 < n) : M ACTN (n - 1) = 0 := by
   simp only [Expr.eval, om, one, eval_cst, Nat.cast_one, hnl, sub_zero, one_mul, ev_k (show n - 1 < n by omega)] at this
   exact this
 
+/-- **One level.** A level starting at row `s` over `p` children has `c = (p + 1) / 2` rows: index `j`,
+size `c`, the level's constants, `LAST` only on the last; then the next level starts, or (`c = 1`) the
+root row follows. -/
+theorem level_rows {s p : ℕ} (hs : s < n) (hn : n ≤ 2 ^ 25) (ha : M ACTN s = 1) (hf : M FIRSTL s = 1)
+    (hp : M PCNT s = (p : F)) (hp25 : p < 2 ^ 25) :
+    2 ≤ p ∧ s + (p + 1) / 2 < n ∧
+      (∀ j < (p + 1) / 2, M ACTN (s + j) = 1 ∧ M I (s + j) = (j : F) ∧ M CNT (s + j) = (((p + 1) / 2 : ℕ) : F) ∧
+        M PCNT (s + j) = (p : F) ∧ M BASE (s + j) = M BASE s ∧ M PBASE (s + j) = M PBASE s ∧
+        M L1 (s + j) = M L1 s ∧ M ODD (s + j) = ((p % 2 : ℕ) : F) ∧
+        M LAST (s + j) = (if j + 1 = (p + 1) / 2 then 1 else 0)) ∧
+      ((p + 1) / 2 = 1 → M RT (s + 1) = 1) ∧
+      ((p + 1) / 2 ≠ 1 → M ACTN (s + (p + 1) / 2) = 1 ∧ M FIRSTL (s + (p + 1) / 2) = 1) := by
+  classical
+  -- rows continue while no `LAST`
+  have walkA : ∀ j, s + j < n → (∀ j' < j, M LAST (s + j') = 0) →
+      M ACTN (s + j) = 1 ∧ (0 < j → M FIRSTL (s + j) = 0) ∧ M I (s + j) = (j : F) ∧
+      ∀ c ∈ [CNT, PCNT, BASE, PBASE, L1], M c (s + j) = M c s := by
+    intro j
+    induction j with
+    | zero =>
+      intro _ _
+      have := (row0 hsat (show 0 < n by omega))
+      refine ⟨ha, fun h => absurd h (lt_irrefl 0), ?_, fun c _ => rfl⟩
+      rcases Nat.eq_zero_or_pos s with e | e
+      · subst e; simpa using this.2.2.2.2
+      · have := start_row hsat (r := s - 1) (by omega) (by rw [show s - 1 + 1 = s by omega]; exact ha)
+          (by rw [show s - 1 + 1 = s by omega]; exact hf)
+        rw [show s - 1 + 1 = s by omega] at this; simpa using this.1
+    | succ j ih =>
+      intro hj hl
+      obtain ⟨a, -, i, cs⟩ := ih (by omega) (fun j' h => hl j' (by omega))
+      have hr : s + j + 1 < n := by omega
+      obtain ⟨k1, -, k3⟩ := kind_next hsat hr
+      have hrn : M RN (s + j) = 0 := by rw [rn_eq hsat (by omega), hl j (by omega), zero_mul]
+      have a1 : M ACTN (s + j + 1) = 1 := by rw [k1, a, hrn]; ring
+      have f1 : M FIRSTL (s + j + 1) = 0 := by rw [k3 a1, hl j (by omega)]
+      obtain ⟨i1, c1⟩ := cont_row hsat hr a1 f1
+      rw [show s + (j + 1) = s + j + 1 by ring]
+      exact ⟨a1, fun _ => f1, by rw [i1, i]; push_cast; ring, fun c hc => (c1 c hc).trans (cs c hc)⟩
+  -- some row of the level is `LAST`
+  have ex : ∃ j, s + j < n ∧ M LAST (s + j) = 1 := by
+    by_contra hne
+    push Not at hne
+    have hz : ∀ j, s + j < n → M LAST (s + j) = 0 := fun j hj =>
+      ((flag01 hsat (c := LAST) (Or.inl rfl) hj).resolve_right (hne j hj))
+    have := (walkA (n - 1 - s) (by omega) (fun j' h => hz j' (by omega))).1
+    rw [show s + (n - 1 - s) = n - 1 by omega, last_not_node hsat (by omega)] at this
+    exact zero_ne_one this
+  have hspec := Nat.find_spec ex
+  have hmin0 : ∀ {j}, j < Nat.find ex → ¬ (s + j < n ∧ M LAST (s + j) = 1) := fun h => Nat.find_min ex h
+  generalize Nat.find ex = jl at hspec hmin0
+  obtain ⟨hjn, hlast⟩ := hspec
+  have hmin : ∀ j < jl, M LAST (s + j) = 0 := fun j h =>
+    (flag01 hsat (c := LAST) (Or.inl rfl) (by omega)).resolve_right (fun h1 => hmin0 h ⟨by omega, h1⟩)
+  obtain ⟨ajl, -, ijl, cjl⟩ := walkA jl hjn hmin
+  -- the level's size
+  have hcnt : M CNT (s + jl) = ((jl + 1 : ℕ) : F) := by
+    have := (last_iff hsat hjn).mp hlast
+    rw [ijl] at this; push_cast; linear_combination -this
+  obtain ⟨hsz, hp1⟩ := size_eq hsat hjn ajl
+  rw [hcnt, cjl PCNT (by simp), hp] at hsz
+  rw [cjl PCNT (by simp), hp] at hp1
+  have hodd := kbool hsat (c := ODD) (by simp) hjn
+  have hn25 : jl < 2 ^ 25 := by omega
+  have hnat : 2 * (jl + 1) = p + (M ODD (s + jl)).val ∧ (M ODD (s + jl)).val ≤ 1 := by
+    have hov : (M ODD (s + jl)).val ≤ 1 := by rcases hodd with h | h <;> simp [h, ZMod.val_one]
+    refine ⟨natCast_inj_of_lt (Fields.lt_P (by omega)) (Fields.lt_P (by omega)) ?_, hov⟩
+    push_cast at hsz ⊢; rw [ZMod.natCast_zmod_val]; exact hsz
+  have hc : jl + 1 = (p + 1) / 2 := by omega
+  have hp2 : 2 ≤ p := by
+    by_contra h
+    have : p = 1 := by omega
+    exact hp1 (by rw [this]; simp)
+  have hoddv : M ODD (s + jl) = ((p % 2 : ℕ) : F) := by
+    rw [← ZMod.natCast_zmod_val (M ODD (s + jl))]; congr 1; omega
+  -- the next row
+  have hlt : s + jl + 1 < n := by
+    by_contra h
+    have : s + jl = n - 1 := by omega
+    rw [this, last_not_node hsat (by omega)] at ajl; exact zero_ne_one ajl
+  obtain ⟨k1, k2, k3⟩ := kind_next hsat hlt
+  have hc1 : M C1 (s + jl) = (if jl = 0 then 1 else 0) := by
+    rcases flag01 hsat (c := C1) (Or.inr rfl) hjn with h | h
+    · rw [h]; split_ifs with h0
+      · exfalso; have := (c1_iff hsat hjn).mp; rw [hcnt, h0] at this
+        rcases (flag01 hsat (c := C1) (Or.inr rfl) hjn) with g | g
+        · have := (c1_iff hsat hjn).mpr (by rw [hcnt, h0]; simp); rw [h] at this; exact zero_ne_one this
+        · rw [h] at g; exact zero_ne_one g
+      · rfl
+    · rw [h]; split_ifs with h0
+      · rfl
+      · have := (c1_iff hsat hjn).mp h; rw [hcnt] at this
+        have e : ((jl : ℕ) : F) = ((0 : ℕ) : F) := by push_cast at this ⊢; linear_combination this
+        exact absurd (natCast_inj_of_lt (Fields.lt_P (by omega)) (Fields.lt_P (by omega)) e) h0
+  have hrn : M RN (s + jl) = (if jl = 0 then 1 else 0) := by rw [rn_eq hsat hjn, hlast, hc1, one_mul]
+  refine ⟨hp2, by omega, fun j hj => ?_, fun h1 => ?_, fun h1 => ?_⟩
+  · have hjj : j ≤ jl := by omega
+    obtain ⟨aj, -, ij, cj⟩ := walkA j (by omega) (fun j' h => hmin j' (by omega))
+    refine ⟨aj, ij, ?_, (cj PCNT (by simp)).trans hp, cj BASE (by simp), cj PBASE (by simp), cj L1 (by simp), ?_, ?_⟩
+    · rw [cj CNT (by simp), ← cjl CNT (by simp), hcnt, hc]
+    · rcases Nat.lt_or_ge j jl with h | h
+      · -- `ODD` is determined by the level's sizes, which are constant
+        have e1 := (size_eq hsat (by omega) aj).1
+        have e2 := (size_eq hsat hjn ajl).1
+        rw [cj CNT (by simp), cj PCNT (by simp)] at e1
+        rw [cjl CNT (by simp), cjl PCNT (by simp)] at e2
+        rw [← hoddv]; linear_combination e2 - e1
+      · rw [show j = jl by omega]; exact hoddv
+    · split_ifs with h
+      · rw [show j = jl by omega]; exact hlast
+      · exact hmin j (by omega)
+  · have hj0 : jl = 0 := by omega
+    rw [hj0] at hrn k2 ajl
+    simp only [Nat.add_zero, if_true] at hrn k2 ajl
+    rw [k2, ajl, hrn, one_mul]
+  · have hj0 : jl ≠ 0 := by omega
+    rw [if_neg hj0] at hrn
+    have a1 : M ACTN (s + jl + 1) = 1 := by rw [k1, ajl, hrn]; ring
+    rw [show s + (p + 1) / 2 = s + jl + 1 by omega]
+    exact ⟨a1, (k3 a1).trans hlast⟩
+
 end Rows2
 
 end StarkedAir.Block.Merkle
