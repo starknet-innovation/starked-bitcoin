@@ -150,6 +150,43 @@ theorem trans_all {r : ℕ} (hr : r + 1 < n) :
   · have := t (.sub (k PC2) (.add (.mul (kp CONT) (kp PC2)) (.mul (kp SW) (kp PC1)))) (by simp [transC])
     simp only [Expr.eval, ev_k hr, ev_kp hr] at this; exact sub_eq_zero.mp this
 
+/-- The cyclic predecessor of row `r`. -/
+def prv (n r : ℕ) : ℕ := (r + n - 1) % n
+
+omit hsat in
+theorem wrap_prv {r : ℕ} (hr : r < n) : wrap n r (-1) = prv n r := by
+  unfold wrap prv
+  have hn : (0 : ℤ) < n := by omega
+  rw [show ((r : ℤ) + -1) = ((r + n - 1 : ℕ) : ℤ) - (n : ℤ) by push_cast [show 1 ≤ r + n by omega]; ring,
+    Int.sub_emod, Int.emod_self, sub_zero, Int.emod_emod_of_dvd _ (dvd_refl _)]
+  rw [show ((r + n - 1 : ℕ) : ℤ) % (n : ℤ) = (((r + n - 1) % n : ℕ) : ℤ) by push_cast; rfl, Int.toNat_natCast]
+
+omit hsat in
+theorem ev_kpp {c r : ℕ} (hr : r < n) : (kp c).eval n preCols pub M r = M c (prv n r) := by
+  simp only [kp, eval_col, wrap_prv hr]
+
+/-- The last row pads. -/
+theorem last_nil (hn : 0 < n) : M NIL (n - 1) = 1 := by
+  have hl : n - 1 < n := by omega
+  have := sat hsat (mem_kindC (c := .mul (om (pre NOTLAST)) (om (k NIL))) (by simp [kindC])) hl
+  have hnl : (pre NOTLAST).eval n preCols pub M (n - 1) = 0 := by
+    simp [pre, Expr.eval, wrap_zero hl, preCols, PreCol.eval, NOTLAST]; omega
+  simp only [Expr.eval, om, one, eval_cst, Nat.cast_one, hnl, sub_zero, one_mul, ev_k hl, sub_eq_zero] at this
+  exact this.symm
+
+/-- Rows that are not data have no piece. -/
+theorem pieces_zero {r : ℕ} (hr : r < n) (hd : M D r = 0) : M PC0 r = 0 ∧ M PC1 r = 0 ∧ M PC2 r = 0 := by
+  have := sat hsat (mem_transC (c := .sub (.add (k PC0) (.add (k PC1) (k PC2))) (k D)) (by simp [transC])) hr
+  simp only [Expr.eval, ev_k hr, hd, sub_zero] at this
+  have b0 := bool_val (bool_col hsat (e := PC0) (by simp) hr)
+  have b1 := bool_val (bool_col hsat (e := PC1) (by simp) hr)
+  have b2 := bool_val (bool_col hsat (e := PC2) (by simp) hr)
+  have hs : (M PC0 r).val + (M PC1 r).val + (M PC2 r).val = 0 := by
+    refine natCast_inj_of_lt ?_ (by unfold P; norm_num) ?_
+    · have := b0.2; have := b1.2; have := b2.2; exact lt_P (by omega)
+    · push_cast; rw [← b0.1, ← b1.1, ← b2.1]; linear_combination this
+  exact ⟨(ZMod.val_eq_zero _).mp (by omega), (ZMod.val_eq_zero _).mp (by omega), (ZMod.val_eq_zero _).mp (by omega)⟩
+
 end Rows
 
 end StarkedAir.Block.Msg
