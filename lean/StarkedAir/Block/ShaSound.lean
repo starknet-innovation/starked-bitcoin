@@ -19,6 +19,12 @@ def fold (M : ℕ → ℕ → F) (s0 : ℕ) : ℕ → Spec.Sha256.State
 def dblBlock (d : Spec.Sha256.State) (t : ℕ) : Spec.Sha256.Word :=
   if t < 8 then Spec.Bitcoin.stateWord d t else BitVec.ofNat 32 (dblWord t)
 
+theorem one_add_one_ne : (1 : F) + 1 ≠ 0 := by
+  intro e
+  have := natCast_inj_of_lt (a := 2) (b := 0) (by unfold P; norm_num) (by unfold P; norm_num)
+    (by push_cast; linear_combination e)
+  omega
+
 section Period
 
 variable {n : ℕ} {pub : ℕ → F} {M : ℕ → ℕ → F}
@@ -253,6 +259,124 @@ theorem dbl_out {s : ℕ} (hs : s % 72 = 0) (h72 : 72 ≤ s) (hsn : s + 72 ≤ n
     have := (flags_excl hsat (show s < n by omega)).1; rw [h, mul_one] at this; exact this
   rw [← period_compress hsat hs hsn, input_iv hsat hs hsn (by rw [hf, h, zero_add])]
   exact HeaderChain.compress_congr _ (fun t ht => by rw [dbl_message hsat hs h72 hsn h t ht]; rfl)
+
+theorem order_sat {c : Expr} (hc : c ∈ orderC) {r : ℕ} (hr : r < n) : c.eval n preCols pub M r = 0 :=
+  hsat r hr c (by simp only [constraints, List.mem_append]; tauto)
+
+theorem fbool {c : ℕ} (hc : c = FST ∨ c = DBL ∨ c = NILS) {r : ℕ} (hr : r < n) : M c r = 0 ∨ M c r = 1 := by
+  have hm : boolC (k c) ∈ flagC := by rcases hc with rfl | rfl | rfl <;> simp [flagC]
+  have := flag_sat hsat hm hr
+  simp only [boolC, Expr.eval, k, Sha256.eval_col, Sha256.eval_cst, wrap_zero hr, Nat.cast_one] at this
+  rcases mul_eq_zero.mp this with h | h
+  · exact Or.inl h
+  · exact Or.inr (sub_eq_zero.mp h)
+
+theorem row0_at {q : ℕ} (hr : 72 * q < n) : (pre ROW0).eval n preCols pub M (72 * q) = 1 := by
+  rw [eval_per72 hsat (i := ROW0) (f := fun q => if q = 0 then 1 else 0) rfl hr]; simp
+
+/-- What a period start says about the previous period. -/
+theorem prev_facts {q : ℕ} (hq : 1 ≤ q) (hn : 72 * q + 72 ≤ n) :
+    (M CHN (72 * q) = 1 → M MID (72 * q) = M MID (72 * (q - 1)) ∧
+      M BLKI (72 * q) = M BLKI (72 * (q - 1)) + 1 ∧ M DBL (72 * (q - 1)) + M NILS (72 * (q - 1)) = 0) ∧
+    (M DBL (72 * q) = 1 → M MID (72 * q) = M MID (72 * (q - 1)) ∧
+      M DBL (72 * (q - 1)) + M NILS (72 * (q - 1)) = 0) := by
+  have hr : 72 * q < n := by omega
+  have r0 := row0_at hsat hr
+  have hw : wrap n (72 * q) (-1) = 72 * (q - 1) + 71 := by
+    rw [show (-1 : ℤ) = -((1 : ℕ) : ℤ) by simp, Sha256.wrap_back (by omega) hr]; omega
+  have pc := fun (X : ℕ) (hX : X = MID ∨ X = BLKI ∨ X = FST ∨ X = DBL ∨ X = NILS) =>
+    per_const hsat hX (s := 72 * (q - 1)) (by omega) 71 (by norm_num) (by omega)
+  have e := fun (c : Expr) (h : c ∈ orderC) => order_sat hsat h hr
+  have ev : ∀ X, (kp X).eval n preCols pub M (72 * q) = M X (72 * (q - 1) + 71) := fun X => by
+    simp [kp, Sha256.eval_col, hw]
+  refine ⟨fun hc => ⟨?_, ?_, ?_⟩, fun hd => ⟨?_, ?_⟩⟩
+  · have := e _ (show Expr.mul (pre ROW0) (.mul (k CHN) (.sub (k MID) (kp MID))) ∈ orderC by simp [orderC])
+    simp only [Expr.eval, r0, one_mul, k, Sha256.eval_col, wrap_zero hr, hc, ev, pc MID (by simp)] at this
+    exact sub_eq_zero.mp this
+  · have := e _ (show Expr.mul (pre ROW0) (.mul (k CHN) (.sub (.sub (k BLKI) (kp BLKI)) one)) ∈ orderC by simp [orderC])
+    simp only [Expr.eval, r0, one_mul, k, Sha256.eval_col, wrap_zero hr, hc, ev, pc BLKI (by simp), one,
+      Sha256.eval_cst, Nat.cast_one] at this
+    linear_combination this
+  · have := e _ (show Expr.mul (pre ROW0) (.mul (k CHN) (.add (kp DBL) (kp NILS))) ∈ orderC by simp [orderC])
+    simp only [Expr.eval, r0, one_mul, k, Sha256.eval_col, wrap_zero hr, hc, ev, pc DBL (by simp), pc NILS (by simp)] at this
+    exact this
+  · have := e _ (show Expr.mul (pre ROW0) (.mul (k DBL) (.sub (k MID) (kp MID))) ∈ orderC by simp [orderC])
+    simp only [Expr.eval, r0, one_mul, k, Sha256.eval_col, wrap_zero hr, hd, ev, pc MID (by simp)] at this
+    exact sub_eq_zero.mp this
+  · have := e _ (show Expr.mul (pre ROW0) (.mul (k DBL) (.add (kp DBL) (kp NILS))) ∈ orderC by simp [orderC])
+    simp only [Expr.eval, r0, one_mul, k, Sha256.eval_col, wrap_zero hr, hd, ev, pc DBL (by simp), pc NILS (by simp)] at this
+    exact this
+
+theorem not_dn {r : ℕ} (hr : r < n) (h : M DBL r + M NILS r = 0) : M DBL r = 0 ∧ M NILS r = 0 := by
+  rcases fbool hsat (c := DBL) (by simp) hr with a | a <;> rcases fbool hsat (c := NILS) (by simp) hr with b | b <;>
+    rw [a, b] at h <;> simp_all
+  exact absurd h one_add_one_ne
+
+theorem fst_or_chn {r : ℕ} (hr : r < n) (hd : M DBL r = 0) (hn : M NILS r = 0) : M FST r = 1 ∨ M CHN r = 1 := by
+  rcases fbool hsat (c := FST) (by simp) hr with a | a
+  · right; rw [chn_eq hsat hr, a, hd, hn]; ring
+  · left; exact a
+
+/-- **Back to the first block.** From a period that is a first block or a continuation, the walk
+back through continuations reaches its message's first block; message id constant, block indices
+counting from 0. -/
+theorem walk : ∀ q, 72 * q + 72 ≤ n → (M FST (72 * q) = 1 ∨ M CHN (72 * q) = 1) →
+    ∃ q0 ≤ q, M FST (72 * q0) = 1 ∧ (∀ j, q0 < j → j ≤ q → M CHN (72 * j) = 1) ∧
+      (∀ j, q0 ≤ j → j ≤ q → M MID (72 * j) = M MID (72 * q) ∧ M BLKI (72 * j) = ((j - q0 : ℕ) : F)) := by
+  intro q
+  induction q with
+  | zero =>
+    intro hn h
+    have hr : 72 * 0 < n := by omega
+    have hf : M FST 0 = 1 := by
+      rcases h with h | h
+      · exact h
+      · exfalso
+        have := order_sat hsat (c := .mul (pre FIRST) (.add (k CHN) (k DBL))) (by simp [orderC]) (show 0 < n by omega)
+        have hfirst : (pre FIRST).eval n preCols pub M 0 = 1 := by
+          simp only [pre, Expr.eval, wrap_zero (show 0 < n by omega)]
+          rw [show preCols.getD FIRST (.periodic [0]) = .isFirst from rfl]; simp [PreCol.eval]
+        simp only [Expr.eval, hfirst, one_mul, k, Sha256.eval_col, wrap_zero (show 0 < n by omega)] at this
+        simp only [Nat.mul_zero] at h
+        have hc := chn_eq hsat (show 0 < n by omega)
+        rw [h] at this hc
+        rcases fbool hsat (c := DBL) (by simp) (show 0 < n by omega) with d | d
+        · rw [d] at this; simp at this
+        · rw [d] at hc this; exact one_add_one_ne this
+    refine ⟨0, le_rfl, by simpa using hf, fun j h1 h2 => by omega, fun j h1 h2 => ?_⟩
+    obtain rfl : j = 0 := by omega
+    refine ⟨rfl, ?_⟩
+    have := order_sat hsat (c := .mul (k FST) (k BLKI)) (by simp [orderC]) (show 0 < n by omega)
+    simp only [Expr.eval, k, Sha256.eval_col, wrap_zero (show 0 < n by omega), hf, one_mul] at this
+    simpa using this
+  | succ q ih =>
+    intro hn h
+    have hr : 72 * (q + 1) < n := by omega
+    rcases fbool hsat (c := FST) (by simp) hr with hf | hf
+    · -- A continuation: step back.
+      have hc : M CHN (72 * (q + 1)) = 1 := by rcases h with h | h; rw [hf] at h; exact absurd h zero_ne_one; exact h
+      obtain ⟨hm, hb, hdn⟩ := (prev_facts hsat (q := q + 1) (by omega) (by omega)).1 hc
+      simp only [Nat.add_sub_cancel] at hm hb hdn
+      obtain ⟨hd, hnl⟩ := not_dn hsat (by omega) hdn
+      obtain ⟨q0, hq0, f0, c0, v0⟩ := ih (by omega) (fst_or_chn hsat (by omega) hd hnl)
+      refine ⟨q0, by omega, f0, fun j h1 h2 => ?_, fun j h1 h2 => ?_⟩
+      · rcases Nat.lt_or_ge j (q + 1) with hj | hj
+        · exact c0 j h1 (by omega)
+        · obtain rfl : j = q + 1 := by omega
+          exact hc
+      · rcases Nat.lt_or_ge j (q + 1) with hj | hj
+        · obtain ⟨a, b⟩ := v0 j h1 (by omega); exact ⟨a.trans hm.symm, b⟩
+        · obtain rfl : j = q + 1 := by omega
+          refine ⟨rfl, ?_⟩
+          rw [hb, (v0 q hq0 le_rfl).2, show q + 1 - q0 = (q - q0) + 1 by omega]
+          push_cast; ring
+    · -- A first block.
+      refine ⟨q + 1, le_rfl, hf, fun j h1 h2 => by omega, fun j h1 h2 => ?_⟩
+      obtain rfl : j = q + 1 := by omega
+      refine ⟨rfl, ?_⟩
+      have := order_sat hsat (c := .mul (k FST) (k BLKI)) (by simp [orderC]) hr
+      simp only [Expr.eval, k, Sha256.eval_col, wrap_zero hr, hf, one_mul] at this
+      simpa using this
 
 end Period
 
