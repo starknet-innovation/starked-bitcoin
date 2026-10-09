@@ -183,6 +183,17 @@ pub const Tables = struct {
     }
 };
 
+/// A preprocessed column of a verify request: its id and log size.
+pub const Column = @typeInfo(@FieldType(circuit_cpu.verify.Request, "preprocessed_column_log_sizes")).pointer.child;
+
+/// A circuit's preprocessed columns, as a verify request lists them (allocated in `a`).
+pub fn requestColumns(a: std.mem.Allocator, pp: *const preprocessed.PreprocessedCircuit) ![]Column {
+    const layout = pp.layout();
+    const columns = try a.alloc(Column, layout.entries.len);
+    for (layout.entries, columns) |entry, *c| c.* = .{ .id = try a.dupe(u8, entry.id), .log_size = entry.log_size };
+    return columns;
+}
+
 /// A proof of a circuit's execution, as the native and in-circuit verifiers take it.
 pub const CircuitProof = struct {
     prepared: circuit_cpu.verifier_proof.VerifierProof,
@@ -210,10 +221,7 @@ pub fn proveCircuit(gpa: std.mem.Allocator, a: std.mem.Allocator, ctx: *Context(
     var prepared = try circuit_cpu.verifier_proof.prepare(gpa, &proof);
     errdefer prepared.deinit();
 
-    const layout = pp.layout();
-    const Column = @typeInfo(@TypeOf(@as(circuit_cpu.verify.Request, undefined).preprocessed_column_log_sizes)).pointer.child;
-    const columns = try a.alloc(Column, layout.entries.len);
-    for (layout.entries, columns) |entry, *c| c.* = .{ .id = try a.dupe(u8, entry.id), .log_size = entry.log_size };
+    const columns = try requestColumns(a, &pp);
     var digest: [8]u32 = undefined;
     for (proof.output_values, &digest) |value, *w| {
         const limbs = value.toM31Array();

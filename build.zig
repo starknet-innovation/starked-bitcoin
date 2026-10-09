@@ -18,6 +18,11 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     }).module("stwo_cpu_backend");
 
+    // The circuit CPU integration and its own instance of the recursion wire module (one module
+    // per file per compilation, so its types match the integration's).
+    const stwo_circuit_cpu = b.dependency("stwo_circuit_cpu_integration", .{ .target = target, .optimize = optimize }).module("stwo_circuit_cpu_integration");
+    const stwo_wire = stwo_circuit_cpu.import_table.get("stwo_circuit_recursion_wire") orelse @panic("circuit CPU integration is missing its recursion wire module");
+
     const lib = b.addModule("starked_bitcoin", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
@@ -28,7 +33,8 @@ pub fn build(b: *std.Build) void {
             .{ .name = "stwo_cpu_backend", .module = stwo_cpu_backend },
             .{ .name = "stwo_proof_wire", .module = b.dependency("stwo_proof_wire", .{ .target = target, .optimize = optimize }).module("stwo_proof_wire") },
             .{ .name = "stwo_circuit_frontend", .module = b.dependency("stwo_circuit_frontend", .{ .target = target, .optimize = optimize }).module("stwo_circuit_frontend") },
-            .{ .name = "stwo_circuit_cpu_integration", .module = b.dependency("stwo_circuit_cpu_integration", .{ .target = target, .optimize = optimize }).module("stwo_circuit_cpu_integration") },
+            .{ .name = "stwo_circuit_cpu_integration", .module = stwo_circuit_cpu },
+            .{ .name = "stwo_circuit_recursion_wire", .module = stwo_wire },
         },
     });
 
@@ -101,6 +107,29 @@ pub fn build(b: *std.Build) void {
         spike.linkFramework("Metal");
         spike.linkSystemLibrary("objc");
         b.installArtifact(spike);
+    }
+    // `chainproof`: the chain proof as a file (PROOF-STORE). Provenance: the commits it was built from.
+    {
+        const opts = b.addOptions();
+        const repo = std.mem.trim(u8, b.run(&.{ "git", "-C", b.build_root.path orelse ".", "rev-parse", "HEAD" }), " \n");
+        const dirty = std.mem.trim(u8, b.run(&.{ "git", "-C", b.build_root.path orelse ".", "status", "--porcelain", "--untracked-files=no" }), " \n").len != 0;
+        opts.addOption([]const u8, "repo_commit", b.fmt("{s}{s}", .{ repo, if (dirty) "+dirty" else "" }));
+        opts.addOption([]const u8, "stwo_commit", std.mem.trim(u8, b.run(&.{ "git", "-C", b.pathFromRoot("third_party/stwo-zig"), "rev-parse", "HEAD" }), " \n"));
+        const chainproof = b.addExecutable(.{
+            .name = "chainproof",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/bin/chainproof.zig"),
+                .target = target,
+                .optimize = optimize,
+                .imports = &.{
+                    .{ .name = "starked_bitcoin", .module = lib },
+                    .{ .name = "stwo_core", .module = stwo_core },
+                    .{ .name = "build_options", .module = opts.createModule() },
+                },
+            }),
+        });
+        chainproof.linkLibC();
+        b.installArtifact(chainproof);
     }
     const test_step = b.step("test", "Run starked-bitcoin tests");
     test_step.dependOn(&b.addRunArtifact(tests).step);

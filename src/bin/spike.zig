@@ -208,7 +208,7 @@ fn agg(gpa: std.mem.Allocator, a: std.mem.Allocator, log_size: u32, n_leaves: us
     var first = try L.buildSegmentLeaf(gpa, a, log_size, all[0..per], H.genesis_start);
     var shape = try N.Shape.init(gpa, &tables.table, first.paddedSizes(), fri);
     defer shape.deinit(gpa);
-    const node_id = try N.nodeIdentity(gpa, &tables.table, &shape);
+    const node_id = try N.nodeIdentity(gpa, a, &tables.table, &shape);
     std.debug.print("shape and node identity: {d:.1}s\n", .{secs(timer.lap())});
 
     const items = try a.alloc(N.Proved, n_leaves);
@@ -310,7 +310,7 @@ fn chain(gpa: std.mem.Allocator, a: std.mem.Allocator, log_size: u32, n_queries:
     }
     var shape = try N.Shape.init(gpa, &tables.table, start.?, fri);
     defer shape.deinit(gpa);
-    const node_id = try N.nodeIdentity(gpa, &tables.table, &shape);
+    const node_id = try N.nodeIdentity(gpa, a, &tables.table, &shape);
     // The verifier's leaf identities, from public data (the first segment of each size).
     var size_hash: [32][8]u32 = undefined;
     @memset(&seen, false);

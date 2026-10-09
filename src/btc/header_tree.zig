@@ -44,28 +44,107 @@ pub fn root(leaves: []const Words) Words {
     return node(root(leaves[0..half]), root(leaves[half..]));
 }
 
+/// A peak of an MMR stack: a folded item and the number of leaves it covers.
+pub fn Peak(comptime E: type) type {
+    return struct { e: E, n: usize };
+}
+
+/// Pushes `e` (covering `n` leaves) onto the peak stack, merging the top two while their counts
+/// are equal (PROOF-STORE: the stack is what a stored chain proof keeps, so it can be extended).
+pub fn pushPeak(comptime E: type, a: std.mem.Allocator, stack: *std.ArrayList(Peak(E)), e: E, n: usize, ctx: anytype, comptime merge: fn (@TypeOf(ctx), E, E) anyerror!E) !void {
+    try stack.append(a, .{ .e = e, .n = n });
+    while (stack.items.len >= 2 and stack.items[stack.items.len - 1].n == stack.items[stack.items.len - 2].n) {
+        const r = stack.pop().?;
+        const l = stack.pop().?;
+        try stack.append(a, .{ .e = try merge(ctx, l.e, r.e), .n = l.n + r.n });
+    }
+}
+
+/// Bags the peaks right to left into one item, leaving `peaks` unchanged (a single peak is
+/// returned as is).
+pub fn bagPeaks(comptime E: type, peaks: []const Peak(E), ctx: anytype, comptime merge: fn (@TypeOf(ctx), E, E) anyerror!E) !E {
+    if (peaks.len == 0) return error.NothingToFold;
+    var acc = peaks[peaks.len - 1].e;
+    var i = peaks.len - 1;
+    while (i > 0) {
+        i -= 1;
+        acc = try merge(ctx, peaks[i].e, acc);
+    }
+    return acc;
+}
+
 /// **MMR order** (D-033): `items` (with leaf counts `sizes`) left to right, merging the top two
 /// while their counts are equal, then the remaining peaks right to left ("bagging"). Every merge
 /// joins adjacent ranges, left before right.
 pub fn mmrFold(comptime E: type, a: std.mem.Allocator, items: []const E, sizes: []const usize, ctx: anytype, comptime merge: fn (@TypeOf(ctx), E, E) anyerror!E) !E {
     if (items.len == 0) return error.NothingToFold;
-    const S = struct { e: E, n: usize };
-    var stack = std.ArrayList(S).empty;
+    var stack = std.ArrayList(Peak(E)).empty;
     defer stack.deinit(a);
-    for (items, sizes) |e, n| {
-        try stack.append(a, .{ .e = e, .n = n });
-        while (stack.items.len >= 2 and stack.items[stack.items.len - 1].n == stack.items[stack.items.len - 2].n) {
-            const r = stack.pop().?;
-            const l = stack.pop().?;
-            try stack.append(a, .{ .e = try merge(ctx, l.e, r.e), .n = l.n + r.n });
-        }
+    for (items, sizes) |e, n| try pushPeak(E, a, &stack, e, n, ctx, merge);
+    return bagPeaks(E, stack.items, ctx, merge);
+}
+
+/// Segment sizes, as log sizes of the segment AIR: `2^(log − 8)` headers. 2 (`log = 9`) is the
+/// minimum (a 1-header segment has no tree node); 4096 (`log = 20`) the largest we prove.
+pub const MIN_SEG_LOG: u32 = 9;
+pub const MAX_SEG_LOG: u32 = 20;
+
+pub fn segHeaders(log: u32) usize {
+    return @as(usize, 1) << @intCast(log - 8);
+}
+
+/// The next segment at height `h0` with `remaining` headers left: the largest log size in
+/// `[MIN_SEG_LOG, max_log]` whose segment fits and stays aligned (`n ≤ lowbit(h0)` for `h0 > 0`).
+/// Then every peak is an aligned perfect subtree and the fold is the canonical MMR (`mmrRoot`),
+/// however the chain is cut. From `h0 = 0` this is the greedy largest-first plan.
+pub fn nextSegment(start: usize, remaining: usize, max_log: u32) ?u32 {
+    var ls = max_log;
+    while (ls >= MIN_SEG_LOG) : (ls -= 1) {
+        const n = segHeaders(ls);
+        if (n <= remaining and (start == 0 or n <= (start & (~start + 1)))) return ls;
     }
-    while (stack.items.len >= 2) {
-        const r = stack.pop().?;
-        const l = stack.pop().?;
-        try stack.append(a, .{ .e = try merge(ctx, l.e, r.e), .n = l.n + r.n });
+    return null;
+}
+
+/// Segments `(h0, log)` covering `[from, to)` after `from` (as many as fit; an odd last header is
+/// left out).
+pub fn planSegments(a: std.mem.Allocator, from: usize, to: usize, max_log: u32) ![]const [2]usize {
+    var segs: std.ArrayList([2]usize) = .empty;
+    var at = from;
+    while (at < to) {
+        const ls = nextSegment(at, to - at, max_log) orelse break;
+        try segs.append(a, .{ at, ls });
+        at += segHeaders(ls);
     }
-    return stack.items[0].e;
+    return segs.toOwnedSlice(a);
+}
+
+/// The verifier's check of a segment list (log sizes, chain order from height 0): every size in
+/// range and every segment aligned, so the fold's root is the canonical MMR root.
+pub fn validPlan(logs: []const u32, max_log: u32) bool {
+    var at: usize = 0;
+    for (logs) |ls| {
+        if (ls < MIN_SEG_LOG or ls > max_log) return false;
+        const n = segHeaders(ls);
+        if (at != 0 and n > (at & (~at + 1))) return false;
+        at += n;
+    }
+    return logs.len > 0;
+}
+
+/// The depth of leaf 0 in the MMR over `n` leaves: the first peak's height, plus one if there are
+/// other peaks (bagging joins the first peak once, on the left).
+pub fn leftmostDepth(n: usize) usize {
+    const first = std.math.log2_int(usize, n);
+    return first + @intFromBool(n != (@as(usize, 1) << @intCast(first)));
+}
+
+/// Checks that `steps` is the inclusion path of leaf 0 in an MMR over `n` leaves with root `t`:
+/// every sibling on the right, of the depth `n` implies.
+pub fn verifyLeftmost(leaf: Words, steps: []const Step, n: usize, t: Words) bool {
+    if (steps.len != leftmostDepth(n)) return false;
+    for (steps) |s| if (s.left) return false;
+    return verifyInclusion(leaf, steps, t);
 }
 
 fn nodeMerge(_: void, l: Words, r: Words) anyerror!Words {
@@ -301,4 +380,42 @@ test "header tree: MMR root and inclusion proofs" {
     // Segment-wise folding (aligned, non-increasing powers of two) gives the same root.
     const segs = [_]Words{ root(leaves[0..4]), root(leaves[4..8]), root(leaves[8..12]), leaves[12] };
     try std.testing.expectEqualSlices(u32, &t, &try mmrFold(Words, a, &segs, &.{ 4, 4, 4, 1 }, {}, nodeMerge));
+}
+
+test "header tree: incremental peaks, aligned plans and the leftmost path" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var leaves: [100]Words = undefined;
+    for (&leaves, 0..) |*l, i| l.* = .{ @intCast(i), 9, 8, 7, 6, 5, 4, 3 };
+    // Cut 0..52 one way, then extend to 100 from the stored peaks: the root is the MMR root.
+    for ([_]usize{ 52, 64, 2, 98 }) |cut| {
+        var stack = std.ArrayList(Peak(Words)).empty;
+        for ([_][2]usize{ .{ 0, cut }, .{ cut, 100 } }) |range| {
+            for (try planSegments(a, range[0], range[1], 12)) |s| {
+                const n = segHeaders(@intCast(s[1]));
+                try pushPeak(Words, a, &stack, root(leaves[s[0] .. s[0] + n]), n, {}, nodeMerge);
+            }
+        }
+        try std.testing.expectEqualSlices(u32, &try mmrRoot(a, &leaves), &try bagPeaks(Words, stack.items, {}, nodeMerge));
+    }
+    // Plans: from 0 greedy; after 52 = 32 + 16 + 4, segments of at most 4 until aligned.
+    const p = try planSegments(a, 52, 100, 12);
+    try std.testing.expectEqual(@as(usize, 52), p[0][0]);
+    try std.testing.expectEqual(@as(usize, 10), p[0][1]);
+    try std.testing.expect(validPlan(&.{ 12, 12, 12, 11, 10, 10, 9 }, 12));
+    try std.testing.expect(!validPlan(&.{ 10, 11 }, 12)); // 8 headers at height 4: misaligned
+    try std.testing.expect(!validPlan(&.{ 13, 12 }, 12)); // above the maximum
+    try std.testing.expect(!validPlan(&.{ 8, 9 }, 12)); // below the minimum
+    // Leaf 0's path is the leftmost one, of the expected depth, for every size.
+    for ([_]usize{ 2, 3, 13, 64, 100 }) |n| {
+        const t = try mmrRoot(a, leaves[0..n]);
+        const steps = try inclusionProof(a, leaves[0..n], 0);
+        try std.testing.expect(verifyLeftmost(leaves[0], steps, n, t));
+        try std.testing.expect(!verifyLeftmost(leaves[1], steps, n, t));
+        if (n > 2) {
+            const other = try inclusionProof(a, leaves[0..n], 1);
+            try std.testing.expect(!verifyLeftmost(leaves[1], other, n, t));
+        }
+    }
 }

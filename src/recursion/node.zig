@@ -35,6 +35,7 @@ const HashValue = builder.blake.HashValue;
 const M31 = core.fields.m31.M31;
 const QM31 = core.fields.qm31.QM31;
 const FriConfigV2 = core.pcs.config_v2.FriConfigV2;
+const PcsConfigV2 = core.pcs.config_v2.PcsConfigV2;
 const ComponentSizes = leaf.ComponentSizes;
 const N_PUB = leaf.N_PUB;
 const Key = leaf.Key;
@@ -46,7 +47,7 @@ pub fn isIn(k: usize) bool {
 
 const T = leaf.T_BASE;
 
-fn treeWords(p: [N_PUB]M31) HT.Words {
+pub fn treeWords(p: [N_PUB]M31) HT.Words {
     var w: HT.Words = undefined;
     for (&w, 0..) |*x, i| x.* = p[T + 2 * i].toU32() | (p[T + 2 * i + 1].toU32() << 16);
     return w;
@@ -319,11 +320,19 @@ pub fn proveNode(
 }
 
 /// A circuit's identity: preprocessed root and circuit hash (as the in-circuit statement
-/// computes it), both as 8 words.
-pub const Identity = struct { root: [8]u32, hash: [8]u32 };
+/// computes it), both as 8 words; and what its proofs' verify request must say besides: the PCS
+/// config (FRI parameters, lifting sizes) and the preprocessed columns. The outer verifier pins
+/// these, since a request is prover-supplied (proof review 2026-10-09, finding 2).
+pub const Identity = struct {
+    root: [8]u32,
+    hash: [8]u32,
+    pcs: PcsConfigV2,
+    columns: []const leaf.Column,
+};
 
-/// The node circuit's identity, derived from its topology alone (no proof needed).
-pub fn nodeIdentity(gpa: std.mem.Allocator, table: *const circuit.air_eval.component_table.Table, shape: *const Shape) !Identity {
+/// The node circuit's identity, derived from its topology alone (no proof needed). The columns
+/// are allocated in `a`.
+pub fn nodeIdentity(gpa: std.mem.Allocator, a: std.mem.Allocator, table: *const circuit.air_eval.component_table.Table, shape: *const Shape) !Identity {
     var ctx = try buildTopology(gpa, table, &shape.shared);
     defer ctx.deinit();
     try finalize.padToTargets(NoValue, &ctx, shape.target);
@@ -333,7 +342,18 @@ pub fn nodeIdentity(gpa: std.mem.Allocator, table: *const circuit.air_eval.compo
     return .{
         .root = core.vcs.blake2_hash.digestToU32s(id.preprocessed_root),
         .hash = core.vcs.blake2_hash.digestToU32s(id.circuit_hash),
+        .pcs = PcsConfigV2.fromFriAndTraceSize(shape.fri, pp.traceLogSize()),
+        .columns = try leaf.requestColumns(a, &pp),
     };
+}
+
+/// Whether a proof's request is the one `id` pins: same PCS config and preprocessed columns.
+pub fn requestPinned(id: Identity, request: *const circuit_cpu.verify.Request) bool {
+    if (!std.meta.eql(request.pcs_config, id.pcs)) return false;
+    if (request.preprocessed_column_log_sizes.len != id.columns.len) return false;
+    for (request.preprocessed_column_log_sizes, id.columns) |got, want|
+        if (got.log_size != want.log_size or !std.mem.eql(u8, got.id, want.id)) return false;
+    return true;
 }
 
 /// The number of headers a subtree with public inputs `p` covers.
@@ -394,6 +414,7 @@ pub fn verifyRoot(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const l
     if (vk.sizes.len != vk.leaf_hashes.len) return error.BadVk;
     const expected = try expectedRoot(a, vk.leaf_hashes, vk.sizes, vk.node.hash);
     if (!std.mem.eql(u32, &proof.request.preprocessed_root, &vk.node.root)) return error.WrongRootCircuit;
+    if (!requestPinned(vk.node, &proof.request)) return error.ConfigNotPinned;
     const out = try leaf.verifyCircuit(gpa, tables, proof);
     if (!std.mem.eql(u32, &out, &leaf.pubsDigest(expected.key, &pubs))) return error.WrongRootDigest;
     // Genesis input state: prev-hash 0, height 0, sentinel window, work 0.
@@ -470,8 +491,11 @@ test "two chained segments fold into one node proof; a non-chained pair is rejec
     const leaf_id = try leaf.leafIdentity(gpa, 12, all, shape.target, fri.log_blowup_factor);
     try std.testing.expectEqualSlices(u32, &leaf_id.hash, &l1.proof.circuit_hash);
     try std.testing.expectEqualSlices(u32, &leaf_id.root, &l1.proof.request.preprocessed_root);
-    const node_id = try nodeIdentity(gpa, &tables.table, &shape);
+    const node_id = try nodeIdentity(gpa, a, &tables.table, &shape);
     try std.testing.expectEqualSlices(u32, &node_id.root, &n.proof.request.preprocessed_root);
+    try std.testing.expect(requestPinned(node_id, &n.proof.request));
+    // Leaves are padded to the same target: their requests match the node's pins too.
+    try std.testing.expect(requestPinned(node_id, &l0.proof.request));
     try std.testing.expectEqualSlices(u32, &node_id.hash, &n.proof.circuit_hash);
 
     // The outer verifier accepts the root, and rejects other public inputs or a wrong VK.
@@ -483,6 +507,10 @@ test "two chained segments fold into one node proof; a non-chained pair is rejec
     var bad_vk = vk;
     bad_vk.leaf_hashes = &.{ l0.proof.circuit_hash, node_id.hash };
     try std.testing.expectError(error.WrongRootDigest, verifyRoot(gpa, a, tables, bad_vk, &n.proof, n.pubs));
+    // A request claiming fewer queries (or any other config) is rejected before verification.
+    var weak = n.proof;
+    weak.request.pcs_config.fri_config.n_queries -= 1;
+    try std.testing.expectError(error.ConfigNotPinned, verifyRoot(gpa, a, tables, vk, &weak, n.pubs));
 
     // Not chained: the node circuit is unsatisfiable.
     try std.testing.expectError(error.CircuitUnsatisfied, proveNode(gpa, a, tables, &shape, &p1, &p0));
