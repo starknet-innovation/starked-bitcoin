@@ -417,15 +417,47 @@ pub fn verifyRoot(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const l
     if (!requestPinned(vk.node, &proof.request)) return error.ConfigNotPinned;
     const out = try leaf.verifyCircuit(gpa, tables, proof);
     if (!std.mem.eql(u32, &out, &leaf.pubsDigest(expected.key, &pubs))) return error.WrongRootDigest;
-    // Genesis input state: prev-hash 0, height 0, sentinel window, work 0.
+    if (!try genesisChecksOk(a, &pubs)) return error.NotFromGenesis;
+}
+
+/// The genesis input state (prev-hash 0, height 0, sentinel window, work 0) as Lean states it:
+/// `airs/genesis_checks.json` is exported from `genesisChecks` (Gadgets/RootChecks.lean), whose
+/// `genesis_checks_sound` proves it gives `chain_from_genesis_T`'s hypotheses.
+pub const genesis_checks_json = @embedFile("air:genesis_checks");
+
+pub fn genesisChecksOk(a: std.mem.Allocator, pubs: []const M31) !bool {
+    const parsed = try std.json.parseFromSlice([]const [2]u32, a, genesis_checks_json, .{});
+    defer parsed.deinit();
+    if (parsed.value.len == 0) return error.NoGenesisChecks;
+    for (parsed.value) |c| {
+        if (c[0] >= pubs.len) return error.BadGenesisCheck;
+        if (pubs[c[0]].toU32() != c[1]) return false;
+    }
+    return true;
+}
+
+test "genesis checks (from Lean) accept a genesis segment's inputs and reject any change" {
     const H = @import("../btc/header_chain.zig");
-    for (0..16) |k| if (pubs[k].toU32() != 0) return error.NotFromGenesis;
-    if (pubs[32].toU32() != 0 or pubs[33].toU32() != 0) return error.NotFromGenesis;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const hw = try H.generate(a, 12, try H.loadHeaders(a, @embedFile("testdata:mainnet_headers_0_16")));
+    var pubs: [N_PUB]M31 = @splat(M31.zero());
+    @memcpy(pubs[0..H.N_PUB], &hw.pubs);
+    try std.testing.expect(try genesisChecksOk(a, &pubs));
+    const parsed = try std.json.parseFromSlice([]const [2]u32, a, genesis_checks_json, .{});
+    try std.testing.expectEqual(@as(usize, 50), parsed.value.len);
+    for (parsed.value) |c| {
+        var bad = pubs;
+        bad[c[0]] = bad[c[0]].add(M31.one());
+        try std.testing.expect(!try genesisChecksOk(a, &bad));
+    }
+    // The same checks the hand-coded verifier made (sentinel words in limbs).
     for (H.SENTINEL, 0..) |w, k| {
         const at: usize = if (k == 0) 44 else 48 + 2 * (k - 1);
-        if (pubs[at].toU32() != (w & 0xffff) or pubs[at + 1].toU32() != (w >> 16)) return error.NotFromGenesis;
+        try std.testing.expectEqual(w & 0xffff, pubs[at].toU32());
+        try std.testing.expectEqual(w >> 16, pubs[at + 1].toU32());
     }
-    for (88..98) |k| if (pubs[k].toU32() != 0) return error.NotFromGenesis;
 }
 
 test "two chained segments fold into one node proof; a non-chained pair is rejected" {

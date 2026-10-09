@@ -14,6 +14,7 @@ import StarkedAir.Block.Msg
 import StarkedAir.Block.Sha
 import StarkedAir.Block.Merkle
 import StarkedAir.Testing.BlockReader
+import StarkedAir.Gadgets.RootChecks
 
 /-- `lake env lean --run Export.lean <name>` prints canonical JSON. -/
 def main (args : List String) : IO Unit := do
@@ -34,5 +35,6 @@ def main (args : List String) : IO Unit := do
   | ["block_sha"] => IO.println StarkedAir.Block.Sha.sha.toJson
   | ["block_merkle"] => IO.println StarkedAir.Block.Merkle.merkle.toJson
   | ["block_reader"] => IO.println StarkedAir.BlockReader.reader.toJson
+  | ["genesis_checks"] => IO.println StarkedAir.HeaderTree.genesisChecksJson
   | ["probe_oracle"] => IO.println (StarkedAir.Probe.oracleJson 4 2024)
   | _ => throw <| IO.userError "usage: export-air add32_chain|probe_oracle"

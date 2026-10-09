@@ -63,6 +63,7 @@ pub fn build(b: *std.Build) void {
     lib.addAnonymousImport("air:blake2s_tree", .{ .root_source_file = b.path("airs/blake2s_tree.json") });
     lib.addAnonymousImport("air:header_chain_v7", .{ .root_source_file = b.path("airs/header_chain_v7.json") });
     lib.addAnonymousImport("air:node_glue", .{ .root_source_file = b.path("airs/node_glue.json") });
+    lib.addAnonymousImport("air:genesis_checks", .{ .root_source_file = b.path("airs/genesis_checks.json") });
     lib.addAnonymousImport("air:leaf_glue", .{ .root_source_file = b.path("airs/leaf_glue.json") });
     lib.addAnonymousImport("air:block_bytes", .{ .root_source_file = b.path("airs/block_bytes.json") });
     lib.addAnonymousImport("air:block_reader", .{ .root_source_file = b.path("airs/block_reader.json") });
