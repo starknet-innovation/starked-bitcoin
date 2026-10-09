@@ -4,10 +4,11 @@
 //!       The frozen node shape and the VK (leaf identities for segment log sizes 9..max_log).
 //! `<vk>` is a VK file, or `mainnet` for the pinned production VK built into the binary.
 //!
-//!   chainproof prove <vk> <headers.bin> <to> <out.sbchain> [--from <in.sbchain>]
+//!   chainproof prove <vk> <headers.bin> <to> <out.sbchain> [--from <in.sbchain>] [--segments K] [--max-log L]
 //!       Proves headers [0, to) (or extends a verified <in.sbchain> to `to`). Checkpoints after
 //!       every segment to <out.sbchain>.ckpt and resumes from it. Writes the file, then reloads and
-//!       verifies it.
+//!       verifies it. `--segments K` stops after K segments (rerun to continue): a driver loop of
+//!       one-segment processes bounds memory on long runs (tools/prove_loop.sh).
 //!   chainproof verify <vk> <file.sbchain> [--min-work <hex>]
 //!       Standalone verification with the VK pinned. The chainwork must reach a trusted minimum (it
 //!       is the only defence against a cheap low-difficulty chain): by default Bitcoin Core's
@@ -31,7 +32,7 @@ fn usage() noreturn {
     std.debug.print(
         \\usage:
         \\  chainproof setup <n_queries> <pow_bits> <max_log> <headers.bin> <out.vk>
-        \\  chainproof prove <vk> <headers.bin> <to> <out.sbchain> [--from <in.sbchain>]
+        \\  chainproof prove <vk> <headers.bin> <to> <out.sbchain> [--from <in.sbchain>] [--segments K] [--max-log L]
         \\  chainproof verify <vk> <file.sbchain> [--min-work <hex> | --min-work 0]
         \\  chainproof inclusion <vk> <file.sbchain> <headers.bin> <height>
         \\
@@ -54,8 +55,20 @@ pub fn main() !void {
     if (args.len < 2) usage();
     const cmd = args[1];
     if (std.mem.eql(u8, cmd, "setup") and args.len == 7) return setup(gpa, a, try parseU32(args[2]), try parseU32(args[3]), try parseU32(args[4]), args[5], args[6]);
-    if (std.mem.eql(u8, cmd, "prove") and (args.len == 6 or (args.len == 8 and std.mem.eql(u8, args[6], "--from"))))
-        return prove(gpa, a, args[2], args[3], try std.fmt.parseInt(usize, args[4], 10), args[5], if (args.len == 8) args[7] else null);
+    if (std.mem.eql(u8, cmd, "prove") and args.len >= 6) {
+        var from: ?[]const u8 = null;
+        var max_segments: ?usize = null;
+        var max_log: ?u32 = null;
+        var i: usize = 6;
+        while (i + 1 < args.len) : (i += 2) {
+            if (std.mem.eql(u8, args[i], "--from")) from = args[i + 1]
+            else if (std.mem.eql(u8, args[i], "--segments")) max_segments = try std.fmt.parseInt(usize, args[i + 1], 10)
+            else if (std.mem.eql(u8, args[i], "--max-log")) max_log = try std.fmt.parseInt(u32, args[i + 1], 10)
+            else usage();
+        }
+        if (i != args.len) usage();
+        return prove(gpa, a, args[2], args[3], try std.fmt.parseInt(usize, args[4], 10), args[5], from, max_segments, max_log);
+    }
     if (std.mem.eql(u8, cmd, "verify") and (args.len == 4 or (args.len == 6 and std.mem.eql(u8, args[4], "--min-work"))))
         return verify(gpa, a, args[2], args[3], if (args.len == 6) try std.fmt.parseInt(u256, args[5], 16) else core_min_work);
     if (std.mem.eql(u8, cmd, "inclusion") and args.len == 6) return inclusion(gpa, a, args[2], args[3], args[4], try std.fmt.parseInt(usize, args[5], 10));
@@ -131,7 +144,7 @@ fn fileExists(path: []const u8) bool {
     return true;
 }
 
-fn prove(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8, headers_path: []const u8, to_req: usize, out: []const u8, from: ?[]const u8) !void {
+fn prove(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8, headers_path: []const u8, to_req: usize, out: []const u8, from: ?[]const u8, max_segments: ?usize, max_log_req: ?u32) !void {
     const vk = try loadVk(a, vk_path);
     const all = try loadHeaderFile(a, headers_path);
     const to = @min(to_req, all.len);
@@ -158,9 +171,18 @@ fn prove(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8, head
     }
     if (pr.next > to) return error.AlreadyBeyondTarget;
 
-    const plan = try HT.planSegments(a, pr.next, to, vk.max_log);
+    // Smaller segments lower the peak memory of a leaf (a 2^20-row leaf peaks near 34 GB); any
+    // log size up to the VK's is valid, and the plan stays aligned.
+    const max_log = max_log_req orelse vk.max_log;
+    if (max_log < HT.MIN_SEG_LOG or max_log > vk.max_log) return error.BadMaxLog;
+    const plan = try HT.planSegments(a, pr.next, to, max_log);
     std.debug.print("proving {d} segments, headers {d}..{d}\n", .{ plan.len, pr.next, if (plan.len > 0) plan[plan.len - 1][0] + HT.segHeaders(@intCast(plan[plan.len - 1][1])) - 1 else pr.next });
     for (plan, 0..) |s, i| {
+        if (max_segments) |m| if (i == m) {
+            // Bounded run: the checkpoint holds the progress; rerun the same command to continue.
+            std.debug.print("STOPPED after {d} segments at {d} headers ({d} to go); checkpoint {s}\n", .{ m, pr.next, plan.len - m, ckpt });
+            return;
+        };
         try pr.pushSegment(all, @intCast(s[1]));
         try pr.checkpoint(all, ckpt);
         if (i % 8 == 7 or i + 1 == plan.len) std.debug.print("  {d}/{d} segments, elapsed {d:.0}s\n", .{ i + 1, plan.len, secs(timer.read()) });
