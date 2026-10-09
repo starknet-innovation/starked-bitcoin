@@ -58,6 +58,30 @@ namespace StarkedAir.Block.Merkle
 open StarkedAir
 open StarkedAir.Sha256 (col pre cst boolC eval_col eval_cst wrap_back)
 
+/-- Level sizes: `N` leaves, then halving (rounded up). -/
+def cntL (N : ℕ) : ℕ → ℕ
+  | 0 => N
+  | l + 1 => (cntL N l + 1) / 2
+
+/-- The first row of level `l ≥ 1`. -/
+def baseL (N : ℕ) : ℕ → ℕ
+  | 0 => 0
+  | 1 => 0
+  | l + 2 => baseL N (l + 1) + cntL N (l + 1)
+
+theorem cntL_pos {N : ℕ} (h : 1 ≤ N) : ∀ l, 1 ≤ cntL N l
+  | 0 => h
+  | l + 1 => by have := cntL_pos h l; simp only [cntL]; omega
+
+theorem cntL_le {N : ℕ} : ∀ l, cntL N (l + 1) ≤ cntL N l
+  | l => by simp only [cntL]; omega
+
+theorem cntL_bound {N : ℕ} (h : 1 ≤ N) : ∀ l, cntL N l ≤ max 1 (N - l)
+  | 0 => by simp [cntL]
+  | l + 1 => by
+    have := cntL_bound h l; have := cntL_pos h l
+    simp only [cntL]; omega
+
 section Rows2
 
 variable {n : ℕ} {pub : ℕ → F} {M : ℕ → ℕ → F}
@@ -330,6 +354,92 @@ theorem level_rows {s p : ℕ} (hs : s < n) (hn : n ≤ 2 ^ 25) (ha : M ACTN s =
     have a1 : M ACTN (s + jl + 1) = 1 := by rw [k1, ajl, hrn]; ring
     rw [show s + (p + 1) / 2 = s + jl + 1 by omega]
     exact ⟨a1, (k3 a1).trans hlast⟩
+
+omit hsat in
+theorem baseL_succ {N : ℕ} {l : ℕ} (hl : 1 ≤ l) : baseL N (l + 1) = baseL N l + cntL N l := by
+  obtain ⟨m, rfl⟩ : ∃ m, l = m + 1 := ⟨l - 1, by omega⟩
+  rfl
+
+/-- **The tree's rows.** With `N ≥ 1` leaves (public input 1): level `l ≥ 1` (over `cnt (l − 1) ≥ 2`
+children) occupies rows `base l + j`, `j < cnt l`, with the expected columns; after the top level
+(`cnt l = 1`) comes the root row; with one leaf, row 0 is the root row. -/
+theorem tree_rows (hn0 : 0 < n) (hn : n ≤ 2 ^ 25) {N : ℕ} (hN : pub 1 = (N : F)) (hN1 : 1 ≤ N) (hN25 : N < 2 ^ 25) :
+    (∀ l, 1 ≤ l → 2 ≤ cntL N (l - 1) →
+      baseL N l + cntL N l < n ∧
+      ∀ j < cntL N l, M ACTN (baseL N l + j) = 1 ∧ M I (baseL N l + j) = (j : F) ∧
+        M PCNT (baseL N l + j) = (cntL N (l - 1) : F) ∧ M L1 (baseL N l + j) = (if l = 1 then 1 else 0) ∧
+        (l ≠ 1 → M PBASE (baseL N l + j) = (baseL N (l - 1) : F)) ∧
+        M ODD (baseL N l + j) = ((cntL N (l - 1) % 2 : ℕ) : F) ∧
+        M LAST (baseL N l + j) = (if j + 1 = cntL N l then 1 else 0) ∧
+        (cntL N l = 1 → M RT (baseL N l + 1) = 1)) ∧
+    (N = 1 → M RT 0 = 1) := by
+  have r0 := row0 hsat hn0
+  have hfirst : ∀ c ∈ kindC, c.eval n preCols pub M 0 = 0 := fun c h => sat hsat (mem_kindC h) hn0
+  have c1 := hfirst (.mul (pre FIRST) (.sub (.add (k ACTN) (k RT)) one)) (by simp [kindC])
+  have c2 := hfirst (.mul (pre FIRST) (.mul (k RT) (.sub NTX one))) (by simp [kindC])
+  simp only [Expr.eval, ev_first hn0, if_true, one_mul, ev_k hn0, one, eval_cst, Nat.cast_one, NTX, hN] at c1 c2
+  -- the start of each level
+  have start : ∀ l, 1 ≤ l → 2 ≤ cntL N (l - 1) →
+      baseL N l < n ∧ M ACTN (baseL N l) = 1 ∧ M FIRSTL (baseL N l) = 1 ∧
+      M PCNT (baseL N l) = (cntL N (l - 1) : F) ∧ M L1 (baseL N l) = (if l = 1 then 1 else 0) ∧
+      M BASE (baseL N l) = (baseL N l : F) ∧ (l ≠ 1 → M PBASE (baseL N l) = (baseL N (l - 1) : F)) := by
+    intro l hl
+    induction l with
+    | zero => omega
+    | succ l ih =>
+      intro h2
+      rcases Nat.eq_zero_or_pos l with e | e
+      · subst e
+        simp only [baseL, cntL, Nat.zero_add, Nat.sub_self, if_true] at h2 ⊢
+        have ha : M ACTN 0 = 1 := by
+          rcases kbool hsat (c := RT) (by simp) hn0 with t | t
+          · rw [t, add_zero, sub_eq_zero] at c1; exact c1
+          · rw [t, one_mul, sub_eq_zero] at c2
+            have := natCast_inj_of_lt (a := N) (b := 1) (Fields.lt_P (by omega)) (Fields.lt_P (by norm_num))
+              (by simpa using c2)
+            omega
+        exact ⟨hn0, ha, r0.1, by rw [r0.2.2.2.1, hN], r0.2.1, by rw [r0.2.2.1]; simp, fun h => absurd rfl h⟩
+      · -- level `l + 1 ≥ 2` starts after level `l`
+        have hcl : 2 ≤ cntL N l := by simpa using h2
+        have hcl1 : 2 ≤ cntL N (l - 1) := by
+          have := cntL_le (N := N) (l - 1); rw [show l - 1 + 1 = l by omega] at this; omega
+        obtain ⟨sl, al, fl, pl, ll, bl, -⟩ := ih (by omega) hcl1
+        have hp25 : cntL N (l - 1) < 2 ^ 25 := by
+          have := cntL_bound hN1 (l - 1); omega
+        obtain ⟨-, hlt, rows, -, nxt⟩ := level_rows hsat sl hn al fl pl hp25
+        have hc : (cntL N (l - 1) + 1) / 2 = cntL N l := by
+          rw [show cntL N l = cntL N (l - 1 + 1) by rw [show l - 1 + 1 = l by omega]]; rfl
+        rw [hc] at hlt rows nxt
+        obtain ⟨a1, f1⟩ := nxt (by omega)
+        have hb : baseL N (l + 1) = baseL N l + cntL N l := baseL_succ (by omega)
+        rw [hb]
+        have hr : baseL N l + cntL N l - 1 + 1 < n := by omega
+        have e1 : baseL N l + cntL N l - 1 + 1 = baseL N l + cntL N l := by omega
+        have a1' : M ACTN (baseL N l + cntL N l - 1 + 1) = 1 := by rw [e1]; exact a1
+        have f1' : M FIRSTL (baseL N l + cntL N l - 1 + 1) = 1 := by rw [e1]; exact f1
+        obtain ⟨-, p1, b1, pb1, l1⟩ := start_row hsat hr a1' f1'
+        rw [show baseL N l + cntL N l - 1 + 1 = baseL N l + cntL N l by omega] at p1 b1 pb1 l1
+        obtain ⟨-, -, cn, -, bs, -, -, -, -⟩ := rows (cntL N l - 1) (by omega)
+        rw [show baseL N l + (cntL N l - 1) = baseL N l + cntL N l - 1 by omega] at cn bs
+        refine ⟨hlt, a1, f1, by rw [p1, cn]; simp, by rw [l1]; simp; omega, by rw [b1]; try push_cast,
+          fun _ => by rw [pb1, bs, bl]; simp⟩
+  refine ⟨fun l hl h2 => ?_, fun h1 => ?_⟩
+  · obtain ⟨sl, al, fl, pl, ll, bl, pbl⟩ := start l hl h2
+    have hp25 : cntL N (l - 1) < 2 ^ 25 := by have := cntL_bound hN1 (l - 1); omega
+    obtain ⟨-, hlt, rows, rt, -⟩ := level_rows hsat sl hn al fl pl hp25
+    have hc : (cntL N (l - 1) + 1) / 2 = cntL N l := by
+      rw [show cntL N l = cntL N (l - 1 + 1) by rw [show l - 1 + 1 = l by omega]]; rfl
+    rw [hc] at hlt rows rt
+    refine ⟨hlt, fun j hj => ?_⟩
+    obtain ⟨a, i, -, pc, -, pb, l1, od, la⟩ := rows j hj
+    exact ⟨a, i, pc, l1.trans ll, fun h => pb.trans (pbl h), od, la, rt⟩
+  · subst h1
+    rcases kbool hsat (c := RT) (by simp) hn0 with t | t
+    · exfalso
+      rw [t, add_zero, sub_eq_zero] at c1
+      obtain ⟨-, hp1⟩ := size_eq hsat hn0 c1
+      exact hp1 (by rw [r0.2.2.2.1, hN]; simp)
+    · exact t
 
 end Rows2
 
