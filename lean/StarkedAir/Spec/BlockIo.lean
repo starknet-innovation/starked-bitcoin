@@ -21,6 +21,10 @@ def Tok.isIo : Tok → Bool
 
 def ioOf (ts : List Tok) : List Tok := ts.filter Tok.isIo
 
+def Tok.isLock : Tok → Bool
+  | .lock .. => true
+  | _ => false
+
 /-- A token's description of an input: the prevout matches, the script and sequence too. -/
 def InTok (i : TxIn) : Tok → Prop
   | .inp h ix s q => h.length = 32 ∧ ix.length = 4 ∧ q.length = 4 ∧ i.prevout = ⟨h, le ix⟩ ∧ i.scriptSig = s ∧
@@ -83,16 +87,17 @@ theorem io_outsT : ∀ (k : ℕ) (ts : List Tok) (outs : List TxOut) (rest : Lis
   | k + 1, [], _, _, h => by simp [outsT] at h
 
 theorem io_itemsT : ∀ (k : ℕ) (ts : List Tok) (w : List Bytes) (rest : List Tok),
-    itemsT k ts = some (w, rest) → ∃ pre, ts = pre ++ rest ∧ ioOf pre = []
-  | 0, ts, w, rest, h => by simp [itemsT] at h; obtain ⟨rfl, rfl⟩ := h; exact ⟨[], by simp, rfl⟩
+    itemsT k ts = some (w, rest) → ∃ pre, ts = pre ++ rest ∧ ioOf pre = [] ∧ pre.filter Tok.isLock = []
+  | 0, ts, w, rest, h => by simp [itemsT] at h; obtain ⟨rfl, rfl⟩ := h; exact ⟨[], by simp, rfl, rfl⟩
   | k + 1, .witem it :: ts, w, rest, h => by
     simp only [itemsT] at h
     split_ifs at h
     obtain ⟨r, hr, he⟩ := Option.map_eq_some_iff.mp h
-    obtain ⟨pre, hpre, hio⟩ := io_itemsT k ts r.1 r.2 (by rw [hr])
+    obtain ⟨pre, hpre, hio, hlk⟩ := io_itemsT k ts r.1 r.2 (by rw [hr])
     simp only [Prod.mk.injEq] at he
     obtain ⟨rfl, rfl⟩ := he
-    exact ⟨.witem it :: pre, by simp [hpre], by simp [ioOf, Tok.isIo] at hio ⊢; exact hio⟩
+    exact ⟨.witem it :: pre, by simp [hpre], by simp [ioOf, Tok.isIo] at hio ⊢; exact hio,
+      by simp [List.filter_cons, Tok.isLock, hlk]⟩
   | k + 1, .blk .. :: _, _, _, h => by simp [itemsT] at h
   | k + 1, .txh .. :: _, _, _, h => by simp [itemsT] at h
   | k + 1, .nout .. :: _, _, _, h => by simp [itemsT] at h
@@ -103,8 +108,8 @@ theorem io_itemsT : ∀ (k : ℕ) (ts : List Tok) (w : List Bytes) (rest : List 
   | k + 1, [], _, _, h => by simp [itemsT] at h
 
 theorem io_witsT : ∀ (k : ℕ) (ts : List Tok) (ws : List (List Bytes)) (rest : List Tok),
-    witsT k ts = some (ws, rest) → ∃ pre, ts = pre ++ rest ∧ ioOf pre = []
-  | 0, ts, ws, rest, h => by simp [witsT] at h; obtain ⟨rfl, rfl⟩ := h; exact ⟨[], by simp, rfl⟩
+    witsT k ts = some (ws, rest) → ∃ pre, ts = pre ++ rest ∧ ioOf pre = [] ∧ pre.filter Tok.isLock = []
+  | 0, ts, ws, rest, h => by simp [witsT] at h; obtain ⟨rfl, rfl⟩ := h; exact ⟨[], by simp, rfl, rfl⟩
   | k + 1, .wcnt c :: ts, ws, rest, h => by
     simp only [witsT] at h
     split_ifs at h
@@ -114,11 +119,11 @@ theorem io_witsT : ∀ (k : ℕ) (ts : List Tok) (ws : List (List Bytes)) (rest 
       obtain ⟨w, ts'⟩ := p
       simp only [hi] at h
       obtain ⟨r, hr, he⟩ := Option.map_eq_some_iff.mp h
-      obtain ⟨pre1, hpre1, hio1⟩ := io_itemsT c ts w ts' hi
-      obtain ⟨pre2, hpre2, hio2⟩ := io_witsT k ts' r.1 r.2 (by rw [hr])
+      obtain ⟨pre1, hpre1, hio1, hlk1⟩ := io_itemsT c ts w ts' hi
+      obtain ⟨pre2, hpre2, hio2, hlk2⟩ := io_witsT k ts' r.1 r.2 (by rw [hr])
       simp only [Prod.mk.injEq] at he
       obtain ⟨rfl, rfl⟩ := he
-      refine ⟨.wcnt c :: (pre1 ++ pre2), by simp [hpre1, hpre2], ?_⟩
+      refine ⟨.wcnt c :: (pre1 ++ pre2), by simp [hpre1, hpre2], ?_, by simp [List.filter_cons, Tok.isLock, hlk1, hlk2]⟩
       simp only [ioOf, List.filter_cons, Tok.isIo, Bool.false_eq_true, if_false, List.filter_append] at hio1 hio2 ⊢
       rw [hio1, hio2]; rfl
   | k + 1, .blk .. :: _, _, _, h => by simp [witsT] at h
@@ -129,6 +134,58 @@ theorem io_witsT : ∀ (k : ℕ) (ts : List Tok) (ws : List (List Bytes)) (rest 
   | k + 1, .witem .. :: _, _, _, h => by simp [witsT] at h
   | k + 1, .lock .. :: _, _, _, h => by simp [witsT] at h
   | k + 1, [], _, _, h => by simp [witsT] at h
+
+/-! ### Transaction indices -/
+
+/-- Input and output tokens tagged with the number of lock-time tokens before them (from `c`). -/
+def tagged : ℕ → List Tok → List (ℕ × Tok)
+  | _, [] => []
+  | c, tk :: ts => (if tk.isIo then [(c, tk)] else []) ++ tagged (if tk.isLock then c + 1 else c) ts
+
+theorem tagged_append (c : ℕ) : ∀ (a b : List Tok),
+    tagged c (a ++ b) = tagged c a ++ tagged (c + (a.filter Tok.isLock).length) b
+  | [], b => by simp [tagged]
+  | tk :: a, b => by
+    by_cases hl : tk.isLock = true
+    · simp only [List.cons_append, tagged, List.filter_cons, hl, if_true, List.length_cons]
+      rw [tagged_append _ a b, List.append_assoc]
+      congr 3; omega
+    · simp only [List.cons_append, tagged, List.filter_cons, hl, Bool.false_eq_true, if_false]
+      rw [tagged_append _ a b, List.append_assoc]
+
+/-- Lock-free and io-free token lists. -/
+theorem tagged_noio : ∀ (c : ℕ) (l : List Tok), ioOf l = [] → tagged c l = []
+  | _, [], _ => rfl
+  | c, tk :: l, h => by
+    have h1 : tk.isIo = false := by
+      by_contra hc; simp only [ioOf, List.filter_cons, Bool.not_eq_false] at h hc; simp [hc] at h
+    have h2 : ioOf l = [] := by
+      simp only [ioOf, List.filter_cons, h1, Bool.false_eq_true, if_false] at h; exact h
+    simp only [tagged, h1, Bool.false_eq_true, if_false, List.nil_append]
+    exact tagged_noio _ l h2
+
+theorem tagged_io : ∀ (c : ℕ) (l : List Tok), ioOf l = l → tagged c l = l.map (c, ·)
+  | _, [], _ => rfl
+  | c, tk :: l, h => by
+    have h1 : tk.isIo = true := by
+      by_contra hc; simp only [ioOf, List.filter_cons] at h; simp [hc] at h
+      have := List.length_filter_le Tok.isIo l; rw [h] at this; simp at this
+    have h2 : ioOf l = l := by
+      simp only [ioOf, List.filter_cons, h1, if_true, List.cons.injEq, true_and] at h; exact h
+    have h3 : tk.isLock = false := by cases tk <;> simp_all [Tok.isIo, Tok.isLock]
+    simp only [tagged, h1, h3, if_true, Bool.false_eq_true, if_false, List.map_cons, List.singleton_append]
+    rw [tagged_io c l h2]
+
+theorem lock_free_io : ∀ (l : List Tok), ioOf l = l → (l.filter Tok.isLock).length = 0
+  | [], _ => rfl
+  | tk :: l, h => by
+    have h1 : tk.isIo = true := by
+      by_contra hc; simp only [ioOf, List.filter_cons] at h; simp [hc] at h
+      have := List.length_filter_le Tok.isIo l; rw [h] at this; simp at this
+    have h2 : ioOf l = l := by
+      simp only [ioOf, List.filter_cons, h1, if_true, List.cons.injEq, true_and] at h; exact h
+    have h3 : tk.isLock = false := by cases tk <;> simp_all [Tok.isIo, Tok.isLock]
+    simp [List.filter_cons, h3, lock_free_io l h2]
 
 theorem inTok_witness (i : TxIn) (w : List Bytes) (tk : Tok) : InTok { i with witness := w } tk ↔ InTok i tk := by
   cases tk <;> simp [InTok]
@@ -149,7 +206,8 @@ theorem forall₂_attach : ∀ (ins : List TxIn) (ws : List (List Bytes)) (l : L
 
 /-- **A transaction's input and output tokens** describe its inputs then its outputs. -/
 theorem io_txT {ts : List Tok} {t : Tx} {rest : List Tok} (h : txT ts = some (t, rest)) :
-    ∃ pre, ts = pre ++ rest ∧ IoTx t (ioOf pre) := by
+    ∃ pre, ts = pre ++ rest ∧ IoTx t (ioOf pre) ∧ (pre.filter Tok.isLock).length = 1 ∧
+      ∀ c, tagged c pre = (ioOf pre).map (c, ·) := by
   match ts, h with
   | .txh v seg nIn :: ts, h =>
     simp only [txT] at h
@@ -177,16 +235,16 @@ theorem io_txT {ts : List Tok} {t : Tx} {rest : List Tok} (h : txT ts = some (t,
           rw [houts] at h
           simp only at h
           have hw : ∃ ws ts3 p3, (if seg then witsT nIn ts2 else some (List.replicate nIn [], ts2)) = some (ws, ts3) ∧
-              ws.length = nIn ∧ ts2 = p3 ++ ts3 ∧ ioOf p3 = [] := by
+              ws.length = nIn ∧ ts2 = p3 ++ ts3 ∧ ioOf p3 = [] ∧ p3.filter Tok.isLock = [] := by
             cases seg with
-            | false => exact ⟨_, _, [], rfl, by simp, by simp, rfl⟩
+            | false => exact ⟨_, _, [], rfl, by simp, by simp, rfl, rfl⟩
             | true =>
               cases hws : witsT nIn ts2 with
               | none => simp [hws] at h
               | some r =>
-                obtain ⟨p3, hp3, hio3⟩ := io_witsT nIn ts2 r.1 r.2 hws
-                exact ⟨r.1, r.2, p3, by simp, (witsT_sound nIn ts2 r.1 r.2 hws).1, hp3, hio3⟩
-          obtain ⟨ws, ts3, p3, hwe, wl, hp3, hio3⟩ := hw
+                obtain ⟨p3, hp3, hio3, hlk3⟩ := io_witsT nIn ts2 r.1 r.2 hws
+                exact ⟨r.1, r.2, p3, by simp, (witsT_sound nIn ts2 r.1 r.2 hws).1, hp3, hio3, hlk3⟩
+          obtain ⟨ws, ts3, p3, hwe, wl, hp3, hio3, hlk3⟩ := hw
           rw [hwe] at h
           match ts3, h, hp3 with
           | .lock l :: rest', h, hp3 =>
@@ -196,12 +254,25 @@ theorem io_txT {ts : List Tok} {t : Tx} {rest : List Tok} (h : txT ts = some (t,
             rw [if_pos hl] at h
             simp only [Option.some.injEq, Prod.mk.injEq] at h
             obtain ⟨rfl, rfl⟩ := h
-            refine ⟨.txh v seg nIn :: (p1 ++ (.nout k :: (p2 ++ (p3 ++ [.lock l])))), ?_, ?_⟩
-            · rw [hp1, hp2, hp3]; simp
-            · refine ⟨p1, p2, ?_, forall₂_attach ins ws p1 (by rw [il, wl]) hf1, hf2⟩
+            have hio : ioOf (.txh v seg nIn :: (p1 ++ (.nout k :: (p2 ++ (p3 ++ [.lock l]))))) = p1 ++ p2 := by
+              have e1 := hio1; have e2 := hio2; have e3 := hio3
               simp only [ioOf, List.filter_cons, Tok.isIo, Bool.false_eq_true, if_false, List.filter_append,
-                List.filter_nil] at hio1 hio2 hio3 ⊢
-              rw [hio1, hio2, hio3]; simp
+                List.filter_nil] at e1 e2 e3 ⊢
+              rw [e1, e2, e3]; simp
+            have l1 := lock_free_io p1 hio1
+            have l2 := lock_free_io p2 hio2
+            refine ⟨.txh v seg nIn :: (p1 ++ (.nout k :: (p2 ++ (p3 ++ [.lock l])))), ?_, ?_, ?_, fun c => ?_⟩
+            · rw [hp1, hp2, hp3]; simp
+            · rw [hio]
+              exact ⟨p1, p2, rfl, forall₂_attach ins ws p1 (by rw [il, wl]) hf1, hf2⟩
+            · simp only [List.filter_cons, Tok.isLock, Bool.false_eq_true, if_false, List.filter_append, hlk3]
+              rw [List.length_eq_zero_iff.mp l1, List.length_eq_zero_iff.mp l2]; simp
+            · rw [hio]
+              simp only [tagged, Tok.isIo, Tok.isLock, Bool.false_eq_true, if_false, List.nil_append]
+              rw [tagged_append, tagged_io c p1 hio1, l1, Nat.add_zero]
+              simp only [tagged, Tok.isIo, Tok.isLock, Bool.false_eq_true, if_false, List.nil_append]
+              rw [tagged_append, tagged_io c p2 hio2, l2, Nat.add_zero, tagged_append, tagged_noio c p3 hio3, hlk3]
+              simp [tagged, Tok.isIo, Tok.isLock]
           | [], h, _ => simp at h
           | .blk .. :: _, h, _ | .txh .. :: _, h, _ | .inp .. :: _, h, _ | .nout .. :: _, h, _
           | .out .. :: _, h, _ | .wcnt .. :: _, h, _ | .witem .. :: _, h, _ => simp at h
@@ -225,7 +296,7 @@ theorem io_txsT : ∀ (k : ℕ) (ts : List Tok) (txs : List Tx) (rest : List Tok
       obtain ⟨t, ts'⟩ := p
       simp only [ht] at h
       obtain ⟨r, hr, he⟩ := Option.map_eq_some_iff.mp h
-      obtain ⟨p1, hp1, hio1⟩ := io_txT ht
+      obtain ⟨p1, hp1, hio1, -, -⟩ := io_txT ht
       obtain ⟨p2, hp2, parts, hio2, hf2⟩ := io_txsT k ts' r.1 r.2 (by rw [hr])
       simp only [Prod.mk.injEq] at he
       obtain ⟨rfl, rfl⟩ := he
@@ -258,5 +329,70 @@ theorem io_toksBlock {ts : List Tok} {b : Blk} (h : toksBlock ts = some b) :
   | [], h => simp [toksBlock] at h
   | .txh .. :: _, h | .inp .. :: _, h | .nout .. :: _, h | .out .. :: _, h | .wcnt .. :: _, h
   | .witem .. :: _, h | .lock .. :: _, h => simp [toksBlock] at h
+
+/-- Parts tagged by their index from `c`. -/
+def tagParts (c : ℕ) : List (List Tok) → List (ℕ × Tok)
+  | [] => []
+  | p :: ps => p.map (c, ·) ++ tagParts (c + 1) ps
+
+theorem io_txsT_tag : ∀ (k : ℕ) (ts : List Tok) (txs : List Tx) (rest : List Tok),
+    txsT k ts = some (txs, rest) →
+    ∃ pre parts, ts = pre ++ rest ∧ List.Forall₂ IoTx txs parts ∧ (pre.filter Tok.isLock).length = k ∧
+      ∀ c, tagged c pre = tagParts c parts
+  | 0, ts, txs, rest, h => by
+    simp [txsT] at h; obtain ⟨rfl, rfl⟩ := h
+    exact ⟨[], [], by simp, List.Forall₂.nil, rfl, fun c => rfl⟩
+  | k + 1, ts, txs, rest, h => by
+    simp only [txsT] at h
+    cases ht : txT ts with
+    | none => simp [ht] at h
+    | some p =>
+      obtain ⟨t, ts'⟩ := p
+      simp only [ht] at h
+      obtain ⟨r, hr, he⟩ := Option.map_eq_some_iff.mp h
+      obtain ⟨p1, hp1, hio1, hl1, htg1⟩ := io_txT ht
+      obtain ⟨p2, parts, hp2, hf2, hl2, htg2⟩ := io_txsT_tag k ts' r.1 r.2 (by rw [hr])
+      simp only [Prod.mk.injEq] at he
+      obtain ⟨rfl, rfl⟩ := he
+      refine ⟨p1 ++ p2, ioOf p1 :: parts, by rw [hp1, hp2, List.append_assoc], List.Forall₂.cons hio1 hf2, ?_, fun c => ?_⟩
+      · rw [List.filter_append, List.length_append, hl1, hl2]; omega
+      · rw [tagged_append, htg1, hl1, htg2]; rfl
+
+/-- **A block's tagged input and output tokens**: transaction `i`'s inputs then outputs, tagged `i`. -/
+theorem io_toksBlock_tag {ts : List Tok} {b : Blk} (h : toksBlock ts = some b) :
+    ∃ parts : List (List Tok), List.Forall₂ IoTx b.txs parts ∧ tagged 0 ts = tagParts 0 parts := by
+  match ts, h with
+  | .blk hd n :: ts, h =>
+    simp only [toksBlock] at h
+    split_ifs at h
+    cases hx : txsT n ts with
+    | none => simp [hx] at h
+    | some p =>
+      obtain ⟨txs, rest⟩ := p
+      rw [hx] at h
+      match rest, h with
+      | [], h =>
+        simp only [Option.some.injEq] at h
+        subst h
+        obtain ⟨pre, parts, hpre, hf, -, htg⟩ := io_txsT_tag n ts txs [] hx
+        refine ⟨parts, hf, ?_⟩
+        simp only [List.append_nil] at hpre
+        subst hpre
+        simp only [tagged, Tok.isIo, Tok.isLock, Bool.false_eq_true, if_false, List.nil_append]
+        exact htg 0
+      | _ :: _, h => simp at h
+  | [], h => simp [toksBlock] at h
+  | .txh .. :: _, h | .inp .. :: _, h | .nout .. :: _, h | .out .. :: _, h | .wcnt .. :: _, h
+  | .witem .. :: _, h | .lock .. :: _, h => simp [toksBlock] at h
+
+/-- Tagging a mapped range: each io element, tagged with the lock count before it. -/
+theorem tagged_range (f : ℕ → Tok) (c : ℕ) : ∀ m, tagged c ((List.range m).map f) =
+    ((List.range m).filter fun r => (f r).isIo).map fun r => (c + (((List.range r).map f).filter Tok.isLock).length, f r)
+  | 0 => by simp [tagged]
+  | m + 1 => by
+    rw [List.range_succ, List.map_append, tagged_append, tagged_range f c m, List.filter_append, List.map_append]
+    congr 1
+    simp only [List.map_singleton, tagged, List.filter_cons, List.filter_nil, List.nil_append, List.append_nil]
+    split_ifs <;> simp
 
 end StarkedAir.Spec.Block

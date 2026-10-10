@@ -19,6 +19,7 @@ import StarkedAir.Block.BlockSetup
 import StarkedAir.Block.MerkleLink
 import StarkedAir.Block.SysLink
 import StarkedAir.Block.B2Link
+import StarkedAir.Spec.BlockIo
 
 namespace StarkedAir.Block
 
@@ -1000,6 +1001,60 @@ theorem urec_bytes {r : ℕ} (hr : r < 2 ^ L) (hon : (inst 13).main URec.ON r = 
       simp [siteEval, hpre, hL 13 (by decide), Expr.eval, URec.k, StarkedAir.Sha256.eval_col,
         StarkedAir.Sha256.eval_cst, wrap_zero hr])
   exact ⟨u, hu, hp, hb⟩
+
+/-! ### Tokens and transactions -/
+
+/-- A row before the padding is an input or output token exactly when it is of kind `K_IN` or `K_OUT`,
+and a lock-time token exactly when it is of kind `K_LOCK`. -/
+theorem tok_kinds (S : Setup inst pub L) {r : ℕ} (hr : r < S.m) :
+    ((Fields.tokOf (inst 1).main (Rb inst pub) r).isIo = true ↔
+      ((inst 1).main Fields.K_OUT r = 1 ∨ (inst 1).main Fields.K_IN r = 1)) ∧
+    ((Fields.tokOf (inst 1).main (Rb inst pub) r).isLock = true ↔ (inst 1).main Fields.K_LOCK r = 1) := by
+  have fs := fields_sat' hL hsat hL24
+  have hrn : r < 2 ^ L := by have := S.hmn; omega
+  obtain ⟨a, ha, h1⟩ := Fields.kind_exists fs hrn
+  have kat := Fields.kinds_at fs hrn ha h1
+  have hpad := S.hnp r hr
+  have hne : a ≠ Fields.K_PAD := by intro e; subst e; rw [hpad] at h1; exact zero_ne_one h1
+  have one0 : (1 : F) ≠ 0 := one_ne_zero
+  simp only [Fields.K_PAD] at hne
+  interval_cases a <;>
+    simp_all [Fields.tokOf, Fields.K_BLK, Fields.K_TXH, Fields.K_IN, Fields.K_NOUT, Fields.K_OUT, Fields.K_WCNT,
+      Fields.K_WITEM, Fields.K_LOCK, Spec.Block.Tok.isIo, Spec.Block.Tok.isLock]
+
+/-- **The fields' tagged tokens**: each input or output row with its lock-time count (its `TXI`). -/
+theorem fields_tagged (S : Setup inst pub L) :
+    Spec.Block.tagged 0 (Fields.toksFrom (inst 1).main (Rb inst pub) S.m 0) =
+      (ioRows inst S.m).map fun ρ => (Fields.locks (inst 1).main ρ, Fields.tokOf (inst 1).main (Rb inst pub) ρ) := by
+  have e : Fields.toksFrom (inst 1).main (Rb inst pub) S.m 0 = (List.range S.m).map (Fields.tokOf (inst 1).main (Rb inst pub)) := by
+    simp [Fields.toksFrom]
+  rw [e, Spec.Block.tagged_range]
+  have hf : ((List.range S.m).filter fun r => (Fields.tokOf (inst 1).main (Rb inst pub) r).isIo) = ioRows inst S.m := by
+    unfold ioRows
+    apply List.filter_congr
+    intro r hr
+    have := (tok_kinds hL hsat hL24 S (List.mem_range.mp hr)).1
+    by_cases h : (Fields.tokOf (inst 1).main (Rb inst pub) r).isIo = true
+    · simp [h, this.mp h]
+    · have : ¬((inst 1).main Fields.K_OUT r = 1 ∨ (inst 1).main Fields.K_IN r = 1) := fun hh => h (this.mpr hh)
+      simp only [Bool.not_eq_true] at h
+      simp [h, this]
+  rw [hf]
+  apply List.map_congr_left
+  intro ρ hρ
+  obtain ⟨hρm, -⟩ := mem_ioRows.mp hρ
+  simp only [Nat.zero_add, Prod.mk.injEq, and_true]
+  unfold Fields.locks
+  rw [List.filter_map, List.length_map]
+  congr 1
+  apply List.filter_congr
+  intro r hr
+  have hk := (tok_kinds hL hsat hL24 S (r := r) (by have := List.mem_range.mp hr; omega)).2
+  by_cases h : (Fields.tokOf (inst 1).main (Rb inst pub) r).isLock = true
+  · simp [Function.comp, h, hk.mp h]
+  · have : ¬ (inst 1).main Fields.K_LOCK r = 1 := fun hh => h (hk.mpr hh)
+    simp only [Bool.not_eq_true] at h
+    simp [Function.comp, h, this]
 
 end System
 
