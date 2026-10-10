@@ -211,6 +211,35 @@ injective tuple encoding; the fingerprint makes it injective only for good `γ`.
 commitments, which bind the raw blocks and undo data. QM31 (`|K| ≈ 2^124`), `N ≈ 2·10⁹`, `L ≤ 10⁴`: the
 `γ` step's bad fraction is about `2^-50` (*est.*).
 
+## The coin proof, plan and progress (2026-10-11)
+
+Layers (Lean):
+1. **Rows** (`Block/CoinSound.lean`, done): kinds, prefix, starts, coinbase flag, record and output
+   indices, tuple fields, unspendable, multiplicity, input count; running sum (`coin_runsum`, via
+   `Block/RunSum.lean`); amounts at the natural-number level (`in_nat`, `out_nat`, `tend_nat`,
+   `fee_acc`, `coinbase_nat`).
+2. **Tokens** (`Block/CoinLink.lean`, done): `outt_sum`/`int_sum` (yields = uses), `coin_align` and
+   `coin_row_tok` (coin row `j` is the block's `j`-th input or output token, same tuple), `coin_bytes`
+   (every coin range check is a byte), `coin_txid` (an output's txid limbs are its transaction's
+   txid).
+3. **Fingerprints and claims** (next), existence links only, each pinned by its tuple:
+   - an output's `FP(0, START, LEN, FH)` is a walker segment `(0, START)`, whose `SEG` use can only be
+     the coin's own `SEG(0, START, START, LEN)` yield (undo segments have stream 1), so the walk reads
+     the block bytes `[START, START + LEN)`: `FH` is their Horner fingerprint (`seg_sound`);
+   - an input's `UREC(J, …)` is URec row `J` (its `J` is the row index): the code and amount bytes
+     are undo bytes at `S_J`, `S_J + 4`; its `FP(1, J, SLEN, FH)` is the walker segment `(1, J)`
+     started by URec's `SEG(1, J, S_J + 4, TL_J)`: `FH` is the fingerprint of undo bytes
+     `[S_J + 4, S_J + 4 + TL_J)`;
+   - the prevout bytes and an output script's first byte are block bytes (`REL_BYTE`).
+4. **Events**: per block, the spec events (created outputs with txid, vout, `2h + cb`, `serTxOut`,
+   creation index `h·2^24 + tx`; spends with the prevout and the claimed record `(code, serTxOut,
+   claimed index)`), the claims being some split of the undo bytes into records (the undo component
+   parses no CompactSize; the epoch balance fixes each claim to a created coin). The coin partial sum
+   is the events' fractions (`coin_runsum` + the links), and the encoding satisfies `Separates`.
+5. **Epoch**: `epoch_sound_fp` / `epoch_from_sound` on the events, then `connect_of_run` with
+   `ClaimsOK` from the amounts (layer 1), and `block_sound`'s no-repeated-prevout hypothesis from the
+   run (D-031).
+
 ## Recommendation (D-040, proposed)
 
 B for catch-up and for the assumeUTXO statement. Revisit A (or a hybrid) only for tip following. Lean:
