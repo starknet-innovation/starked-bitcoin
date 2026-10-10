@@ -292,8 +292,7 @@ commitment fix every byte, and `block_sound` proves both. This drops the raw blo
 A later proof that re-reads the raw block checks it against Bitcoin's SHA-256 trees, not Blake2s.
 
 ### D-039 — A block proof is a file bound to the chain proof by its public block hash
-Date: 2026-10-10 · By: Claude (agent), on the owner's "go forward, finish M3" · Status: proposed
-(implemented; the owner should confirm the file format and the verifier's checks)
+Date: 2026-10-10 · By: Claude (agent), on the owner's "go forward, finish M3" · Status: active (**owner decisions 2026-10-10** at the end of this entry)
 Decision:
 - **Block hash public:** public inputs 25–40 are the 16-bit limbs of `SHA256d(header)`. The context
   component reads `digest(0, pub 25..40)` once, and SHA's free yield multiplicity serves it, so no new
