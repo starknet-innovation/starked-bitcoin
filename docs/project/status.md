@@ -46,7 +46,9 @@ Proven in Lean (standard axioms):
 Not yet:
 1. Lean soundness of the coin component and its system links, which connects the AIR to
    `connect_of_run`. The amount checks are AIR-only so far.
-2. The fingerprint's Schwartz–Zippel step in Lean (`epoch_sound` assumes an injective encoding).
+2. ~~The fingerprint's Schwartz–Zippel step~~ (done 2026-10-10: `epoch_sound_fp`,
+   `Spec/UtxoFingerprint.lean`). What remains is linking `Separates` and `hdet` to the coin
+   component's actual encoding (item 1).
 3. The final sorted pass as a proof (`HASH_SERIALIZED` in-circuit). For now the verifier computes
    the final set's fractions and hash natively from an explicit, sorted coin list. Fine at height
    1,000; at a snapshot height that list is ~13 GB.

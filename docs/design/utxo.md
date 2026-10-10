@@ -190,9 +190,17 @@ practice: a `2^24`-row block is beyond memory anyway.
 **Still to add after the events:** per-transaction amounts (inputs ≥ outputs, ≤ `MAX_MONEY`) and the
 coinbase's subsidy plus fees, as limb arithmetic like the fields' output totals.
 
-**Formal gap to close:** `epoch_sound` assumes an injective tuple encoding. The fingerprint is injective
-only outside a small set of `γ` (Schwartz–Zippel over QM31: at most `N²·10⁴/|K|`), which needs a second
-probabilistic step in Lean.
+**The fingerprint step (closed 2026-10-10, `Spec/UtxoFingerprint.lean`).** `epoch_sound` assumed an
+injective tuple encoding; the fingerprint makes it injective only for good `γ`.
+- `fp_separates`: outside `fpBad` (at most `N²·(L + 1)` values of `γ`, `N` distinct byte strings, `L`
+  their maximum length), equal lengths and equal fingerprints give equal bytes.
+- `epoch_sound_on`: the epoch theorem needs injectivity only on the epoch's own events.
+- `epoch_sound_fp`: both steps. For `γ ∉ fpBad`, then `(α, z)` outside the LogUp bad set, a zero sum
+  gives Core's coins view, for any encoding that records a coin's other fields, its byte length and its
+  fingerprint (`Separates`), with a coin determined by its fields and bytes.
+`γ` must be drawn after the epoch's bytes are fixed: it comes from the seed over the block hashes and
+commitments, which bind the raw blocks and undo data. QM31 (`|K| ≈ 2^124`), `N ≈ 2·10⁹`, `L ≤ 10⁴`: the
+`γ` step's bad fraction is about `2^-50` (*est.*).
 
 ## Recommendation (D-040, proposed)
 

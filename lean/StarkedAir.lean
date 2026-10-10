@@ -111,6 +111,7 @@ import StarkedAir.Testing.BlockReader
 import StarkedAir.Spec.UtxoMultiset
 import StarkedAir.Spec.QM31
 import StarkedAir.Spec.UtxoEpoch
+import StarkedAir.Spec.UtxoFingerprint
 import StarkedAir.Block.ExtSum
 import StarkedAir.Block.FpWalk
 import StarkedAir.Block.URec
