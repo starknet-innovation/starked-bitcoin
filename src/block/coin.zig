@@ -297,8 +297,14 @@ pub fn coinColumns(a: std.mem.Allocator, log_size: u32, in: CoinInput, raw_reads
     const MNB = 154;
     const MC1 = 155;
     const MLO = 156;
+    const H1C = 157;
+    const H2C = 158;
+    const Q3 = 159;
+    const H3 = 162;
+    const BR3 = 166;
+    const H3C = 167;
     const n = @as(usize, 1) << @intCast(log_size);
-    const cols = try zeros(a, 157, n);
+    const cols = try zeros(a, 168, n);
     // Amounts: per row the coin's value; the token order is the block's.
     const M24: u64 = 1 << 24;
     var in_sum: u64 = 0;
@@ -563,6 +569,12 @@ pub fn coinColumns(a: std.mem.Allocator, log_size: u32, in: CoinInput, raw_reads
                 cols[MC1][q] = M31.one();
                 fcy = (fe & (M24 - 1)) + (fee & (M24 - 1)) >= M24;
                 fe += fee;
+                // The accumulated fees within MAX_MONEY (Core: bad-txns-accumulated-fee-outofrange).
+                if (fe > MAX_MONEY) return error.AccumulatedFeesOutOfRange;
+                const d3 = MAX_MONEY - fe;
+                cols[BR3][q] = if ((MAX_MONEY & (M24 - 1)) < (fe & (M24 - 1))) M31.one() else M31.zero();
+                for (0..3) |i| cols[Q3 + i][q] = f(((d3 & (M24 - 1)) >> @intCast(8 * i)) & 0xff);
+                for (0..4) |i| cols[H3 + i][q] = f(((d3 >> 24) >> @intCast(8 * i)) & 0xff);
             }
             if (tend and is_cb) cbo = out_v;
             cols[FEL][q] = f(fe & (M24 - 1));
@@ -594,6 +606,20 @@ pub fn coinColumns(a: std.mem.Allocator, log_size: u32, in: CoinInput, raw_reads
     _ = &out_sum;
     _ = &fees;
     _ = &cb_out;
+    // The comparators' top bytes are at most 7: `H1C = 7 − H1 3`, `H2C = 7 − H2 3` on every row,
+    // range-checked where the comparator is (MC1, MLO).
+    for (0..n) |q| {
+        cols[H1C][q] = f(7).sub(cols[H1 + 3][q]);
+        cols[H2C][q] = f(7).sub(cols[H2 + 3][q]);
+        cols[H3C][q] = f(7).sub(cols[H3 + 3][q]);
+        if (cols[MC1][q].eql(M31.one())) {
+            try ranges.append(a, cols[H1C][q].toU32());
+            for (0..3) |i| try ranges.append(a, cols[Q3 + i][q].toU32());
+            for (0..4) |i| try ranges.append(a, cols[H3 + i][q].toU32());
+            try ranges.append(a, cols[H3C][q].toU32());
+        }
+        if (cols[MLO][q].eql(M31.one())) try ranges.append(a, cols[H2C][q].toU32());
+    }
     // Off rows: the coinbase flag and is-zero helpers, the record count and the accumulator carried.
     while (r < n) : (r += 1) {
         cols[CBO][r] = M31.one();
@@ -717,4 +743,64 @@ test "amounts: a coinbase above subsidy plus fees is rejected (block 170, subsid
     const bad_c = try bsys.firstViolation(a, &airs, &b);
     const bad_l = try bsys.unbalanced(a, &airs, &b);
     try std.testing.expect(bad_c != null or bad_l != null);
+}
+
+test "amounts: a wrapped high comparator cannot hide a coinbase above subsidy plus fees (the 7 − H2 3 bound)" {
+    const bsys = @import("system.zig");
+    const checks = @import("checks.zig");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const airs = try bsys.parseAirs(a);
+    const s = checks.samples_small[1];
+    var b = try bsys.buildU(a, s.raw, s.undo, s.ctx);
+    const COIN = 14;
+    const TABLES = 5;
+    const Q2 = 145;
+    const H2 = 148;
+    const KP = 152;
+    const KN = 153;
+    const MLO = 156;
+    const H2C = 158;
+    const cc = b.mains[COIN];
+    const rg = b.mains[TABLES][0];
+    var q: usize = 0;
+    while (!cc[MLO][q].eql(M31.one())) q += 1;
+    // Block 170: subsidy 50 BTC, no fees, coinbase 50 BTC. Lower the subsidy by one satoshi: the honest
+    // difference is −1. The attack writes it wrapped: the low limb borrows (`KN = 1`), so the low
+    // comparator is `2^24 − 1` and the high one `−1 ≡ P − 1 = 0x7FFFFFFE`, four valid bytes.
+    b.pubs[PUB_SUBL] = b.pubs[PUB_SUBL].sub(M31.one());
+    const drop = struct {
+        fn f(t: []M31, v: M31) void {
+            t[v.toU32()] = t[v.toU32()].sub(M31.one());
+        }
+        fn add(t: []M31, v: u32) void {
+            t[v] = t[v].add(M31.one());
+        }
+    };
+    for (0..3) |i| drop.f(rg, cc[Q2 + i][q]);
+    for (0..4) |i| drop.f(rg, cc[H2 + i][q]);
+    drop.f(rg, cc[H2C][q]);
+    cc[KN][q] = M31.one();
+    cc[KP][q] = M31.zero();
+    const lo = [3]u32{ 0xff, 0xff, 0xff };
+    const hi = [4]u32{ 0xfe, 0xff, 0xff, 0x7f };
+    for (lo, 0..) |v, i| {
+        cc[Q2 + i][q] = f(v);
+        drop.add(rg, v);
+    }
+    for (hi, 0..) |v, i| {
+        cc[H2 + i][q] = f(v);
+        drop.add(rg, v);
+    }
+    // With the bound column consistent (`7 − 0x7f`, not a byte), the range lookup cannot balance.
+    cc[H2C][q] = f(7).sub(f(0x7f));
+    try std.testing.expect(try bsys.firstViolation(a, &airs, &b) == null);
+    try std.testing.expect(try bsys.unbalanced(a, &airs, &b) != null);
+    // With a byte there instead, everything balances and only the bound's constraint fails: without the
+    // bound, this coinbase would have been accepted.
+    cc[H2C][q] = f(7);
+    drop.add(rg, 7);
+    try std.testing.expect(try bsys.unbalanced(a, &airs, &b) == null);
+    try std.testing.expect(try bsys.firstViolation(a, &airs, &b) != null);
 }

@@ -184,11 +184,20 @@ The canonical pairing matters: the commitment must be the undo stream in input o
 - the input count;
 - the BIP30-lost bit.
 
-**Lookup sites** grow to about 170 per row, so the system bound becomes `L ≤ 23`. That costs nothing in
-practice: a `2^24`-row block is beyond memory anyway.
+**Lookup sites:** 211 per row in the system, so the bound is `L ≤ 23` (`211·2^23 < P`). That costs
+nothing in practice: a `2^24`-row block is beyond memory anyway.
 
-**Still to add after the events:** per-transaction amounts (inputs ≥ outputs, ≤ `MAX_MONEY`) and the
-coinbase's subsidy plus fees, as limb arithmetic like the fields' output totals.
+**Amounts (built):** per-transaction input and output sums as 24-bit limbs (inputs ≤ `MAX_MONEY`, inputs
+≥ outputs), the fees summed over the block, and the coinbase's outputs at most subsidy plus fees. Each
+comparator is a difference written as a three-byte low limb and a four-byte high limb. **The high
+limb's top byte is bounded by 7** (`H1C = 7 − H1 3`, `H2C = 7 − H2 3`, range-checked), so the high
+limb is below `2^27 < P` and the equation cannot wrap modulo `P`. Without that bound (the AIR before
+2026-10-10), a wrapped difference such as `P − 1` fits four bytes, and a transaction could output more
+than its inputs or a coinbase claim more than subsidy plus fees. The block's accumulated fees are
+checked within `MAX_MONEY` after each non-coinbase transaction (Core's
+`bad-txns-accumulated-fee-outofrange`), which also keeps the fee accumulator from wrapping. Proven at the
+natural-number level in `Block/CoinSound.lean` (`in_nat`, `out_nat`, `tend_nat`, `fee_acc`,
+`coinbase_nat`), given the byte ranges from the lookups.
 
 **The fingerprint step (closed 2026-10-10, `Spec/UtxoFingerprint.lean`).** `epoch_sound` assumed an
 injective tuple encoding; the fingerprint makes it injective only for good `γ`.

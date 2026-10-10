@@ -134,9 +134,9 @@ theorem mem_sites {i r k : ℕ} : ((i, r, k) : Site) ∈ sites hashSys inst ↔
     exact ⟨i, hi, r, by rw [hL i hi]; exact hr', k, hk', rfl, rfl, rfl⟩
 
 omit hsat in
-/-- 201 lookup sites per row: bytes 1, fields 36, messages 4, SHA 6, txid tree 11, tables 2, walker 5,
-context 12, witness tree 3, undo bytes 1, Blake2s words 6, Blake2s 11, fingerprints 4, undo records 15, coins 84. -/
-theorem hash_sites_len : (sites hashSys inst).length = 201 * 2 ^ L := by
+/-- 211 lookup sites per row: bytes 1, fields 36, messages 4, SHA 6, txid tree 11, tables 2, walker 5,
+context 12, witness tree 3, undo bytes 1, Blake2s words 6, Blake2s 11, fingerprints 4, undo records 15, coins 94. -/
+theorem hash_sites_len : (sites hashSys inst).length = 211 * 2 ^ L := by
   simp [sites, hashSys, hL 0 (by decide), hL 1 (by decide), hL 2 (by decide), hL 3 (by decide), hL 4 (by decide),
     hL 5 (by decide), hL 6 (by decide), hL 7 (by decide), hL 8 (by decide), hL 9 (by decide), hL 10 (by decide),
     hL 11 (by decide), hL 12 (by decide), hL 13 (by decide), hL 14 (by decide),
@@ -147,8 +147,8 @@ theorem hash_sites_len : (sites hashSys inst).length = 201 * 2 ^ L := by
   ring
 
 omit hL hsat in
-theorem hash_rows_lt_P (hL24 : L ≤ 23) : 201 * 2 ^ L < P :=
-  lt_of_le_of_lt (Nat.mul_le_mul_left 201 (Nat.pow_le_pow_right (by norm_num) hL24)) (by unfold P; norm_num)
+theorem hash_rows_lt_P (hL24 : L ≤ 23) : 211 * 2 ^ L < P :=
+  lt_of_le_of_lt (Nat.mul_le_mul_left 211 (Nat.pow_le_pow_right (by norm_num) hL24)) (by unfold P; norm_num)
 
 /-- SHA's word and length uses have multiplicity `−1` or `0`. -/
 theorem sha_use_mult {r : ℕ} (hr : r < 2 ^ L) {kk : ℕ} (hk : kk < 2) :
@@ -473,7 +473,7 @@ theorem use_mult : ∀ s ∈ sites hashSys inst, isUse s.1 s.2.2 = true →
         ((inst 14).main Coin.KO r + (inst 14).main Coin.KI r + (inst 14).main Coin.CBI r) = 0 ∨
         ((Coin.notFirst).eval (2 ^ L) Coin.preCols pub (inst 14).main r) *
         ((inst 14).main Coin.KO r + (inst 14).main Coin.KI r + (inst 14).main Coin.CBI r) = 1 := mul01 bNF bon
-    have hk64 : k < 84 := by rw [← Coin.lookups_len]; simpa [hashSys, Coin.coin] using hk
+    have hk64 : k < 94 := by rw [← Coin.lookups_len]; simpa [hashSys, Coin.coin] using hk
     have hm := Coin.mult_cases k hk64 hk4
     simp only [Coin.useMults, List.mem_cons, List.not_mem_nil, or_false] at hm
     rcases hm with h | h | h | h | h | h | h | h | h | h | h <;> rw [h] <;>

@@ -45,7 +45,10 @@ Proven in Lean (standard axioms):
 
 Not yet:
 1. Lean soundness of the coin component and its system links, which connects the AIR to
-   `connect_of_run`. The amount checks are AIR-only so far.
+   `connect_of_run`. Done: the row-level facts and the running sum (`CoinSound.lean`). The proof found
+   a soundness bug in the amount comparators (fixed 2026-10-10, see log). Open: the amounts at the
+   natural-number level, the lookups' links, the step to `connect_of_run`. Epoch proofs made before the
+   fix are stale.
 2. ~~The fingerprint's Schwartz–Zippel step~~ (done 2026-10-10: `epoch_sound_fp`,
    `Spec/UtxoFingerprint.lean`). What remains is linking `Separates` and `hdet` to the coin
    component's actual encoding (item 1).

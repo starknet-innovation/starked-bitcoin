@@ -21,6 +21,45 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-10-10 (session 7) — VERIFIER-LEAN steps 4–5 done; M3b proofs; an amount-check soundness bug fixed
+Who: Claude (agent, Opus 5.5), on the owner's "proceed with step 5 (channel and Merkle proven, FRI
+soundness stated), then M3b and everything not blocked by compute"
+Roadmap: VERIFIER-LEAN step 5 done (end-to-end composition theorem open); UTXO (M3b) in progress
+Done:
+- VERIFIER-LEAN: Merkle leaf hashing (ecd7fbf), the DEEP response list (185a271), Merkle paths
+  (59fbbad), the channel and the transcript order (d0d975f), all Lean-first and in the leaf; FRI
+  soundness stated as an assumption (verifier-formalization.md).
+- `glue.parse` counted constants' coordinates as registers (n_regs up to ~2^31): fixed in d0d975f;
+  leaf tests' peak memory 14 GB → 6 GB.
+- M3b: the fingerprint's Schwartz–Zippel step (`epoch_sound_fp`, 04efc40); the coin component's
+  row-level soundness (`CoinSound.lean`, f29bbfa) and running sum (`coin_runsum`, 86807b1).
+- **Soundness bug, found by the coin proof and fixed:** the coin component's high comparators (`H1`:
+  inputs ≤ `MAX_MONEY`, inputs ≥ outputs; `H2`: coinbase ≤ subsidy + fees) were four full bytes, up to
+  2^32 > P, so their equations could wrap modulo P: a transaction could output more than its inputs,
+  or a coinbase more than subsidy plus fees. Fixed as in the fields' value check: `H1C = 7 − H1 3` and
+  `H2C = 7 − H2 3`, range-checked (high limbs < 2^27). Regression test: block 170 with the subsidy one
+  satoshi lower and the wrapped comparator is rejected; with the bound's constraint alone removed, the
+  same trace balances.
+- **Core rule added:** the block's accumulated fees within `MAX_MONEY` (Core's
+  `bad-txns-accumulated-fee-outofrange`), checked after each non-coinbase transaction (comparator 3).
+  It also keeps the fee accumulator from wrapping, which the coinbase check relies on.
+- Amounts at the natural-number level (`in_nat`, `out_nat`, `tend_nat`, `fee_acc`, `coinbase_nat`):
+  given the byte ranges the lookups provide, every sum is exact (no wrap), inputs within `MAX_MONEY`,
+  outputs at most inputs, the fees the sum of the transactions' fees, the coinbase at most subsidy
+  plus fees.
+Evidence:
+- `zig build test` filters for the recursion set (20/20), channel/Merkle/transcript parity, block system
+  small samples, coin events, amounts, epoch (6/6); `lake build` clean; `#print axioms` standard for
+  every new theorem.
+Problems / lessons:
+- A shell command with a stray `cat > file` waited on stdin for 3.5 hours; check background jobs
+  actually start.
+- Running a Lean build next to the leaf tests OOM-killed the test; the real cause was the register
+  count bug above.
+- Epoch proofs made before the comparator fix (0–170, 0–1000) use the old coin AIR and are stale.
+Next: the coin system links (lookups to the fields, SHA, undo records, fingerprints), the amounts at the
+natural-number level, then the step to `connect_of_run`; epochs from a previous set; the sorted pass.
+
 ## 2026-10-10 (session 6) — M3a.5 BLK-CHECKS done and proven (`block_sound`)
 Who: Claude (agent, Opus 5.5), on the owner's "go forward, finish M3"
 Roadmap: BLOCK-AIR → M3a.5 done (M3a.6 next); BLOCK-DATA, UTXO, CATCHUP todo

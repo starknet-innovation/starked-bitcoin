@@ -120,7 +120,17 @@ def KN : ℕ := 153
 def MNB : ℕ := 154
 def MC1 : ℕ := 155
 def MLO : ℕ := 156
-def N_MAIN : ℕ := 157
+/-- `7 − H1 3` and `7 − H2 3`, range-checked: the comparators' high limbs stay below `2^27 < P`, so their
+equations cannot wrap modulo `P` (as in the fields' value check). -/
+def H1C : ℕ := 157
+def H2C : ℕ := 158
+/-- Comparator 3 (the block's accumulated fees within `MAX_MONEY`, Core's
+`bad-txns-accumulated-fee-outofrange`): low bytes, high bytes, borrow, the high limb's top-byte bound. -/
+def Q3 (i : ℕ) : ℕ := 159 + i
+def H3 (i : ℕ) : ℕ := 162 + i
+def BR3 : ℕ := 166
+def H3C : ℕ := 167
+def N_MAIN : ℕ := 168
 
 -- public inputs (after the block's 41 and the fingerprint's `γ` at 41–44); `VAMT` is unused (amounts are
 -- `VL`, `VH`)
@@ -205,7 +215,14 @@ def amountC : List Expr :=
     -- the block: coinbase outputs at most subsidy plus fees
     .mul lastOn (.sub (b3 Q2) (.add (.sub (.add (.pub PUB_SUBL) (k FEL)) (k CBL))
       (.mul two24 (.sub (k KN) (k KP))))),
-    .mul lastOn (.sub (b4 H2) (.add (.sub (.add (.pub PUB_SUBH) (k FEH)) (k CBH)) (.sub (k KP) (k KN)))) ]
+    .mul lastOn (.sub (b4 H2) (.add (.sub (.add (.pub PUB_SUBH) (k FEH)) (k CBH)) (.sub (k KP) (k KN)))),
+    -- the comparators' top bytes are at most 7
+    .sub (k H1C) (.sub (cst 7) (k (H1 3))), .sub (k H2C) (.sub (cst 7) (k (H2 3))),
+    -- the accumulated fees within MAX_MONEY, after each non-coinbase transaction
+    boolC (k BR3),
+    .mul tf (.sub (b3 Q3) (.add (.sub (cst Fields.MAXLO) (k FEL)) (.mul two24 (k BR3)))),
+    .mul tf (.sub (b4 H3) (.sub (.sub (cst Fields.MAXHI) (k FEH)) (k BR3))),
+    .sub (k H3C) (.sub (cst 7) (k (H3 3))) ]
 
 def localC : List Expr :=
   [KO, KI, CBI, CBC, ORD, U6A, BIG, ZS].map (fun c => boolC (k c)) ++
@@ -280,7 +297,11 @@ def lookups : List Lookup :=
   (List.range 4).map (fun i => r8 (k (H1 i)) (k MC1)) ++
   (List.range 3).map (fun i => r8 (k (FB i)) on) ++
   (List.range 3).map (fun i => r8 (k (Q2 i)) (k MLO)) ++
-  (List.range 4).map (fun i => r8 (k (H2 i)) (k MLO))
+  (List.range 4).map (fun i => r8 (k (H2 i)) (k MLO)) ++
+  [r8 (k H1C) (k MC1), r8 (k H2C) (k MLO)] ++
+  (List.range 3).map (fun i => r8 (k (Q3 i)) (k MC1)) ++
+  (List.range 4).map (fun i => r8 (k (H3 i)) (k MC1)) ++
+  [r8 (k H3C) (k MC1)]
 
 /-- The use multiplicities that occur (every lookup but the segment yield, index 4). -/
 def useMults : List Expr :=
@@ -288,9 +309,9 @@ def useMults : List Expr :=
     .neg (.mul notFirst on), .neg (.mul (k KI) (k CBC)), .neg (k MNB), .neg (k MC1), .neg on, .neg (k MLO) ]
 
 set_option maxRecDepth 20000 in
-theorem mult_cases : ∀ j < 84, j ≠ 4 → (lookups.getD j ⟨0, .const 0, []⟩).mult ∈ useMults := by decide
+theorem mult_cases : ∀ j < 94, j ≠ 4 → (lookups.getD j ⟨0, .const 0, []⟩).mult ∈ useMults := by decide
 
-theorem lookups_len : lookups.length = 84 := by decide
+theorem lookups_len : lookups.length = 94 := by decide
 
 def coin : Comp where
   air := { name := "block_coin", nMain := N_MAIN, pre := preCols, constraints := constraints }
