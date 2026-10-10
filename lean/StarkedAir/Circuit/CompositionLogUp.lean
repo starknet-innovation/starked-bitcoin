@@ -12,6 +12,7 @@ Each gadget's lemma says what its result register holds, over QM31.
 -/
 import StarkedAir.Circuit.Composition
 import StarkedAir.Circuit.Gadgets
+import StarkedAir.Lookup
 
 namespace StarkedAir.Circuit.Composition
 
@@ -205,5 +206,128 @@ theorem horner_concat (c a : QM) (xs ys : List QM) : horner c a (xs ++ ys) = hor
   induction xs generalizing a with
   | nil => rfl
   | cons x xs ih => simp [horner, ih]
+
+end StarkedAir.Circuit.Composition
+
+namespace StarkedAir.Circuit.Composition
+
+open StarkedAir StarkedAir.Circuit
+
+/-! ### A component, and the whole system -/
+
+/-- A component's DAG roots: constraints, then per lookup its multiplicity and values (as exported). -/
+def compRoots (c : Comp) : List Expr := c.air.constraints ++ c.lookups.flatMap fun l => l.mult :: l.vals
+def compDag (c : Comp) : List ℕ × DagState := emitAll (compRoots c) {}
+
+/-- Where lookup `j`'s multiplicity id sits among the roots' ids. -/
+def lookupAt (c : Comp) (j : ℕ) : ℕ :=
+  c.air.constraints.length + ((c.lookups.take j).map fun l => l.vals.length + 1).sum
+
+/-- A component's input registers: samples and public inputs (`Inputs`), interaction samples, its
+claimed sum. -/
+structure PartRegs where
+  ci : Inputs
+  inter : ℕ → ℕ → ℕ
+  claimed : ℕ
+
+/-- Shared registers: coefficient, lookup elements, trace size. -/
+structure Shared where
+  coeff : ℕ
+  z : ℕ
+  alpha : ℕ
+  logSize : ℕ
+
+/-- `1/2^L` in M31 (the claimed sum's share per row). -/
+def ninv (L : ℕ) : ℕ := (((2 : F) ^ L)⁻¹).val
+
+/-- Run a list of gadgets, each from the previous one's next register. -/
+def seqOuts : ℕ → List (ℕ → Out ℕ) → List Op × List ℕ × ℕ
+  | n, [] => ([], [], n)
+  | n, f :: fs => let o := f n; let r := seqOuts o.next fs; (o.ops ++ r.1, o.res :: r.2.1, r.2.2)
+
+/-- A component's program from register `n`, accumulating from `accIn`. -/
+def partProg (c : Comp) (pr : PartRegs) (sh : Shared) (n accIn : ℕ) : Out ℕ :=
+  let (ids, st) := compDag c
+  let nodes := st.out
+  let reg := nodeReg n nodes pr.ci
+  let nc := c.air.constraints.length
+  let hb := n + 2 * nodes.size
+  let cOps := dagOps n nodes pr.ci ++ hornerOps accIn hb sh.coeff ((ids.take nc).map reg)
+  let acc1 := accReg accIn hb nc
+  let p0 := hb + 2 * nc
+  if c.lookups.isEmpty then ⟨cOps, acc1, p0⟩ else
+  let L := c.lookups.length
+  let B := (L + 1) / 2
+  let idAt := fun i => reg (ids.getD i 0)
+  let mults := fun j => idAt (lookupAt c j)
+  let valsOf := fun j => ((List.range ((c.lookups.getD j ⟨0, .const 0, []⟩).vals.length)).map fun i => idAt (lookupAt c j + 1 + i))
+  let dens := seqOuts p0 ((List.range L).map fun j => fun m => denOps m (c.lookups.getD j ⟨0, .const 0, []⟩).rel sh.z sh.alpha (valsOf j))
+  let ss := seqOuts dens.2.2 ((List.range B).map fun b => fun m =>
+    secureOps m (fun k => pr.inter (4 * b + k) (if b + 1 = B then 1 else 0)))
+  let sp := secureOps ss.2.2 (fun k => pr.inter (4 * (B - 1) + k) 0)
+  let q := sp.next
+  let shOps : List Op := [.const q (ninv sh.logSize) 0 0 0, .mul (q + 1) pr.claimed q]
+  let bx : BatchIn := ⟨mults, fun j => dens.2.1.getD j 0, fun b => ss.2.1.getD b 0, sp.res, q + 1, L, B⟩
+  let bt := (List.range B).foldl (fun (acc : List Op × ℕ × ℕ) b =>
+    let o := batchOps acc.2.2 acc.2.1 sh.coeff b bx; (acc.1 ++ o.ops, o.res, o.next)) ([], acc1, q + 2)
+  ⟨cOps ++ dens.1 ++ ss.1 ++ sp.ops ++ shOps ++ bt.1, bt.2.1, bt.2.2⟩
+
+/-- The system's program: input hook, zero accumulator, components in order, `1/Z(oods)`, product. -/
+def sysProg (parts : List (Comp × PartRegs)) (sh : Shared) (nIn oodsX : ℕ) : List Op × ℕ :=
+  let r := parts.foldl (fun (acc : List Op × ℕ × ℕ) p =>
+    let o := partProg p.1 p.2 sh acc.2.2 acc.2.1; (acc.1 ++ o.ops, o.res, o.next)) ([], nIn, nIn + 1)
+  let w := r.2.2
+  ([.hook 0 [] (List.range nIn), .zero nIn] ++ r.1 ++ [.hook 1 [oodsX] [w], .mul (w + 1) r.2.1 w], w + 1)
+
+/-! ### The input layout of `plain_verifier.zig` -/
+
+/-- Per component: preprocessed count, main offsets per column, interaction column count, pubs count. -/
+structure PartShape where
+  nPre : ℕ
+  offs : List (List ℤ)
+  nInter : ℕ
+  nPub : ℕ
+  lookups : Bool
+
+/-- Registers, in Zig's order: all preprocessed samples, all main samples, all interaction samples
+(two for a component's last four columns), all public inputs, the claimed sums, the coefficient, `z`,
+`α`, the OODS `x`. -/
+def layoutRegs (shapes : List PartShape) : List PartRegs × Shared × ℕ × ℕ :=
+  let nPreAll := (shapes.map (·.nPre)).sum
+  let mainLen := fun (s : PartShape) => (s.offs.map List.length).sum
+  let interLen := fun (s : PartShape) => if s.nInter = 0 then 0 else s.nInter + 4
+  let nMainAll := (shapes.map mainLen).sum
+  let nInterAll := (shapes.map interLen).sum
+  let nPubAll := (shapes.map (·.nPub)).sum
+  let nSums := (shapes.filter (·.lookups)).length
+  let pubBase := nPreAll + nMainAll + nInterAll
+  let sumBase := pubBase + nPubAll
+  let coeff := sumBase + nSums
+  let go := shapes.foldl (fun (acc : List PartRegs × ℕ × ℕ × ℕ × ℕ × ℕ) s =>
+    let (out, pre, main, inter, pubb, sums) := acc
+    let mainStart := fun i => main + ((s.offs.take i).map List.length).sum
+    let ci : Inputs := ⟨fun t i off => match t with
+      | .pre => pre + i
+      | .main => mainStart i + ((s.offs.getD i []).idxOf off), fun j => pubb + j⟩
+    -- column c's samples: one, or two (prev, cur) for the last four columns
+    let interAt := fun c j => inter + c + (c - (s.nInter - 4)) + j
+    let pr : PartRegs := ⟨ci, interAt, sums⟩
+    (out ++ [pr], pre + s.nPre, main + mainLen s, inter + interLen s, pubb + s.nPub, if s.lookups then sums + 1 else sums))
+    ([], 0, nPreAll, nPreAll + nMainAll, pubBase, sumBase)
+  (go.1, ⟨coeff, coeff + 1, coeff + 2, 0⟩, coeff + 4, coeff + 3)
+
+def sysJson (parts : List Comp) (shapes : List PartShape) (logSize : ℕ) : String :=
+  let (regs, sh, nIn, oodsX) := layoutRegs shapes
+  let (ops, res) := sysProg (parts.zip regs) { sh with logSize := logSize } nIn oodsX
+  s!"\{\"schema\":\"starked-glue-v1\",\"ops\":[{",".intercalate (ops.map Op.toJson)}],\"results\":[{res}]}"
+
+end StarkedAir.Circuit.Composition
+
+namespace StarkedAir.Circuit.Composition
+
+def compShape (c : Comp) (nPub : ℕ) : PartShape :=
+  let nodes := (compDag c).2.out
+  ⟨c.air.pre.length, (List.range c.air.nMain).map (mainOffsets nodes), if c.lookups.isEmpty then 0 else 4 * ((c.lookups.length + 1) / 2),
+    nPub, !c.lookups.isEmpty⟩
 
 end StarkedAir.Circuit.Composition
