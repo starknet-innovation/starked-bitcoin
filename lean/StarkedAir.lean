@@ -66,6 +66,7 @@ import StarkedAir.Block.Sha
 import StarkedAir.Block.Merkle
 import StarkedAir.Block.Walk
 import StarkedAir.Block.Ctx
+import StarkedAir.Block.CtxSound
 import StarkedAir.Block.WMerkle
 import StarkedAir.Block.WMerkleSound
 import StarkedAir.Block.MerkleSound
