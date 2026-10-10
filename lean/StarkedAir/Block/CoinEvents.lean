@@ -221,6 +221,179 @@ theorem coin_out_tuple (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
   · simp only [List.cons.injEq, and_true]
     exact ⟨evlo, evhi, eclo, echi, trivial, trivial, trivial, trivial, hslen', by rw [hctx, htxi]⟩
 
+omit hL hsat hL24 in
+/-- A slice's element. -/
+theorem slice_getD {R : Spec.Block.Bytes} {a l i : ℕ} (hi : i < l) (hal : a + l ≤ R.length) :
+    (Fields.slice R a l).getD i 0 = R.getD (a + i) 0 := by
+  rw [List.getD_eq_getElem _ _ (by rw [Fields.slice_length hal]; exact hi), List.getD_eq_getElem _ _ (by omega)]
+  simp [Fields.slice, List.getElem_take, List.getElem_drop]
+
+/-- **An input row's tuple is its claimed coin's.** For input `q` of transaction `t` (`t ≥ 1`): the
+prevout's hash and index, and the claim of undo record `J` (URec row `rj`): its code (four undo bytes,
+little-endian), its `serTxOut` (the record's undo bytes), and the claimed creating transaction `CTX`. -/
+theorem coin_in_tuple (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
+    (hon : ∀ j < 2 ^ L, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
+    (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
+    {parts : List (List Spec.Block.Tok)} (hf : List.Forall₂ Spec.Block.IoTx S.b.txs parts)
+    (htg : Spec.Block.tagged 0 (Fields.toksFrom (inst 1).main (Rb inst pub) S.m 0) = Spec.Block.tagParts 0 parts)
+    {j t q : ℕ} {tx : Spec.Block.Tx} {i : Spec.Block.TxIn} (hj : j < e) (hki : (inst 14).main Coin.KI j = 1)
+    (htx : S.b.txs[t]? = some tx) (hjq : j = ((parts.take t).map List.length).sum + q)
+    (hq : q < tx.vin.length + tx.vout.length) (hi : tx.vin[q]? = some i) :
+    ∃ rj < 2 ^ L, (inst 13).main URec.ON rj = 1 ∧ (inst 14).main Coin.J j = (inst 13).main URec.J rj ∧
+      ∃ (code : ℕ) (ser : Spec.Block.Bytes) (ctx : ℕ),
+        rowTuple inst pub L j = tupleOf (FpWalk.gQ pub) i.prevout.hash i.prevout.n code ser ctx ∧
+        (inst 14).main Coin.CLO j + 65536 * (inst 14).main Coin.CHI j = (code : F) ∧
+        (inst 14).main Coin.CTX j = (ctx : F) ∧
+        (∃ u0 : ℕ, (inst 13).main URec.S rj + 4 = (u0 : F) ∧ 4 ≤ u0 ∧ u0 + ser.length ≤ (pub 8).val ∧
+          ser = (List.range ser.length).map (fun k => (Ub inst pub).getD (u0 + k) 0) ∧
+          code = Spec.Block.le ((List.range 4).map fun k => (Ub inst pub).getD (u0 - 4 + k) 0)) := by
+  have cs := coin_sat hL hsat hL24
+  have fs := fields_sat' hL hsat hL24
+  have hj2 : j < 2 ^ L := by omega
+  have hLb : 2 ^ L ≤ 2 ^ 23 := Nat.pow_le_pow_right (by norm_num) hL24
+  have hRl := len_R hL hsat hL24
+  have hU := undo_len hL hsat hL24
+  have hcbi : (inst 14).main Coin.CBI j = 0 := by
+    rcases Coin.kinds cs hj2 with h | h | h | h <;> simp_all
+  have hkc : (inst 14).main Coin.KI j + (inst 14).main Coin.CBI j = 1 := by rw [hki, hcbi]; simp
+  -- the row's input
+  obtain ⟨t0, q0, tx0, htx0, htxi, hjq0, hq0, -, hki0⟩ := coin_row_tx hL hsat hL24 S he hon hlen hst hf htg hj
+  obtain ⟨hpl, hpe⟩ := part_len hf htx
+  obtain ⟨hpl0, hpe0⟩ := part_len hf htx0
+  obtain ⟨rfl, rfl⟩ := decomp_unique parts hpl hpl0 (by omega) (by omega) (hjq.symm.trans hjq0)
+  rw [htx] at htx0; obtain rfl := Option.some.inj htx0
+  obtain ⟨-, i0, hi0, hit⟩ := hki0 hkc
+  rw [hi] at hi0; obtain rfl := Option.some.inj hi0
+  set ρ := (ioRows inst S.m).getD j 0 with hρdef
+  have hρ : ρ ∈ ioRows inst S.m := by rw [hρdef, List.getD_eq_getElem _ _ (by omega)]; exact List.getElem_mem _
+  obtain ⟨hρm, -⟩ := mem_ioRows.mp hρ
+  have hρn : ρ < 2 ^ L := by have := S.hmn; omega
+  obtain ⟨hkin, -⟩ := (coin_row_tok hL hsat hL24 S he hon hlen hst hj).2 hkc
+  -- the input token: the prevout's hash and index bytes
+  have hSTART := hst j hj
+  set sv := ((inst 14).main Coin.START j).val with hsv
+  have hfitρ := S.hfit ρ hρm
+  have htok : Fields.tokOf (inst 1).main (Rb inst pub) ρ = .inp (Fields.slice (Rb inst pub) sv 32)
+      (Fields.slice (Rb inst pub) (sv + 32) 4) (Fields.slice (Rb inst pub) (sv + 36 + Fields.prefOf (inst 1).main ρ)
+        ((inst 1).main Fields.VAL ρ).val)
+      (Fields.slice (Rb inst pub) (sv + 36 + Fields.prefOf (inst 1).main ρ + ((inst 1).main Fields.VAL ρ).val) 4) := by
+    have kat := Fields.kinds_at fs hρn (a := Fields.K_IN) (by decide) hkin
+    unfold Fields.tokOf
+    rw [if_neg (by rw [kat Fields.K_BLK (by decide)]; simp [Fields.K_BLK, Fields.K_IN]),
+      if_neg (by rw [kat Fields.K_TXH (by decide)]; simp [Fields.K_TXH, Fields.K_IN]), if_pos hkin, hsv, hSTART]
+  rw [htok] at hit
+  obtain ⟨hh32, hix4, -, hprev, -, -⟩ := hit
+  -- the prevout bytes
+  have hpb : ∀ k < 36, ((inst 14).main (Coin.PB k) j).val = ((Rb inst pub).getD (sv + k) 0).toNat ∧ sv + k < (Rb inst pub).length := by
+    intro k hk
+    obtain ⟨hlt, hb⟩ := coin_prevout hL hsat hL24 hj2 hki hk
+    have hsk : ((inst 14).main Coin.START j + (k : F)).val = sv + k := by
+      have e : (inst 14).main Coin.START j + (k : F) = ((sv + k : ℕ) : F) := by rw [hsv]; push_cast; rw [Coin.cast_val]
+      rw [e, ZMod.val_natCast_of_lt (lt_of_lt_of_le (show sv + k < 2 ^ 25 by
+        have := coin_start_le hL hsat hL24 S hj2 ((hon j hj2).mpr hj); omega) (by unfold P; norm_num))]
+    rw [hsk] at hlt hb
+    exact ⟨hb, hlt⟩
+  have hpbF : ∀ k < 36, (inst 14).main (Coin.PB k) j = ((((Rb inst pub).getD (sv + k) 0).toNat : ℕ) : F) := by
+    intro k hk; rw [← Coin.cast_val ((inst 14).main (Coin.PB k) j), (hpb k hk).1]
+  have hfit32 : sv + 32 ≤ (Rb inst pub).length := by have := (hpb 31 (by norm_num)).2; omega
+  have hfit36 : sv + 36 ≤ (Rb inst pub).length := by have := (hpb 35 (by norm_num)).2; omega
+  obtain ⟨-, -, -, -, -, hvlo, hvhi, htlb⟩ := Coin.in_spec cs hj2 hki
+  -- the undo record
+  obtain ⟨rj, hrj, honj, hJ, hclo, hchi, -, -⟩ := coin_urec hL hsat hL24 hj2 hki
+  obtain ⟨len, htl, hsl, u0, hu0, hu0len, hfp⟩ := coin_fp_in hL hsat hL24 hj2 hki hrj honj hJ
+  have hub : ∀ c < 4, ∃ u, u < (pub 8).val ∧ u + 4 = u0 + c ∧
+      ((inst 13).main (4 + c) rj).val = ((Ub inst pub).getD u 0).toNat := by
+    intro c hc
+    obtain ⟨u, hu, hpu, hb⟩ := urec_bytes hL hsat hL24 hrj honj (c := c) (by omega)
+    refine ⟨u, hu, ?_, hb⟩
+    apply Coin.lift _ (lt_of_lt_of_le (show u + 4 < 2 ^ 25 by omega) (by unfold P; norm_num))
+      (lt_of_lt_of_le (show u0 + c < 2 ^ 25 by omega) (by unfold P; norm_num))
+    push_cast; rw [← hpu, ← hu0]; ring
+  obtain ⟨ua, -, hua, hba⟩ := hub 0 (by norm_num)
+  have hu04 : 4 ≤ u0 := by omega
+  have hcb : ∀ c < 4, (inst 13).main (URec.C c) rj = ((((Ub inst pub).getD (u0 - 4 + c) 0).toNat : ℕ) : F) := by
+    intro c hc
+    obtain ⟨u, -, hu, hb⟩ := hub c hc
+    rw [show u0 - 4 + c = u by omega, ← hb]; exact (Coin.cast_val _).symm
+  set ub := fun k => ((Ub inst pub).getD (u0 - 4 + k) 0).toNat with hubdef
+  have hb256 : ∀ k, ub k < 256 := fun k => UInt8.toNat_lt _
+  set code := Spec.Block.le ((List.range 4).map fun k => (Ub inst pub).getD (u0 - 4 + k) 0) with hcode
+  have hcodev : code = ub 0 + 256 * (ub 1 + 256 * (ub 2 + 256 * ub 3)) := by
+    simp [hcode, Spec.Block.le, List.range_succ, hubdef]
+  -- the claimed bytes
+  set ser : Spec.Block.Bytes := (List.range len).map fun k => (Ub inst pub).getD (u0 + k) 0 with hser
+  have hserlen : ser.length = len := by simp [hser]
+  have hFH : (⟨(inst 14).main Coin.FH j, (inst 14).main (Coin.FH + 1) j, (inst 14).main (Coin.FH + 2) j,
+      (inst 14).main (Coin.FH + 3) j⟩ : Circuit.Q) =
+      coordsOf (FpWalk.horner (FpWalk.gQ pub) (ser.map fun b => emb ((b.toNat : ℕ) : F))) := by
+    have hl : (ser.map fun b => emb ((b.toNat : ℕ) : F)) =
+        (List.range len).map fun k => emb ((((Ub inst pub).getD (u0 + k) 0).toNat : ℕ) : F) := by
+      simp [hser, List.map_map, Function.comp]
+    rw [hl, ← hfp, coordsOf_toQ]
+  refine ⟨rj, hrj, honj, hJ, code, ser, ((inst 14).main Coin.CTX j).val, ?_, ?_, (Coin.cast_val _).symm,
+    u0, hu0, hu04, by rw [hserlen]; exact hu0len, by rw [hserlen], rfl⟩
+  · rw [rowTuple_eq hL hsat hL24 hj2, tupleOf]
+    simp only [← hFH]
+    rw [hprev]
+    congr 1
+    · apply List.ext_getElem (by simp)
+      intro k h1 h2
+      simp only [List.getElem_map, List.getElem_range]
+      have hk : k < 16 := by simpa using h1
+      rw [htlb k hk]
+      unfold Coin.prevLimb txidLimb
+      have e := fun (a : ℕ) (ha : a < 32) => slice_getD (R := Rb inst pub) (a := sv) (l := 32) (i := a) ha hfit32
+      split_ifs with hpar
+      · simp only [Coin.pair, Expr.eval, Coin.ev_k hj2, StarkedAir.Sha256.eval_cst, Nat.cast_ofNat]
+        rw [hpbF _ (by omega), hpbF _ (by omega), e _ (by omega), e _ (by omega)]; push_cast; ring
+      · simp only [Coin.pair, Expr.eval, Coin.ev_k hj2, StarkedAir.Sha256.eval_cst, Nat.cast_ofNat]
+        rw [hpbF _ (by omega), hpbF _ (by omega), e _ (by omega), e _ (by omega)]; push_cast; ring
+    · have hfit36' : sv + 32 + 4 ≤ (Rb inst pub).length := by omega
+      have e := fun (a : ℕ) (ha : a < 4) => slice_getD (R := Rb inst pub) (a := sv + 32) (l := 4) (i := a) ha hfit36'
+      have hix : Spec.Block.le (Fields.slice (Rb inst pub) (sv + 32) 4) =
+          ((Rb inst pub).getD (sv + 32) 0).toNat + 256 * (((Rb inst pub).getD (sv + 33) 0).toNat +
+            256 * (((Rb inst pub).getD (sv + 34) 0).toNat + 256 * ((Rb inst pub).getD (sv + 35) 0).toNat)) := by
+        have h4 : Fields.slice (Rb inst pub) (sv + 32) 4 = [(Rb inst pub).getD (sv + 32) 0, (Rb inst pub).getD (sv + 33) 0,
+            (Rb inst pub).getD (sv + 34) 0, (Rb inst pub).getD (sv + 35) 0] := by
+          apply List.ext_getElem (by rw [Fields.slice_length hfit36']; rfl)
+          intro a h1 h2
+          rw [← List.getD_eq_getElem _ 0 h1, e a (by rw [Fields.slice_length hfit36'] at h1; exact h1)]
+          have : a < 4 := by rw [Fields.slice_length hfit36'] at h1; exact h1
+          interval_cases a <;> simp
+        rw [h4]; simp [Spec.Block.le]
+      have r32 := UInt8.toNat_lt ((Rb inst pub).getD (sv + 32) 0)
+      have r33 := UInt8.toNat_lt ((Rb inst pub).getD (sv + 33) 0)
+      have r34 := UInt8.toNat_lt ((Rb inst pub).getD (sv + 34) 0)
+      have r35 := UInt8.toNat_lt ((Rb inst pub).getD (sv + 35) 0)
+      simp only [List.cons.injEq, and_true]
+      refine ⟨?_, ?_, ?_, ?_, trivial, trivial, trivial, trivial, ?_, ?_⟩
+      · rw [hvlo, Coin.pairV, hpbF 32 (by norm_num), hpbF 33 (by norm_num), hix]
+        rw [show ((Rb inst pub).getD (sv + 32) 0).toNat + 256 * (((Rb inst pub).getD (sv + 33) 0).toNat +
+            256 * (((Rb inst pub).getD (sv + 34) 0).toNat + 256 * ((Rb inst pub).getD (sv + 35) 0).toNat)) =
+            (((Rb inst pub).getD (sv + 32) 0).toNat + 256 * ((Rb inst pub).getD (sv + 33) 0).toNat) +
+              65536 * (((Rb inst pub).getD (sv + 34) 0).toNat + 256 * ((Rb inst pub).getD (sv + 35) 0).toNat) by ring]
+        rw [Nat.add_mul_mod_self_left, Nat.mod_eq_of_lt (by omega)]; push_cast; ring
+      · rw [hvhi, Coin.pairV, hpbF 34 (by norm_num), hpbF 35 (by norm_num), hix]
+        rw [show ((Rb inst pub).getD (sv + 32) 0).toNat + 256 * (((Rb inst pub).getD (sv + 33) 0).toNat +
+            256 * (((Rb inst pub).getD (sv + 34) 0).toNat + 256 * ((Rb inst pub).getD (sv + 35) 0).toNat)) =
+            (((Rb inst pub).getD (sv + 32) 0).toNat + 256 * ((Rb inst pub).getD (sv + 33) 0).toNat) +
+              65536 * (((Rb inst pub).getD (sv + 34) 0).toNat + 256 * ((Rb inst pub).getD (sv + 35) 0).toNat) by ring]
+        rw [Nat.add_mul_div_left _ _ (by norm_num), Nat.div_eq_of_lt (by omega), zero_add]; push_cast; ring
+      · rw [hclo, hcb 0 (by norm_num), hcb 1 (by norm_num), hcodev]
+        have := hb256 0; have := hb256 1; have := hb256 2; have := hb256 3
+        rw [show ub 0 + 256 * (ub 1 + 256 * (ub 2 + 256 * ub 3)) = (ub 0 + 256 * ub 1) + 65536 * (ub 2 + 256 * ub 3) by ring,
+          Nat.add_mul_mod_self_left, Nat.mod_eq_of_lt (by omega)]
+        simp only [hubdef]; push_cast; ring
+      · rw [hchi, hcb 2 (by norm_num), hcb 3 (by norm_num), hcodev]
+        have := hb256 0; have := hb256 1; have := hb256 2; have := hb256 3
+        rw [show ub 0 + 256 * (ub 1 + 256 * (ub 2 + 256 * ub 3)) = (ub 0 + 256 * ub 1) + 65536 * (ub 2 + 256 * ub 3) by ring,
+          Nat.add_mul_div_left _ _ (by norm_num), Nat.div_eq_of_lt (by omega), zero_add]
+        simp only [hubdef]; push_cast; ring
+      · rw [hsl, hserlen]
+      · exact (Coin.cast_val _).symm
+  · rw [hclo, hchi, hcb 0 (by norm_num), hcb 1 (by norm_num), hcb 2 (by norm_num), hcb 3 (by norm_num), hcodev]
+    simp only [hubdef]; push_cast; ring
+
 end System
 
 end StarkedAir.Block
