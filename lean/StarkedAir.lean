@@ -110,3 +110,4 @@ import StarkedAir.Spec.MerkleLevels
 import StarkedAir.Testing.BlockReader
 import StarkedAir.Spec.UtxoMultiset
 import StarkedAir.Spec.QM31
+import StarkedAir.Spec.UtxoEpoch
