@@ -109,3 +109,4 @@ import StarkedAir.Spec.TxSplit
 import StarkedAir.Spec.MerkleLevels
 import StarkedAir.Testing.BlockReader
 import StarkedAir.Spec.UtxoMultiset
+import StarkedAir.Spec.QM31
