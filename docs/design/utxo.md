@@ -1,7 +1,7 @@
 # UTXO module (M3b) — design proposal
 
-Status: proposal for the owner (2026-10-10, D-040 proposed). Nothing here is built. It decides
-`Q-TREE`, which the roadmap leaves to the owner. Figures marked *est.* are rough.
+Status: approach B approved by the owner (2026-10-10, D-040); epochs end at Core's assumeUTXO heights.
+Figures marked *est.* are rough.
 
 ## What M3b must prove
 
@@ -83,6 +83,63 @@ order, it also carries a position: `(height, transaction index)`.
   - following the tip needs either short epochs (each paying a sorted pass over the set) or approach A
     for the last stretch;
   - the soundness argument is global, so the Lean proof is about a system of all blocks, not one.
+
+## Soundness argument, in detail (2026-10-10)
+
+**Spec theorem (proven, `Spec/UtxoMultiset.lean`, `run_of_balance`).** Model each transaction as its
+claimed inputs `(outpoint, coin, creation index)` and its outputs. Core's update runs the transactions in
+order: each input must find exactly the claimed coin, which is removed; then each output is added and may
+not overwrite. The theorem assumes three things:
+- every claimed creation index is earlier than the spending transaction;
+- the created outpoints are distinct;
+- `created = spent + final` as multisets.
+
+Under those, Core's update never fails and ends holding exactly `final`. So the undo records are the
+removed coins (D-029), and no outpoint is spent twice, in one transaction or across transactions (D-031).
+
+**From field sums to multisets.** The epoch's sum `Σ_created 1/(z − φ) − Σ_spent 1/(z − φ) − Σ_final
+1/(z − φ) = 0` over QM31 gives, outside a small set of bad `(α, z)`, per-fingerprint balance *in the
+field* (`LogUpSZ.logup_sz`). Counts are only known mod p (≈ 2³¹):
+- a created tuple occurs at most once (distinct outpoints);
+- a final tuple occurs at most once (the final set is strictly sorted);
+- a spent tuple's count is at most the epoch's number of inputs.
+
+So **each epoch must have fewer than p − 1 inputs**. Each block proof makes its input count public, and
+the aggregator checks the epoch total; an epoch that would exceed it is split. Bitcoin's total inputs to
+~840k are roughly 2–3 × 10⁹ (*est.*), near p, so the first epoch may need a split.
+
+**Distinct created outpoints.** A txid is SHA256d of the transaction. Assuming no SHA256d collision on the
+chain's data (a stated cryptographic assumption), equal txids mean equal transactions:
+- **coinbases after BIP34 (height 227,931)** commit to their height (proven in `block_sound`), so they
+  are distinct;
+- **a repeated non-coinbase transaction** would spend its inputs twice, which the balance rejects; this
+  argument is well-founded on positions, since the earliest repeat would be a coinbase;
+- **pre-BIP34 coinbases:** the only repeats in history are the two BIP30 pairs. The two earlier
+  coinbases' outputs (heights 91,722 and 91,812) are treated as never created. Core overwrote them
+  unspent at 91,880 and 91,842, so the views agree from 91,880 on, and every snapshot height is later.
+  The heights are constants the verifier knows. A one-off sorted check over the ~228k pre-BIP34 coinbase
+  txids shows there are no other repeats.
+
+**The challenge.** `(α, z)` is drawn from the MMR root of the epoch's block commitments (D-038) and the
+header MMR, computed natively before proving. Each block proof takes `(α, z)` as public inputs and outputs
+its partial sum (a QM31) and its input count. The aggregator recomputes the challenge from the proven
+commitments.
+
+**Coin tuple.** `φ` combines, with powers of `α`:
+- the txid's 16 limbs and the output index;
+- `2·height + coinbase`;
+- the amount's limbs;
+- a fingerprint of the script, `Σ_j γ^j b_j` over QM31 with `γ` derived like `z`. That costs one row per
+  script byte, on the walker that already reads script bytes.
+
+**Build order.**
+1. QM31 is a field (Lean);
+2. the external-challenge running-sum gadget and its soundness;
+3. the epoch theorem (sums → multisets → `run_of_balance`);
+4. the undo-record parser component;
+5. the coin-event component linked to the fields' outputs and inputs;
+6. the final sorted pass, with `HASH_SERIALIZED`;
+7. the aggregator.
 
 ## Recommendation (D-040, proposed)
 
