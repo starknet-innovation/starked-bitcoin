@@ -71,6 +71,10 @@ pub fn build(b: *std.Build) void {
     lib.addAnonymousImport("air:block_msg", .{ .root_source_file = b.path("airs/block_msg.json") });
     lib.addAnonymousImport("air:block_fields", .{ .root_source_file = b.path("airs/block_fields.json") });
     lib.addAnonymousImport("air:block_merkle", .{ .root_source_file = b.path("airs/block_merkle.json") });
+    lib.addAnonymousImport("air:block_tables", .{ .root_source_file = b.path("airs/block_tables.json") });
+    lib.addAnonymousImport("air:block_walk", .{ .root_source_file = b.path("airs/block_walk.json") });
+    lib.addAnonymousImport("air:block_ctx", .{ .root_source_file = b.path("airs/block_ctx.json") });
+    lib.addAnonymousImport("air:block_wmerkle", .{ .root_source_file = b.path("airs/block_wmerkle.json") });
     lib.addAnonymousImport("testdata:block_170", .{ .root_source_file = b.path("testdata/blocks/170.bin") });
     lib.addAnonymousImport("testdata:block_91722", .{ .root_source_file = b.path("testdata/blocks/91722.bin") });
     lib.addAnonymousImport("testdata:block_91812", .{ .root_source_file = b.path("testdata/blocks/91812.bin") });

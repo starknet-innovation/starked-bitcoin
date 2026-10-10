@@ -51,7 +51,7 @@ const TXA = 114;
 const WST = 115;
 const TXI = 116;
 const TXM = 117;
-pub const N_MAIN = 118;
+pub const N_MAIN = 190;
 const MAX_SIZE: u64 = 0x02000000;
 
 /// One token row.

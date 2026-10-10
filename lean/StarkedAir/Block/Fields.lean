@@ -7,7 +7,7 @@ Row `r` covers bytes `[START, START + LEN)`; rows tile the block from 0 to `LEN_
 the token grammar. Opaque fields (header, hashes, scripts, items, fixed-size fields) are not read
 here.
 -/
-import StarkedAir.Block.Bytes
+import StarkedAir.Block.Tables
 
 /-! Degrees: constraints at most 3, lookup multiplicities at most 2, tuple entries 1 (`#guard`s below). -/
 
@@ -214,7 +214,157 @@ def txC : List Expr :=
 /-- M3a.4: the block token's transaction count is public input 1 (the Merkle tree's leaf count). -/
 def pubC : List Expr := [.mul first (.sub (k VAL) (.pub 1))]
 
-def constraints : List Expr := kindC ++ transC ++ tileC ++ compactC ++ segC ++ countC ++ zeroC ++ bitC ++ txC ++ pubC
+/-! ### Per-transaction checks (M3a.5b, D-035)
+
+Columns from `118` on. Byte slots `BY 0 … 7` read the block at `BASEC + j`: an output's 8 value bytes, a
+lock time's 4 bytes, an input's 4 sequence bytes (`BASEC = START + LEN − 4` on input rows). Range slots
+`RG 0 … 12` are looked up in the byte table `r8` on every row (unused slots hold 0); each kind of row
+gives them its own meaning. Public inputs: `pub 2` the height, `pub 6` the segwit bit. -/
+
+def FZ : ℕ := 118
+def FL : ℕ := 119
+def FS : ℕ := 120
+def TY : ℕ := 121
+def BASEC : ℕ := 122
+def BY (j : ℕ) : ℕ := 123 + j
+def AQ : ℕ := 131
+def BQ : ℕ := 132
+def INVQ : ℕ := 133
+def EXPQ : ℕ := 134
+def QH : ℕ := 135
+def QB (j : ℕ) : ℕ := 136 + j
+def OH (j : ℕ) : ℕ := 141 + j
+def ZT : ℕ := 147
+def INVT : ℕ := 148
+def GIN : ℕ := 149
+def INVN : ℕ := 150
+def TLO : ℕ := 151
+def THI : ℕ := 152
+def CAR : ℕ := 153
+def BOR : ℕ := 154
+def RG (j : ℕ) : ℕ := 155 + j
+def B2 : ℕ := 168
+def BRW : ℕ := 169
+def GL0 : ℕ := 170
+def GL1 : ℕ := 171
+def GZ : ℕ := 172
+def GS : ℕ := 173
+def CLO : ℕ := 174
+def CHI : ℕ := 175
+def WB : ℕ := 176
+def NS : ℕ := 177
+def SSC : ℕ := 178
+def ZV : ℕ := 179
+def INVV : ℕ := 180
+def G0 : ℕ := 181
+def ISC : ℕ := 182
+def AFT : ℕ := 183
+def HASC : ℕ := 184
+def REQC : ℕ := 185
+def REQ : ℕ := 186
+def MML : ℕ := 187
+def MMB : ℕ := 188
+def DW : ℕ := 189
+def N_MAIN' : ℕ := 190
+
+/-- `script(start, len)`: a non-empty script (sigop walker). -/
+def REL_SCRIPT : ℕ := 11
+/-- `totals(W, NSEG, HASC)`: witness bytes, segwit transactions, whether a commitment output is claimed. -/
+def REL_TOT : ℕ := 12
+/-- `ctx(cutoffLo, cutoffHi)`: the finality cutoff's 16-bit limbs. -/
+def REL_CTX : ℕ := 13
+/-- `commit(start, len)`: the coinbase output taken as the witness commitment. -/
+def REL_COMMIT : ℕ := 14
+
+/-- `MAX_MONEY = MAXHI · 2^24 + MAXLO`. -/
+def MAXLO : ℕ := 475136
+def MAXHI : ℕ := 125169754
+/-- The witness-commitment pattern `6a24aa21a9ed`. -/
+def pat : List ℕ := [0x6a, 0x24, 0xaa, 0x21, 0xa9, 0xed]
+
+def by4 (j : ℕ) : Expr := k (BY j)
+def rg (j : ℕ) : Expr := k (RG j)
+def c (v : ℕ) : Expr := cst v
+/-- `a + 256·b`, `a + 256·b + 65536·c`, … -/
+def le2 (a b : Expr) : Expr := .add a (.mul (c 256) b)
+def le3 (a b d : Expr) : Expr := .add (le2 a b) (.mul (c 65536) d)
+def le4 (a b d e : Expr) : Expr := .add (le3 a b d) (.mul (c 16777216) e)
+/-- An output's value limbs: bytes 0–2 and 3–6 (byte 7 is 0). -/
+def vlo : Expr := le3 (by4 0) (by4 1) (by4 2)
+def vhi : Expr := le4 (by4 3) (by4 4) (by4 5) (by4 6)
+/-- A lock time's (or sequence's) 16-bit limbs. -/
+def lo16 : Expr := le2 (by4 0) (by4 1)
+def hi16 : Expr := le2 (by4 2) (by4 3)
+def qE : Expr := .add (.mul (c 32) (k QH)) (sumPow (fun j => k (QB j)) 5)
+def ohSum (f : ℕ → ℕ) : Expr := (List.range 6).foldr (fun j acc => .add (.mul (c (f j)) (k (OH j))) acc) (c 0)
+def same (x : ℕ) : Expr := .mul notFirst (.sub (k x) (kp x))
+
+def modeC : List Expr :=
+  [FZ, FL, FS, TY].map (fun x => boolC (k x)) ++
+  [ .sub (.add (k FZ) (.add (k FL) (k FS))) one ] ++
+  [FZ, FL, FS, TY].map (fun x => .mul (oneMinus (k K_TXH)) (same x))
+
+def valueC : List Expr :=
+  [ .sub (k BASEC) (.add (k START) (.mul (k K_IN) (.sub (k LEN) (c 4)))),
+    .mul (k K_OUT) (by4 7),
+    .mul (k K_OUT) (.sub (rg 0) (.sub (c 7) (by4 6))),
+    .mul (k K_OUT) (.sub (k TLO) (le3 (rg 1) (rg 2) (rg 3))),
+    .mul (k K_OUT) (.sub (le3 (rg 4) (rg 5) (rg 6)) (.add (.sub (c MAXLO) (k TLO)) (.mul (c 16777216) (k BOR)))),
+    .mul (k K_OUT) (.sub (le4 (rg 7) (rg 8) (rg 9) (rg 10)) (.sub (.sub (c MAXHI) (k THI)) (k BOR))),
+    .mul (k K_OUT) (.sub (rg 11) (.sub (c 7) (rg 10))),
+    boolC (k BOR), boolC (k CAR), .mul (oneMinus (k K_OUT)) (k CAR),
+    .mul notFirst (.add (.sub (.sub (k TLO) (.mul (oneMinus (k K_TXH)) (kp TLO))) (.mul (k K_OUT) vlo))
+      (.mul (c 16777216) (k CAR))),
+    .mul notFirst (.sub (.sub (.sub (k THI) (.mul (oneMinus (k K_TXH)) (kp THI))) (.mul (k K_OUT) vhi)) (k CAR)),
+    .mul (k K_NOUT) (.sub (.mul (k VAL) (k INVN)) one) ]
+
+def prevoutC : List Expr :=
+  [ boolC (k ZT), .mul (k ZT) (k TXI), .mul (oneMinus (k ZT)) (.sub (.mul (k TXI) (k INVT)) one),
+    .sub (k GIN) (.mul (k K_IN) (oneMinus (k ZT))),
+    boolC (k QH) ] ++ (List.range 5).map (fun j => boolC (k (QB j))) ++
+  [ .mul (k QH) (.add (k (QB 2)) (.add (k (QB 3)) (k (QB 4)))) ] ++
+  (List.range 6).map (fun j => boolC (k (OH j))) ++
+  [ .mul (k MMB) (.sub (ohSum (fun _ => 1)) one),
+    .sub (k AQ) (.add (.mul (k GIN) (.add (k START) qE)) (.mul (k MMB) (.add (k SSC) (ohSum id)))),
+    .sub (k EXPQ) (.add (.mul (k GIN) (.mul (c 255) (k QH))) (.mul (k MMB) (ohSum (fun j => pat.getD j 0)))),
+    .mul (.add (k GIN) (k MMB)) (.sub (.mul (.sub (k BQ) (k EXPQ)) (k INVQ)) one) ]
+
+def finalC : List Expr :=
+  [ .sub (k GZ) (.mul (k K_LOCK) (k FZ)),
+    .sub (k GS) (.mul (k K_IN) (k FS)),
+    .sub (k GL0) (.mul (k K_LOCK) (.mul (k FL) (oneMinus (k TY)))),
+    .sub (k GL1) (.mul (k K_LOCK) (.mul (k FL) (k TY))),
+    .mul (k GZ) (.add (by4 0) (.add (by4 1) (.add (by4 2) (by4 3)))) ] ++
+  (List.range 4).map (fun j => .mul (k GS) (.sub (by4 j) (c 255))) ++
+  [ .mul (k GL0) (by4 3),
+    .mul (k GL0) (.sub (rg 0) (.sub (c 127) (by4 2))),
+    .mul (k GL0) (.sub (le3 (rg 1) (rg 2) (rg 3)) (.sub (.sub (.pub 2) one) (le3 (by4 0) (by4 1) (by4 2)))),
+    .mul (k GL1) (.sub (le2 (rg 4) (rg 5)) (.add (.sub lo16 (c 0x6500)) (.mul (c 65536) (k B2)))),
+    .mul (k GL1) (.sub (le2 (rg 6) (rg 7)) (.sub (.sub hi16 (c 0x1DCD)) (k B2))),
+    .mul (k GL1) (.sub (le2 (rg 8) (rg 9)) (.add (.sub (.sub (k CLO) lo16) one) (.mul (c 65536) (k BRW)))),
+    .mul (k GL1) (.sub (le2 (rg 10) (rg 11)) (.sub (.sub (k CHI) hi16) (k BRW))),
+    boolC (k B2), boolC (k BRW), same CLO, same CHI ]
+
+def totalsC : List Expr :=
+  [ .sub (k DW) (.mul (k K_LOCK) (.mul (k SEG) (.sub (.add (c 2) (k START)) (k WST)))),
+    .mul first (k WB), .mul notFirst (.sub (.sub (k WB) (kp WB)) (k DW)),
+    .mul first (k NS), .mul notFirst (.sub (.sub (k NS) (kp NS)) (.mul (k K_TXH) (k SEG))),
+    .sub (k SSC) (.add (.add (k START) (k OFF)) pref),
+    boolC (k ZV), .mul (k ZV) (k VAL), .mul (oneMinus (k ZV)) (.sub (.mul (k VAL) (k INVV)) one) ]
+
+def commitC : List Expr :=
+  [ .sub (k G0) (.mul (k K_OUT) (.mul (k ZT) (.pub 6))),
+    boolC (k ISC), .mul (k ISC) (oneMinus (k G0)),
+    .mul first (k AFT), .mul notFirst (.sub (.sub (k AFT) (kp AFT)) (kp ISC)), .mul (k ISC) (k AFT),
+    boolC (k HASC), same HASC, .mul isLast (.sub (k HASC) (k AFT)),
+    .sub (k REQC) (.mul (k G0) (oneMinus (k ISC))),
+    .sub (k REQ) (.mul (k REQC) (.add (oneMinus (k HASC)) (k AFT))),
+    boolC (k MML), boolC (k MMB), .sub (.add (k MML) (k MMB)) (k REQ),
+    .mul (k MML) (.sub (rg 12) (.sub (c 37) (k VAL))) ]
+
+def chkC : List Expr := modeC ++ valueC ++ prevoutC ++ finalC ++ totalsC ++ commitC
+
+def constraints : List Expr := kindC ++ transC ++ tileC ++ compactC ++ segC ++ countC ++ zeroC ++ bitC ++ txC ++ pubC ++ chkC
 
 /-- Byte reads: the CompactSize's bytes, and a segwit head's marker and flag. -/
 def lookups : List Lookup :=
@@ -227,9 +377,21 @@ def lookups : List Lookup :=
     ⟨REL_BYTE, .neg (.mul (k K_TXH) (k SEG)), [.add (k START) (cst 5), cst 1]⟩,
     ⟨REL_TX, .mul (k K_LOCK) (k TXM), [k TXI, k TXA, k SEG, k WST, k START]⟩ ]
 
+/-- M3a.5b: byte slots, the auxiliary read, range slots, and the tuples for the other components. -/
+def chkLookups : List Lookup :=
+  (List.range 8).map (fun j =>
+    ⟨REL_BYTE, .neg (if j < 4 then .add (k K_OUT) (.add (k K_LOCK) (k K_IN)) else k K_OUT),
+      [.add (k BASEC) (c j), by4 j]⟩) ++
+  [ ⟨REL_BYTE, .neg (.add (k GIN) (k MMB)), [k AQ, k BQ]⟩ ] ++
+  (List.range 13).map (fun j => ⟨Tables.REL_R8, .neg one, [rg j]⟩) ++
+  [ ⟨REL_SCRIPT, .mul (.add (k K_IN) (k K_OUT)) (oneMinus (k ZV)), [k SSC, k VAL]⟩,
+    ⟨REL_TOT, isLast, [k WB, k NS, k HASC]⟩,
+    ⟨REL_CTX, .neg first, [k CLO, k CHI]⟩,
+    ⟨REL_COMMIT, k ISC, [k SSC, k VAL]⟩ ]
+
 def fields : Comp where
-  air := { name := "block_fields", nMain := N_MAIN, pre := preCols, constraints := constraints }
-  lookups := lookups
+  air := { name := "block_fields", nMain := N_MAIN', pre := preCols, constraints := constraints }
+  lookups := lookups ++ chkLookups
 
 /-- Polynomial degree of an expression. -/
 def degE : Expr → ℕ
@@ -241,6 +403,6 @@ def degE : Expr → ℕ
   | .neg a => degE a
 
 #guard constraints.all (fun c => degE c ≤ 3)
-#guard lookups.all (fun l => degE l.mult ≤ 2 && l.vals.all (fun v => degE v ≤ 1))
+#guard (lookups ++ chkLookups).all (fun l => degE l.mult ≤ 2 && l.vals.all (fun v => degE v ≤ 1))
 
 end StarkedAir.Block.Fields

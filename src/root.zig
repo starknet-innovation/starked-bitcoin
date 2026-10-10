@@ -14,6 +14,12 @@ pub const block = struct {
     pub const msg = @import("block/msg.zig");
     pub const sha = @import("block/sha.zig");
     pub const merkle = @import("block/merkle.zig");
+    pub const checks = @import("block/checks.zig");
+    pub const walk = @import("block/walk.zig");
+    pub const ctx = @import("block/ctx.zig");
+    pub const wmerkle = @import("block/wmerkle.zig");
+    pub const system = @import("block/system.zig");
+    pub const negative = @import("block/negative.zig");
 };
 pub const recursion = struct {
     pub const plain_verifier = @import("recursion/plain_verifier.zig");

@@ -11,8 +11,6 @@ namespace StarkedAir.LogUpSZ
 
 theorem headerTree_static : StaticOk StarkedAir.HeaderTree.sys = true := by decide
 
-theorem blockSys_static : StaticOk StarkedAir.Block.Fields.blockSys = true := by decide
-
 theorem hashSys_static : StaticOk StarkedAir.Block.hashSys = true := by decide
 
 end StarkedAir.LogUpSZ

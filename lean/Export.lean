@@ -13,6 +13,7 @@ import StarkedAir.Block.Fields
 import StarkedAir.Block.Msg
 import StarkedAir.Block.Sha
 import StarkedAir.Block.Merkle
+import StarkedAir.Block.WMerkle
 import StarkedAir.Testing.BlockReader
 import StarkedAir.Gadgets.RootChecks
 
@@ -34,6 +35,10 @@ def main (args : List String) : IO Unit := do
   | ["block_msg"] => IO.println StarkedAir.Block.Msg.msg.toJson
   | ["block_sha"] => IO.println StarkedAir.Block.Sha.sha.toJson
   | ["block_merkle"] => IO.println StarkedAir.Block.Merkle.merkle.toJson
+  | ["block_tables"] => IO.println StarkedAir.Block.Tables.tables.toJson
+  | ["block_walk"] => IO.println StarkedAir.Block.Walk.walk.toJson
+  | ["block_ctx"] => IO.println StarkedAir.Block.Ctx.ctx.toJson
+  | ["block_wmerkle"] => IO.println StarkedAir.Block.WMerkle.wmerkle.toJson
   | ["block_reader"] => IO.println StarkedAir.BlockReader.reader.toJson
   | ["genesis_checks"] => IO.println StarkedAir.HeaderTree.genesisChecksJson
   | ["probe_oracle"] => IO.println (StarkedAir.Probe.oracleJson 4 2024)
