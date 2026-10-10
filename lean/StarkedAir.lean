@@ -30,6 +30,7 @@ import StarkedAir.Gadgets.Aggregate
 import StarkedAir.Spec.Sha256Fast
 import StarkedAir.Spec.Block
 import StarkedAir.Spec.BlockFlat
+import StarkedAir.Spec.TxFields
 import StarkedAir.Lookup
 import StarkedAir.LogUp
 import StarkedAir.LogUpSZ
@@ -55,6 +56,8 @@ import StarkedAir.Block.FieldsSound
 import StarkedAir.Block.TxIndex
 import StarkedAir.Block.FieldsChk
 import StarkedAir.Block.TxRanges
+import StarkedAir.Block.TxRows
+import StarkedAir.Block.ValueSound
 import StarkedAir.Block.TxBytes
 import StarkedAir.Block.Msg
 import StarkedAir.Block.MsgSound
@@ -68,6 +71,7 @@ import StarkedAir.Block.MerkleSound
 import StarkedAir.Block.ShaSound
 import StarkedAir.Block.HashSpec
 import StarkedAir.Block.Link
+import StarkedAir.Block.ChkLink
 import StarkedAir.Block.HashSound
 import StarkedAir.Block.MerkleLink
 import StarkedAir.Spec.BlockTokens
