@@ -83,7 +83,7 @@ theorem hash_wmerkle_sat' : ∀ r < 2 ^ L, ∀ c ∈ WMerkle.constraints,
 read) with multiplicity `−1` reads a second hash's output, the zero digest, or the coinbase nonce yielded
 at context row 79. -/
 theorem digest_any (hL24 : L ≤ 24) {i r k : ℕ}
-    (hu : (i = 3 ∧ (k = 4 ∨ k = 5)) ∨ (i = 4 ∧ k = 2) ∨ (i = 7 ∧ k = 10))
+    (hu : (i = 3 ∧ (k = 4 ∨ k = 5)) ∨ (i = 4 ∧ k = 2) ∨ (i = 7 ∧ (k = 10 ∨ k = 11)))
     (hr : r < 2 ^ L) (hm : siteMult hashSys inst pub (i, r, k) = -1) :
     (∃ q', 72 * q' + 72 ≤ 2 ^ L ∧ (inst 3).main Sha.DBL (72 * q') = 1 ∧
       siteVals hashSys inst pub (3, 72 * q' + 71, 2) = siteVals hashSys inst pub (i, r, k)) ∨
@@ -92,13 +92,13 @@ theorem digest_any (hL24 : L ≤ 24) {i r k : ℕ}
       siteVals hashSys inst pub (i, r, k) = (Ctx.NONCE_ID : F) :: (List.range 16).map (ctxLimb (inst 7).main 79)) := by
   have ss := hash_sha_sat hL hsat
   have hs1 : ((i, r, k) : Site) ∈ sites hashSys inst := by
-    rcases hu with ⟨rfl, h | h⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ <;> (try subst h) <;>
+    rcases hu with ⟨rfl, h | h⟩ | ⟨rfl, rfl⟩ | ⟨rfl, h | h⟩ <;> (try subst h) <;>
       exact site_mem hL (by decide) hr (by simp [hashSys, Sha.sha, Sha.lookups, Merkle.merkle, Merkle.lookups,
         Ctx.ctx, Ctx.lookups])
-  have huse : isUse i k = true := by rcases hu with ⟨rfl, h | h⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ <;> (try subst h) <;> rfl
+  have huse : isUse i k = true := by rcases hu with ⟨rfl, h | h⟩ | ⟨rfl, rfl⟩ | ⟨rfl, h | h⟩ <;> (try subst h) <;> rfl
   obtain ⟨i', r', k', hr', hy, hsm, hsv⟩ := link hL hsat hL24 hs1 huse hm
   have e : siteRel hashSys (i, r, k) = 7 := by
-    rcases hu with ⟨rfl, h | h⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ <;> (try subst h) <;> rfl
+    rcases hu with ⟨rfl, h | h⟩ | ⟨rfl, rfl⟩ | ⟨rfl, h | h⟩ <;> (try subst h) <;> rfl
   rw [e, yt] at hy
   rcases (by omega : (i' = 3 ∧ k' = 2) ∨ (i' = 7 ∧ k' = 7) ∨ (i' = 7 ∧ k' = 8)) with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩
   · left
@@ -480,7 +480,7 @@ theorem wmerkle_sound (hL24 : L ≤ 24) (h256 : 256 ≤ 2 ^ L) {b : Spec.Block.B
     simp [siteVals, siteEval, siteLookup, hashSys, hL 7 (by decide), Ctx.ctx, Ctx.lookups, Ctx.limbs, ctxLimb,
       Ctx.ev_k (M := (inst 7).main) (pub := pub) h117]
   have hsmall : WMerkle.NBW + rr < P := Fields.lt_P (by unfold WMerkle.NBW; omega)
-  rcases digest_any hL hsat hL24 (i := 7) (k := 10) (Or.inr (Or.inr ⟨rfl, rfl⟩)) h117 hm10 with
+  rcases digest_any hL hsat hL24 (i := 7) (k := 10) (Or.inr (Or.inr ⟨rfl, Or.inl rfl⟩)) h117 hm10 with
     ⟨q, hq, hd, hyq⟩ | hz | ⟨-, -, hn⟩
   rotate_left
   · rw [hv10] at hz; simp only [List.cons.injEq] at hz

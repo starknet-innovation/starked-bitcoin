@@ -118,9 +118,9 @@ theorem mem_sites {i r k : ℕ} : ((i, r, k) : Site) ∈ sites hashSys inst ↔
     exact ⟨i, hi, r, by rw [hL i hi]; exact hr', k, hk', rfl, rfl, rfl⟩
 
 omit hsat in
-/-- 99 lookup sites per row: bytes 1, fields 34, messages 4, SHA 6, txid tree 11, tables 2, walker 5,
-context 11, witness tree 3, undo bytes 1, Blake2s words 10, Blake2s 11. -/
-theorem hash_sites_len : (sites hashSys inst).length = 99 * 2 ^ L := by
+/-- 100 lookup sites per row: bytes 1, fields 34, messages 4, SHA 6, txid tree 11, tables 2, walker 5,
+context 12, witness tree 3, undo bytes 1, Blake2s words 10, Blake2s 11. -/
+theorem hash_sites_len : (sites hashSys inst).length = 100 * 2 ^ L := by
   simp [sites, hashSys, hL 0 (by decide), hL 1 (by decide), hL 2 (by decide), hL 3 (by decide), hL 4 (by decide),
     hL 5 (by decide), hL 6 (by decide), hL 7 (by decide), hL 8 (by decide), hL 9 (by decide), hL 10 (by decide),
     hL 11 (by decide),
@@ -130,8 +130,8 @@ theorem hash_sites_len : (sites hashSys inst).length = 99 * 2 ^ L := by
   ring
 
 omit hL hsat in
-theorem hash_rows_lt_P (hL24 : L ≤ 24) : 99 * 2 ^ L < P :=
-  lt_of_le_of_lt (Nat.mul_le_mul_left 99 (Nat.pow_le_pow_right (by norm_num) hL24)) (by unfold P; norm_num)
+theorem hash_rows_lt_P (hL24 : L ≤ 24) : 100 * 2 ^ L < P :=
+  lt_of_le_of_lt (Nat.mul_le_mul_left 100 (Nat.pow_le_pow_right (by norm_num) hL24)) (by unfold P; norm_num)
 
 /-- SHA's word and length uses have multiplicity `−1` or `0`. -/
 theorem sha_use_mult {r : ℕ} (hr : r < 2 ^ L) {kk : ℕ} (hk : kk < 2) :
@@ -288,7 +288,7 @@ theorem use_mult : ∀ s ∈ sites hashSys inst, isUse s.1 s.2.2 = true →
         List.getD_cons_succ, Expr.eval, Walk.k, StarkedAir.Sha256.eval_col, wrap_zero hr] <;>
       exact neg01 (wb _ (by simp [Walk.bools]))
   · -- context
-    have hk11 : k < 11 := by simpa [hashSys, Ctx.ctx, Ctx.lookups] using hk
+    have hk11 : k < 12 := by simpa [hashSys, Ctx.ctx, Ctx.lookups] using hk
     have actr := air_bool cs (c := Ctx.ACTR) (by simp [Ctx.ctx, Ctx.constraints, Ctx.k]) hr
     have hasc := air_bool cs (c := Ctx.HASC) (by simp [Ctx.ctx, Ctx.constraints, Ctx.k]) hr
     have hc := air_bool cs (c := Ctx.HC) (by simp [Ctx.ctx, Ctx.constraints, Ctx.k]) hr

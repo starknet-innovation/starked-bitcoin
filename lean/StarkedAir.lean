@@ -103,6 +103,7 @@ import StarkedAir.Block.B2Bridge
 import StarkedAir.Block.B2sSound
 import StarkedAir.Block.B2MsgSound
 import StarkedAir.Block.B2Link
+import StarkedAir.Block.HashPub
 import StarkedAir.Spec.BlockTokens
 import StarkedAir.Spec.TxSplit
 import StarkedAir.Spec.MerkleLevels

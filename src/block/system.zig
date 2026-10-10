@@ -22,10 +22,11 @@ const commit = @import("commit.zig");
 pub const N_COMP = 12;
 pub const jsons = [N_COMP][]const u8{ bytes.json, fields.json, msg.json, bsha.json, merkle.json, checks.tables_json, walk.json, ctxw.json, wmerkle.json, commit.undo_json, commit.msg_json, commit.b2s_json };
 pub const names = [N_COMP][]const u8{ "bytes", "fields", "msg", "sha", "merkle", "tables", "walk", "ctx", "wmerkle", "undo", "b2msg", "b2s" };
-/// Public inputs each component's AIR references (a prefix of the block's 25: the eight checks inputs,
-/// the undo length, the commitment's 16 limbs).
-pub const N_PUB = 25;
-pub const n_pubs = [N_COMP]usize{ 1, 7, 0, 0, 2, 0, 0, 8, 2, 9, 9, 25 };
+/// Public inputs each component's AIR references (a prefix of the block's 41: the eight checks inputs,
+/// the undo length, the commitment's 16 limbs, the block hash's 16 limbs).
+pub const N_PUB = 41;
+pub const PUB_HASH = 25;
+pub const n_pubs = [N_COMP]usize{ 1, 7, 0, 0, 2, 0, 0, 41, 2, 9, 9, 25 };
 
 pub const Built = struct {
     log_size: u32,
@@ -83,7 +84,10 @@ pub fn buildU(a: std.mem.Allocator, raw: []const u8, undo: []const u8, ctx: chec
         if (!std.mem.eql(u8, raw[c[0] + 6 ..][0..32], &bsha.digestBytes(cdig)) and !ctx.force) return error.BadWitnessCommitment;
     } else if (chk.nseg != 0 and !ctx.force) return error.UnexpectedWitness;
 
-    // Multiplicities.
+    // Multiplicities. The context reads the header's digest once (the public block hash).
+    for (pl.meta) |*m| if (m.dbl and m.mid == 0) {
+        m.ym += 1;
+    };
     fields.setTxUses(fm, rows, 2);
     for (rows, 0..) |r, i| if (r.kind == fields.K_LOCK) {
         fm[117][i] = fm[117][i].add(M31.one()); // transaction 0's tuple: the context component's use
@@ -116,6 +120,7 @@ pub fn buildU(a: std.mem.Allocator, raw: []const u8, undo: []const u8, ctx: chec
     @memcpy(pubs[0..8], &checks.pubs(raw, ntx, ctx));
     pubs[8] = M31.fromCanonical(@intCast(undo.len));
     @memcpy(pubs[9..25], &commit.pubLimbs(cw));
+    @memcpy(pubs[PUB_HASH..N_PUB], &hashLimbs(raw[0..80]));
     return .{
         .log_size = log_size,
         .pubs = pubs,
@@ -127,6 +132,23 @@ pub fn buildU(a: std.mem.Allocator, raw: []const u8, undo: []const u8, ctx: chec
         .commitment = cx.hc,
         .reads = reads.items,
     };
+}
+
+/// The block hash's public limbs: SHA256d of the header as SHA-256 state words (big-endian words of
+/// the hash in internal byte order), limb `2w + h` half `h` of word `w` (Lean: `HashPub.hash_pub`).
+pub fn hashLimbs(header: *const [80]u8) [16]M31 {
+    var h1: [32]u8 = undefined;
+    var h2: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(header, &h1, .{});
+    std.crypto.hash.sha2.Sha256.hash(&h1, &h2, .{});
+    return hashLimbsOf(h2);
+}
+
+/// The public limbs of a block hash given in internal byte order.
+pub fn hashLimbsOf(h: [32]u8) [16]M31 {
+    var w: [8]u32 = undefined;
+    for (0..8) |i| w[i] = std.mem.readInt(u32, h[4 * i ..][0..4], .big);
+    return commit.pubLimbs(w);
 }
 
 pub fn parts(airs: *const [N_COMP]ir.Air, b: *const Built) [N_COMP]system.Part {
@@ -235,4 +257,24 @@ test "block system: large samples satisfy every component (run with ReleaseFast)
         }
         std.debug.print("height {d}: {d} txs, sigops {d}, weight {d}, commitment {}, log {d}: constraints hold, lookups balance\n", .{ s.ctx.height, b.ntx, b.sigops, b.weight, b.commitment, b.log_size });
     }
+}
+
+test "block system: the block hash is public (limbs of SHA256d(header)); a tampered limb is rejected" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const airs = try parseAirs(a);
+    const s = checks.samples_small[0];
+    var b = try build(a, s.raw, s.ctx);
+    // Genesis: 000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f (displayed reversed).
+    if (s.ctx.height == 0) {
+        var h: [32]u8 = undefined;
+        _ = try std.fmt.hexToBytes(&h, "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f");
+        std.mem.reverse(u8, &h);
+        const want = hashLimbsOf(h);
+        for (0..16) |j| try std.testing.expect(b.pubs[PUB_HASH + j].eql(want[j]));
+    }
+    try std.testing.expect(try unbalanced(a, &airs, &b) == null);
+    b.pubs[PUB_HASH + 3] = b.pubs[PUB_HASH + 3].add(M31.one());
+    try std.testing.expect(try unbalanced(a, &airs, &b) != null);
 }

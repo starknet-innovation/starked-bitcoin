@@ -35,6 +35,8 @@ open StarkedAir.Block.Sha (REL_DIGEST)
 
 def ZERO_ID : ℕ := 2 ^ 28
 def NONCE_ID : ℕ := 2 ^ 28 + 1
+/-- BLOCK-DATA: the block hash's 16 limbs are public inputs 25–40. -/
+def PUB_HASH : ℕ := 25
 /-- `wcid(id)`: the witness-commitment node's digest id (yielded by the witness tree). -/
 def REL_WCID : ℕ := 16
 
@@ -218,7 +220,9 @@ def lookups : List Lookup :=
     ⟨REL_DIGEST, .mul (p P_FIRST) (k MZ), cst ZERO_ID :: (List.range 16).map (fun _ => cst 0)⟩,
     ⟨REL_DIGEST, .mul (.sub (p P_LT80) (p P_LT79)) (k HC), cst NONCE_ID :: limbs⟩,
     ⟨REL_WCID, .neg (.mul (p P_FIRST) (k HC)), [k CID]⟩,
-    ⟨REL_DIGEST, .neg (.mul (.sub (p P_LT118) (p P_LT117)) (k HC)), k CID :: limbs⟩ ]
+    ⟨REL_DIGEST, .neg (.mul (.sub (p P_LT118) (p P_LT117)) (k HC)), k CID :: limbs⟩,
+    -- BLOCK-DATA: the header's digest (message id 0) is the public block hash
+    ⟨REL_DIGEST, .neg (p P_FIRST), cst 0 :: (List.range 16).map (fun j => .pub (PUB_HASH + j))⟩ ]
 
 def ctx : Comp where
   air := { name := "block_ctx", nMain := N_MAIN, pre := preCols, constraints := constraints }
