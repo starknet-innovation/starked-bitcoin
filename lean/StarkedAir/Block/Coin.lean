@@ -90,16 +90,50 @@ def FC : ℕ := 109
 def ACC : ℕ := 113
 /-- The fingerprint segment's id: the start for an output, the record index for an input. -/
 def SIDC : ℕ := 117
-def N_MAIN : ℕ := 118
+-- amounts (24-bit low and high limbs)
+def VL : ℕ := 118
+def VH : ℕ := 119
+def INL : ℕ := 120
+def INH : ℕ := 121
+def OUL : ℕ := 122
+def OUH : ℕ := 123
+def CY : ℕ := 124
+def FEL : ℕ := 125
+def FEH : ℕ := 126
+def FCY : ℕ := 127
+def CBL : ℕ := 128
+def CBH : ℕ := 129
+/-- The transaction's last output row. -/
+def TEND : ℕ := 130
+/-- Comparator 1 (`A − B ≥ 0`): low bytes, high bytes, borrow. -/
+def Q1 (i : ℕ) : ℕ := 131 + i
+def H1 (i : ℕ) : ℕ := 134 + i
+def BR1 : ℕ := 138
+def NB (i : ℕ) : ℕ := 139 + i
+def FB (i : ℕ) : ℕ := 142 + i
+/-- Comparator 2 (the block's coinbase): low bytes, high bytes, the low limb's carry `KP − KN`. -/
+def Q2 (i : ℕ) : ℕ := 145 + i
+def H2 (i : ℕ) : ℕ := 148 + i
+def KP : ℕ := 152
+def KN : ℕ := 153
+/-- The range checks' multiplicities, as boolean columns: `KI + KO`, `KI + tf`, the last on row. -/
+def MNB : ℕ := 154
+def MC1 : ℕ := 155
+def MLO : ℕ := 156
+def N_MAIN : ℕ := 157
 
--- public inputs (after the block's 41 and the fingerprint's `γ` at 41–44)
+-- public inputs (after the block's 41 and the fingerprint's `γ` at 41–44); `VAMT` is unused (amounts are
+-- `VL`, `VH`)
 def PUB_Z : ℕ := 45
 def W : ℕ := 26
 def PUB_ALPHA (j : ℕ) : ℕ := 49 + 4 * j
 def PUB_S : ℕ := 153
 def PUB_NIN : ℕ := 157
 def PUB_LOST : ℕ := 158
-def N_PUB : ℕ := 159
+/-- The block subsidy, as 24-bit low and high limbs. -/
+def PUB_SUBL : ℕ := 159
+def PUB_SUBH : ℕ := 160
+def N_PUB : ℕ := 161
 
 def preCols : List PreCol := [.isFirst, .notLast]
 def k (c : ℕ) : Expr := col c
@@ -135,6 +169,43 @@ def prevLimb (i : ℕ) : Expr :=
   if i % 2 = 0 then pair (PB (4 * w + 3)) (PB (4 * w + 2)) else pair (PB (4 * w + 1)) (PB (4 * w))
 
 def lastOn : Expr := .mul notLast (.sub on onn)
+def b4 (f : ℕ → ℕ) : Expr := .add (b3 f) (.mul (cst 16777216) (k (f 3)))
+def two24 : Expr := cst 16777216
+/-- A transaction's last output, not the coinbase's: the fee check. -/
+def tf : Expr := .mul (k TEND) (om (k CBO))
+
+/-- Amounts: running input and output sums per transaction, the fees, the coinbase's outputs; inputs within
+`MAX_MONEY` and at least the outputs; the coinbase within subsidy plus fees. -/
+def amountC : List Expr :=
+  [ boolC (k CY), boolC (k FCY), boolC (k BR1), boolC (k KP), boolC (k KN), .mul (k KP) (k KN),
+    boolC (k MNB), boolC (k MC1), boolC (k MLO),
+    .sub (k MNB) (.add (k KI) (k KO)), .sub (k MC1) (.add (k KI) tf), .sub (k MLO) lastOn,
+    -- inputs: a running sum (fresh after outputs or at the start), normalized, within MAX_MONEY
+    .mul (k KI) (.sub (.add (k INL) (.mul two24 (k CY))) (.add (.mul (kp KI) (kp INL)) (k VL))),
+    .mul (k KI) (.sub (k INH) (.add (.add (.mul (kp KI) (kp INH)) (k VH)) (k CY))),
+    .mul (k KI) (.sub (k INL) (b3 NB)),
+    .mul (k KI) (.sub (b3 Q1) (.add (.sub (cst Fields.MAXLO) (k INL)) (.mul two24 (k BR1)))),
+    .mul (k KI) (.sub (b4 H1) (.sub (.sub (cst Fields.MAXHI) (k INH)) (k BR1))),
+    -- outputs: the inputs' sum carried, a running output sum, normalized
+    .mul (k KO) (.sub (k INL) (kp INL)), .mul (k KO) (.sub (k INH) (kp INH)),
+    .mul (k KO) (.sub (.add (k OUL) (.mul two24 (k CY))) (.add (.mul (kp KO) (kp OUL)) (k VL))),
+    .mul (k KO) (.sub (k OUH) (.add (.add (.mul (kp KO) (kp OUH)) (k VH)) (k CY))),
+    .mul (k KO) (.sub (k OUL) (b3 NB)),
+    -- the transaction's end: inputs at least outputs (the fee)
+    .sub (k TEND) (.mul (k KO) (om (kn KO))),
+    .mul tf (.sub (b3 Q1) (.add (.sub (k INL) (k OUL)) (.mul two24 (k BR1)))),
+    .mul tf (.sub (b4 H1) (.sub (.sub (k INH) (k OUH)) (k BR1))),
+    -- the fees: summed over the block, normalized
+    .sub (.add (k FEL) (.mul two24 (k FCY))) (.add (.mul notFirst (kp FEL)) (.mul tf (b3 Q1))),
+    .sub (k FEH) (.add (.add (.mul notFirst (kp FEH)) (.mul tf (b4 H1))) (k FCY)),
+    .sub (k FEL) (b3 FB),
+    -- the coinbase's outputs (its last output row)
+    .sub (k CBL) (.add (.mul notFirst (kp CBL)) (.mul (.mul (k TEND) (k CBO)) (k OUL))),
+    .sub (k CBH) (.add (.mul notFirst (kp CBH)) (.mul (.mul (k TEND) (k CBO)) (k OUH))),
+    -- the block: coinbase outputs at most subsidy plus fees
+    .mul lastOn (.sub (b3 Q2) (.add (.sub (.add (.pub PUB_SUBL) (k FEL)) (k CBL))
+      (.mul two24 (.sub (k KN) (k KP))))),
+    .mul lastOn (.sub (b4 H2) (.add (.sub (.add (.pub PUB_SUBH) (k FEH)) (k CBH)) (.sub (k KP) (k KN)))) ]
 
 def localC : List Expr :=
   [KO, KI, CBI, CBC, ORD, U6A, BIG, ZS].map (fun c => boolC (k c)) ++
@@ -183,15 +254,15 @@ def zeroC : List Expr := (colQ FC).coords.map fun e => .mul (.sub one (.mul mE m
 def accC : List Expr := ((colQ ACC).sub (((base notFirst).mul (colQ ACC (-1))).add (colQ FC))).coords
 def lastC : List Expr := ((base isLast).mul ((colQ ACC).sub (pubQ PUB_S))).coords
 
-def constraints : List Expr := localC ++ fracC ++ zeroC ++ accC ++ lastC
+def constraints : List Expr := localC ++ fracC ++ zeroC ++ accC ++ lastC ++ amountC
 
 def r8 (e : Expr) (m : Expr) : Lookup := ⟨Tables.REL_R8, .neg m, [e]⟩
 
 def lookups : List Lookup :=
-  [ ⟨REL_OUTT, .neg (k KO), [k TXI, k START, k LEN, k SSC, k SVAL]⟩,
+  [ ⟨REL_OUTT, .neg (k KO), [k TXI, k START, k LEN, k SSC, k SVAL, k VL, k VH]⟩,
     ⟨REL_INT, .neg (.add (k KI) (k CBI)), [k TXI, k START]⟩,
     ⟨Sha.REL_DIGEST, .neg (k KO), (.add (.mul (cst 2) (k TXI)) one) :: (List.range 16).map (fun i => k (TLB i))⟩,
-    ⟨URec.REL_UREC, .neg (k KI), [k J, k CLO, k CHI, k (VAMT 0), k (VAMT 1), k (VAMT 2), k (VAMT 3)]⟩,
+    ⟨URec.REL_UREC, .neg (k KI), [k J, k CLO, k CHI, k VL, k VH]⟩,
     ⟨FpWalk.REL_SEG, k KO, [cst 0, k START, k START, k LEN]⟩,
     ⟨FpWalk.REL_FP, .neg (.add (k KO) (k KI)),
       [k KI, k SIDC, k SLEN, k FH, k (FH + 1), k (FH + 2), k (FH + 3)]⟩,
@@ -203,17 +274,23 @@ def lookups : List Lookup :=
   (List.range 3).map (fun i => r8 (k (HB i)) (k KI)) ++
   (List.range 3).map (fun i => r8 (k (OB i)) (k KI)) ++
   (List.range 3).map (fun i => r8 (k (MB i)) (.mul (k KI) (k CBC))) ++
-  (List.range 3).map (fun i => r8 (k (GB i)) (k KO))
+  (List.range 3).map (fun i => r8 (k (GB i)) (k KO)) ++
+  (List.range 3).map (fun i => r8 (k (NB i)) (k MNB)) ++
+  (List.range 3).map (fun i => r8 (k (Q1 i)) (k MC1)) ++
+  (List.range 4).map (fun i => r8 (k (H1 i)) (k MC1)) ++
+  (List.range 3).map (fun i => r8 (k (FB i)) on) ++
+  (List.range 3).map (fun i => r8 (k (Q2 i)) (k MLO)) ++
+  (List.range 4).map (fun i => r8 (k (H2 i)) (k MLO))
 
 /-- The use multiplicities that occur (every lookup but the segment yield, index 4). -/
 def useMults : List Expr :=
   [ .neg (k KO), .neg (.add (k KI) (k CBI)), .neg (k KI), .neg (.add (k KO) (k KI)), .neg (.mul (k KO) (om (k ZS))),
-    .neg (.mul notFirst on), .neg (.mul (k KI) (k CBC)) ]
+    .neg (.mul notFirst on), .neg (.mul (k KI) (k CBC)), .neg (k MNB), .neg (k MC1), .neg on, .neg (k MLO) ]
 
 set_option maxRecDepth 20000 in
-theorem mult_cases : ∀ j < 64, j ≠ 4 → (lookups.getD j ⟨0, .const 0, []⟩).mult ∈ useMults := by decide
+theorem mult_cases : ∀ j < 84, j ≠ 4 → (lookups.getD j ⟨0, .const 0, []⟩).mult ∈ useMults := by decide
 
-theorem lookups_len : lookups.length = 64 := by decide
+theorem lookups_len : lookups.length = 84 := by decide
 
 def coin : Comp where
   air := { name := "block_coin", nMain := N_MAIN, pre := preCols, constraints := constraints }

@@ -8,7 +8,8 @@ row per record:
 - the code bytes `S … S + 3` and the amount bytes `S + 4 … S + 11` are read from the undo table;
 - the `serTxOut` part is the fingerprint segment `(1, J, S + 4, TL)` (`block_fpwalk`), whose length the
   walker fixes;
-- each row yields `urec(J, code lo, code hi, amount limbs ×4)`.
+- each row yields `urec(J, code lo, code hi, amount lo, amount hi)`: the amount as 24 low bits (bytes
+  0–2) and the next 32 (bytes 3–6), as the fields split an output's value.
 
 The coin tuple fixes the bytes behind the fingerprint, so this component parses no CompactSize: an undo
 record whose `serTxOut` part matches a created output is that output's serialization.
@@ -68,8 +69,9 @@ def lookups : List Lookup :=
   (List.range 4).map (fun i => ⟨Undo.REL_UBYTE, .neg (k ON), [.add (k S) (cst i), k (C i)]⟩) ++
   (List.range 8).map (fun i => ⟨Undo.REL_UBYTE, .neg (k ON), [.add (k S) (cst (4 + i)), k (V i)]⟩) ++
   [ ⟨FpWalk.REL_SEG, k ON, [cst 1, k J, .add (k S) (cst 4), k TL]⟩,
-    ⟨REL_UREC, k ON, [k J, limb (C 0) (C 1), limb (C 2) (C 3), limb (V 0) (V 1), limb (V 2) (V 3),
-      limb (V 4) (V 5), limb (V 6) (V 7)]⟩ ]
+    ⟨REL_UREC, k ON, [k J, limb (C 0) (C 1), limb (C 2) (C 3),
+      .add (.add (k (V 0)) (.mul (cst 256) (k (V 1)))) (.mul (cst 65536) (k (V 2))),
+      .add (.add (.add (k (V 3)) (.mul (cst 256) (k (V 4)))) (.mul (cst 65536) (k (V 5)))) (.mul (cst 16777216) (k (V 6)))]⟩ ]
 
 def urec : Comp where
   air := { name := "block_urec", nMain := N_MAIN, pre := preCols, constraints := constraints }

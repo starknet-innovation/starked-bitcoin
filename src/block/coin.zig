@@ -19,7 +19,17 @@ pub const PUB_ALPHA = 49;
 pub const PUB_S = 153;
 pub const PUB_NIN = 157;
 pub const PUB_LOST = 158;
-pub const N_PUB = 159;
+pub const PUB_SUBL = 159;
+pub const PUB_SUBH = 160;
+pub const N_PUB = 161;
+
+pub const MAX_MONEY: u64 = 21_000_000 * 100_000_000;
+
+/// The block subsidy at `height` (Core's `GetBlockSubsidy`).
+pub fn subsidy(height: u32) u64 {
+    const halvings = height / 210000;
+    return if (halvings >= 64) 0 else @as(u64, 5_000_000_000) >> @intCast(halvings);
+}
 
 pub const Challenge = struct {
     gamma: QM31,
@@ -262,8 +272,50 @@ pub fn coinColumns(a: std.mem.Allocator, log_size: u32, in: CoinInput, raw_reads
     const FC = 109;
     const ACC = 113;
     const SIDC = 117;
+    const VL = 118;
+    const VH = 119;
+    const INL = 120;
+    const INH = 121;
+    const OUL = 122;
+    const OUH = 123;
+    const CY = 124;
+    const FEL = 125;
+    const FEH = 126;
+    const FCY = 127;
+    const CBL = 128;
+    const CBH = 129;
+    const TEND = 130;
+    const Q1 = 131;
+    const H1 = 134;
+    const BR1 = 138;
+    const NB = 139;
+    const FB = 142;
+    const Q2 = 145;
+    const H2 = 148;
+    const KP = 152;
+    const KN = 153;
+    const MNB = 154;
+    const MC1 = 155;
+    const MLO = 156;
     const n = @as(usize, 1) << @intCast(log_size);
-    const cols = try zeros(a, 118, n);
+    const cols = try zeros(a, 157, n);
+    // Amounts: per row the coin's value; the token order is the block's.
+    const M24: u64 = 1 << 24;
+    var in_sum: u64 = 0;
+    var out_sum: u64 = 0;
+    var fees: u64 = 0;
+    var cb_out: u64 = 0;
+    var prev_kind: u8 = 0; // 0 none/CBI, 1 KI, 2 KO
+    const putN = struct {
+        fn bytes(c: [][]M31, base: usize, row: usize, v: u64, nb: usize, rg: *std.ArrayList(u32), al: std.mem.Allocator) !void {
+            if (v >= @as(u64, 1) << @intCast(8 * nb)) return error.RangeOverflow;
+            for (0..nb) |i| {
+                const byte: u32 = @intCast((v >> @intCast(8 * i)) & 0xff);
+                c[base + i][row] = f(byte);
+                try rg.append(al, byte);
+            }
+        }
+    };
     const ch = in.chal;
     const digest_uses = try a.alloc(u32, in.txids.len);
     @memset(digest_uses, 0);
@@ -423,6 +475,49 @@ pub fn coinColumns(a: std.mem.Allocator, log_size: u32, in: CoinInput, raw_reads
             j += 1;
             prev_ko = false;
         }
+        // Amounts.
+        {
+            const is_ki = cols[KI][r].eql(M31.one());
+            const value: u64 = if (is_out) std.mem.readInt(u64, in.raw[tok.start..][0..8], .little) else if (is_ki) in.recs[j - 1].value else 0;
+            if (is_out or is_ki) {
+                cols[VL][r] = f(value & (M24 - 1));
+                cols[VH][r] = f(value >> 24);
+                cols[MNB][r] = M31.one();
+            }
+            if (is_ki) {
+                const base: u64 = if (prev_kind == 1) in_sum else 0;
+                const lo = (base & (M24 - 1)) + (value & (M24 - 1));
+                in_sum = base + value;
+                if (in_sum > MAX_MONEY) return error.InputsOutOfRange;
+                cols[CY][r] = if (lo >= M24) M31.one() else M31.zero();
+                cols[INL][r] = f(in_sum & (M24 - 1));
+                cols[INH][r] = f(in_sum >> 24);
+                try putN.bytes(cols, NB, r, in_sum & (M24 - 1), 3, ranges, a);
+                // MAX_MONEY − inputs ≥ 0
+                const br = (MAX_MONEY & (M24 - 1)) < (in_sum & (M24 - 1));
+                cols[BR1][r] = if (br) M31.one() else M31.zero();
+                const d = MAX_MONEY - in_sum;
+                try putN.bytes(cols, Q1, r, d & (M24 - 1), 3, ranges, a);
+                try putN.bytes(cols, H1, r, d >> 24, 4, ranges, a);
+                cols[MC1][r] = M31.one();
+                prev_kind = 1;
+            } else if (is_out) {
+                cols[INL][r] = f(in_sum & (M24 - 1));
+                cols[INH][r] = f(in_sum >> 24);
+                const base: u64 = if (prev_kind == 2) out_sum else 0;
+                const lo = (base & (M24 - 1)) + (value & (M24 - 1));
+                out_sum = base + value;
+                cols[CY][r] = if (lo >= M24) M31.one() else M31.zero();
+                cols[OUL][r] = f(out_sum & (M24 - 1));
+                cols[OUH][r] = f(out_sum >> 24);
+                try putN.bytes(cols, NB, r, out_sum & (M24 - 1), 3, ranges, a);
+                prev_kind = 2;
+            } else {
+                // The coinbase input: no value; the coinbase's outputs carry a zero input sum.
+                in_sum = 0;
+                prev_kind = 0;
+            }
+        }
         const mv: M31 = switch (m) {
             0 => M31.zero(),
             1 => M31.one(),
@@ -440,6 +535,65 @@ pub fn coinColumns(a: std.mem.Allocator, log_size: u32, in: CoinInput, raw_reads
         r += 1;
     }
     if (j != in.recs.len) return error.ExtraUndoRecords;
+    // Second pass: transaction ends, fees, the coinbase's outputs, the block's check.
+    const n_on = r;
+    {
+        var fe: u64 = 0;
+        var cbo: u64 = 0;
+        for (0..n) |q| {
+            const ko = q < n_on and cols[KO][q].eql(M31.one());
+            const next_ko = q + 1 < n_on and cols[KO][q + 1].eql(M31.one());
+            const tend = ko and !next_ko;
+            const is_cb = cols[CBO][q].eql(M31.one()) and q < n_on;
+            cols[TEND][q] = if (tend) M31.one() else M31.zero();
+            const inl = cols[INL][q].toU32();
+            const inh = cols[INH][q].toU32();
+            const oul = cols[OUL][q].toU32();
+            const ouh = cols[OUH][q].toU32();
+            const in_v = @as(u64, inh) * M24 + inl;
+            const out_v = @as(u64, ouh) * M24 + oul;
+            var fcy = false;
+            if (tend and !is_cb) {
+                if (in_v < out_v) return error.InputsBelowOutputs;
+                const fee = in_v - out_v;
+                const br = inl < oul;
+                cols[BR1][q] = if (br) M31.one() else M31.zero();
+                try putN.bytes(cols, Q1, q, fee & (M24 - 1), 3, ranges, a);
+                try putN.bytes(cols, H1, q, fee >> 24, 4, ranges, a);
+                cols[MC1][q] = M31.one();
+                fcy = (fe & (M24 - 1)) + (fee & (M24 - 1)) >= M24;
+                fe += fee;
+            }
+            if (tend and is_cb) cbo = out_v;
+            cols[FEL][q] = f(fe & (M24 - 1));
+            cols[FEH][q] = f(fe >> 24);
+            cols[FCY][q] = if (fcy) M31.one() else M31.zero();
+            // The fee sum's bytes on every row (range-checked on on rows only).
+            if (q < n_on) try putN.bytes(cols, FB, q, fe & (M24 - 1), 3, ranges, a) else {
+                for (0..3) |i| cols[FB + i][q] = f((fe >> @intCast(8 * i)) & 0xff);
+            }
+            cols[CBL][q] = f(cbo & (M24 - 1));
+            cols[CBH][q] = f(cbo >> 24);
+            if (q + 1 == n_on) {
+                const sub = subsidy(in.height);
+                if (cbo > sub + fe) return error.CoinbaseTooLarge;
+                const d = sub + fe - cbo;
+                const t: i64 = @as(i64, @intCast(sub & (M24 - 1))) + @as(i64, @intCast(fe & (M24 - 1))) - @as(i64, @intCast(cbo & (M24 - 1)));
+                const dlo: i64 = @intCast(d & (M24 - 1));
+                const kk = @divExact(t - dlo, @as(i64, @intCast(M24)));
+                cols[KP][q] = if (kk == 1) M31.one() else M31.zero();
+                cols[KN][q] = if (kk == -1) M31.one() else M31.zero();
+                try putN.bytes(cols, Q2, q, d & (M24 - 1), 3, ranges, a);
+                try putN.bytes(cols, H2, q, d >> 24, 4, ranges, a);
+                cols[MLO][q] = M31.one();
+            }
+        }
+        fees = fe;
+        cb_out = cbo;
+    }
+    _ = &out_sum;
+    _ = &fees;
+    _ = &cb_out;
     // Off rows: the coinbase flag and is-zero helpers, the record count and the accumulator carried.
     while (r < n) : (r += 1) {
         cols[CBO][r] = M31.one();
@@ -452,7 +606,7 @@ pub fn coinColumns(a: std.mem.Allocator, log_size: u32, in: CoinInput, raw_reads
 }
 
 /// The public inputs 41–158 for a challenge and a block's sum.
-pub fn pubs(ch: Challenge, sum: QM31, nin: u32, lost: bool) [N_PUB - 41]M31 {
+pub fn pubs(ch: Challenge, sum: QM31, nin: u32, lost: bool, height: u32) [N_PUB - 41]M31 {
     var out: [N_PUB - 41]M31 = undefined;
     @memcpy(out[0..4], &ch.gamma.toM31Array());
     @memcpy(out[4..8], &ch.z.toM31Array());
@@ -460,6 +614,9 @@ pub fn pubs(ch: Challenge, sum: QM31, nin: u32, lost: bool) [N_PUB - 41]M31 {
     @memcpy(out[PUB_S - 41 ..][0..4], &sum.toM31Array());
     out[PUB_NIN - 41] = f(nin);
     out[PUB_LOST - 41] = if (lost) M31.one() else M31.zero();
+    const sub = subsidy(height);
+    out[PUB_SUBL - 41] = f(sub & 0xffffff);
+    out[PUB_SUBH - 41] = f(sub >> 24);
     return out;
 }
 
@@ -541,4 +698,23 @@ test "coin events: blocks 9 and 170 balance (block 170 spends block 9's coinbase
     const b170x = try bsys.buildU(a, s170.raw, bad, s170.ctx);
     try std.testing.expect(try bsys.firstViolation(a, &airs, &b170x) == null);
     try std.testing.expect(!b9.coin_sum.add(b170x.coin_sum).eql(final));
+}
+
+test "amounts: a coinbase above subsidy plus fees is rejected (block 170, subsidy one satoshi lower)" {
+    const bsys = @import("system.zig");
+    const checks = @import("checks.zig");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const airs = try bsys.parseAirs(a);
+    const s = checks.samples_small[1];
+    var b = try bsys.buildU(a, s.raw, s.undo, s.ctx);
+    try std.testing.expect(try bsys.firstViolation(a, &airs, &b) == null);
+    try std.testing.expect(try bsys.unbalanced(a, &airs, &b) == null);
+    // Block 170: coinbase 50 BTC, the subsidy, and no fees: one satoshi less subsidy breaks the check.
+    try std.testing.expectEqual(@as(u64, 5_000_000_000), subsidy(170));
+    b.pubs[PUB_SUBL] = b.pubs[PUB_SUBL].sub(M31.one());
+    const bad_c = try bsys.firstViolation(a, &airs, &b);
+    const bad_l = try bsys.unbalanced(a, &airs, &b);
+    try std.testing.expect(bad_c != null or bad_l != null);
 }

@@ -389,7 +389,7 @@ def chkLookups : List Lookup :=
     ⟨REL_CTX, .neg first, [k CLO, k CHI]⟩,
     ⟨REL_COMMIT, k ISC, [k SSC, k VAL]⟩,
     -- M3b: output and input tokens for the coin events (`Block/Coin.lean`)
-    ⟨24, k K_OUT, [k TXI, k START, k LEN, k SSC, k VAL]⟩,
+    ⟨24, k K_OUT, [k TXI, k START, k LEN, k SSC, k VAL, vlo, vhi]⟩,
     ⟨25, k K_IN, [k TXI, k START]⟩ ]
 
 def fields : Comp where

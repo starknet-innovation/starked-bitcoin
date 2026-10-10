@@ -61,7 +61,8 @@ pub fn parseAirs(a: std.mem.Allocator) ![N_COMP]ir.Air {
 
 /// `build` with an empty undo record (`undo = 0x01`).
 /// Builds with a synthetic undo stream (tests of single blocks): per non-coinbase input a record from
-/// the height before, non-coinbase, amount 0, empty script. The multiset only balances over an epoch, so
+/// the height before, non-coinbase, empty script; a transaction's first record carries its outputs' total
+/// (no fee), the others 0. The multiset only balances over an epoch, so
 /// a single block's events need no real coins; use `buildU` with the node's undo data otherwise.
 pub fn build(a: std.mem.Allocator, raw: []const u8, ctx: checks.Ctx) !Built {
     return buildU(a, raw, try syntheticUndo(a, raw, ctx.height), ctx);
@@ -69,15 +70,32 @@ pub fn build(a: std.mem.Allocator, raw: []const u8, ctx: checks.Ctx) !Built {
 
 pub fn syntheticUndo(a: std.mem.Allocator, raw: []const u8, height: u32) ![]u8 {
     const rows = fields.tokenize(a, raw) catch return a.dupe(u8, &.{1});
+    // Each transaction's output total.
+    var totals = std.ArrayList(u64).empty;
+    var t: u64 = 0;
+    for (rows) |r| {
+        if (r.kind == fields.K_OUT and r.start + 8 <= raw.len) t +|= std.mem.readInt(u64, raw[r.start..][0..8], .little);
+        if (r.kind == fields.K_LOCK) {
+            try totals.append(a, t);
+            t = 0;
+        }
+    }
     var out = std.ArrayList(u8).empty;
     try out.append(a, 1);
     var txi: u32 = 0;
+    var first = true;
     for (rows) |r| {
-        if (r.kind == fields.K_LOCK) txi += 1;
+        if (r.kind == fields.K_LOCK) {
+            txi += 1;
+            first = true;
+        }
         if (r.kind == fields.K_IN and txi > 0) {
             if (height == 0) return error.NoEarlierHeight;
             var rec: [13]u8 = [_]u8{0} ** 13;
             std.mem.writeInt(u32, rec[0..4], 2 * (height - 1), .little);
+            const v: u64 = if (first and txi < totals.items.len) @min(totals.items[txi], coin.MAX_MONEY) else 0;
+            std.mem.writeInt(u64, rec[4..12], v, .little);
+            first = false;
             try out.appendSlice(a, &rec);
         }
     }
@@ -192,7 +210,7 @@ pub fn buildFull(a: std.mem.Allocator, raw: []const u8, undo: []const u8, ctx: c
     pubs[8] = M31.fromCanonical(@intCast(undo.len));
     @memcpy(pubs[9..25], &commit.pubLimbs(cw));
     @memcpy(pubs[PUB_HASH..41], &hashLimbs(raw[0..80]));
-    @memcpy(pubs[41..N_PUB], &coin.pubs(opts.chal, co.sum, co.nin, lost));
+    @memcpy(pubs[41..N_PUB], &coin.pubs(opts.chal, co.sum, co.nin, lost, ctx.height));
     return .{
         .log_size = log_size,
         .pubs = pubs,
