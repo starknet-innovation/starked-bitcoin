@@ -166,4 +166,71 @@ theorem emb_inj : Function.Injective emb := by
 /-- Zero coordinates are the zero of QM31; nonzero `toQ` needs a nonzero coordinate. -/
 theorem toQ_zero : toQ ⟨0, 0, 0, 0⟩ = 0 := by simp [toQ]
 
+/-! ### Coordinates: `toQ` is a bijection -/
+
+/-- Every element of QM31 is `A + C u` with `A, C` in CM31. -/
+theorem qm_coords (y : QM) : ∃ A C : CM, y = algebraMap CM QM A + algebraMap CM QM C * u := by
+  obtain ⟨g, rfl⟩ := AdjoinRoot.mk_surjective y
+  have hm : fU.Monic := by unfold fU; monicity!
+  have e1 : AdjoinRoot.mk fU g = AdjoinRoot.mk fU (g %ₘ fU) := by
+    rw [AdjoinRoot.mk_eq_mk]
+    have := Polynomial.modByMonic_add_div g fU
+    exact ⟨g /ₘ fU, by linear_combination -this⟩
+  have hdeg : (g %ₘ fU).degree ≤ 1 := by
+    have := Polynomial.degree_modByMonic_lt g hm
+    rw [Polynomial.degree_eq_natDegree hm.ne_zero, fU_natDegree] at this
+    exact Order.le_of_lt_succ this
+  refine ⟨(g %ₘ fU).coeff 0, (g %ₘ fU).coeff 1, ?_⟩
+  conv_lhs => rw [e1, Polynomial.eq_X_add_C_of_degree_le_one hdeg]
+  simp only [map_add, map_mul, AdjoinRoot.mk_C, AdjoinRoot.mk_X, AdjoinRoot.algebraMap_eq, u]
+  ring
+
+/-- `1, u` are independent over CM31. -/
+theorem qm_indep {A C : CM} (h : algebraMap CM QM A + algebraMap CM QM C * u = 0) : A = 0 ∧ C = 0 := by
+  have hp : AdjoinRoot.mk fU (Polynomial.C A + Polynomial.C C * X) = 0 := by
+    simp only [map_add, map_mul, AdjoinRoot.mk_C, AdjoinRoot.mk_X]
+    exact h
+  rw [AdjoinRoot.mk_eq_zero] at hp
+  have hz : Polynomial.C A + Polynomial.C C * X = 0 := by
+    apply Polynomial.eq_zero_of_dvd_of_natDegree_lt hp
+    rw [fU_natDegree]
+    calc (Polynomial.C A + Polynomial.C C * X).natDegree ≤ 1 := by compute_degree
+      _ < 2 := by norm_num
+  have h0 := congrArg (fun p => p.coeff 0) hz
+  have h1 := congrArg (fun p => p.coeff 1) hz
+  simp at h0 h1
+  exact ⟨h0, h1⟩
+
+theorem emb_eq (x : F) : emb x = algebraMap CM QM (algebraMap F CM x) := rfl
+
+theorem toQ_eq (x : Circuit.Q) : toQ x = algebraMap CM QM (algebraMap F CM x.a + algebraMap F CM x.b * i) +
+    algebraMap CM QM (algebraMap F CM x.c + algebraMap F CM x.d * i) * u := by
+  simp only [toQ, emb, I, map_add, map_mul]
+
+/-- **`toQ` is injective**: Stwo's four coordinates are unique. -/
+theorem toQ_inj : Function.Injective toQ := by
+  intro x y h
+  have h0 : toQ (x - y) = 0 := by rw [toQ_sub, h, sub_self]
+  rw [toQ_eq] at h0
+  obtain ⟨hA, hC⟩ := qm_indep h0
+  obtain ⟨ha, hb⟩ := cm_indep hA
+  obtain ⟨hc, hd⟩ := cm_indep hC
+  simp only [Circuit.Q.sub_a, Circuit.Q.sub_b, Circuit.Q.sub_c, Circuit.Q.sub_d, sub_eq_zero] at ha hb hc hd
+  exact Circuit.Q.ext ha hb hc hd
+
+/-- **`toQ` is surjective.** -/
+theorem toQ_surj : Function.Surjective toQ := by
+  intro y
+  obtain ⟨A, C, rfl⟩ := qm_coords y
+  obtain ⟨a, b, rfl⟩ := cm_coords A
+  obtain ⟨c, d, rfl⟩ := cm_coords C
+  exact ⟨⟨a, b, c, d⟩, by rw [toQ_eq]⟩
+
+/-- The coordinates of a QM31 element (the inverse of `toQ`). -/
+noncomputable def coordsOf (y : QM) : Circuit.Q := (toQ_surj y).choose
+
+theorem toQ_coordsOf (y : QM) : toQ (coordsOf y) = y := (toQ_surj y).choose_spec
+
+theorem coordsOf_toQ (x : Circuit.Q) : coordsOf (toQ x) = x := toQ_inj (toQ_coordsOf _)
+
 end StarkedAir.Spec.QM31
