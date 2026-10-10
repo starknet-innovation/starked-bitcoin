@@ -32,13 +32,17 @@ against Core's own C++ (about 860k cases, 0 mismatches).
 
 ## Next step (concrete)
 
-1. **BLOCK-DATA:** expose the block hash as public inputs (the header's SHA256d, already computed),
-   fetch undo records from the node (`getblock … 3` prevouts), and a per-block prove/verify CLI that
-   checks the block hash against the chain proof's MMR at the block's height.
-2. **Owner:** confirm D-035's amendments and D-038 (commitment format) before any large proving run.
-3. **M3b (UTXO) design:** assumeUTXO compatibility is a goal (D-037), so `Q-TREE` must allow a
-   traversal in Core's coin order.
-4. **Memory:** blocks above ~3.5 MB need lifting (per-component sizes) or a larger machine.
+BLOCK-DATA is built (`hash_pub` proven; `chainproof prove-block` / `verify-block`; D-039 proposed).
+Measured: block 170 proves in 0.6 s (544 KB) and verifies against the mainnet chain proof. Block
+400000 (949 KB, 1,660 txs, undo 182 KB) builds a 2²² trace that satisfies all constraints in 235 s.
+Proving it was stopped for low memory on the 24 GB Mac (the in-memory check already needed ~14 GB).
+
+1. **Owner decisions:** D-035 amendments, D-038 (commitment format), D-039 (block proof file),
+   **D-040 (M3b: multiset argument instead of a per-block tree, decides `Q-TREE`)**.
+2. **M3b** after D-040: the coin-event component, `z` from the commitments' MMR, the final sorted pass
+   (`HASH_SERIALIZED`).
+3. **Memory/CATCHUP:** full blocks need lifting (per-component sizes) or a larger machine; catch-up
+   from genesis needs a proving cluster, not this laptop ([utxo.md § Compute wall](../design/utxo.md)).
 
 ## In flight
 
@@ -75,6 +79,7 @@ open StarkedAir.HeaderChain StarkedAir.Spec.Bitcoin
 #print axioms StarkedAir.Block.wmerkle_sound
 #print axioms StarkedAir.Block.block_sound
 #print axioms StarkedAir.Block.commit_sound
+#print axioms StarkedAir.Block.hash_pub
 EOS
 (cd lean && lake env lean /tmp/ax.lean)  # expect: propext, Classical.choice, Quot.sound
 

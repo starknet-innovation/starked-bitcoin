@@ -51,7 +51,12 @@ Problems / lessons:
   (a77183f, 86df454). Found while proving: the outer period needed `OUTP·NIL = 0`.
 - Memory: the 12-component system at `2^23` rows (774628, 3.96 MB) exceeds 24 GB in the in-memory
   check; that sample is now skipped by the large test.
-Next: BLOCK-DATA (block hash public, undo records from the node, per-block CLI with MMR check).
+- BLOCK-DATA, same session: block hash public, proven (`hash_pub`, a8f57fd); `.sbblock` files,
+  `chainproof prove-block`/`verify-block`, `scripts/fetch_undo.py` (ba207e0). Block 170 proved and
+  verified against the mainnet chain proof. Block 400000: witness checked (2²², 235 s); proving stopped
+  for low memory.
+- M3b design proposed (D-040, utxo.md); CATCHUP is a compute wall.
+Next: owner decisions (D-035 amendments, D-038, D-039, D-040), then M3b.
 
 ## 2026-10-09 (session 5) — M3a.5 design pass
 Who: Claude (agent, Opus 5.5), on the owner's request
