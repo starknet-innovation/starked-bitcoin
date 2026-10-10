@@ -90,6 +90,7 @@ import StarkedAir.Block.FieldsCommit
 import StarkedAir.Block.Coinbase
 import StarkedAir.Block.RunSum
 import StarkedAir.Block.CoinSound
+import StarkedAir.Block.CoinLink
 import StarkedAir.Block.BlockSetup
 import StarkedAir.Block.BlockTxs
 import StarkedAir.Block.BlockSums
@@ -114,6 +115,7 @@ import StarkedAir.Spec.UtxoMultiset
 import StarkedAir.Spec.QM31
 import StarkedAir.Spec.UtxoEpoch
 import StarkedAir.Spec.UtxoFingerprint
+import StarkedAir.Spec.UtxoEpochFrom
 import StarkedAir.Block.ExtSum
 import StarkedAir.Block.FpWalk
 import StarkedAir.Block.URec

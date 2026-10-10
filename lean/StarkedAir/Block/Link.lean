@@ -662,18 +662,20 @@ theorem node_row (hL24 : L ≤ 23) {x : ℕ} (hx : x < 2 ^ L)
 or the root row's read, txid-tree lookup 2) with multiplicity `−1` and an id below `2^28` reads the tuple
 yielded at the last row of a second-hash period `q'`. (Ids `2^28`, `2^28 + 1` are the context's
 pseudo-digests.) -/
-theorem digest_linked (hL24 : L ≤ 23) {i r k : ℕ} (hu : (i = 3 ∧ (k = 4 ∨ k = 5)) ∨ (i = 4 ∧ k = 2))
+theorem digest_linked (hL24 : L ≤ 23) {i r k : ℕ} (hu : (i = 3 ∧ (k = 4 ∨ k = 5)) ∨ (i = 4 ∧ k = 2) ∨ (i = 14 ∧ k = 2))
     (hr : r < 2 ^ L) (hm : siteMult hashSys inst pub (i, r, k) = -1)
     (hid : ∀ v ∈ (siteVals hashSys inst pub (i, r, k)).head?, v.val < 2 ^ 28) :
     ∃ q', 72 * q' + 72 ≤ 2 ^ L ∧ (inst 3).main Sha.DBL (72 * q') = 1 ∧
       siteVals hashSys inst pub (3, 72 * q' + 71, 2) = siteVals hashSys inst pub (i, r, k) := by
   have ss := hash_sha_sat hL hsat
   have hs1 : ((i, r, k) : Site) ∈ sites hashSys inst := by
-    rcases hu with ⟨rfl, h | h⟩ | ⟨rfl, rfl⟩ <;> (try subst h) <;>
-      exact site_mem hL (by decide) hr (by simp [hashSys, Sha.sha, Sha.lookups, Merkle.merkle, Merkle.lookups])
-  have huse : isUse i k = true := by rcases hu with ⟨rfl, h | h⟩ | ⟨rfl, rfl⟩ <;> (try subst h) <;> rfl
+    rcases hu with ⟨rfl, h | h⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ <;> (try subst h) <;>
+      exact site_mem hL (by decide) hr (by simp [hashSys, Sha.sha, Sha.lookups, Merkle.merkle, Merkle.lookups, Coin.coin,
+        Coin.lookups])
+  have huse : isUse i k = true := by rcases hu with ⟨rfl, h | h⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ <;> (try subst h) <;> rfl
   obtain ⟨i', r', k', hr', hy, hsm, hsv⟩ := link hL hsat hL24 hs1 huse hm
-  have e : siteRel hashSys (i, r, k) = 7 := by rcases hu with ⟨rfl, h | h⟩ | ⟨rfl, rfl⟩ <;> (try subst h) <;> rfl
+  have e : siteRel hashSys (i, r, k) = 7 := by
+    rcases hu with ⟨rfl, h | h⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ <;> (try subst h) <;> rfl
   rw [e, yt] at hy
   rcases (by omega : (i' = 3 ∧ k' = 2) ∨ (i' = 7 ∧ k' = 7) ∨ (i' = 7 ∧ k' = 8)) with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩
   · -- the yield row is a second hash's last row

@@ -653,7 +653,7 @@ theorem merkle_sound (hL24 : L ≤ 23) :
   have hmr : siteMult hashSys inst pub (4, rr, 2) = -1 := by
     simp [siteMult, siteEval, siteLookup, hashSys, hL 4 (by decide), Merkle.merkle, Merkle.lookups, Expr.eval,
       Merkle.k, StarkedAir.Sha256.eval_col, wrap_zero hrr, hrt]
-  obtain ⟨q, hq, hd, hv⟩ := digest_linked hL hsat hL24 (i := 4) (k := 2) (Or.inr ⟨rfl, rfl⟩) hrr hmr (by
+  obtain ⟨q, hq, hd, hv⟩ := digest_linked hL hsat hL24 (i := 4) (k := 2) (Or.inr (Or.inl ⟨rfl, rfl⟩)) hrr hmr (by
     intro v hv
     have hv4 : (siteVals hashSys inst pub (4, rr, 2)).head? = some ((inst 4).main Merkle.RIDC rr) := by
       simp [siteVals, siteEval, siteLookup, hashSys, hL 4 (by decide), Merkle.merkle, Merkle.lookups, Merkle.k,

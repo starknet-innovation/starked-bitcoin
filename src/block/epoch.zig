@@ -18,12 +18,19 @@ pub const TAG = "starked-bitcoin M3b epoch v1";
 
 /// The seed: Blake2s of the tag, the range, and per height the block hash and commitment.
 pub fn seed(from: u32, to: u32, hashes: []const [32]u8, commits: []const [32]u8) [32]u8 {
+    return seedFrom(from, to, null, hashes, commits);
+}
+
+/// The seed of an epoch from a previous set: the previous set's `hash_serialized` follows the range, so
+/// the initial set is fixed before the challenge (`Spec/UtxoEpochFrom.lean`). Without one, it is `seed`.
+pub fn seedFrom(from: u32, to: u32, prev: ?[32]u8, hashes: []const [32]u8, commits: []const [32]u8) [32]u8 {
     var h = Blake2s.init(.{});
     h.update(TAG);
     var buf: [8]u8 = undefined;
     std.mem.writeInt(u32, buf[0..4], from, .little);
     std.mem.writeInt(u32, buf[4..8], to, .little);
     h.update(&buf);
+    if (prev) |p| h.update(&p);
     for (hashes, commits) |bh, c| {
         h.update(&bh);
         h.update(&c);
@@ -124,9 +131,15 @@ fn unspendable(script: []const u8) bool {
 
 /// The coin set after blocks `0 … blocks.len − 1` (Core's semantics with the spec's two deviations).
 pub fn coinSet(a: std.mem.Allocator, blocks: []const []const u8) ![]Coin {
+    return coinSetFrom(a, &.{}, 0, blocks);
+}
+
+/// The coin set after applying blocks `first, first + 1, …` to `init`.
+pub fn coinSetFrom(a: std.mem.Allocator, init: []const Coin, first: u32, blocks: []const []const u8) ![]Coin {
     var set = std.AutoHashMap(Key, Coin).init(a);
+    for (init) |c| try set.put(.{ .txid = c.txid, .vout = c.vout }, c);
     for (blocks, 0..) |raw, hh| {
-        const height: u32 = @intCast(hh);
+        const height: u32 = first + @as(u32, @intCast(hh));
         const rows = try fields.tokenize(a, raw);
         var txi: u32 = 0;
         var tx_start: usize = 0;
@@ -210,6 +223,13 @@ pub fn hashSerialized(set: []const Coin) [32]u8 {
     std.crypto.hash.sha2.Sha256.hash(&h1, &out, .{});
     std.mem.reverse(u8, &out);
     return out;
+}
+
+/// An initial set's coins are all created before block `from` (their creation indices are earlier than
+/// the epoch's transactions).
+pub fn createdBefore(set: []const Coin, from: u32) bool {
+    for (set) |c| if (c.height >= from) return false;
+    return true;
 }
 
 /// Total amount of the set.
