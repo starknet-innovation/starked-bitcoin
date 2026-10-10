@@ -88,6 +88,7 @@ import StarkedAir.Block.FieldsScripts
 import StarkedAir.Block.ScriptSum
 import StarkedAir.Block.FieldsCommit
 import StarkedAir.Block.Coinbase
+import StarkedAir.Block.RunSum
 import StarkedAir.Block.CoinSound
 import StarkedAir.Block.BlockSetup
 import StarkedAir.Block.BlockTxs

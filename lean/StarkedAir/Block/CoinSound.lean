@@ -20,6 +20,7 @@ undo records, fingerprints) and the step to `Spec.Coins.connect_of_run` build on
 Range facts (bytes, three-byte differences) come from the lookups and are hypotheses here.
 -/
 import StarkedAir.Block.Coin
+import StarkedAir.Block.RunSum
 
 namespace StarkedAir.Block.Coin
 
@@ -336,6 +337,64 @@ theorem sidc_spec {r : ℕ} (hr : r < n) : M SIDC r = M KO r * M START r + M KI 
   have := sat hsat (mem_local (c := .sub (k SIDC) (.add (.mul (k KO) (k START)) (.mul (k KI) (k J)))) (by simp [localC])) hr
   simp only [Expr.eval, ev_k hr] at this
   linear_combination this
+
+/-! ### The running sum -/
+
+open StarkedAir.Spec.QM31 (QM toQ emb toQ_mul toQ_add toQ_sub emb_zero)
+open StarkedAir.Block.ExtSum (QE)
+open StarkedAir.Block.ExtSum.QE
+
+omit hsat in
+theorem fracC_eq : fracC = RunSum.fracC FC PUB_Z phi mE := rfl
+omit hsat in
+theorem zeroC_eq : zeroC = RunSum.zeroC FC mE := rfl
+omit hsat in
+theorem accC_eq : accC = RunSum.accC FC ACC := rfl
+omit hsat in
+theorem lastC_eq : lastC = RunSum.lastC ACC PUB_S := rfl
+
+theorem runsum_sat : ∀ r < n, ∀ c ∈ RunSum.fracC FC PUB_Z phi mE ++ RunSum.zeroC FC mE ++ RunSum.accC FC ACC ++
+    RunSum.lastC ACC PUB_S, c.eval n RunSum.preCols pub M r = 0 := by
+  intro r hr c hc
+  have : c ∈ constraints := by
+    rw [← fracC_eq, ← zeroC_eq, ← accC_eq, ← lastC_eq] at hc
+    simp only [constraints, List.mem_append] at hc ⊢
+    tauto
+  exact hsat r hr c this
+
+/-- The fingerprint `φ = Σⱼ αⱼ tⱼ` of a row. -/
+noncomputable def phiQ (pub : ℕ → F) (M : ℕ → ℕ → F) (n r : ℕ) : QM :=
+  ((List.range W).map fun j => RunSum.pQ pub (PUB_ALPHA j) * emb ((tuple.getD j (cst 0)).eval n RunSum.preCols pub M r)).sum
+
+omit hsat in
+theorem ev_phi (r : ℕ) : toQ (phi.ev n RunSum.preCols pub M r) = phiQ pub M n r := by
+  have gen : ∀ (l : List ℕ) (a : QE), toQ ((l.foldl (fun acc j => acc.add ((pubQ (PUB_ALPHA j)).mul (base (tuple.getD j (cst 0))))) a).ev
+      n RunSum.preCols pub M r) = toQ (a.ev n RunSum.preCols pub M r) +
+        (l.map fun j => RunSum.pQ pub (PUB_ALPHA j) * emb ((tuple.getD j (cst 0)).eval n RunSum.preCols pub M r)).sum := by
+    intro l
+    induction l with
+    | nil => intro a; simp
+    | cons j l ih =>
+      intro a
+      rw [List.foldl_cons, ih, ev_add, toQ_add, ev_mul, toQ_mul, toQ_ev_base, RunSum.ev_pubQ, List.map_cons, List.sum_cons,
+        add_assoc]
+  show toQ (((List.range W).foldl _ (base (cst 0))).ev n RunSum.preCols pub M r) = _
+  rw [gen, toQ_ev_base]
+  simp only [eval_cst, Nat.cast_zero, emb_zero, zero_add, phiQ]
+
+/-- **The coin events' running sum.** The public partial sum is the rows' fractions summed; each row's
+fraction `f` has `(z − φ)·f = MM`, and is zero when `MM = 0`. -/
+theorem coin_runsum (hn : 0 < n) :
+    RunSum.pQ pub PUB_S = ∑ r ∈ Finset.range n, RunSum.cQ M FC r ∧
+    ∀ r < n, (RunSum.pQ pub PUB_Z - phiQ pub M n r) * RunSum.cQ M FC r = emb (M MM r) ∧
+      (M MM r = 0 → RunSum.cQ M FC r = 0) := by
+  obtain ⟨hs, hrow⟩ := RunSum.runsum_sound (runsum_sat hsat) hn
+  refine ⟨hs, fun r hr => ?_⟩
+  have hm : mE.eval n RunSum.preCols pub M r = M MM r := by simp [mE, k, eval_col, wrap_zero hr]
+  obtain ⟨h1, h2⟩ := hrow r hr
+  rw [ev_phi, hm] at h1
+  rw [hm] at h2
+  exact ⟨h1, h2⟩
 
 end Rows
 
