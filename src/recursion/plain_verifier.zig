@@ -332,7 +332,54 @@ pub const PlainStatement = struct {
     parts: []const PartStatement,
     preprocessed_root: [32]u8,
     ext: []const ExtEntry = &.{},
+    /// The composition check as a Lean-generated program (`Circuit/CompositionLogUp.lean`, proven in
+    /// `CompositionSound.lean`); null: the hand-written `compositionAtOods` (the parity reference).
+    composition: ?*const glue.Program = null,
 };
+
+const glue = @import("glue.zig");
+
+/// The composition check by replaying the Lean program: hook 0 binds the inputs in the Lean layout's
+/// order (preprocessed, main, interaction samples, public inputs, claimed sums, coefficient, z, α,
+/// OODS x), hook 1 is `1/Z(oods)` (stwo-zig), hook 2 the constant `1/2^L`.
+fn compositionViaProgram(
+    comptime V: type,
+    ctx: *Context(V),
+    prog: *const glue.Program,
+    st: *const PlainStatement,
+    config: PlainConfig,
+    p: *const PlainProof(Var),
+    oods_x: Var,
+    coeff: Var,
+    elements: ?[2]Var,
+) !Var {
+    var ins: std.ArrayListUnmanaged(Var) = .empty;
+    const s = ctx.scratch();
+    try ins.appendSlice(s, p.preprocessed_at_oods);
+    for (p.trace_at_oods) |col| try ins.appendSlice(s, col);
+    for (p.interaction_at_oods) |col| try ins.appendSlice(s, col);
+    for (st.parts) |part| try ins.appendSlice(s, part.pubs);
+    try ins.appendSlice(s, p.claimed_sums);
+    const el = elements orelse .{ ctx.zero(), ctx.zero() };
+    try ins.appendSlice(s, &.{ coeff, el[0], el[1], oods_x });
+    const Hooks = struct {
+        ctx: *Context(V),
+        inputs: []const Var,
+        log: u32,
+        pub fn call(self: @This(), id: u32, args: []const Var) ![]const Var {
+            const out = try self.ctx.scratch().alloc(Var, 1);
+            switch (id) {
+                0 => return self.inputs,
+                1 => out[0] = try sv.circle.denomInverse(V, self.ctx, args[0], self.log),
+                2 => out[0] = try self.ctx.constant(QM31.fromBase(try M31.fromU64(@as(u64, 1) << @intCast(self.log)).inv())),
+                else => return error.UnknownHook,
+            }
+            return out;
+        }
+    };
+    const res = try glue.run(V, ctx, prog, &.{}, Hooks{ .ctx = ctx, .inputs = ins.items, .log = config.log_trace_size });
+    return res[0];
+}
 
 /// `Σ eᵢ αⁱ − z` over `e = (rel, vals…)`, in-circuit (`component.denominator`).
 fn denominatorVar(comptime V: type, ctx: *Context(V), rel: u32, vals: []const Var, z: Var, alpha: Var) !Var {
@@ -506,7 +553,10 @@ pub fn verifyPlain(
     try values.appendSlice(ctx.scratch(), &p.composition_eval_at_oods);
     try channel.mixQm31s(V, ctx, values.items);
 
-    const computed = try compositionAtOods(V, ctx, st, config, p, oods.x, coeff, elements);
+    const computed = if (st.composition) |prog|
+        try compositionViaProgram(V, ctx, prog, st, config, p, oods.x, coeff, elements)
+    else
+        try compositionAtOods(V, ctx, st, config, p, oods.x, coeff, elements);
     const expected = try sv.oods.extractExpectedCompositionEval(V, ctx, &p.composition_eval_at_oods, oods, log_trace + 1);
     try ctx.eq(computed, expected);
 
@@ -748,7 +798,6 @@ test "plain verifier circuit size for one header-chain segment (2^12 rows)" {
 
 test "composition check: the Lean program (Circuit/Composition.lean) replays gate for gate as compositionAtOods" {
     const H = @import("../btc/header_chain.zig");
-    const glue = @import("glue.zig");
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -818,7 +867,6 @@ test "composition check: the Lean program (Circuit/Composition.lean) replays gat
 
 test "composition check with LogUp: the Lean program replays gate for gate (byte system, 2 components)" {
     const system = @import("../air/system.zig");
-    const glue = @import("glue.zig");
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -888,6 +936,11 @@ test "composition check with LogUp: the Lean program replays gate for gate (byte
                 1 => blk: {
                     const out = try self.ctx.scratch().alloc(Var, 1);
                     out[0] = try sv.circle.denomInverse(QM31, self.ctx, args[0], self.log);
+                    break :blk out;
+                },
+                2 => blk: {
+                    const out = try self.ctx.scratch().alloc(Var, 1);
+                    out[0] = try self.ctx.constant(QM31.fromBase(try M31.fromU64(@as(u64, 1) << @intCast(self.log)).inv()));
                     break :blk out;
                 },
                 else => error.UnknownHook,

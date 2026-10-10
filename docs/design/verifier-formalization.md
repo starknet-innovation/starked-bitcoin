@@ -68,3 +68,25 @@ gate-parity test against the hand-written Zig, then proven):
 3. The statement mixing and the LogUp balance check.
 4. The DEEP response order and leaf hashing.
 5. Then the trust question for `sv.*`.
+
+### Done (2026-10-10): the composition check
+
+- **The program:** `Circuit/Composition.lean` and `Circuit/CompositionLogUp.lean` define
+  `compositionAtOods` as a program of ops: the DAG of each component, the constraint Horner, LogUp
+  denominators, cumulative sums, the claimed sum's share, and the batches. Hooks: inputs (0), `1/Z(oods)`
+  (1), `1/2^L` (2).
+- **Proven** (`Circuit/CompositionSound.lean`, standard axioms): `sys_sound`. If the ops hold and
+  hook 2 returns `1/2^L`, the result is the Horner combination, with the random coefficient, of every
+  component's constraint values (`evalR` at the OODS samples, via `dag_correct`) and LogUp batch terms,
+  times hook 1's value.
+- **In production:** the leaf replays `airs/composition_leaf.json`, and the hand-written function is the
+  reference. Tests:
+  - gate-for-gate parity, on the header-chain AIR, the byte LogUp system and the whole leaf circuit;
+  - the leaf identity still equals the pinned mainnet VK (segment log 9).
+
+  So the circuits, the VK and existing proofs are unchanged.
+- **Trusted for this step:** hooks 1 and 2 (stwo-zig's vanishing inverse, the interned constant), and the
+  LogUp batch terms' meaning. That meaning (the native verifier's LogUp constraint) is `LogUp.lean`'s
+  `logup_sum`; linking `batchTerm` to it is the next sub-step.
+
+Next: the statement mixing and the balance check (step 3), then the DEEP response order (step 4).

@@ -222,7 +222,8 @@ set_option maxHeartbeats 400000 in
 /-- **A component's composition terms are sound.** If its ops hold, the accumulator after it is the
 Horner combination, from the incoming accumulator, of its constraints' values and its LogUp batch
 terms at the OODS samples. -/
-theorem part_sound (h : Holds ρ (partProg c pr sh n accIn).ops) :
+theorem part_sound (h : Holds ρ (partProg c pr sh n accIn).ops)
+    (hq : c.lookups.isEmpty = false → val ρ (pQ c pr sh n) = emb (ninv sh.logSize : F)) :
     val ρ (partProg c pr sh n accIn).res = horner (val ρ sh.coeff) (val ρ accIn) (partTerms ρ c pr sh) := by
   unfold partProg at h
   unfold partProg partTerms
@@ -268,11 +269,11 @@ theorem part_sound (h : Holds ρ (partProg c pr sh n accIn).ops) :
     rw [secure_sound hp, secureVal]
     simp [pB, pL]
   · simp only [pBx]
-    have c1 := hsh (.const (pQ c pr sh n) (ninv sh.logSize) 0 0 0) (by simp [pShOps])
     have m1 := hsh (.mul (pQ c pr sh n + 1) pr.claimed (pQ c pr sh n)) (by simp [pShOps])
-    simp only [Op.holds] at c1 m1
-    simp only [val]
-    rw [m1, toQ_mul, c1, toQ_lit]
+    simp only [Op.holds] at m1
+    have hq' := hq (by simpa using hE)
+    simp only [val] at hq' ⊢
+    rw [m1, toQ_mul, hq']
 
 end PartSound
 
@@ -303,28 +304,37 @@ theorem partFold_prefix (sh : Shared) : ∀ (parts : List (Comp × PartRegs)) (s
 
 theorem partFold_sound (sh : Shared) : ∀ (parts : List (Comp × PartRegs)) (s : List Op × ℕ × ℕ),
     (∀ p ∈ parts, WF (pNodes p.1) ∧ ∀ id ∈ pIds p.1, id < (pNodes p.1).size) →
+    (∀ q, Op.hook 2 [] [q] ∈ (partFold sh parts s).1 → val ρ q = emb (ninv sh.logSize : F)) →
     Holds ρ (partFold sh parts s).1 →
     val ρ (partFold sh parts s).2.1 = horner (val ρ sh.coeff) (val ρ s.2.1) (parts.flatMap fun p => partTerms ρ p.1 p.2 sh)
-  | [], s, _, _ => by simp [partFold, horner]
-  | p :: ps, s, hw, h => by
+  | [], s, _, _, _ => by simp [partFold, horner]
+  | p :: ps, s, hw, hn, h => by
     set o := partProg p.1 p.2 sh s.2.2 s.2.1 with ho
     have e : partFold sh (p :: ps) s = partFold sh ps (s.1 ++ o.ops, o.res, o.next) := by
       simp [partFold, ho]
-    rw [e] at h ⊢
+    rw [e] at h hn ⊢
     obtain ⟨rest, hr⟩ := partFold_prefix sh ps (s.1 ++ o.ops, o.res, o.next)
     have hops : Holds ρ o.ops := by
       rw [hr] at h; simp only at h
       rw [holds_append, holds_append] at h; exact h.1.2
     obtain ⟨hwf, hids⟩ := hw p (by simp)
-    rw [partFold_sound sh ps _ (fun q hq => hw q (by simp [hq])) h]
+    rw [partFold_sound sh ps _ (fun q hq => hw q (by simp [hq])) hn h]
     simp only
-    rw [part_sound hwf hids hops, List.flatMap_cons, horner_concat]
+    have hq : p.1.lookups.isEmpty = false → val ρ (pQ p.1 p.2 sh s.2.2) = emb (ninv sh.logSize : F) := by
+      intro hE
+      exact hn _ (by
+        rw [hr]; simp only
+        apply List.mem_append_left; apply List.mem_append_right
+        simp only [ho, partProg, hE, if_false, Bool.false_eq_true, pShOps]
+        simp)
+    rw [part_sound hwf hids hops hq, List.flatMap_cons, horner_concat]
 
 /-- **The composition check is sound.** If the system program holds, its result is the Horner
 combination, from 0 with the coefficient, of every component's constraint values and LogUp batch terms at
 the OODS samples, in component order, times the value of hook 1 (stwo-zig's `1/Z(oods)`). -/
 theorem sys_sound {parts : List (Comp × PartRegs)} {sh : Shared} {nIn oodsX : ℕ}
     (hw : ∀ p ∈ parts, WF (pNodes p.1) ∧ ∀ id ∈ pIds p.1, id < (pNodes p.1).size)
+    (hninv : ∀ q, Op.hook 2 [] [q] ∈ (sysProg parts sh nIn oodsX).1 → val ρ q = emb (ninv sh.logSize : F))
     (h : Holds ρ (sysProg parts sh nIn oodsX).1) :
     val ρ (sysProg parts sh nIn oodsX).2 =
       horner (val ρ sh.coeff) 0 (parts.flatMap fun p => partTerms ρ p.1 p.2 sh) *
@@ -334,7 +344,7 @@ theorem sys_sound {parts : List (Comp × PartRegs)} {sh : Shared} {nIn oodsX : �
         [.hook 1 [oodsX] [(partFold sh parts ([], nIn, nIn + 1)).2.2],
          .mul ((partFold sh parts ([], nIn, nIn + 1)).2.2 + 1) (partFold sh parts ([], nIn, nIn + 1)).2.1
            (partFold sh parts ([], nIn, nIn + 1)).2.2], (partFold sh parts ([], nIn, nIn + 1)).2.2 + 1) := rfl
-  rw [e] at h ⊢
+  rw [e] at h hninv ⊢
   rw [holds_append, holds_append] at h
   obtain ⟨⟨h0, hf⟩, h1⟩ := h
   have hz : val ρ nIn = 0 := by
@@ -343,7 +353,8 @@ theorem sys_sound {parts : List (Comp × PartRegs)} {sh : Shared} {nIn oodsX : �
   simp only [Op.holds] at hm
   simp only [val] at hz ⊢
   rw [hm, toQ_mul]
-  have := partFold_sound sh parts ([], nIn, nIn + 1) hw hf
+  have := partFold_sound sh parts ([], nIn, nIn + 1) hw (fun q hq => hninv q (by
+    apply List.mem_append_left; apply List.mem_append_right; exact hq)) hf
   simp only [val] at this
   rw [this, hz]
 

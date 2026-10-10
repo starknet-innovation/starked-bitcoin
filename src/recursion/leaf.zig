@@ -124,6 +124,9 @@ pub fn buildLeafCircuit(
     var ctx = try Context(QM31).init(gpa, component_list.N_RESERVED);
     errdefer ctx.deinit();
     const prog = try glue.parse(ctx.scratch(), glue.leaf_json);
+    // The composition check: the Lean program (Circuit/CompositionLogUp.lean, proven in
+    // CompositionSound.lean); the reference builder keeps the hand-written one.
+    const comp = try glue.parse(ctx.scratch(), @embedFile("air:composition_leaf"));
     const ext = try ctx.scratch().alloc(QM31, pubs.len);
     for (ext, pubs) |*e, v| e.* = QM31.fromBase(v);
     const Hooks = struct {
@@ -135,6 +138,7 @@ pub fn buildLeafCircuit(
         pre_root: [32]u8,
         k: u32,
         proof_vars: *pv.PlainProof(Var),
+        comp: *const glue.Program,
         /// 0: guess the proof; 1: verify it, with the public entry `node(k, 0, pubs[T_BASE..])`.
         pub fn call(self: @This(), id: u32, args: []const Var) ![]const Var {
             if (id == 0) {
@@ -149,13 +153,14 @@ pub fn buildLeafCircuit(
                 .parts = &.{ .{ .air = self.airs[0], .digest = self.digests[0], .pubs = args[0..T_BASE] }, .{ .air = self.airs[1], .digest = self.digests[1], .pubs = &.{} } },
                 .preprocessed_root = self.pre_root,
                 .ext = &.{.{ .rel = HT.REL_NODE, .vals = entry_vals, .mult = M31.zero().sub(M31.one()) }},
+                .composition = self.comp,
             };
             try pv.verifyPlain(QM31, self.ctx, self.proof_vars, self.config, &st);
             return &.{};
         }
     };
     var proof_vars: pv.PlainProof(Var) = undefined;
-    const res = try glue.run(QM31, &ctx, &prog, ext, Hooks{ .ctx = &ctx, .values = values, .config = config, .airs = airs, .digests = digests, .pre_root = pre_root, .k = k, .proof_vars = &proof_vars });
+    const res = try glue.run(QM31, &ctx, &prog, ext, Hooks{ .ctx = &ctx, .values = values, .config = config, .airs = airs, .digests = digests, .pre_root = pre_root, .k = k, .proof_vars = &proof_vars, .comp = &comp });
     var digest: HashValue(Var) = undefined;
     for (&digest.words, res) |*w, v| w.* = .newUnsafe(v);
     try finish(QM31, &ctx, digest);
@@ -357,6 +362,20 @@ pub fn leafIdentity(gpa: std.mem.Allocator, log_size: u32, genesis_headers: []co
     defer pp.deinit(gpa);
     const id = try circuit_cpu.recursion.circuit_params.identity(gpa, &pp, log_blowup);
     return .{ .root = core.vcs.blake2_hash.digestToU32s(id.preprocessed_root), .hash = core.vcs.blake2_hash.digestToU32s(id.circuit_hash) };
+}
+
+test "the leaf circuit's identity is the pinned mainnet VK's (segment log 9)" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const store = @import("store.zig");
+    const vk = try store.Vk.decode(a, @embedFile("vk:mainnet_test"));
+    const headers = try H.loadHeaders(a, @embedFile("testdata:mainnet_headers_0_1024"));
+    const id = try leafIdentity(gpa, 9, headers, vk.target, vk.fri.log_blowup_factor);
+    const want = vk.leafId(9);
+    try std.testing.expectEqualSlices(u32, &want.root, &id.root);
+    try std.testing.expectEqualSlices(u32, &want.hash, &id.hash);
 }
 
 test "glue parity: the replayed leaf circuit equals the hand-written one" {

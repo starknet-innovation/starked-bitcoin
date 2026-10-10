@@ -33,6 +33,10 @@ def main (args : List String) : IO Unit := do
       [StarkedAir.ByteLookup.table, StarkedAir.ByteLookup.user]
       [StarkedAir.Circuit.Composition.compShape StarkedAir.ByteLookup.table 0,
        StarkedAir.Circuit.Composition.compShape StarkedAir.ByteLookup.user 0] 8)
+  | ["composition_leaf"] => IO.println (StarkedAir.Circuit.Composition.sysJson
+      [StarkedAir.HeaderTree.headers, StarkedAir.HeaderTree.tree]
+      [StarkedAir.Circuit.Composition.compShape StarkedAir.HeaderTree.headers 108,
+       StarkedAir.Circuit.Composition.compShape StarkedAir.HeaderTree.tree 0] 0)
   | ["composition_header_chain"] => IO.println (StarkedAir.Circuit.Composition.programJson StarkedAir.HeaderChain.air
       { nPre := StarkedAir.HeaderChain.air.pre.length, nMain := StarkedAir.HeaderChain.air.nMain,
         offs := StarkedAir.Circuit.Composition.mainOffsets StarkedAir.HeaderChain.air.toDag.1, nPub := 108 })

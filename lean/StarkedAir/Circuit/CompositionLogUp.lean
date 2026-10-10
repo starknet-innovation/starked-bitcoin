@@ -271,7 +271,9 @@ def pSS : List Op × List ℕ × ℕ :=
     secureOps m (fun k => pr.inter (4 * b + k) (if b + 1 = pB c then 1 else 0)))
 def pSp : Out ℕ := secureOps (pSS c pr sh n).2.2 (fun k => pr.inter (4 * (pB c - 1) + k) 0)
 def pQ : ℕ := (pSp c pr sh n).next
-def pShOps : List Op := [.const (pQ c pr sh n) (ninv sh.logSize) 0 0 0, .mul (pQ c pr sh n + 1) pr.claimed (pQ c pr sh n)]
+/-- `1/2^L` (hook 2: the host's interned constant, so one program serves every trace size), then
+`claimed · 1/2^L`. -/
+def pShOps : List Op := [.hook 2 [] [pQ c pr sh n], .mul (pQ c pr sh n + 1) pr.claimed (pQ c pr sh n)]
 def pBx : BatchIn := ⟨pMults c pr n, fun j => (pDens c pr sh n).2.1.getD j 0, fun b => (pSS c pr sh n).2.1.getD b 0,
   (pSp c pr sh n).res, pQ c pr sh n + 1, pL c, pB c⟩
 def pBt : List Op × ℕ × ℕ :=
