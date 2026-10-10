@@ -493,4 +493,260 @@ theorem trans_len {r k i acc : ℕ} (hr : r + 1 < n) (hrep : Rep M r (.len k i a
 
 end Walker
 
+theorem slice_cons {R : Spec.Block.Bytes} {a L : ℕ} (h : a < R.length) :
+    Fields.slice R a (L + 1) = R.getD a 0 :: Fields.slice R (a + 1) L := by
+  simp only [Fields.slice]
+  rw [List.drop_eq_getElem_cons h, List.take_succ_cons, List.getD_eq_getElem _ _ h]
+
+section Segments
+
+variable {n : ℕ} {pub : ℕ → F} {M : ℕ → ℕ → F}
+  (hsat : ∀ r < n, ∀ c ∈ constraints, c.eval n preCols pub M r = 0)
+  (hopc : ∀ r < n, M OP r = 1 → M PN r = (Tables.pushN (M B r).val : F) ∧ M K1 r = (Tables.isK 0x4c (M B r).val : F) ∧
+    M K2 r = (Tables.isK 0x4d (M B r).val : F) ∧ M K4 r = (Tables.isK 0x4e (M B r).val : F) ∧
+    M SG r = (Tables.sigN (M B r).val : F) ∧ M NZP r = (Tables.nzp (M B r).val : F))
+  (hr8 : ∀ r < n, M TOPF r = 1 → (M B r - 2).val < 256)
+  (R : Spec.Block.Bytes)
+  (hread : ∀ r < n, M ACT r = 1 → (M POS r).val < R.length ∧ (M B r).val = (R.getD (M POS r).val 0).toNat)
+  (hR : R.length ≤ 2 ^ 25)
+include hsat hopc hr8 hread hR
+
+omit hopc hr8 hread hR in
+/-- An active row is not the last row. -/
+theorem act_lt {r : ℕ} (hr : r < n) (ha : M ACT r = 1) : r + 1 < n := by
+  have c := sat hsat (mem_script (c := .mul isLast (k ACT)) (by simp [scriptC])) hr
+  simp only [Expr.eval, ev_last hr, ev_k hr, ha, mul_one] at c
+  by_contra h
+  rw [if_neg h] at c; exact one_ne_zero c
+
+/-- **A script segment walks its bytes.** From an active row `r` with `L` bytes left: if the row represents
+state `s`, the segment's sigop sum is `walk s` of those bytes; a run-to-the-end row counts nothing. -/
+theorem segment : ∀ L r, r < n → M ACT r = 1 → (M REM r).val = L → 1 ≤ L → L ≤ 2 ^ 25 →
+    (∀ s, Rep M r s → ∑ j ∈ Finset.range L, M OP (r + j) * M SG (r + j) =
+      ((Spec.Block.walk s (Fields.slice R (M POS r).val L) : ℕ) : F)) ∧
+    (M INF r = 1 → ∑ j ∈ Finset.range L, M OP (r + j) * M SG (r + j) = 0) := by
+  intro L
+  induction L with
+  | zero => intro r _ _ _ h; omega
+  | succ L ih =>
+    intro r hr ha hrem _ hL
+    have hr1 := act_lt hsat hr ha
+    obtain ⟨hpos, hx⟩ := hread r hr ha
+    set x := R.getD (M POS r).val 0
+    have hsl := slice_cons (L := L) hpos
+    -- the row's own count and next state
+    have tr : ∀ s, Rep M r s → M OP r * M SG r = (((wstep s x).2 : ℕ) : F) ∧
+        (M GC (r + 1) = 1 → Rep M (r + 1) (wstep s x).1 ∨
+          (M INF (r + 1) = 1 ∧ ∃ d, 2 ^ 25 ≤ d ∧ (wstep s x).1 = .data d)) := by
+      intro s hs
+      match s, hs with
+      | .op, hs => obtain ⟨a, b⟩ := trans_op hsat hopc hr8 hr1 hs x hx; exact ⟨a, fun hg => Or.inl (b hg)⟩
+      | .len k i acc, hs => exact trans_len hsat hopc hr8 hr1 hs x hx
+      | .data d, hs => obtain ⟨a, b⟩ := trans_data hsat hopc hr8 hr1 hs x; exact ⟨a, fun hg => Or.inl (b hg)⟩
+    rcases Nat.eq_zero_or_pos L with h0 | hpos'
+    · -- the last byte
+      subst h0
+      refine ⟨fun s hs => ?_, fun hi => ?_⟩
+      · rw [show (0 : ℕ) + 1 = 1 from rfl] at hsl ⊢
+        rw [Finset.sum_range_one, Nat.add_zero, (tr s hs).1, hsl]
+        simp [Fields.slice, Spec.Block.walk, x, List.getD_eq_getElem?_getD]
+      · simp [(trans_inf hsat hopc hr8 hr1 hi).1]
+    · -- more bytes: the next row continues the segment
+      have zr := zspec hsat (z := ZR) (inv := INVR) (e := .sub (k REM) one)
+        (fun c hc => by simp only [localC, List.mem_append]; tauto) hr
+      simp only [Expr.eval, ev_k hr, one, eval_cst, Nat.cast_one] at zr
+      have hz : M ZR r = 0 := by
+        rcases zr.1 with h | h
+        · exact h
+        · exfalso; have := zr.2.1 h
+          rw [← ZMod.natCast_zmod_val (M REM r), hrem, sub_eq_zero] at this
+          have := natCast_inj_of_lt (a := L + 1) (b := 1) (Fields.lt_P (by omega)) (Fields.lt_P (by norm_num))
+            (by simpa using this)
+          omega
+      have hg := cont hsat hr1 ha hz
+      obtain ⟨-, -, -, -, -, -, -, -, -, -, sPOS, sREM, -⟩ := step hsat hr1 hg
+      have ha1 : M ACT (r + 1) = 1 := by
+        have := (defs hsat hr1).2.2.2.2.2.2.2.2.2.2.2.2.2.2.2.2.2.2
+        have fsb := bool hsat (c := FS) (by simp [bools]) hr1
+        have acb := bool hsat (c := ACT) (by simp [bools]) hr1
+        rw [hg] at this
+        rcases acb with h | h
+        · rw [h, zero_mul] at this; exact absurd this one_ne_zero
+        · exact h
+      have hrem1 : (M REM (r + 1)).val = L := by
+        rw [sREM, ← ZMod.natCast_zmod_val (M REM r), hrem]
+        rw [show ((L + 1 : ℕ) : F) - 1 = ((L : ℕ) : F) by push_cast; ring]
+        exact ZMod.val_natCast_of_lt (Fields.lt_P (by omega))
+      have hpos1 : (M POS (r + 1)).val = (M POS r).val + 1 := by
+        have e : M POS (r + 1) = (((M POS r).val + 1 : ℕ) : F) := by
+          rw [sPOS]; push_cast; rw [ZMod.natCast_zmod_val]
+        rw [e]
+        exact ZMod.val_natCast_of_lt (Fields.lt_P (m := (M POS r).val + 1) (by omega))
+      obtain ⟨ihr, ihi⟩ := ih (r + 1) hr1 ha1 hrem1 hpos' (by omega)
+      have split : ∑ j ∈ Finset.range (L + 1), M OP (r + j) * M SG (r + j) =
+          M OP r * M SG r + ∑ j ∈ Finset.range L, M OP (r + 1 + j) * M SG (r + 1 + j) := by
+        rw [Finset.sum_range_succ', add_comm]; simp only [Nat.add_zero]; congr 1
+        apply Finset.sum_congr rfl; intro j _; rw [show r + (j + 1) = r + 1 + j by ring]
+      refine ⟨fun s hs => ?_, fun hi => ?_⟩
+      · obtain ⟨o, nx⟩ := tr s hs
+        rw [split, o, hsl, Spec.Block.walk]
+        rcases nx hg with h | ⟨hi1, d, hd, he⟩
+        · rw [ihr _ h, hpos1]; push_cast; simp [x, List.getD_eq_getElem?_getD]
+        · have hlen : (Fields.slice R ((M POS r).val + 1) L).length ≤ L := List.length_take_le _ _
+          rw [ihi hi1, he, Spec.Block.walk_data _ _ (by omega), if_neg (by omega)]
+          simp [x, List.getD_eq_getElem?_getD]
+      · obtain ⟨o, nx⟩ := trans_inf hsat hopc hr8 hr1 hi
+        rw [split, o, ihi (nx hg)]; simp
+
+omit hopc hr8 hread hR in
+/-- A segment's rows: from an active row with `L` bytes left, the next `L − 1` rows continue it and its last
+row ends it. -/
+theorem seg_rows : ∀ L r, r < n → M ACT r = 1 → (M REM r).val = L → 1 ≤ L → L ≤ 2 ^ 25 →
+    (∀ j, 1 ≤ j → j < L → M GC (r + j) = 1) ∧ M ZR (r + L - 1) = 1 ∧ M ACT (r + L - 1) = 1 ∧ r + L < n := by
+  intro L
+  induction L with
+  | zero => intro r _ _ _ h; omega
+  | succ L ih =>
+    intro r hr ha hrem _ hL
+    have hr1 := act_lt hsat hr ha
+    have zr := zspec hsat (z := ZR) (inv := INVR) (e := .sub (k REM) one)
+      (fun c hc => by simp only [localC, List.mem_append]; tauto) hr
+    simp only [Expr.eval, ev_k hr, one, eval_cst, Nat.cast_one] at zr
+    rcases Nat.eq_zero_or_pos L with h0 | hpos
+    · subst h0
+      have : M ZR r = 1 := zr.2.2 (by rw [← ZMod.natCast_zmod_val (M REM r), hrem]; simp)
+      exact ⟨fun j h1 h2 => by omega, by simpa using this, by simpa using ha, hr1⟩
+    · have hz : M ZR r = 0 := by
+        rcases zr.1 with h | h
+        · exact h
+        · exfalso; have := zr.2.1 h
+          rw [← ZMod.natCast_zmod_val (M REM r), hrem, sub_eq_zero] at this
+          have := natCast_inj_of_lt (a := L + 1) (b := 1) (Fields.lt_P (by omega)) (Fields.lt_P (by norm_num))
+            (by simpa using this)
+          omega
+      have hg := cont hsat hr1 ha hz
+      obtain ⟨-, -, -, -, -, -, -, -, -, -, -, sREM, -⟩ := step hsat hr1 hg
+      have ha1 : M ACT (r + 1) = 1 := by
+        have := (defs hsat hr1).2.2.2.2.2.2.2.2.2.2.2.2.2.2.2.2.2.2
+        rw [hg] at this
+        rcases bool hsat (c := ACT) (by simp [bools]) hr1 with h | h
+        · rw [h, zero_mul] at this; exact absurd this one_ne_zero
+        · exact h
+      have hrem1 : (M REM (r + 1)).val = L := by
+        have e : M REM (r + 1) = ((L : ℕ) : F) := by
+          rw [sREM, ← ZMod.natCast_zmod_val (M REM r), hrem]; push_cast; ring
+        rw [e]; exact ZMod.val_natCast_of_lt (Fields.lt_P (by omega))
+      obtain ⟨c1, c2, c3, c4⟩ := ih (r + 1) hr1 ha1 hrem1 hpos (by omega)
+      refine ⟨fun j h1 h2 => ?_, by rw [show r + (L + 1) - 1 = r + 1 + L - 1 by omega]; exact c2,
+        by rw [show r + (L + 1) - 1 = r + 1 + L - 1 by omega]; exact c3, by omega⟩
+      rcases Nat.eq_or_lt_of_le h1 with e | e
+      · subst e; exact hg
+      · rw [show r + j = r + 1 + (j - 1) by omega]; exact c1 (j - 1) (by omega) (by omega)
+
+omit hopc hr8 hread hR in
+theorem sums_eq : ∀ r < n, M SUMS r = ∑ j ∈ Finset.range (r + 1), M OP j * M SG j := by
+  intro r
+  induction r with
+  | zero =>
+    intro h0
+    have c := sat hsat (mem_script (c := .mul first (.sub (k SUMS) (.mul (k OP) (k SG)))) (by simp [scriptC])) h0
+    simp only [Expr.eval, ev_first h0, if_true, one_mul, ev_k h0, sub_eq_zero] at c
+    simp [c]
+  | succ r ih =>
+    intro hr
+    have c := sat hsat (mem_script (c := .mul notFirst (.sub (.sub (k SUMS) (kp SUMS)) (.mul (k OP) (k SG))))
+      (by simp [scriptC])) hr
+    simp only [Expr.eval, ev_notFirst hr, one_mul, ev_k hr, ev_kp hr] at c
+    rw [Finset.sum_range_succ, ← ih (by omega)]; linear_combination c
+
+omit hopc hr8 hread hR in
+/-- Inactive rows are a suffix and count nothing. -/
+theorem inactive {f : ℕ} (hf : f < n) (h0 : M ACT f = 0) :
+    ∀ j, f ≤ j → j < n → M ACT j = 0 ∧ M OP j * M SG j = 0 ∧ M FS j = 0 := by
+  intro j h1 h2
+  have hact : M ACT j = 0 := by
+    induction j, h1 using Nat.le_induction with
+    | base => exact h0
+    | succ j hj ih =>
+      have c := sat hsat (mem_script (c := .mul notFirst (.mul (k ACT) (om (kp ACT)))) (by simp [scriptC])) h2
+      simp only [Expr.eval, ev_notFirst h2, one_mul, ev_k h2, ev_kp h2, om, one, eval_cst, Nat.cast_one,
+        ih (by omega), sub_zero, mul_one] at c
+      exact c
+  obtain ⟨hk, hfa, -⟩ := kinds hsat h2
+  have bv := fun d (hd : d ∈ bools) => Fields.bool_val (bool hsat hd h2)
+  obtain ⟨vo, lo⟩ := bv OP (by simp [bools]); obtain ⟨vl, ll⟩ := bv LN (by simp [bools])
+  obtain ⟨vd, ld⟩ := bv DT (by simp [bools]); obtain ⟨vi, li⟩ := bv INF (by simp [bools])
+  have e : (((M OP j).val + (M LN j).val + (M DT j).val + (M INF j).val : ℕ) : F) = ((0 : ℕ) : F) := by
+    push_cast; rw [← vo, ← vl, ← vd, ← vi, hk, hact]
+  have := natCast_inj_of_lt (Fields.lt_P (by omega)) (Fields.lt_P (by norm_num)) e
+  refine ⟨hact, by rw [vo, show (M OP j).val = 0 by omega]; simp, by rw [hact, sub_zero, mul_one] at hfa; exact hfa⟩
+
+/-- **The walker's total.** If every script starts with at most `2^25` bytes left, the sigop sum is the sum,
+over first rows, of the legacy sigops of their scripts. -/
+theorem total (hrem : ∀ r < n, M FS r = 1 → 1 ≤ (M REM r).val ∧ (M REM r).val ≤ 2 ^ 25) (hn : 0 < n) :
+    M SUMS (n - 1) = ∑ f ∈ (Finset.range n).filter (fun f => M FS f = 1),
+      ((Spec.Block.sigOps (Fields.slice R (M POS f).val (M REM f).val) : ℕ) : F) := by
+  rw [sums_eq hsat (n - 1) (by omega), show n - 1 + 1 = n by omega]
+  -- from any segment start (or the inactive suffix) to the end
+  set g := fun j => M OP j * M SG j
+  set h := fun j => ((Spec.Block.sigOps (Fields.slice R (M POS j).val (M REM j).val) : ℕ) : F)
+  have claim : ∀ d f, n - f = d → f ≤ n → (M ACT f = 0 ∨ M FS f = 1) →
+      ∑ j ∈ Finset.Ico f n, g j = ∑ j ∈ Finset.Ico f n, (if M FS j = 1 then h j else 0) := by
+    intro d
+    induction d using Nat.strong_induction_on with
+    | _ d ih =>
+      intro f hd hfn hc
+      rcases Nat.eq_or_lt_of_le hfn with rfl | hfn'
+      · simp
+      rcases hc with h0 | hfs
+      · have z := inactive hsat hfn' h0
+        rw [Finset.sum_eq_zero (fun j hj => (z j (Finset.mem_Ico.mp hj).1 (Finset.mem_Ico.mp hj).2).2.1),
+          Finset.sum_eq_zero (fun j hj => by rw [if_neg (by rw [(z j (Finset.mem_Ico.mp hj).1 (Finset.mem_Ico.mp hj).2).2.2]; exact zero_ne_one)])]
+      · obtain ⟨-, hfa, hfo⟩ := kinds hsat hfn'
+        have ha : M ACT f = 1 := by rw [hfs] at hfa; linear_combination -hfa
+        have hop : M OP f = 1 := by rw [hfs] at hfo; linear_combination -hfo
+        obtain ⟨hL1, hL⟩ := hrem f hfn' hfs
+        set L := (M REM f).val
+        obtain ⟨cont', zrl, -, hfl⟩ := seg_rows hsat L f hfn' ha rfl hL1 hL
+        have seg := (segment hsat hopc hr8 R hread hR L f hfn' ha rfl hL1 hL).1 .op hop
+        rw [Spec.Block.walk_eq_sigOps] at seg
+        -- the next row starts a segment or is inactive
+        have nxt : M ACT (f + L) = 0 ∨ M FS (f + L) = 1 := by
+          have hi : f + L - 1 + 1 < n := by omega
+          have c := sat hsat (mem_step (c := .mul (k GC) (kp ZR)) (by simp [stepC])) hi
+          simp only [Expr.eval, ev_k hi, ev_kp hi, zrl, mul_one] at c
+          rw [show f + L - 1 + 1 = f + L by omega] at c
+          have gc := (defs hsat (show f + L < n by omega)).2.2.2.2.2.2.2.2.2.2.2.2.2.2.2.2.2.2
+          rw [c] at gc
+          rcases bool hsat (c := ACT) (by simp [bools]) (show f + L < n by omega) with a0 | a1
+          · exact Or.inl a0
+          · rw [a1, one_mul] at gc
+            exact Or.inr (by linear_combination gc)
+        have ih' := ih (n - (f + L)) (by omega) (f + L) rfl (by omega) nxt
+        rw [← Finset.sum_Ico_consecutive _ (show f ≤ f + L by omega) (show f + L ≤ n by omega),
+          ← Finset.sum_Ico_consecutive (fun j => if M FS j = 1 then h j else 0) (show f ≤ f + L by omega)
+            (show f + L ≤ n by omega), ih']
+        congr 1
+        rw [Finset.sum_Ico_eq_sum_range, Finset.sum_Ico_eq_sum_range, show f + L - f = L by omega, seg]
+        rw [Finset.sum_eq_single 0]
+        · simp [hfs, h, L]
+        · intro j hj hj0
+          have hjL := Finset.mem_range.mp hj
+          have gcj := cont' j (by omega) hjL
+          have := (defs hsat (show f + j < n by omega)).2.2.2.2.2.2.2.2.2.2.2.2.2.2.2.2.2.2
+          rw [gcj] at this
+          rw [if_neg]
+          intro hfs'
+          rw [hfs', sub_self, mul_zero] at this; exact one_ne_zero this
+        · intro h0; exact absurd (Finset.mem_range.mpr (by omega)) h0
+  have hc := claim n 0 (by simp) (by omega) (by
+    have c := sat hsat (mem_script (c := .mul first (.mul (k ACT) (om (k FS)))) (by simp [scriptC])) hn
+    simp only [Expr.eval, ev_first hn, if_true, one_mul, ev_k hn, om, one, eval_cst, Nat.cast_one] at c
+    rcases mul_eq_zero.mp c with h | h
+    · exact Or.inl h
+    · exact Or.inr (by linear_combination -h))
+  rw [Finset.range_eq_Ico, hc, Finset.sum_filter]
+
+end Segments
+
 end StarkedAir.Block.Walk
