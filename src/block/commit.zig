@@ -1,6 +1,7 @@
-//! Block commitment (M3a.6 `BLK-COMMIT`, D-038): witnesses for the `block_undo`, `block_b2msg` and
-//! `block_b2s` components (Lean: `Block/Undo.lean`, `Block/B2Msg.lean`, `Block/B2s.lean`).
-//! `C = blake2s(blake2s(raw) ++ blake2s(undo))`, with `undo = 0x01 ++ records`.
+//! Block commitment (M3a.6 `BLK-COMMIT`, D-038 as amended): witnesses for the `block_undo`,
+//! `block_b2msg` and `block_b2s` components (Lean: `Block/Undo.lean`, `Block/B2Msg.lean`,
+//! `Block/B2s.lean`). `C = blake2s(undo)`, with `undo = 0x01 ++ records`; the raw block is bound by
+//! the public block hash.
 
 const std = @import("std");
 const M31 = @import("stwo_core").fields.m31.M31;
@@ -52,14 +53,9 @@ pub fn digest(a: std.mem.Allocator, data: []const u8) ![8]u32 {
     return hs[hs.len - 1];
 }
 
-/// The commitment's words: `blake2s(blake2s(raw) ++ blake2s(undo))`.
-pub fn commitment(a: std.mem.Allocator, raw: []const u8, undo: []const u8) ![8]u32 {
-    const d0 = try digest(a, raw);
-    const d1 = try digest(a, undo);
-    var m: [16]u32 = undefined;
-    @memcpy(m[0..8], &d0);
-    @memcpy(m[8..16], &d1);
-    return b2.compress(.{ .h = H0, .m = m, .t = 64, .f = true });
+/// The commitment's words: `blake2s(undo)`.
+pub fn commitment(a: std.mem.Allocator, undo: []const u8) ![8]u32 {
+    return digest(a, undo);
 }
 
 /// Public inputs 9–24: the commitment's 16-bit limbs (word `w` low limb first).
@@ -85,127 +81,97 @@ fn f(x: anytype) M31 {
     return M31.fromCanonical(@intCast(x));
 }
 
-pub fn rowsNeeded(raw_len: usize, undo_len: usize) usize {
-    const nb = @max(1, (raw_len + 63) / 64) + @max(1, (undo_len + 63) / 64);
-    return @max(16 * nb + 1, b2.PERIOD * (nb + 2));
+pub fn rowsNeeded(undo_len: usize) usize {
+    const nb = @max(1, (undo_len + 63) / 64);
+    return @max(16 * nb + 1, b2.PERIOD * (nb + 1));
 }
 
-/// The walker's columns; appends the positions it reads to `raw_reads` and `undo_reads`.
-pub fn msgColumns(a: std.mem.Allocator, log_size: u32, raw: []const u8, undo: []const u8, raw_reads: *std.ArrayList(u32), undo_reads: *std.ArrayList(u32)) ![][]M31 {
+/// The walker's columns; appends the undo positions it reads to `undo_reads`.
+pub fn msgColumns(a: std.mem.Allocator, log_size: u32, undo: []const u8, undo_reads: *std.ArrayList(u32)) ![][]M31 {
     const ON = 0;
-    const STR = 1;
-    const BLK = 2;
-    const POS = 3;
-    const B0 = 4;
-    const A0 = 8;
-    const CNT = 12;
-    const LASTF = 13;
-    const NEWS = 14;
-    const T = 15;
-    const SM = 16;
-    const END = 17;
+    const BLK = 1;
+    const POS = 2;
+    const B0 = 3;
+    const A0 = 7;
+    const CNT = 11;
+    const LASTF = 12;
+    const T = 13;
+    const SM = 14;
+    const END = 15;
     const n = @as(usize, 1) << @intCast(log_size);
-    const cols = try zeros(a, 18, n);
+    const cols = try zeros(a, 16, n);
+    const nb = @max(1, (undo.len + 63) / 64);
     var r: usize = 0;
-    for ([2][]const u8{ raw, undo }, 0..) |data, s| {
-        const nb = @max(1, (data.len + 63) / 64);
-        var cnt: usize = 0;
-        for (0..nb) |blk| for (0..16) |kw| {
-            if (r + 1 >= n) return error.CommitDoesNotFit;
-            const pos = 64 * blk + 4 * kw;
-            cols[ON][r] = M31.one();
-            cols[STR][r] = f(s);
-            cols[BLK][r] = f(blk);
-            cols[POS][r] = f(pos);
-            for (0..4) |j| if (pos + j < data.len) {
-                cols[A0 + j][r] = M31.one();
-                cols[B0 + j][r] = f(data[pos + j]);
-                cnt += 1;
-                try (if (s == 0) raw_reads else undo_reads).append(a, @intCast(pos + j));
-            };
-            cols[CNT][r] = f(cnt);
-            const last = blk + 1 == nb;
-            cols[LASTF][r] = if (last) M31.one() else M31.zero();
-            cols[NEWS][r] = if (s == 1 and blk == 0 and kw == 0) M31.one() else M31.zero();
-            cols[SM][r] = if (r > 0 and !(s == 1 and blk == 0 and kw == 0)) M31.one() else M31.zero();
-            cols[END][r] = if (last and kw == 15) M31.one() else M31.zero();
-            cols[T][r] = if (last) f(data.len) else f(64 * (blk + 1));
-            r += 1;
+    var cnt: usize = 0;
+    for (0..nb) |blk| for (0..16) |kw| {
+        if (r + 1 >= n) return error.CommitDoesNotFit;
+        const pos = 64 * blk + 4 * kw;
+        cols[ON][r] = M31.one();
+        cols[BLK][r] = f(blk);
+        cols[POS][r] = f(pos);
+        for (0..4) |j| if (pos + j < undo.len) {
+            cols[A0 + j][r] = M31.one();
+            cols[B0 + j][r] = f(undo[pos + j]);
+            cnt += 1;
+            try undo_reads.append(a, @intCast(pos + j));
         };
-    }
-    // Off rows: stream 1, block 0, positions by the period, nothing active.
+        cols[CNT][r] = f(cnt);
+        const last = blk + 1 == nb;
+        cols[LASTF][r] = if (last) M31.one() else M31.zero();
+        cols[SM][r] = if (r > 0) M31.one() else M31.zero();
+        cols[END][r] = if (last and kw == 15) M31.one() else M31.zero();
+        cols[T][r] = if (last) f(undo.len) else f(64 * (blk + 1));
+        r += 1;
+    };
+    // Off rows: block 0, positions by the period, nothing active.
     while (r < n) : (r += 1) {
-        cols[STR][r] = M31.one();
         cols[POS][r] = f(4 * (r % 16));
         cols[T][r] = f(64);
     }
     return cols;
 }
 
-/// The Blake2s component's columns: period 0 is the outer hash, then stream 0's and stream 1's
-/// blocks, then unused periods.
-pub fn b2sColumns(a: std.mem.Allocator, log_size: u32, raw: []const u8, undo: []const u8) ![][]M31 {
-    const STR = 300;
-    const BLKI = 301;
-    const FST = 302;
-    const NIL = 303;
-    const LASTF = 304;
-    const T = 305;
-    const WLO = 306;
-    const WHI = 307;
-    const CHN = 308;
-    const USEW = 309;
-    const YD = 310;
-    const TV = 311;
-    const FV = 312;
-    const OQ = 313;
-    const MU0 = 314;
-    const MU1 = 315;
-    const MU2 = 316;
+/// The Blake2s component's columns: the stream's blocks from period 0, then unused periods.
+pub fn b2sColumns(a: std.mem.Allocator, log_size: u32, undo: []const u8) ![][]M31 {
+    const BLKI = 300;
+    const FST = 301;
+    const NIL = 302;
+    const LASTF = 303;
+    const T = 304;
+    const WLO = 305;
+    const WHI = 306;
+    const CHN = 307;
+    const USEW = 308;
+    const YD = 309;
+    const MU0 = 310;
+    const MU1 = 311;
     const n = @as(usize, 1) << @intCast(log_size);
-    const cols = try zeros(a, 317, n);
-    const Per = struct { in: b2.Input, str: u32, blki: u32, fst: bool, nil: bool, last: bool, t: u64, outer: bool };
-    var pers = std.ArrayList(Per).empty;
-    const s0 = try blocks(a, raw);
-    const s1 = try blocks(a, undo);
-    const h0s = try chain(a, s0);
-    const h1s = try chain(a, s1);
-    var m: [16]u32 = undefined;
-    @memcpy(m[0..8], &h0s[h0s.len - 1]);
-    @memcpy(m[8..16], &h1s[h1s.len - 1]);
-    try pers.append(a, .{ .in = .{ .h = H0, .m = m, .t = 64, .f = true }, .str = 0, .blki = 0, .fst = false, .nil = false, .last = false, .t = 0, .outer = true });
-    for ([2][]const Block{ s0, s1 }, [2][][8]u32{ h0s, h1s }, 0..) |bs, hs, s| for (bs, 0..) |b, i| {
-        const h = if (i == 0) H0 else hs[i - 1];
-        try pers.append(a, .{ .in = .{ .h = h, .m = b.m, .t = b.t, .f = b.last }, .str = @intCast(s), .blki = @intCast(i), .fst = i == 0, .nil = false, .last = b.last, .t = b.t, .outer = false });
-    };
-    const nil: Per = .{ .in = .{ .h = H0, .m = [_]u32{0} ** 16, .t = 0, .f = false }, .str = 0, .blki = 0, .fst = false, .nil = true, .last = false, .t = 0, .outer = false };
+    const cols = try zeros(a, 312, n);
+    const bs = try blocks(a, undo);
+    const hs = try chain(a, bs);
     var p: usize = 0;
     while (p * b2.PERIOD < n) : (p += 1) {
-        const x = if (p < pers.items.len) pers.items[p] else nil;
+        const used = p < bs.len;
+        const in: b2.Input = if (used) .{ .h = if (p == 0) H0 else hs[p - 1], .m = bs[p].m, .t = bs[p].t, .f = bs[p].last } else .{ .h = H0, .m = [_]u32{0} ** 16, .t = 0, .f = false };
+        const last = used and bs[p].last;
         const base = p * b2.PERIOD;
-        b2.fillPeriod(cols, base, n, x.in);
-        const usew = !x.nil and !x.outer;
+        b2.fillPeriod(cols, base, n, in);
         for (0..b2.PERIOD) |q| {
             const row = base + q;
             if (row >= n) break;
-            cols[STR][row] = f(x.str);
-            cols[BLKI][row] = f(x.blki);
-            cols[FST][row] = if (x.fst) M31.one() else M31.zero();
-            cols[NIL][row] = if (x.nil) M31.one() else M31.zero();
-            cols[LASTF][row] = if (x.last) M31.one() else M31.zero();
-            cols[T][row] = f(x.t);
-            cols[CHN][row] = if (usew and !x.fst) M31.one() else M31.zero();
-            cols[USEW][row] = if (usew) M31.one() else M31.zero();
-            cols[YD][row] = if (usew and x.last) M31.one() else M31.zero();
-            cols[TV][row] = if (x.outer) f(64) else f(x.t);
-            cols[FV][row] = if (x.outer or x.last) M31.one() else M31.zero();
-            cols[OQ][row] = if (p == 0) M31.one() else M31.zero();
-            cols[MU0][row] = if (usew and q < 16) M31.one() else M31.zero();
-            cols[MU1][row] = if (x.outer and q < 16) M31.one() else M31.zero();
-            cols[MU2][row] = if (usew and q == 0) M31.one() else M31.zero();
+            cols[BLKI][row] = if (used) f(p) else M31.zero();
+            cols[FST][row] = if (used and p == 0) M31.one() else M31.zero();
+            cols[NIL][row] = if (used) M31.zero() else M31.one();
+            cols[LASTF][row] = if (last) M31.one() else M31.zero();
+            cols[T][row] = if (used) f(bs[p].t) else M31.zero();
+            cols[CHN][row] = if (used and p > 0) M31.one() else M31.zero();
+            cols[USEW][row] = if (used) M31.one() else M31.zero();
+            cols[YD][row] = if (last) M31.one() else M31.zero();
+            cols[MU0][row] = if (used and q < 16) M31.one() else M31.zero();
+            cols[MU1][row] = if (used and q == 0) M31.one() else M31.zero();
             if (q < 16) {
-                cols[WLO][row] = f(x.in.m[q] & 0xffff);
-                cols[WHI][row] = f(x.in.m[q] >> 16);
+                cols[WLO][row] = f(in.m[q] & 0xffff);
+                cols[WHI][row] = f(in.m[q] >> 16);
             }
         }
     }
@@ -221,25 +187,12 @@ test "block commitment: the spec's commitment matches std Blake2s" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const raw = @embedFile("testdata:block_0");
-    const undo = [_]u8{1};
-    var d0: [32]u8 = undefined;
-    std.crypto.hash.blake2.Blake2s256.hash(raw, &d0, .{});
-    var d1: [32]u8 = undefined;
-    std.crypto.hash.blake2.Blake2s256.hash(&undo, &d1, .{});
-    var both: [64]u8 = undefined;
-    @memcpy(both[0..32], &d0);
-    @memcpy(both[32..64], &d1);
-    var c: [32]u8 = undefined;
-    std.crypto.hash.blake2.Blake2s256.hash(&both, &c, .{});
-    const words = try commitment(a, raw, &undo);
-    for (0..8) |w| try std.testing.expectEqual(std.mem.readInt(u32, c[4 * w ..][0..4], .little), words[w]);
-    // The empty stream and a 64-byte stream (exact block) as well.
+    // The empty stream, the version byte alone, an exact block and one short of it.
     const z = [_]u8{0} ** 64;
-    for ([_][]const u8{ &.{}, &z, z[0..63] }) |data| {
+    for ([_][]const u8{ &.{}, &[_]u8{1}, &z, z[0..63], @embedFile("testdata:block_0") }) |data| {
         var d: [32]u8 = undefined;
         std.crypto.hash.blake2.Blake2s256.hash(data, &d, .{});
-        const dw = try digest(a, data);
+        const dw = try commitment(a, data);
         for (0..8) |w| try std.testing.expectEqual(std.mem.readInt(u32, d[4 * w ..][0..4], .little), dw[w]);
     }
 }
@@ -258,8 +211,8 @@ test "block commitment: a 3-block undo stream satisfies and balances; a wrong pu
     var b = try bsys.buildU(a, s.raw, &undo, s.ctx);
     try std.testing.expect((try bsys.firstViolation(a, &airs, &b)) == null);
     try std.testing.expect((try bsys.unbalanced(a, &airs, &b)) == null);
-    try std.testing.expectEqualSlices(u32, &(try commitment(a, s.raw, &undo)), &b.commitment_words);
+    try std.testing.expectEqualSlices(u32, &(try commitment(a, &undo)), &b.commitment_words);
+    // The public limbs enter by a lookup: a wrong one leaves the digest relation unbalanced.
     b.pubs[9 + 5] = b.pubs[9 + 5].add(M31.one());
-    const v = (try bsys.firstViolation(a, &airs, &b)) orelse return error.TestUnexpectedResult;
-    try std.testing.expectEqual(@as(usize, 11), v.comp);
+    try std.testing.expect((try bsys.unbalanced(a, &airs, &b)) != null);
 }

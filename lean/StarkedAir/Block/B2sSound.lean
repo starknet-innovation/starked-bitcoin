@@ -1,9 +1,9 @@
 /-
 **Block Blake2s soundness, per period (M3a.6).** In a satisfied `block_b2s` trace, every aligned period
 computes the Blake2s compression of its chaining value, message words, counter and flag
-(`period_compress`, from the gadget's `compress_sound`); a first block's (or the outer hash's) chaining
-value is `h0`; a continuing period's is the previous period's output; the counter and flag are `TV`
-and `FV`; the message limbs are the words read at rows 0–15.
+(`period_compress`, from the gadget's `compress_sound`); a first block's chaining value is `h0`; a
+continuing period's is the previous period's output; the counter and flag are `T` and `LASTF`; the
+message limbs are the words read at rows 0–15.
 -/
 import StarkedAir.Block.B2Bridge
 
@@ -14,9 +14,8 @@ open StarkedAir.Sha256 (col pre cst boolC eval_col eval_cst wrap_back word bit e
 open StarkedAir.Blake2s (BlakeSat diagSlot msgWord inT fBit outWord rw4 compress_sound P_INIT P_FIN)
 
 theorem preCols_assoc : preCols = Blake2s.preCols ++
-    ([ .rowLt 88, per88 (fun r => if r = 0 then 1 else 0), per88 (fun r => if r < 16 then 1 else 0),
-      per88 (fun r => if r < 16 then r else 0), per88 (fun r => if r < 16 then r / 8 else 0),
-      per88 (fun r => if r < 16 then r % 8 else 0) ] ++
+    ([ .rowLt 8, per88 (fun r => if r = 0 then 1 else 0), per88 (fun r => if r < 16 then 1 else 0),
+      per88 (fun r => if r < 16 then r else 0) ] ++
     (List.range 16).map (fun j => per88 (fun r => if r = j then 1 else 0))) := by
   simp [preCols, List.append_assoc]
 
@@ -73,8 +72,8 @@ theorem ev_per88 {i : ℕ} {f : ℕ → ℕ} (hi : preCols.getD i (.periodic [0]
   simp [per88, PreCol.eval, Blake2s.PERIOD, List.getD_eq_getElem?_getD, this]
 
 omit hsat in
-theorem ev_outp {r : ℕ} (hr : r < n) : outp.eval n preCols pub M r = if r < 88 then 1 else 0 := by
-  simp [outp, p, pre, Expr.eval, wrap_zero hr, preCols, P_OUTP, PreCol.eval, List.getD_append, Blake2s.preCols]
+theorem ev_out8 {r : ℕ} (hr : r < n) : (p P_OUT8).eval n preCols pub M r = if r < 8 then 1 else 0 := by
+  simp [p, pre, Expr.eval, wrap_zero hr, preCols, P_OUT8, PreCol.eval, List.getD_append, Blake2s.preCols]
 
 omit hsat in
 theorem ev_r0 {r : ℕ} (hr : r < n) : (p P_R0).eval n preCols pub M r = if r % 88 = 0 then 1 else 0 := by
@@ -92,7 +91,7 @@ theorem ev_rk {j r : ℕ} (hj : j < 16) (hr : r < n) :
   rw [p, ev_per88 (f := fun r => if r = j then 1 else 0) (by
     rw [preCols_assoc, P_RK, List.getD_append_right _ _ _ _ (by rw [gadget_len]; omega), gadget_len,
       List.getD_append_right _ _ _ _ (by simp; omega), List.length_cons, List.length_cons, List.length_cons,
-      List.length_cons, List.length_cons, List.length_cons, List.length_nil, show 56 + j - 50 - (0 + 1 + 1 + 1 + 1 + 1 + 1) = j by omega]
+      List.length_cons, List.length_nil, show 54 + j - 50 - (0 + 1 + 1 + 1 + 1) = j by omega]
     simp [List.getD_eq_getElem?_getD, hj]) hr]
   split_ifs <;> simp
 
@@ -114,15 +113,13 @@ omit hsat in
 theorem mem_tf {c : Expr} (h : c ∈ tfC) : c ∈ constraints := by simp only [constraints, List.mem_append]; tauto
 omit hsat in
 theorem mem_word {c : Expr} (h : c ∈ wordC) : c ∈ constraints := by simp only [constraints, List.mem_append]; tauto
-omit hsat in
-theorem mem_out {c : Expr} (h : c ∈ outC) : c ∈ constraints := by simp only [constraints, List.mem_append]; tauto
 
 omit hsat in
 theorem ev_kp {c r : ℕ} (hr : r + 1 < n) : (kp c).eval n preCols pub M (r + 1) = M c r := by
   simp only [kp, eval_col]
   rw [show (-1 : ℤ) = -((1 : ℕ) : ℤ) by simp, wrap_back (by omega) hr]; rfl
 
-theorem bool_flag {c : ℕ} (hc : c ∈ [FST, NIL, LASTF, MU0, MU1, MU2]) {r : ℕ} (hr : r < n) : M c r = 0 ∨ M c r = 1 := by
+theorem bool_flag {c : ℕ} (hc : c ∈ [FST, NIL, LASTF, MU0, MU1]) {r : ℕ} (hr : r < n) : M c r = 0 ∨ M c r = 1 := by
   have := sat hsat (mem_flag (c := boolC (k c)) (by
     simp only [flagC, List.mem_append, List.mem_map]; left; left; exact ⟨c, hc, rfl⟩)) hr
   simp only [boolC, Expr.eval, ev_k hr, eval_cst, Nat.cast_one] at this
@@ -151,14 +148,6 @@ theorem per_const {X : ℕ} (hX : X ∈ perConst) {s : ℕ} (hs : s % 88 = 0) :
       show ¬ ((s + q + 1) % 88 = 0) by omega, if_false, sub_zero, one_mul, sub_eq_zero] at this
     rw [this, ih (by omega) (by omega)]
 
-omit hsat in
-theorem outp_const {s : ℕ} (hs : s % 88 = 0) {q : ℕ} (hq : q < 88) (hr : s + q < n) :
-    outp.eval n preCols pub M (s + q) = outp.eval n preCols pub M s := by
-  rw [ev_outp (show s + q < n from hr), ev_outp (show s < n by omega)]
-  rcases Nat.eq_zero_or_pos s with h | h
-  · subst h; simp [hq, show (0 : ℕ) < 88 by norm_num]
-  · rw [if_neg (by omega), if_neg (by omega)]
-
 /-- **Each aligned period computes the Blake2s compression.** -/
 theorem period_compress {s : ℕ} (hs : s % 88 = 0) (hsn : s + 88 ≤ n)
     (hm : ∀ kk < 16, ∀ h ≤ 1, (M (Blake2s.ML kk h) s).val < 65536) :
@@ -179,15 +168,15 @@ theorem h0_bits (i b : ℕ) : ((h0Bit i b : ℕ) : F) = (((Spec.Blake2s.h0 i).ge
 theorem bits4 {r : ℕ} (hr : r < n) (w : ℕ) (hw : w < 8) : ∀ i < 32, (M (32 * w + i) r).val ≤ 1 :=
   Blake2s.word_bits (gadget_sat hsat) hr hw
 
-/-- **A first block (or the outer hash) starts from `h0`.** -/
+/-- **A first block starts from `h0`.** -/
 theorem h_first {s : ℕ} (hs : s % 88 = 0) (hsn : s + 88 ≤ n)
-    (hf : M FST s + outp.eval n preCols pub M s ≠ 0) : ∀ i < 8, diagSlot M s i = Spec.Blake2s.h0 i := by
+    (hf : M FST s ≠ 0) : ∀ i < 8, diagSlot M s i = Spec.Blake2s.h0 i := by
   have row : ∀ j < 4, rw4 M (s + j) 0 = Spec.Blake2s.h0 j ∧ rw4 M (s + j) 1 = Spec.Blake2s.h0 (bidx j) := by
     intro j hj
     have hr : s + j < n := by omega
-    have hfj : M FST (s + j) + outp.eval n preCols pub M (s + j) ≠ 0 := by
-      rw [per_const hsat (X := FST) (by simp [perConst]) hs j (by omega) hr, outp_const (pub := pub) (M := M) hs (by omega) hr]; exact hf
-    have key : ∀ (w : ℕ) (hw : w < 8) (idx : ℕ), (∀ b < 32, Expr.mul (.add (k FST) outp) (.mul (p (P_INIT j))
+    have hfj : M FST (s + j) ≠ 0 := by
+      rw [per_const hsat (X := FST) (by simp [perConst]) hs j (by omega) hr]; exact hf
+    have key : ∀ (w : ℕ) (hw : w < 8) (idx : ℕ), (∀ b < 32, Expr.mul (k FST) (.mul (p (P_INIT j))
         (.sub (k (Blake2s.WB w b)) (cst (h0Bit idx b)))) ∈ initC) → word M (32 * w) (s + j) = Spec.Blake2s.h0 idx := by
       intro w hw idx hmem
       apply word_of_vals (bits4 hsat hr w hw)
@@ -200,8 +189,8 @@ theorem h_first {s : ℕ} (hs : s % 88 = 0) (hsn : s + 88 ≤ n)
       have this := h
       rw [show Blake2s.WB w b = 32 * w + b from rfl] at this
       rw [this, h0_bits]
-    have mem : ∀ b < 32, ∀ e ∈ [Expr.mul (.add (k FST) outp) (.mul (p (P_INIT j)) (.sub (k (Blake2s.WB (Blake2s.outW 0) b)) (cst (h0Bit j b)))),
-        Expr.mul (.add (k FST) outp) (.mul (p (P_INIT j)) (.sub (k (Blake2s.WB (Blake2s.outW 1) b)) (cst (h0Bit (bidx j) b))))],
+    have mem : ∀ b < 32, ∀ e ∈ [Expr.mul (k FST) (.mul (p (P_INIT j)) (.sub (k (Blake2s.WB (Blake2s.outW 0) b)) (cst (h0Bit j b)))),
+        Expr.mul (k FST) (.mul (p (P_INIT j)) (.sub (k (Blake2s.WB (Blake2s.outW 1) b)) (cst (h0Bit (bidx j) b))))],
         e ∈ initC := by
       intro b hb e he
       simp only [initC, List.mem_flatMap, List.mem_range]
@@ -220,12 +209,12 @@ theorem h_chain {s : ℕ} (hs : s % 88 = 0) (hsn : s + 88 ≤ n) (h88 : 88 ≤ s
     intro j hj
     have hr : s + j < n := by omega
     have hcj : M CHN (s + j) = 1 := by
-      have e := defn hsat (a := CHN) (e := .mul (om (.add (k FST) (k NIL))) (om outp)) (by simp [flagC]) hr
-      have e0 := defn hsat (a := CHN) (e := .mul (om (.add (k FST) (k NIL))) (om outp)) (by simp [flagC]) (show s < n by omega)
+      have e := defn hsat (a := CHN) (e := om (.add (k FST) (k NIL))) (by simp [flagC]) hr
+      have e0 := defn hsat (a := CHN) (e := om (.add (k FST) (k NIL))) (by simp [flagC]) (show s < n by omega)
       simp only [Expr.eval, om, one, eval_cst, Nat.cast_one, ev_k hr] at e
       simp only [Expr.eval, om, one, eval_cst, Nat.cast_one, ev_k (show s < n by omega)] at e0
       rw [e, per_const hsat (X := FST) (by simp [perConst]) hs j (by omega) hr,
-        per_const hsat (X := NIL) (by simp [perConst]) hs j (by omega) hr, outp_const (pub := pub) (M := M) hs (by omega) hr, ← e0, hc]
+        per_const hsat (X := NIL) (by simp [perConst]) hs j (by omega) hr, ← e0, hc]
     have hwr : wrap n (s + j) (-4) = s - 88 + 84 + j := by
       rw [show (-4 : ℤ) = -((4 : ℕ) : ℤ) by simp, wrap_back (by omega) hr]; omega
     have key : ∀ (w : ℕ) (hw : w < 8) (w' : ℕ), w' < 8 → (∀ b < 32, Expr.mul (k CHN) (.mul (p (P_INIT j))
@@ -272,9 +261,9 @@ variable {n : ℕ} {pub : ℕ → F} {M : ℕ → ℕ → F}
   (hsat : ∀ r < n, ∀ c ∈ constraints, c.eval n preCols pub M r = 0)
 include hsat
 
-/-- **The counter and the flag** of a used period are `TV` and `FV`. -/
+/-- **The counter and the flag** of a used period are `T` and `LASTF`. -/
 theorem tf {s : ℕ} (hs : s % 88 = 0) (hsn : s + 88 ≤ n) (hnil : M NIL s = 0) :
-    inT M s = (M TV s).val ∧ (fBit M s = true ↔ M FV s = 1) := by
+    inT M s = (M T s).val ∧ (fBit M s = true ↔ M LASTF s = 1) := by
   have hr : s < n := by omega
   have hg : (Expr.mul (p P_R0) (om (k NIL))).eval n preCols pub M s = 1 := by
     simp [Expr.eval, om, one, eval_cst, ev_r0 hr, hs, ev_k hr, hnil]
@@ -306,14 +295,14 @@ theorem tf {s : ℕ} (hs : s % 88 = 0) (hsn : s + 88 ≤ n) (hnil : M NIL s = 0)
   have hw0 : (word M (32 * 0) s).toNat = ofBits g 25 := by
     simp only [word]; rw [bv32_toNat, ofBits_extend hhi (by norm_num)]
   -- the low bits sum to `TV`
-  have hsum := c (.sub (bitSum 0 25) (k TV)) (by simp [tfC])
+  have hsum := c (.sub (bitSum 0 25) (k T)) (by simp [tfC])
   simp only [Expr.eval, ev_k hr, sub_eq_zero] at hsum
   rw [bitSum, Sha256.eval_sumPow_bits _ g 25 (fun j hj => by
     rw [ev_k hr]; exact eq_bit (b0 j (by omega)))] at hsum
   refine ⟨?_, ?_⟩
   · unfold inT
     rw [hw0, hw1, ← hsum, ZMod.val_natCast_of_lt (by have := ofBits_lt g 25; unfold P; omega)]; simp
-  · have hf := c (.sub (k (Blake2s.WB 2 0)) (k FV)) (by simp [tfC])
+  · have hf := c (.sub (k (Blake2s.WB 2 0)) (k LASTF)) (by simp [tfC])
     simp only [Expr.eval, ev_k hr, sub_eq_zero] at hf
     unfold fBit bit
     rw [show 32 * 2 = Blake2s.WB 2 0 from rfl, hf]
@@ -322,7 +311,7 @@ theorem tf {s : ℕ} (hs : s % 88 = 0) (hsn : s + 88 ≤ n) (hnil : M NIL s = 0)
       have := b2 0 (by norm_num)
       rw [show 32 * 2 + 0 = Blake2s.WB 2 0 from rfl, hf] at this
       have := decide_eq_true_iff.mp h
-      rw [← ZMod.natCast_zmod_val (M FV s), this]; simp
+      rw [← ZMod.natCast_zmod_val (M LASTF s), this]; simp
     · intro h; rw [h]; simp [ZMod.val_one]
 
 /-- **Message words**: row `s + j`'s `WLO`, `WHI` are message word `j`'s limbs. -/
@@ -331,7 +320,7 @@ theorem msg_word {s j : ℕ} (hs : s % 88 = 0) (hsn : s + 88 ≤ n) (hj : j < 16
   have hr : s + j < n := by omega
   have hlt : (p P_LT16).eval n preCols pub M (s + j) = 1 := by
     rw [ev_lt16 hr, if_pos (by omega)]
-  have sel : ∀ kk < 16, (pre (56 + kk)).eval n preCols pub M (s + j) = if kk = j then 1 else 0 := by
+  have sel : ∀ kk < 16, (pre (54 + kk)).eval n preCols pub M (s + j) = if kk = j then 1 else 0 := by
     intro kk hk
     have := ev_rk (pub := pub) (M := M) hk hr
     simp only [p, P_RK] at this
@@ -340,7 +329,7 @@ theorem msg_word {s j : ℕ} (hs : s % 88 = 0) (hsn : s + 88 ≤ n) (hj : j < 16
     · subst h; simp
     · rw [if_neg (Ne.symm h), if_neg h]
   have w := fun (h : ℕ) (hh : h ≤ 1) (e : Expr) (he : Expr.mul (p P_LT16) (.sub (k (if h = 0 then WLO else WHI))
-      (Blake2s.msgLimb 56 h)) ∈ wordC) => by
+      (Blake2s.msgLimb 54 h)) ∈ wordC) => by
     have := sat hsat (mem_word he) hr
     simp only [Expr.eval, hlt, one_mul, ev_k hr, sub_eq_zero] at this
     rw [Blake2s.eval_msgLimb hr hj sel h, Blake2s.msg_copy (gadget_sat hsat) hs hsn hj hh j (by simp [Blake2s.PERIOD]; omega)] at this

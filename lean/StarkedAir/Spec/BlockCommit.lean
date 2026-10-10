@@ -1,7 +1,8 @@
 /-
-**The block commitment (M3a.6, D-038).** `C = blake2s(blake2s(raw) ++ blake2s(undo))`, where `raw` is the
-block's bytes and `undo` the spent-output records (one per input after the coinbase: Core's `TxOutSer`
-without the outpoint). M3a commits to `undo` without checking it (D-029).
+**The block commitment (M3a.6, D-038 as amended 2026-10-10).** `C = blake2s(undo)`, where `undo` is the
+spent-output records (one per input after the coinbase: Core's `TxOutSer` without the outpoint) after a
+version byte. The raw block is bound by the public block hash (`HashPub.hash_pub`). M3a commits to `undo`
+without checking it (D-029).
 -/
 import StarkedAir.Spec.Blake2s
 import StarkedAir.Spec.Block
@@ -17,8 +18,8 @@ def undoRecord (height : ℕ) (coinbase : Bool) (o : TxOut) : Bytes :=
 /-- The undo stream: a version byte `0x01`, then the records. -/
 def undoStream (records : Bytes) : Bytes := 1 :: records
 
-def blockCommit (raw undo : Bytes) : Bytes := blake2s (blake2s raw ++ blake2s undo)
+def blockCommit (undo : Bytes) : Bytes := blake2s undo
 
-#guard (blockCommit [] (undoStream [])).length = 32
+#guard (blockCommit (undoStream [])).length = 32
 
 end StarkedAir.Spec.Block

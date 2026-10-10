@@ -140,7 +140,7 @@ pub const Statement = struct {
     block_len: u32,
     ntx: u32,
     undo_len: u32,
-    /// `blake2s(blake2s(raw) ++ blake2s(undo))` (D-038), in byte order.
+    /// `blake2s(undo)` (D-038 as amended), in byte order.
     commitment: [32]u8,
 };
 
@@ -197,12 +197,8 @@ test "block proof file: round trip, verify, and the header checks (block 170, te
     try std.testing.expect(st == null);
     var c: [32]u8 = undefined;
     for (0..8) |w| std.mem.writeInt(u32, c[4 * w ..][0..4], b.commitment_words[w], .little);
-    var raw_h: [32]u8 = undefined;
-    var undo_h: [32]u8 = undefined;
-    std.crypto.hash.blake2.Blake2s256.hash(s.raw, &raw_h, .{});
-    std.crypto.hash.blake2.Blake2s256.hash(&[_]u8{1}, &undo_h, .{});
     var want: [32]u8 = undefined;
-    std.crypto.hash.blake2.Blake2s256.hash(&(raw_h ++ undo_h), &want, .{});
+    std.crypto.hash.blake2.Blake2s256.hash(&[_]u8{1}, &want, .{});
     try std.testing.expectEqualSlices(u8, &want, &c);
 }
 
@@ -219,7 +215,7 @@ test "prevMtp: median of the previous 11 header times" {
     try std.testing.expectEqual(@as(u32, 61), prevMtp(&hs, 12));
 }
 
-test "block 170 with its undo stream from the node: the commitment is blake2s(blake2s(raw) ++ blake2s(undo))" {
+test "block 170 with its undo stream from the node: the commitment is blake2s(undo)" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -233,7 +229,7 @@ test "block 170 with its undo stream from the node: the commitment is blake2s(bl
     for (0..8) |w| std.mem.writeInt(u32, c[4 * w ..][0..4], b.commitment_words[w], .little);
     // Computed independently (Python hashlib.blake2s).
     var want: [32]u8 = undefined;
-    _ = try std.fmt.hexToBytes(&want, "c4e9db3c55270c0433eecd8e77686c24a5e238fdf37c402b03b4e6d94f3ab3c9");
+    _ = try std.fmt.hexToBytes(&want, "000f60585ef4c4ec168547418dd7282ea2e2b3896937443cbc6f1cfef87e7a03");
     try std.testing.expectEqualSlices(u8, &want, &c);
     try std.testing.expectEqual(@as(u32, 81), b.pubs[8].toU32());
 }

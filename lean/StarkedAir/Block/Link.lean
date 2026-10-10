@@ -32,7 +32,7 @@ def isUse : ℕ → ℕ → Bool
   | 4, k => decide (2 ≤ k)
   | 6, k => decide (k < 4)
   | 7, k => !(k == 6 || k == 7 || k == 8)
-  | 10, k => decide (k < 8)
+  | 10, k => decide (k < 4)
   | 11, k => decide (k < 3)
   | _, _ => false
 
@@ -45,7 +45,7 @@ def yieldTable : List (ℕ × ℕ × ℕ) :=
    (4, 0, Sha.REL_NODE), (4, 1, Msg.REL_MLEN), (5, 0, Tables.REL_R8), (5, 1, Tables.REL_OPC),
    (6, 4, Walk.REL_SIGOPS), (7, 6, Fields.REL_CTX), (7, 7, Sha.REL_DIGEST), (7, 8, Sha.REL_DIGEST),
    (8, 0, Sha.REL_NODE), (8, 1, Msg.REL_MLEN), (8, 2, Ctx.REL_WCID), (9, 0, Undo.REL_UBYTE),
-   (10, 8, B2Msg.REL_B2W), (10, 9, B2Msg.REL_B2B), (11, 3, B2s.REL_B2D), (11, 4, B2s.REL_B2D), (11, 5, B2s.REL_B2D),
+   (10, 4, B2Msg.REL_B2W), (10, 5, B2Msg.REL_B2B), (11, 3, B2s.REL_B2D), (11, 4, B2s.REL_B2D), (11, 5, B2s.REL_B2D),
    (11, 6, B2s.REL_B2D), (11, 7, B2s.REL_B2D), (11, 8, B2s.REL_B2D), (11, 9, B2s.REL_B2D), (11, 10, B2s.REL_B2D)]
 
 def yieldOK : Bool :=
@@ -118,9 +118,9 @@ theorem mem_sites {i r k : ℕ} : ((i, r, k) : Site) ∈ sites hashSys inst ↔
     exact ⟨i, hi, r, by rw [hL i hi]; exact hr', k, hk', rfl, rfl, rfl⟩
 
 omit hsat in
-/-- 100 lookup sites per row: bytes 1, fields 34, messages 4, SHA 6, txid tree 11, tables 2, walker 5,
-context 12, witness tree 3, undo bytes 1, Blake2s words 10, Blake2s 11. -/
-theorem hash_sites_len : (sites hashSys inst).length = 100 * 2 ^ L := by
+/-- 96 lookup sites per row: bytes 1, fields 34, messages 4, SHA 6, txid tree 11, tables 2, walker 5,
+context 12, witness tree 3, undo bytes 1, Blake2s words 6, Blake2s 11. -/
+theorem hash_sites_len : (sites hashSys inst).length = 96 * 2 ^ L := by
   simp [sites, hashSys, hL 0 (by decide), hL 1 (by decide), hL 2 (by decide), hL 3 (by decide), hL 4 (by decide),
     hL 5 (by decide), hL 6 (by decide), hL 7 (by decide), hL 8 (by decide), hL 9 (by decide), hL 10 (by decide),
     hL 11 (by decide),
@@ -130,8 +130,8 @@ theorem hash_sites_len : (sites hashSys inst).length = 100 * 2 ^ L := by
   ring
 
 omit hL hsat in
-theorem hash_rows_lt_P (hL24 : L ≤ 24) : 100 * 2 ^ L < P :=
-  lt_of_le_of_lt (Nat.mul_le_mul_left 100 (Nat.pow_le_pow_right (by norm_num) hL24)) (by unfold P; norm_num)
+theorem hash_rows_lt_P (hL24 : L ≤ 24) : 96 * 2 ^ L < P :=
+  lt_of_le_of_lt (Nat.mul_le_mul_left 96 (Nat.pow_le_pow_right (by norm_num) hL24)) (by unfold P; norm_num)
 
 /-- SHA's word and length uses have multiplicity `−1` or `0`. -/
 theorem sha_use_mult {r : ℕ} (hr : r < 2 ^ L) {kk : ℕ} (hk : kk < 2) :
@@ -319,8 +319,8 @@ theorem use_mult : ∀ s ∈ sites hashSys inst, isUse s.1 s.2.2 = true →
         | exact neg01 (mul01 lt hc)
   · simp [isUse] at hu
   · simp [isUse] at hu
-  · -- Blake2s message words: byte reads `−A·(1 − STR)`, `−A·STR`
-    have hk8 : k < 8 := by simpa [isUse] using hu
+  · -- Blake2s message words: undo byte reads `−A`
+    have hk4 : k < 4 := by simpa [isUse] using hu
     have bs : ∀ c ∈ B2Msg.boolCols, (inst 10).main c r = 0 ∨ (inst 10).main c r = 1 := by
       intro c hc
       have hm : StarkedAir.Sha256.boolC (StarkedAir.Sha256.col c) ∈ B2Msg.b2msg.air.constraints := by
@@ -329,23 +329,18 @@ theorem use_mult : ∀ s ∈ sites hashSys inst, isUse s.1 s.2.2 = true →
         simp only [B2Msg.b2msg, B2Msg.constraints, List.mem_append]
         tauto
       exact air_bool (hash_b2msg_sat hL hsat) hm hr
-    have hstr := bs B2Msg.STR (by simp [B2Msg.boolCols])
     have ev : ∀ kk, siteMult hashSys inst pub (10, r, kk) =
         ((B2Msg.lookups.getD kk ⟨0, .const 0, []⟩).mult.eval (2 ^ L) B2Msg.preCols pub (inst 10).main r) := by
       intro kk; simp only [siteMult, siteEval, siteLookup, hashSys, hL 10 (by decide)]; rfl
     rw [ev]
-    have om01 : ∀ {x : F}, (x = 0 ∨ x = 1) → (1 - x = 0 ∨ 1 - x = 1) := by
-      intro x h; rcases h with h | h <;> simp [h]
     interval_cases k <;>
       simp only [B2Msg.lookups, List.range_succ, List.range_zero, List.nil_append, List.map_cons, List.map_nil,
-        List.cons_append, List.nil_append, List.getD_cons_zero, List.getD_cons_succ, Expr.eval, B2Msg.k, B2Msg.om,
-        B2Msg.one, StarkedAir.Sha256.eval_col, StarkedAir.Sha256.eval_cst, wrap_zero hr, Nat.cast_one] <;>
-      first
-        | exact neg01 (mul01 (bs _ (by simp [B2Msg.boolCols, B2Msg.A])) (om01 hstr))
-        | exact neg01 (mul01 (bs _ (by simp [B2Msg.boolCols, B2Msg.A])) hstr)
-  · -- Blake2s: `−USEW·LT16`, `−OUTP·LT16`, `−USEW·R0`
+        List.cons_append, List.nil_append, List.getD_cons_zero, List.getD_cons_succ, Expr.eval, B2Msg.k,
+        StarkedAir.Sha256.eval_col, wrap_zero hr] <;>
+      exact neg01 (bs _ (by simp [B2Msg.boolCols, B2Msg.A]))
+  · -- Blake2s: `−USEW·LT16`, `−USEW·R0`, `−[row < 8]`
     have hk3 : k < 3 := by simpa [isUse] using hu
-    have bs : ∀ c ∈ [B2s.MU0, B2s.MU1, B2s.MU2], (inst 11).main c r = 0 ∨ (inst 11).main c r = 1 := by
+    have bs : ∀ c ∈ [B2s.MU0, B2s.MU1], (inst 11).main c r = 0 ∨ (inst 11).main c r = 1 := by
       intro c hc
       have hm : StarkedAir.Sha256.boolC (StarkedAir.Sha256.col c) ∈ B2s.b2s.air.constraints := by
         have h1 : StarkedAir.Sha256.boolC (StarkedAir.Sha256.col c) ∈ B2s.flagC := by
@@ -355,14 +350,27 @@ theorem use_mult : ∀ s ∈ sites hashSys inst, isUse s.1 s.2.2 = true →
         simp only [B2s.b2s, B2s.constraints, List.mem_append]
         tauto
       exact air_bool (hash_b2s_sat hL hsat) hm hr
-    interval_cases k <;>
-      simp only [siteMult, siteEval, siteLookup, hashSys, hL 11 (by decide), B2s.b2s, B2s.lookups,
+    have hout : (B2s.p B2s.P_OUT8).eval (2 ^ L) B2s.preCols pub (inst 11).main r = if r < 8 then 1 else 0 := by
+      simp [B2s.p, pre, Expr.eval, wrap_zero hr, B2s.preCols, B2s.P_OUT8, PreCol.eval, List.getD_append, Blake2s.preCols]
+    have h01 : (if r < 8 then (1 : F) else 0) = 0 ∨ (if r < 8 then (1 : F) else 0) = 1 := by split_ifs <;> simp
+    interval_cases k
+    · simp only [siteMult, siteEval, siteLookup, hashSys, hL 11 (by decide), B2s.b2s, B2s.lookups,
         show (11 : ℕ) ≠ 0 by decide, show (11 : ℕ) ≠ 1 by decide, show (11 : ℕ) ≠ 2 by decide, show (11 : ℕ) ≠ 3 by decide,
         show (11 : ℕ) ≠ 4 by decide, show (11 : ℕ) ≠ 5 by decide, show (11 : ℕ) ≠ 6 by decide, show (11 : ℕ) ≠ 7 by decide,
-        show (11 : ℕ) ≠ 8 by decide, show (11 : ℕ) ≠ 9 by decide, show (11 : ℕ) ≠ 10 by decide, if_false, if_true,
+        show (11 : ℕ) ≠ 8 by decide, show (11 : ℕ) ≠ 9 by decide, show (11 : ℕ) ≠ 10 by decide, if_false,
         List.getD_cons_zero, List.getD_cons_succ, List.cons_append, Expr.eval, B2s.k, StarkedAir.Sha256.eval_col,
-        wrap_zero hr] <;>
+        wrap_zero hr]
       exact neg01 (bs _ (by simp))
+    · simp only [siteMult, siteEval, siteLookup, hashSys, hL 11 (by decide), B2s.b2s, B2s.lookups,
+        show (11 : ℕ) ≠ 0 by decide, show (11 : ℕ) ≠ 1 by decide, show (11 : ℕ) ≠ 2 by decide, show (11 : ℕ) ≠ 3 by decide,
+        show (11 : ℕ) ≠ 4 by decide, show (11 : ℕ) ≠ 5 by decide, show (11 : ℕ) ≠ 6 by decide, show (11 : ℕ) ≠ 7 by decide,
+        show (11 : ℕ) ≠ 8 by decide, show (11 : ℕ) ≠ 9 by decide, show (11 : ℕ) ≠ 10 by decide, if_false,
+        List.getD_cons_zero, List.getD_cons_succ, List.cons_append, Expr.eval, B2s.k, StarkedAir.Sha256.eval_col,
+        wrap_zero hr]
+      exact neg01 (bs _ (by simp))
+    · have e : siteMult hashSys inst pub (11, r, 2) = -((B2s.p B2s.P_OUT8).eval (2 ^ L) B2s.preCols pub (inst 11).main r) := by
+        simp only [siteMult, siteEval, siteLookup, hashSys, hL 11 (by decide)]; rfl
+      rw [e, hout]; exact neg01 h01
 
 /-- **A use is matched by a yield.** A use site with multiplicity `−1` has a yield site (not a use) with
 nonzero multiplicity, the same relation and the same tuple. -/
@@ -402,7 +410,7 @@ theorem yt (i k R : ℕ) : (i, k, R) ∈ yieldTable ↔
     (i = 4 ∧ k = 0 ∧ R = 8) ∨ (i = 4 ∧ k = 1 ∧ R = 6) ∨ (i = 5 ∧ k = 0 ∧ R = 9) ∨ (i = 5 ∧ k = 1 ∧ R = 10) ∨
     (i = 6 ∧ k = 4 ∧ R = 15) ∨ (i = 7 ∧ k = 6 ∧ R = 13) ∨ (i = 7 ∧ k = 7 ∧ R = 7) ∨ (i = 7 ∧ k = 8 ∧ R = 7) ∨
     (i = 8 ∧ k = 0 ∧ R = 8) ∨ (i = 8 ∧ k = 1 ∧ R = 6) ∨ (i = 8 ∧ k = 2 ∧ R = 16) ∨ (i = 9 ∧ k = 0 ∧ R = 17) ∨
-    (i = 10 ∧ k = 8 ∧ R = 18) ∨ (i = 10 ∧ k = 9 ∧ R = 19) ∨ (i = 11 ∧ k = 3 ∧ R = 20) ∨ (i = 11 ∧ k = 4 ∧ R = 20) ∨
+    (i = 10 ∧ k = 4 ∧ R = 18) ∨ (i = 10 ∧ k = 5 ∧ R = 19) ∨ (i = 11 ∧ k = 3 ∧ R = 20) ∨ (i = 11 ∧ k = 4 ∧ R = 20) ∨
     (i = 11 ∧ k = 5 ∧ R = 20) ∨ (i = 11 ∧ k = 6 ∧ R = 20) ∨ (i = 11 ∧ k = 7 ∧ R = 20) ∨ (i = 11 ∧ k = 8 ∧ R = 20) ∨
     (i = 11 ∧ k = 9 ∧ R = 20) ∨ (i = 11 ∧ k = 10 ∧ R = 20) := by
   obtain ⟨r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, r13, r14, r15, r16, r17, r18⟩ := rels

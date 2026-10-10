@@ -31,7 +31,7 @@ pub const n_pubs = [N_COMP]usize{ 1, 7, 0, 0, 2, 0, 0, 41, 2, 9, 9, 25 };
 pub const Built = struct {
     log_size: u32,
     pubs: [N_PUB]M31,
-    /// The block commitment `blake2s(blake2s(raw) ++ blake2s(undo))` (D-038).
+    /// The block commitment `blake2s(undo)` (D-038 as amended).
     commitment_words: [8]u32,
     mains: [N_COMP][][]M31,
     ntx: u32,
@@ -70,7 +70,7 @@ pub fn buildU(a: std.mem.Allocator, raw: []const u8, undo: []const u8, ctx: chec
         scripts_len += r.val;
     };
     const comps_est = pl.compressions.len + 3 * (wnodes.len + 1);
-    const need = @max(@max(msg.rowsNeeded(msgs), raw.len + 1, rows.len + 1, (comps_est + 1) * shaw.PERIOD), @max(nodes.len + 2, wnodes.len + 2, scripts_len + 1, 256), @max(undo.len + 1, commit.rowsNeeded(raw.len, undo.len)));
+    const need = @max(@max(msg.rowsNeeded(msgs), raw.len + 1, rows.len + 1, (comps_est + 1) * shaw.PERIOD), @max(nodes.len + 2, wnodes.len + 2, scripts_len + 1, 256), @max(undo.len + 1, commit.rowsNeeded(undo.len)));
     const log_size: u32 = std.math.log2_int_ceil(usize, need);
 
     const fm = try fields.generate(a, log_size, raw, rows);
@@ -105,9 +105,9 @@ pub fn buildU(a: std.mem.Allocator, raw: []const u8, undo: []const u8, ctx: chec
     try reads.appendSlice(a, wk.reads);
     try reads.appendSlice(a, cx.reads);
     var undo_reads = std.ArrayList(u32).empty;
-    const b2m = try commit.msgColumns(a, log_size, raw, undo, &reads, &undo_reads);
+    const b2m = try commit.msgColumns(a, log_size, undo, &undo_reads);
     const um = try commit.undoColumns(a, log_size, undo, undo_reads.items);
-    const b2sm = try commit.b2sColumns(a, log_size, raw, undo);
+    const b2sm = try commit.b2sColumns(a, log_size, undo);
     const bm = try bytes.generate(a, log_size, raw, reads.items);
     var ranges = std.ArrayList(u32).empty;
     try ranges.appendSlice(a, chk.ranges);
@@ -115,7 +115,7 @@ pub fn buildU(a: std.mem.Allocator, raw: []const u8, undo: []const u8, ctx: chec
     try ranges.appendSlice(a, cx.ranges);
     const tm = try checks.tables(a, log_size, ranges.items, wk.opcodes);
 
-    const cw = try commit.commitment(a, raw, undo);
+    const cw = try commit.commitment(a, undo);
     var pubs: [N_PUB]M31 = undefined;
     @memcpy(pubs[0..8], &checks.pubs(raw, ntx, ctx));
     pubs[8] = M31.fromCanonical(@intCast(undo.len));

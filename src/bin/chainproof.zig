@@ -20,7 +20,7 @@
 //!
 //!   chainproof prove-block <block.bin> <undo.bin | -> <headers.bin> <height> <out.sbblock> [--test-strength]
 //!       Proves one block (BLOCK-DATA): its checks, its block hash and its commitment
-//!       `blake2s(blake2s(raw) ++ blake2s(undo))` (D-038) as public inputs. `undo.bin` is the
+//!       `blake2s(undo)` (D-038) as public inputs. `undo.bin` is the
 //!       undo stream (`0x01` and the spent-output records, scripts/fetch_undo.py); `-` uses the empty
 //!       stream (no spent outputs: only right for a coinbase-only block). The block's header must be
 //!       `headers.bin`'s at `height`, whose 11 predecessors give the median time past.
@@ -360,7 +360,7 @@ fn verifyBlock(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8
     printHash("  block hash  ", hashes[st.height]);
     std.debug.print("  height      {d}\n  block       {d} bytes, {d} transactions\n", .{ st.height, st.block_len, st.ntx });
     std.debug.print("  valid under Core's CheckBlock (without proof of work, which the chain proof covers) and\n  ContextualCheckBlock, given no repeated prevout (M3b)\n", .{});
-    std.debug.print("  undo        {d} bytes (committed, not checked: M3b)\n  commitment  {x}  (blake2s(blake2s(raw) ++ blake2s(undo)))\n", .{ st.undo_len, st.commitment });
+    std.debug.print("  undo        {d} bytes (committed, not checked: M3b)\n  commitment  {x}  (blake2s(undo))\n", .{ st.undo_len, st.commitment });
     std.debug.print("  provenance  {s}\n", .{f.provenance});
 }
 
