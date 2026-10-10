@@ -501,10 +501,12 @@ table's bytes. It extends `block_sound`'s statement.
 - **Undo data:** `scripts/fetch_undo.py` reads `getblock <hash> 3` over the RPC tunnel, checks the
   hash against `data/headers.bin` and the raw block against `testdata/blocks/`, and writes the undo
   stream. The samples' streams are in `testdata/undo/` (block 970347: 8,750 spent outputs, 309 KB).
-- **CLI:** `chainproof prove-block` and `chainproof verify-block` (`src/block/proof_file.zig`;
-  format and checks in D-039). Block 170 at production strength: proved in 0.6 s, 544 KB, verified
-  against the mainnet chain proof (`mainnet-to-970734.sbchain`); the commitment matches Python's
-  `hashlib.blake2s`. Rejected: a tampered proof, a test-strength proof under the production verifier,
+- **CLI:** `chainproof prove-block`, `verify-block`, `rebind-block` (`src/block/proof_file.zig`;
+  format and checks in D-039). Files are self-contained: the block's header and its 11 predecessors
+  with MMR inclusion paths; the verifier needs only the chain proof. Block 170 at production
+  strength: proved in 0.6 s, 536 KB, verified against the mainnet chain proof
+  (`mainnet-to-970734.sbchain`), and rebound to `mainnet-0-970347.sbchain`. The commitment
+  (`blake2s(undo)`, D-038 as amended) matches Python's `hashlib.blake2s`. Rejected: a tampered proof, a test-strength proof under the production verifier,
   a block at the wrong height, an empty undo stream for a block that spends outputs.
 - **Not yet:** folding block proofs into the recursive chain proof (`BLOCK-REC`); blocks above ~3.5 MB
   (memory, needs lifting).

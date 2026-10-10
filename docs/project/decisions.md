@@ -290,6 +290,7 @@ block hash (inputs 25–40): for a valid block, the header's Merkle root and the
 commitment fix every byte, and `block_sound` proves both. This drops the raw block's Blake2s stream
 (the larger part of the commitment's cost). The undo format (2b) and the version byte (2c) stay.
 A later proof that re-reads the raw block checks it against Bitcoin's SHA-256 trees, not Blake2s.
+Built 2026-10-10 (5014aeb): `commit_sound` re-proven; 96 lookup sites per row.
 
 ### D-039 — A block proof is a file bound to the chain proof by its public block hash
 Date: 2026-10-10 · By: Claude (agent), on the owner's "go forward, finish M3" · Status: active (**owner decisions 2026-10-10** at the end of this entry)
@@ -321,7 +322,8 @@ Why:
 Owner decisions (2026-10-10): **self-contained files**: the file carries the block's header and the 11
 before it with MMR inclusion paths, so a verifier needs only the chain proof and the block file (no
 `headers.bin`). Strength matches the chain proof (70 queries, 26 bits). Standalone now; `BLOCK-REC`
-after M3b.
+after M3b. Built 2026-10-10: file version 2 carries the window; `chainproof rebind-block` rebuilds it for
+a longer chain without re-proving.
 
 ### D-040 — M3b keeps the UTXO set by a chain-wide multiset argument, not a per-block tree
 Date: 2026-10-10 · By: Claude (agent), **approved by the owner 2026-10-10** · Status: active (decides `Q-TREE`)

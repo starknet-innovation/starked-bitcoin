@@ -3,9 +3,13 @@
 //!
 //! `.sbblock` layout (little-endian): magic `SBBLOCK\0`, version u32, log size u32, the 41 public inputs
 //! (u32 each, canonical M31), the claimed LogUp sums (count u32, then 4 u32 per QM31), the STARK proof
-//! (length u32, then stwo's postcard encoding), the provenance (length u32, bytes).
+//! (length u32, then stwo's postcard encoding), the provenance (length u32, bytes), then the header
+//! window (D-039, self-contained files): the chain length `n` the paths are for (u32), the count (u32),
+//! and per header its height (u32), its 80 bytes, and its MMR inclusion path (steps u32; per step 8 u32
+//! sibling words and a side byte). The window is the block's header and up to 11 before it.
 //!
-//! The FRI configuration is pinned by the verifier, never taken from the file.
+//! The FRI configuration is pinned by the verifier, never taken from the file. The header window can be
+//! rebuilt for a longer chain without re-proving.
 
 const std = @import("std");
 const core = @import("stwo_core");
@@ -20,7 +24,7 @@ const bs = @import("system.zig");
 const checks = @import("checks.zig");
 
 pub const MAGIC = "SBBLOCK\x00";
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 
 /// Production strength, as the chain proof's: 70 queries at blowup 2, 26 bits of proof of work.
 pub fn productionFri() FriConfigV2 {
@@ -32,12 +36,47 @@ pub fn testFri() FriConfigV2 {
     return FriConfigV2.init(10, 0, 1, 3, 1) catch unreachable;
 }
 
+const HT = @import("../btc/header_tree.zig");
+
+/// A header with its inclusion path in the chain's MMR.
+pub const Bound = struct { height: u32, header: [80]u8, steps: []const HT.Step };
+
 pub const File = struct {
     log_size: u32,
     pubs: [bs.N_PUB]M31,
     proof: system.Proof,
     provenance: []const u8,
+    /// The chain length the paths are for.
+    chain_len: u32 = 0,
+    /// The block's header and up to 11 before it, oldest first.
+    window: []const Bound = &.{},
 };
+
+/// The header window for height `h` against the MMR over `hashes` (the chain's block hashes).
+pub fn bindWindow(a: std.mem.Allocator, headers: []const [80]u8, hashes: []const HT.Words, h: u32) ![]Bound {
+    if (h >= hashes.len or headers.len < hashes.len) return error.HeightBeyondChain;
+    const lo: u32 = if (h >= 11) h - 11 else 0;
+    const out = try a.alloc(Bound, h - lo + 1);
+    for (out, lo..) |*b, i| b.* = .{ .height = @intCast(i), .header = headers[i], .steps = try HT.inclusionProof(a, hashes, i) };
+    return out;
+}
+
+/// Checks the window against a verified chain (length `n`, MMR root `t`): consecutive heights ending
+/// at the block's, starting at `max(0, h − 11)`, each header's hash included at its height.
+pub fn checkWindow(a: std.mem.Allocator, f: *const File, n: usize, t: HT.Words) ![]const [80]u8 {
+    if (f.chain_len != n) return error.WindowForOtherChainLength;
+    const h = f.pubs[2].toU32();
+    if (h >= n) return error.HeightBeyondChain;
+    const lo: u32 = if (h >= 11) h - 11 else 0;
+    if (f.window.len != h - lo + 1) return error.BadWindow;
+    const hs = try a.alloc([80]u8, f.window.len);
+    for (f.window, 0..) |b, i| {
+        if (b.height != lo + i) return error.BadWindow;
+        if (!try HT.verifyAt(a, HT.blockHash(&b.header), b.steps, b.height, n, t)) return error.HeaderNotInChain;
+        hs[i] = b.header;
+    }
+    return hs;
+}
 
 pub fn partsOf(airs: *const [bs.N_COMP]ir.Air, log_size: u32, pubs: *const [bs.N_PUB]M31) [bs.N_COMP]system.Part {
     var out: [bs.N_COMP]system.Part = undefined;
@@ -80,6 +119,17 @@ pub fn encode(a: std.mem.Allocator, f: *const File) ![]u8 {
     try w.writeAll(pb.items);
     try w.writeInt(u32, @intCast(f.provenance.len), .little);
     try w.writeAll(f.provenance);
+    try w.writeInt(u32, f.chain_len, .little);
+    try w.writeInt(u32, @intCast(f.window.len), .little);
+    for (f.window) |b| {
+        try w.writeInt(u32, b.height, .little);
+        try w.writeAll(&b.header);
+        try w.writeInt(u32, @intCast(b.steps.len), .little);
+        for (b.steps) |st| {
+            for (st.sibling) |x| try w.writeInt(u32, x, .little);
+            try w.writeByte(@intFromBool(st.left));
+        }
+    }
     return out.toOwnedSlice(a);
 }
 
@@ -117,6 +167,25 @@ pub fn decode(a: std.mem.Allocator, bytes: []const u8) !File {
     if (vlen > bytes.len - fbs.pos) return error.Truncated;
     f.provenance = bytes[fbs.pos .. fbs.pos + vlen];
     fbs.pos += vlen;
+    f.chain_len = try r.readInt(u32, .little);
+    const nw = try r.readInt(u32, .little);
+    if (nw > 12) return error.BadWindow;
+    const win = try a.alloc(Bound, nw);
+    for (win) |*b| {
+        b.height = try r.readInt(u32, .little);
+        try r.readNoEof(&b.header);
+        const ns = try r.readInt(u32, .little);
+        if (ns > 64) return error.BadWindow;
+        const steps = try a.alloc(HT.Step, ns);
+        for (steps) |*st| {
+            for (&st.sibling) |*x| x.* = try r.readInt(u32, .little);
+            const side = try r.readByte();
+            if (side > 1) return error.BadWindow;
+            st.left = side == 1;
+        }
+        b.steps = steps;
+    }
+    f.window = win;
     if (fbs.pos != bytes.len) return error.TrailingBytes;
     f.proof = .{ .stark = stark, .claimed_sums = sums };
     return f;
@@ -125,13 +194,17 @@ pub fn decode(a: std.mem.Allocator, bytes: []const u8) !File {
 /// Median time past of the 11 headers below `height` (Core's `GetMedianTimePast` of the previous
 /// block); `headers[i]` is the 80-byte header at height `i`.
 pub fn prevMtp(headers: []const [80]u8, height: usize) u32 {
-    if (height == 0) return 0;
     const lo = if (height >= 11) height - 11 else 0;
+    return mtpOf(headers[lo..height]);
+}
+
+/// The median of up to 11 headers' times (0 for none).
+pub fn mtpOf(prev: []const [80]u8) u32 {
+    if (prev.len == 0) return 0;
     var t: [11]u32 = undefined;
-    const n = height - lo;
-    for (0..n) |i| t[i] = std.mem.readInt(u32, headers[lo + i][68..72], .little);
-    std.mem.sort(u32, t[0..n], {}, std.sort.asc(u32));
-    return t[n / 2];
+    for (prev, 0..) |h, i| t[i] = std.mem.readInt(u32, h[68..72], .little);
+    std.mem.sort(u32, t[0..prev.len], {}, std.sort.asc(u32));
+    return t[prev.len / 2];
 }
 
 /// What a verified block proof states once its public inputs match the headers.
@@ -144,15 +217,15 @@ pub const Statement = struct {
     commitment: [32]u8,
 };
 
-/// Checks the public inputs against the header at their height: the block hash (25–40), the height's
-/// context (MTP limbs and soft-fork flags, inputs 3–7). `headers` must already be bound to a verified
-/// chain (its hashes fold to the chain proof's MMR root).
-pub fn checkPubs(pubs: *const [bs.N_PUB]M31, headers: []const [80]u8) !Statement {
+/// Checks the public inputs against a window of headers bound to a verified chain (`checkWindow`): the
+/// block's header (the window's last) gives the block hash (inputs 25–40), the ones before it the
+/// previous median time past; with the height, the context inputs 2–7.
+pub fn checkPubs(pubs: *const [bs.N_PUB]M31, window: []const [80]u8) !Statement {
     const height = pubs[2].toU32();
-    if (height >= headers.len) return error.HeightBeyondChain;
-    const want_hash = bs.hashLimbs(&headers[height]);
+    if (window.len == 0 or window.len != @min(height, 11) + 1) return error.BadWindow;
+    const want_hash = bs.hashLimbs(&window[window.len - 1]);
     for (0..16) |j| if (!pubs[bs.PUB_HASH + j].eql(want_hash[j])) return error.BlockHashMismatch;
-    const ctx = checks.Ctx{ .height = height, .prev_mtp = prevMtp(headers, height) };
+    const ctx = checks.Ctx{ .height = height, .prev_mtp = mtpOf(window[0 .. window.len - 1]) };
     const want = checks.pubs(&.{}, 0, ctx);
     for (2..8) |i| if (!pubs[i].eql(want[i])) return error.ContextMismatch;
     var c: [32]u8 = undefined;
@@ -182,13 +255,14 @@ test "block proof file: round trip, verify, and the header checks (block 170, te
     try std.testing.expect(std.meta.isError(verifyStark(a, &airs, &g, testFri())));
     // The header checks: block 170's header and a context from the 11 headers below it are not in the
     // repo, so check the hash binding with a one-header "chain" placed at height 170.
-    var hs = try a.alloc([80]u8, 171);
+    var hs = try a.alloc([80]u8, 12);
     @memset(hs, [_]u8{0} ** 80);
-    hs[170] = s.raw[0..80].*;
+    hs[11] = s.raw[0..80].*;
     try std.testing.expectError(error.ContextMismatch, checkPubs(&f.pubs, hs));
     var hs2 = try a.dupe([80]u8, hs);
-    hs2[170][0] ^= 1;
+    hs2[11][0] ^= 1;
     try std.testing.expectError(error.BlockHashMismatch, checkPubs(&f.pubs, hs2));
+    try std.testing.expectError(error.BadWindow, checkPubs(&f.pubs, hs[1..]));
     // The commitment bytes are D-038's.
     const st = checkPubs(&f.pubs, hs) catch |e| switch (e) {
         error.ContextMismatch => null,
@@ -232,4 +306,38 @@ test "block 170 with its undo stream from the node: the commitment is blake2s(un
     _ = try std.fmt.hexToBytes(&want, "000f60585ef4c4ec168547418dd7282ea2e2b3896937443cbc6f1cfef87e7a03");
     try std.testing.expectEqualSlices(u8, &want, &c);
     try std.testing.expectEqual(@as(u32, 81), b.pubs[8].toU32());
+}
+
+test "block proof file: a self-contained window binds block 170 to a 1024-header MMR (test strength)" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const H = @import("../btc/header_chain.zig");
+    const headers = try H.loadHeaders(a, @embedFile("testdata:mainnet_headers_0_1024"));
+    const hashes = try a.alloc(HT.Words, headers.len);
+    for (hashes, headers) |*h, *hd| h.* = HT.blockHash(hd);
+    const t = try HT.mmrRoot(a, hashes);
+    const airs = try bs.parseAirs(a);
+    const s = checks.samples_small[1];
+    try std.testing.expectEqual(s.ctx.prev_mtp, prevMtp(headers, 170));
+    const b = try bs.buildU(a, s.raw, @embedFile("testdata:undo_170"), s.ctx);
+    const proof = try prove(a, &airs, &b, testFri());
+    const win = try bindWindow(a, headers, hashes, 170);
+    const bytes = try encode(a, &.{ .log_size = b.log_size, .pubs = b.pubs, .proof = proof, .provenance = "test", .chain_len = @intCast(headers.len), .window = win });
+    const f = try decode(a, bytes);
+    try verifyStark(a, &airs, &f, testFri());
+    const hs = try checkWindow(a, &f, headers.len, t);
+    const st = try checkPubs(&f.pubs, hs);
+    try std.testing.expectEqual(@as(u32, 170), st.height);
+    try std.testing.expectEqual(@as(u32, 2), st.ntx);
+    // Rejected: another chain length, a wrong root, a tampered window header.
+    try std.testing.expectError(error.WindowForOtherChainLength, checkWindow(a, &f, headers.len - 1, t));
+    var t2 = t;
+    t2[0] ^= 1;
+    try std.testing.expectError(error.HeaderNotInChain, checkWindow(a, &f, headers.len, t2));
+    var g = try decode(a, bytes);
+    const w2 = try a.dupe(Bound, g.window);
+    w2[3].header[70] ^= 1;
+    g.window = w2;
+    try std.testing.expectError(error.HeaderNotInChain, checkWindow(a, &g, headers.len, t));
 }

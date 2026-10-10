@@ -294,33 +294,37 @@ system with `BlockPubs c pub`, `height < 2^23`, `prevMtp < 2^32` and `8 ≤ L �
 Lean: `Block/Undo.lean`, `Block/B2Msg.lean`, `Block/B2s.lean`; proofs `Block/B2MsgSound.lean`,
 `Block/B2sSound.lean`, `Block/B2Bridge.lean`, `Block/B2Link.lean`; spec `Spec/BlockCommit.lean`,
 `Spec/Blake2sBlocks.lean`. Zig: `src/block/commit.zig`. Design: [block-data.md § M3a.6](../design/block-data.md),
-decision D-038.
+decision D-038 (amended 2026-10-10).
 
-`C = blake2s(blake2s(raw) ++ blake2s(undo))`, with `undo = 0x01 ++ records` (one `TxOutSer`-without-
-outpoint per input after the coinbase, unchecked here, D-029). Public inputs: `pub 8` the undo length,
-`pub 9 + 2i + h` limb `h` of commitment word `i`. The system now has 12 components and 25 public inputs;
-99 lookup sites per row.
+`C = blake2s(undo)`, with `undo = 0x01 ++ records` (one `TxOutSer`-without-outpoint per input after the
+coinbase, unchecked here, D-029). The raw block is bound by the public block hash (`hash_pub`, below).
+Public inputs: `pub 8` the undo length, `pub 9 + 2i + h` limb `h` of commitment word `i`, `pub 25..40`
+the block hash. The system has 12 components and 41 public inputs; 96 lookup sites per row.
 
 - **`block_undo`:** the byte table's AIR with its length read from `pub 8`, relation `UBYTE` (17).
-- **`block_b2msg`:** one row per 32-bit message word of the two streams (raw, then undo); bytes past the
-  length are zero. Active-byte flags are monotone and counted against the length, and only block 0 may
-  start inactive, so a stream has `max 1 ⌈len/64⌉` blocks. Yields `b2w(stream, block, k, lo, hi)` and
-  `b2b(stream, block, last, t)`.
-- **`block_b2s`:** the proven Blake2s gadget (300 columns) plus 17: period 0 is the outer hash (`h0`,
-  `t = 64`, `f = 1`, message = the two digests read as `b2d`), other periods are stream blocks chained
-  from the previous period, and a stream's last block yields its digest words.
+- **`block_b2msg`:** one row per 32-bit message word of the undo stream; bytes past the length are zero.
+  Active-byte flags are monotone and counted against the length, and only block 0 may start inactive,
+  so the stream has `max 1 ⌈len/64⌉` blocks. Yields `b2w(block, k, lo, hi)` and `b2b(block, last, t)`.
+  16 columns, 6 lookups.
+- **`block_b2s`:** the proven Blake2s gadget (300 columns) plus 12: each used period hashes a block,
+  chained from the previous period (never at period 0); the last block yields its digest words (`b2d`);
+  rows 0–7 read `b2d(k, pub (9 + 2k), pub (10 + 2k))`.
 
-**Soundness.** Headline **`commit_sound`** (`B2Link`, standard axioms only): in a satisfied 12-component
-system with `8 ≤ L ≤ 24`, `pub (9 + 2i + h) = half16 (C i) h` where `C = hashBlocks h0 0 (blake2s raw ++
-blake2s undo)`, and `blockCommit raw undo = digest C` (`blockCommit_eq`). Parts:
+**Soundness.** Headline **`commit_sound`** (`B2Link`, standard axioms only): in a satisfied system with
+`8 ≤ L ≤ 24`, `pub (9 + 2i + h) = half16 (C i) h` where `C = hashBlocks h0 0 undo`, and
+`blockCommit undo = digest C` (`blockCommit_eq`).
 
 | File | Result |
 |---|---|
-| `B2MsgSound` | `prefix_of_count`, `on_prefix`, `streams`, `layout`, `stream_count`, `walker_sound` |
+| `B2MsgSound` | `prefix_of_count`, `on_prefix`, `layout`, `stream_count`, `walker_sound` |
 | `B2sSound` | `period_compress` (gadget), `h_first`, `h_chain`, `tf`, `msg_word` |
-| `B2Link` | `undo_read`, `walker_fact`, `period_block`, `chain_state`, `last_digest`, `digest_yield`, `outer_words`, `commit_sound` |
-| `Spec/Blake2sBlocks` | `compress_congr`, `hashBlocks_eq` (block by block), `leWord_digests` |
+| `B2Link` | `undo_read`, `walker_fact`, `period_block`, `chn_pos`, `chain_state`, `last_digest`, `digest_yield`, `commit_sound` |
+| `Spec/Blake2sBlocks` | `compress_congr`, `hashBlocks_eq` (block by block) |
 
-**Limits.** At one shared trace size the system has about 900 columns. A block above about 3.5 MB needs
-`2^23` rows, more memory than a 24 GB machine has for the in-memory check, so the large-sample test
-skips 774628 (3.96 MB). Proving such blocks needs per-component sizes (lifting) or a larger machine.
+**The block hash** (`HashPub.hash_pub`): the context component reads `digest(0, pub 25..40)` at row 0, so
+public inputs 25–40 are the limbs of `SHA256d(header)`.
+
+**Limits.** At one shared trace size the system has about 880 columns. A block above about 3.5 MB needs
+`2^23` rows, more memory than a 24 GB machine has for the in-memory check; a ~1 MB block (2²²) builds
+and checks its witness in ~4 min at ~14 GB, and proving it needs more. Full blocks need per-component
+sizes (lifting) or a larger machine.

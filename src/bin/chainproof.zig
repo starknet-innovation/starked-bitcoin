@@ -18,16 +18,20 @@
 //!   chainproof inclusion <vk> <file.sbchain> <headers.bin> <height>
 //!       Prints and checks the MMR inclusion path of a block hash in the (verified) file's `T`.
 //!
-//!   chainproof prove-block <block.bin> <undo.bin | -> <headers.bin> <height> <out.sbblock> [--test-strength]
+//!   chainproof prove-block <block.bin> <undo.bin | -> <headers.bin> <height> <file.sbchain> <out.sbblock> [--test-strength]
 //!       Proves one block (BLOCK-DATA): its checks, its block hash and its commitment
 //!       `blake2s(undo)` (D-038) as public inputs. `undo.bin` is the
 //!       undo stream (`0x01` and the spent-output records, scripts/fetch_undo.py); `-` uses the empty
 //!       stream (no spent outputs: only right for a coinbase-only block). The block's header must be
-//!       `headers.bin`'s at `height`, whose 11 predecessors give the median time past.
-//!   chainproof verify-block <vk> <file.sbchain> <headers.bin> <file.sbblock> [--min-work <hex> | --min-work 0] [--test-strength]
-//!       Verifies the chain proof, binds `headers.bin` to it (its block hashes fold to the proof's
-//!       MMR root), verifies the block proof under the pinned FRI configuration, and checks its height,
-//!       context and block hash against the headers. Prints the proven statement.
+//!       `headers.bin`'s at `height`, whose 11 predecessors give the median time past. The file is
+//!       self-contained (D-039): it carries those headers with MMR inclusion paths for the chain
+//!       `file.sbchain` proves (its length only is read; it is not verified here).
+//!   chainproof verify-block <vk> <file.sbchain> <file.sbblock> [--min-work <hex> | --min-work 0] [--test-strength]
+//!       Verifies the chain proof, the block file's headers against its MMR root, the block proof
+//!       under the pinned FRI configuration, and its height, context and block hash against those
+//!       headers. Needs no header file. Prints the proven statement.
+//!   chainproof rebind-block <in.sbblock> <headers.bin> <file.sbchain> <out.sbblock>
+//!       Rebuilds a block file's header window for another (longer) chain proof, without re-proving.
 //!
 //! `headers.bin`: raw 80-byte headers from height 0. CPU only. `--test-strength`: 3 queries, 10
 //! PoW bits (fast, not secure); without it block proofs use the chain proof's 70 queries, 26 bits.
@@ -50,8 +54,9 @@ fn usage() noreturn {
         \\  chainproof verify <vk> <file.sbchain> [--min-work <hex> | --min-work 0]
         \\  chainproof inclusion <vk> <file.sbchain> <headers.bin> <height>
         \\  chainproof info <file.sbchain>
-        \\  chainproof prove-block <block.bin> <undo.bin | -> <headers.bin> <height> <out.sbblock> [--test-strength]
-        \\  chainproof verify-block <vk> <file.sbchain> <headers.bin> <file.sbblock> [--min-work <hex> | --min-work 0] [--test-strength]
+        \\  chainproof prove-block <block.bin> <undo.bin | -> <headers.bin> <height> <file.sbchain> <out.sbblock> [--test-strength]
+        \\  chainproof verify-block <vk> <file.sbchain> <file.sbblock> [--min-work <hex> | --min-work 0] [--test-strength]
+        \\  chainproof rebind-block <in.sbblock> <headers.bin> <file.sbchain> <out.sbblock>
         \\
     , .{});
     std.process.exit(2);
@@ -89,12 +94,12 @@ pub fn main() !void {
     if (std.mem.eql(u8, cmd, "verify") and (args.len == 4 or (args.len == 6 and std.mem.eql(u8, args[4], "--min-work"))))
         return verify(gpa, a, args[2], args[3], if (args.len == 6) try std.fmt.parseInt(u256, args[5], 16) else core_min_work);
     if (std.mem.eql(u8, cmd, "info") and args.len == 3) return info(gpa, a, args[2]);
-    if (std.mem.eql(u8, cmd, "prove-block") and (args.len == 7 or (args.len == 8 and std.mem.eql(u8, args[7], "--test-strength"))))
-        return proveBlock(gpa, a, args[2], args[3], args[4], try std.fmt.parseInt(u32, args[5], 10), args[6], args.len == 8);
-    if (std.mem.eql(u8, cmd, "verify-block") and args.len >= 6) {
+    if (std.mem.eql(u8, cmd, "prove-block") and (args.len == 8 or (args.len == 9 and std.mem.eql(u8, args[8], "--test-strength"))))
+        return proveBlock(gpa, a, args[2], args[3], args[4], try std.fmt.parseInt(u32, args[5], 10), args[6], args[7], args.len == 9);
+    if (std.mem.eql(u8, cmd, "verify-block") and args.len >= 5) {
         var min_work: u256 = core_min_work;
         var weak = false;
-        var i: usize = 6;
+        var i: usize = 5;
         while (i < args.len) {
             if (std.mem.eql(u8, args[i], "--test-strength")) {
                 weak = true;
@@ -104,8 +109,9 @@ pub fn main() !void {
                 i += 2;
             } else usage();
         }
-        return verifyBlock(gpa, a, args[2], args[3], args[4], args[5], min_work, weak);
+        return verifyBlock(gpa, a, args[2], args[3], args[4], min_work, weak);
     }
+    if (std.mem.eql(u8, cmd, "rebind-block") and args.len == 6) return rebindBlock(gpa, a, args[2], args[3], args[4], args[5]);
     if (std.mem.eql(u8, cmd, "inclusion") and args.len == 6) return inclusion(gpa, a, args[2], args[3], args[4], try std.fmt.parseInt(usize, args[5], 10));
     usage();
 }
@@ -292,13 +298,15 @@ fn blockFri(weak: bool) FriConfigV2 {
     return if (weak) PF.testFri() else PF.productionFri();
 }
 
-fn proveBlock(gpa: std.mem.Allocator, a: std.mem.Allocator, block_path: []const u8, undo_path: []const u8, headers_path: []const u8, height: u32, out: []const u8, weak: bool) !void {
-    _ = gpa;
+fn proveBlock(gpa: std.mem.Allocator, a: std.mem.Allocator, block_path: []const u8, undo_path: []const u8, headers_path: []const u8, height: u32, chain_path: []const u8, out: []const u8, weak: bool) !void {
+    var c = try S.Chain.decode(gpa, a, try S.readFile(a, chain_path));
+    const n = c.headers();
+    c.deinit();
     const raw = try S.readFile(a, block_path);
     const undo: []const u8 = if (std.mem.eql(u8, undo_path, "-")) &.{1} else try S.readFile(a, undo_path);
     if (undo.len == 0 or undo[0] != 1) return error.BadUndoStream;
     const all = try loadHeaderFile(a, headers_path);
-    if (height >= all.len) return error.HeightBeyondHeaders;
+    if (height >= n or all.len < n) return error.HeightBeyondChain;
     if (raw.len < 80 or !std.mem.eql(u8, raw[0..80], &all[height])) return error.HeaderMismatch;
     const ctx = sb.block.checks.Ctx{ .height = height, .prev_mtp = PF.prevMtp(all, height) };
     var timer = try std.time.Timer.start();
@@ -321,16 +329,38 @@ fn proveBlock(gpa: std.mem.Allocator, a: std.mem.Allocator, block_path: []const 
     const proof = try PF.prove(a, &airs, &b, fri);
     std.debug.print("proved in {d:.1}s ({s})\n", .{ secs(timer.lap()), if (weak) "TEST STRENGTH, not secure" else "70 queries, 26 PoW bits" });
     const prov = try std.fmt.allocPrint(a, "starked-bitcoin {s}, stwo-zig {s}", .{ build_options.repo_commit, build_options.stwo_commit });
-    const bytes = try PF.encode(a, &.{ .log_size = b.log_size, .pubs = b.pubs, .proof = proof, .provenance = prov });
+    const hashes = try a.alloc(HT.Words, n);
+    for (hashes, all[0..n]) |*h, *hd| h.* = HT.blockHash(hd);
+    const window = try PF.bindWindow(a, all, hashes, height);
+    const bytes = try PF.encode(a, &.{ .log_size = b.log_size, .pubs = b.pubs, .proof = proof, .provenance = prov, .chain_len = @intCast(n), .window = window });
     try S.writeFileAtomic(out, bytes);
     const f = try PF.decode(a, try S.readFile(a, out));
     try PF.verifyStark(a, &airs, &f, fri);
     std.debug.print("wrote {s} ({d} bytes), reloaded and verified in {d:.1}s\n", .{ out, bytes.len, secs(timer.lap()) });
 }
 
-fn verifyBlock(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8, chain_path: []const u8, headers_path: []const u8, block_path: []const u8, min_work: u256, weak: bool) !void {
+fn rebindBlock(gpa: std.mem.Allocator, a: std.mem.Allocator, in_path: []const u8, headers_path: []const u8, chain_path: []const u8, out: []const u8) !void {
+    var c = try S.Chain.decode(gpa, a, try S.readFile(a, chain_path));
+    const n = c.headers();
+    c.deinit();
+    var f = try PF.decode(a, try S.readFile(a, in_path));
+    const all = try loadHeaderFile(a, headers_path);
+    if (all.len < n) return error.HeadersShorterThanChain;
+    const hashes = try a.alloc(HT.Words, n);
+    for (hashes, all[0..n]) |*h, *hd| h.* = HT.blockHash(hd);
+    const height = f.pubs[2].toU32();
+    // The block's header must stay the same: the proof's public block hash fixes it.
+    const want = BS.hashLimbs(&all[height]);
+    for (0..16) |j| if (!f.pubs[BS.PUB_HASH + j].eql(want[j])) return error.BlockHashMismatch;
+    f.window = try PF.bindWindow(a, all, hashes, height);
+    f.chain_len = @intCast(n);
+    try S.writeFileAtomic(out, try PF.encode(a, &f));
+    std.debug.print("rebound {s} to a chain of {d} headers: {s}\n", .{ in_path, n, out });
+}
+
+fn verifyBlock(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8, chain_path: []const u8, block_path: []const u8, min_work: u256, weak: bool) !void {
     var timer = try std.time.Timer.start();
-    // 1. The chain proof, and the headers bound to it.
+    // 1. The chain proof.
     const vk = try loadVk(a, vk_path);
     const tables = try L.Tables.init(gpa);
     defer tables.deinit(gpa);
@@ -341,24 +371,16 @@ fn verifyBlock(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8
         std.debug.print("REJECTED: chainwork 0x{x} below the required minimum 0x{x}\n", .{ s.work, min_work });
         return error.InsufficientWork;
     }
-    const all = try loadHeaderFile(a, headers_path);
-    if (all.len < s.headers) return error.HeadersShorterThanChain;
-    const hashes = try a.alloc(HT.Words, s.headers);
-    for (hashes, all[0..s.headers]) |*h, *hd| h.* = HT.blockHash(hd);
-    const t = try HT.mmrRoot(a, hashes);
-    if (!std.mem.eql(u32, &t, &s.t)) {
-        std.debug.print("REJECTED: headers.bin does not fold to the chain proof's MMR root\n", .{});
-        return error.HeadersNotProven;
-    }
-    std.debug.print("chain proof verified: headers 0..{d}, chainwork 0x{x}{s}; headers.bin bound to its MMR root ({d:.1}s)\n", .{ s.headers - 1, s.work, if (min_work == 0) " (minimum-work check DISABLED)" else "", secs(timer.lap()) });
-    // 2. The block proof.
+    std.debug.print("chain proof verified: headers 0..{d}, chainwork 0x{x}{s} ({d:.1}s)\n", .{ s.headers - 1, s.work, if (min_work == 0) " (minimum-work check DISABLED)" else "", secs(timer.lap()) });
+    // 2. The block file: its headers against the chain's MMR root, its STARK, its public inputs.
     const airs = try BS.parseAirs(a);
     const f = try PF.decode(a, try S.readFile(a, block_path));
+    const window = try PF.checkWindow(a, &f, s.headers, s.t);
     try PF.verifyStark(a, &airs, &f, blockFri(weak));
-    const st = try PF.checkPubs(&f.pubs, all[0..s.headers]);
+    const st = try PF.checkPubs(&f.pubs, window);
     std.debug.print("VERIFIED block proof {s} ({s}) in {d:.1}s\n", .{ block_path, if (weak) "TEST STRENGTH, not secure" else "70 queries, 26 PoW bits", secs(timer.lap()) });
-    printHash("  block hash  ", hashes[st.height]);
-    std.debug.print("  height      {d}\n  block       {d} bytes, {d} transactions\n", .{ st.height, st.block_len, st.ntx });
+    printHash("  block hash  ", HT.blockHash(&window[window.len - 1]));
+    std.debug.print("  height      {d} (header and {d} predecessors included in the chain's MMR root)\n  block       {d} bytes, {d} transactions\n", .{ st.height, window.len - 1, st.block_len, st.ntx });
     std.debug.print("  valid under Core's CheckBlock (without proof of work, which the chain proof covers) and\n  ContextualCheckBlock, given no repeated prevout (M3b)\n", .{});
     std.debug.print("  undo        {d} bytes (committed, not checked: M3b)\n  commitment  {x}  (blake2s(undo))\n", .{ st.undo_len, st.commitment });
     std.debug.print("  provenance  {s}\n", .{f.provenance});
