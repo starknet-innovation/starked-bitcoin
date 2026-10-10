@@ -220,10 +220,11 @@ Why:
 - Public activation bits avoid comparisons on public values inside the AIR.
 - Reusing the SHA and Merkle components keeps the proven compression untouched.
 
-Amendments (2026-10-10, Claude, during implementation; the owner should confirm):
+Amendments (2026-10-10, Claude, during implementation; **confirmed by the owner 2026-10-10**):
 - **The range table is 8-bit** (`block_tables`, relation `R8`), not 16-bit. All block components
   share one trace size, so a `2^16`-row table would force every block to `L ≥ 16`. Wider values
-  are split into bytes.
+  are split into bytes. Owner: keep 8-bit; after per-component trace sizes (lifting) land, measure
+  what a 16-bit table would save and switch only if it pays, before any large proving run.
 - **The previous MTP is public as two 16-bit limbs:** `pub 3` (low) and a new `pub 7` (high). With
   one public value and private limbs, limbs summing to `prevMtp + P` also satisfied
   `lo + 65536·hi = pub 3` in M31, which would have loosened the finality cutoff. Found while
@@ -266,9 +267,8 @@ Why: it makes an assumeUTXO snapshot checkable without trusting the constant in 
 Scoping: [utxo-hash-scope.md](../design/utxo-hash-scope.md).
 
 ### D-038 — The block commitment hashes the raw block and an undo record
-Date: 2026-10-10 · By: Claude (agent), on the owner's "go forward, finish M3" · Status: proposed
-(implementation proceeds; the owner should confirm before any large proving run, since proven blocks
-fix the format)
+Date: 2026-10-10 · By: Claude (agent), on the owner's "go forward, finish M3" · Status: **amended by
+the owner 2026-10-10** (see the amendment at the end of this entry)
 Decision:
 - `C = blake2s(blake2s(raw) ++ blake2s(undo))`, output as 8 public words.
 - `undo` is a version byte `0x01` then one record per input after the coinbase, in block order (the
@@ -284,6 +284,12 @@ Why:
 - The records plus outpoints are `TxOutSer`, the unit of assumeUTXO's `hash_serialized` (D-037).
 - Two inner hashes let a module open only what it needs.
 
+
+Amendment (owner, 2026-10-10): **`C = blake2s(undo)` only.** The raw block is bound by the public
+block hash (inputs 25–40): for a valid block, the header's Merkle root and the coinbase's witness
+commitment fix every byte, and `block_sound` proves both. This drops the raw block's Blake2s stream
+(the larger part of the commitment's cost). The undo format (2b) and the version byte (2c) stay.
+A later proof that re-reads the raw block checks it against Bitcoin's SHA-256 trees, not Blake2s.
 
 ### D-039 — A block proof is a file bound to the chain proof by its public block hash
 Date: 2026-10-10 · By: Claude (agent), on the owner's "go forward, finish M3" · Status: proposed
@@ -313,8 +319,13 @@ Why:
   verifier circuit is a separate step (`BLOCK-REC`, backlog). Until then a block proof is a standalone
   file of about 0.5–2 MB.
 
+Owner decisions (2026-10-10): **self-contained files**: the file carries the block's header and the 11
+before it with MMR inclusion paths, so a verifier needs only the chain proof and the block file (no
+`headers.bin`). Strength matches the chain proof (70 queries, 26 bits). Standalone now; `BLOCK-REC`
+after M3b.
+
 ### D-040 — M3b keeps the UTXO set by a chain-wide multiset argument, not a per-block tree
-Date: 2026-10-10 · By: Claude (agent) · Status: **proposed, needs the owner** (decides `Q-TREE`)
+Date: 2026-10-10 · By: Claude (agent), **approved by the owner 2026-10-10** · Status: active (decides `Q-TREE`)
 Decision (proposed): created coins add `1/(z − coin)` and spent coins subtract it, with the coin's
 tuple taken from the parsed outputs and from the undo records. Each spend checks that the coin's position
 `(height, tx index)` is earlier. Over an epoch the sum, minus the strictly sorted final set, is zero.
@@ -324,3 +335,12 @@ Design: [utxo.md](../design/utxo.md).
 Why: about 10¹⁰ rows over history against about 4 × 10¹³ for a per-block sorted Merkle tree (*est.*);
 it checks the undo records (D-029) and duplicate inputs (D-031) by construction. Cost: statements hold
 per epoch, not per block, and tip following needs short epochs or a tree for the last stretch.
+
+Owner decisions on D-040 (2026-10-10):
+- Build the multiset argument first. A per-block tree (hybrid, for the stretch after the last epoch) is
+  built only if assessment shows tip following needs it.
+- Epochs end at Bitcoin Core's assumeUTXO heights (840,000, 880,000, 910,000), so each yields a check
+  of Core's pinned `hash_serialized`: trustlessness for what Core ships.
+- Tip following: start by matching Core's snapshots, compute them, then assess.
+- Cost estimate corrected: script fingerprints cost about one row per script byte, so M3b adds roughly
+  10–30% to the block proofs (*est.*), not 10¹⁰ rows in total.
