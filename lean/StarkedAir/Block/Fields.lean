@@ -346,7 +346,7 @@ def finalC : List Expr :=
     boolC (k B2), boolC (k BRW), same CLO, same CHI ]
 
 def totalsC : List Expr :=
-  [ .sub (k DW) (.mul (k K_LOCK) (.mul (k SEG) (.sub (.add (c 2) (k START)) (k WST)))),
+  [ .sub (k DW) (.add (.mul (c 2) (.mul (k K_TXH) (k SEG))) (.mul (.add (k K_WCNT) (k K_WITEM)) (k LEN))),
     .mul first (k WB), .mul notFirst (.sub (.sub (k WB) (kp WB)) (k DW)),
     .mul first (k NS), .mul notFirst (.sub (.sub (k NS) (kp NS)) (.mul (k K_TXH) (k SEG))),
     .sub (k SSC) (.add (.add (k START) (k OFF)) pref),

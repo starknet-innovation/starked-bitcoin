@@ -24,7 +24,6 @@ const VAL = 11;
 const SEG = 12;
 const OFF = 13;
 const TXI = 116;
-const WST = 115;
 
 const FZ = 118;
 const FL = 119;
@@ -325,13 +324,13 @@ pub fn fill(a: std.mem.Allocator, cols: [][]M31, raw: []const u8, rows: []const 
         cols[CLO][i] = f(cutoff & 0xffff);
         cols[CHI][i] = f(cutoff >> 16);
 
-        // Witness bytes and segwit count.
+        // Witness bytes (2 per segwit head, each witness token's length) and segwit count.
         if (i > 0) {
-            if (r.kind == K_LOCK and r.seg) {
-                const dw = 2 + r.start - cols[WST][i].toU32();
-                cols[DW][i] = f(dw);
-                w += dw;
-            }
+            var dw: u32 = 0;
+            if (r.kind == K_TXH and r.seg) dw = 2;
+            if (r.kind == fields.K_WCNT or r.kind == fields.K_WITEM) dw = r.len;
+            cols[DW][i] = f(dw);
+            w += dw;
             if (r.kind == K_TXH and r.seg) nseg += 1;
         }
         cols[WB][i] = f(w);
