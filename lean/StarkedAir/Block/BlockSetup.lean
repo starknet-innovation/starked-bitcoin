@@ -48,7 +48,7 @@ structure Setup (inst : ℕ → Inst) (pub : ℕ → F) (L : ℕ) where
 section System
 
 variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ}
-  (hL : ∀ i < 12, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : L ≤ 24)
+  (hL : ∀ i < 15, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : L ≤ 23)
 include hL hsat hL24
 
 theorem setup_exists : Nonempty (Setup inst pub L) := by
@@ -61,7 +61,7 @@ theorem setup_exists : Nonempty (Setup inst pub L) := by
       mono hSm
   exact ⟨⟨m, b, hmn, hnp, hpad, hfit, hcs, cat, mono, hSm, hparse, hhead, hlenv, hN1, hN25, hidx, htok, hsurj⟩⟩
 
-theorem rows_le : 2 ^ L ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) hL24
+theorem rows_le : 2 ^ L ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans hL24 (by norm_num))
 
 theorem len_R : (Rb inst pub).length ≤ 2 ^ L := by
   have hP : 2 ^ L < P := by have := hash_rows_lt_P hL24; omega

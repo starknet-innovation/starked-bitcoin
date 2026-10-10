@@ -39,7 +39,7 @@ theorem le4_slice {R : Spec.Block.Bytes} {a : ℕ} (h : a + 4 ≤ R.length) :
 section System
 
 variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ}
-  (hL : ∀ i < 12, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : L ≤ 24)
+  (hL : ∀ i < 15, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : L ≤ 23)
 include hL hsat hL24
 
 /-- **Finality.** -/

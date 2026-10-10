@@ -15,7 +15,7 @@ open Fields (blockBytes slice toksFrom tokOf prefOf locks TxAt)
 section System
 
 variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ}
-  (hL : ∀ i < 12, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : L ≤ 24)
+  (hL : ∀ i < 15, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : L ≤ 23)
 include hL hsat hL24
 
 theorem zt_of_locks {r : ℕ} (hr : r < 2 ^ L) (h : locks (inst 1).main r = 0) : (inst 1).main Fields.ZT r = 1 := by

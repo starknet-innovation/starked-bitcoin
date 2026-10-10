@@ -2,6 +2,7 @@ import StarkedAir.Export
 import StarkedAir.Block.ExtSum
 import StarkedAir.Block.FpWalk
 import StarkedAir.Block.URec
+import StarkedAir.Block.Coin
 import StarkedAir.Gadgets.Add32Chain
 import StarkedAir.Testing.Probe
 import StarkedAir.Gadgets.Sha256
@@ -31,6 +32,7 @@ def main (args : List String) : IO Unit := do
   | ["extsum_test"] => IO.println StarkedAir.Block.ExtSum.air.toJson
   | ["block_fpwalk"] => IO.println StarkedAir.Block.FpWalk.fpwalk.toJson
   | ["block_urec"] => IO.println StarkedAir.Block.URec.urec.toJson
+  | ["block_coin"] => IO.println StarkedAir.Block.Coin.coin.toJson
   | ["blake2s_tree"] => IO.println StarkedAir.HeaderTree.tree.toJson
   | ["header_chain_v7"] => IO.println StarkedAir.HeaderTree.headers.toJson
   | ["byte_table"] => IO.println StarkedAir.ByteLookup.table.toJson

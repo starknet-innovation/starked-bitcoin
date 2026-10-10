@@ -11,6 +11,7 @@ namespace StarkedAir.LogUpSZ
 
 theorem headerTree_static : StaticOk StarkedAir.HeaderTree.sys = true := by decide
 
+set_option maxRecDepth 100000 in
 theorem hashSys_static : StaticOk StarkedAir.Block.hashSys = true := by decide
 
 end StarkedAir.LogUpSZ

@@ -17,7 +17,7 @@ open StarkedAir.Sha256 (pre cst)
 section System
 
 variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ}
-  (hL : ∀ i < 12, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : L ≤ 24)
+  (hL : ∀ i < 15, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : L ≤ 23)
 include hL hsat hL24
 
 /-- A byte position below the length is in the block, and its byte is the block's. -/
@@ -40,7 +40,7 @@ theorem byte_read_R {i r k : ℕ} (hs0 : ((i, r, k) : Site) ∈ sites hashSys in
   have hP : 2 ^ L < P := by have := hash_rows_lt_P hL24; omega
   have h25 := (Block.bytes_rows (n := 2 ^ L) (pub := pub) (main := (inst 0).main) (hash_bytes_sat hL hsat) hP
     (by positivity)).2.1
-  have h24 : 2 ^ L ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) hL24
+  have h24 : 2 ^ L ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans hL24 (by norm_num))
   norm_num at h24
   have hpv : p.val = r0 := by rw [hp]; exact ZMod.val_natCast_of_lt (Fields.lt_P (by omega))
   rw [hpv, hb]; exact read_R hL hsat hL24 hr0

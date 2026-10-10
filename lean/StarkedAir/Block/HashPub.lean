@@ -14,7 +14,7 @@ open StarkedAir.Sha256 (pre cst outputAt)
 section System
 
 variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ}
-  (hL : ∀ i < 12, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : L ≤ 24)
+  (hL : ∀ i < 15, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : L ≤ 23)
 include hL hsat hL24
 
 /-- A message start with id 0 is the header message. -/
@@ -22,7 +22,7 @@ theorem mid_zero_hdr {r0 : ℕ} (h0 : r0 < 2 ^ L) (f0 : (inst 2).main Msg.FIRSTM
     (hz : (inst 2).main Msg.MID r0 = 0) : (inst 2).main Msg.HDR r0 = 1 := by
   have ms := hash_msg_sat hL hsat
   have fs := hash_fields_sat' hL hsat
-  have h25 : 2 ^ L ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) hL24
+  have h25 : 2 ^ L ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans hL24 (by norm_num))
   norm_num at h25
   rcases Msg.bool_col ms (e := Msg.HDR) (by simp) h0 with h | h
   · exfalso

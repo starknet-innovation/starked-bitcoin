@@ -387,7 +387,10 @@ def chkLookups : List Lookup :=
   [ ⟨REL_SCRIPT, .mul (.add (k K_IN) (k K_OUT)) (oneMinus (k ZV)), [k SSC, k VAL]⟩,
     ⟨REL_TOT, isLast, [k WB, k NS, k HASC]⟩,
     ⟨REL_CTX, .neg first, [k CLO, k CHI]⟩,
-    ⟨REL_COMMIT, k ISC, [k SSC, k VAL]⟩ ]
+    ⟨REL_COMMIT, k ISC, [k SSC, k VAL]⟩,
+    -- M3b: output and input tokens for the coin events (`Block/Coin.lean`)
+    ⟨24, k K_OUT, [k TXI, k START, k LEN, k SSC, k VAL]⟩,
+    ⟨25, k K_IN, [k TXI, k START]⟩ ]
 
 def fields : Comp where
   air := { name := "block_fields", nMain := N_MAIN', pre := preCols, constraints := constraints }
