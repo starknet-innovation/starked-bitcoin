@@ -32,17 +32,27 @@ against Core's own C++ (about 860k cases, 0 mismatches).
 
 ## Next step (concrete)
 
-BLOCK-DATA is built (`hash_pub` proven; `chainproof prove-block` / `verify-block`; D-039 proposed).
-Measured: block 170 proves in 0.6 s (544 KB) and verifies against the mainnet chain proof. Block
-400000 (949 KB, 1,660 txs, undo 182 KB) builds a 2²² trace that satisfies all constraints in 235 s.
-Proving it was stopped for low memory on the 24 GB Mac (the in-memory check already needed ~14 GB).
+**M3b (UTXO, D-040) is built and running at small scale.** The block system has 15 components (coin
+events, undo records, segment fingerprints). `chainproof prove-epoch` / `verify-epoch` prove the coin set
+after block N from genesis. Measured: blocks 0–170 proved in 209 s (production strength); the epoch
+verifies to a 171-coin set of 850,000,000,000 sat; a tampered set is rejected.
 
-1. **Owner decisions:** D-035 amendments, D-038 (commitment format), D-039 (block proof file),
-   **D-040 (M3b: multiset argument instead of a per-block tree, decides `Q-TREE`)**.
-2. **M3b** after D-040: the coin-event component, `z` from the commitments' MMR, the final sorted pass
-   (`HASH_SERIALIZED`).
-3. **Memory/CATCHUP:** full blocks need lifting (per-component sizes) or a larger machine; catch-up
-   from genesis needs a proving cluster, not this laptop ([utxo.md § Compute wall](../design/utxo.md)).
+Proven in Lean (standard axioms):
+- **Spec:** `run_of_balance`, `epoch_sound`, `connect_of_run` (Core's coins view), QM31 is a field;
+- **Components:** `extsum_sound`, `seg_sound`, `rows_sound` (undo records);
+- **System:** `block_sound`, `commit_sound`, `hash_pub` still hold for the 15-component system
+  (`L ≤ 23`).
+
+Not yet:
+1. Lean soundness of the coin component and its system links, which connects the AIR to
+   `connect_of_run`. The amount checks are AIR-only so far.
+2. The fingerprint's Schwartz–Zippel step in Lean (`epoch_sound` assumes an injective encoding).
+3. The final sorted pass as a proof (`HASH_SERIALIZED` in-circuit). For now the verifier computes
+   the final set's fractions and hash natively from an explicit, sorted coin list. Fine at height
+   1,000; at a snapshot height that list is ~13 GB.
+4. Epochs that start from a previous set; the aggregator as a circuit (`BLOCK-REC`).
+5. **CATCHUP:** a compute wall. Full blocks need lifting or a larger machine, and the in-memory check
+   of a 1 MB block already took ~14 GB before M3b's extra ~190 columns.
 
 ## In flight
 

@@ -56,7 +56,14 @@ Problems / lessons:
   verified against the mainnet chain proof. Block 400000: witness checked (2²², 235 s); proving stopped
   for low memory.
 - M3b design proposed (D-040, utxo.md); CATCHUP is a compute wall.
-Next: owner decisions (D-035 amendments, D-038, D-039, D-040), then M3b.
+- Owner decisions (2026-10-10): D-035 amendments confirmed; D-038 amended to `C = blake2s(undo)`
+  (built, 5014aeb); D-039 self-contained block files (built, 2d3efd9); D-040 approved (multiset, epochs at
+  Core's assumeUTXO heights).
+- M3b, same day: `run_of_balance`, `epoch_sound`, `connect_of_run`, QM31 field, `extsum_sound`,
+  `seg_sound`, `rows_sound` (Lean); coin/undo-record/fingerprint components with amount rules; the
+  15-component system proves on the samples; blocks 9+170 balance; epoch 0–170 verified from genesis
+  (706083a).
+Next: the in-circuit plain verifier proof (owner's request), then coin-component Lean links.
 
 ## 2026-10-09 (session 5) — M3a.5 design pass
 Who: Claude (agent, Opus 5.5), on the owner's request

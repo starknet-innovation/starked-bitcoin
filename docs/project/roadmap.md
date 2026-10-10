@@ -66,7 +66,7 @@ Done 2026-10-08 (CPU, laptop): heights 0..970,347 in one root proof; [report](..
 | BLAKE2S | Blake2s compression AIR (RFC 7693) with a Lean soundness proof; shared by HC-HASHTREE and BLK-COMMIT | done (2026-10-08): `compress_sound_air`, [airs/blake2s.md](../airs/blake2s.md) | D-032 |
 | HC-HASHTREE | Header chain exposes a Blake2s Merkle tree over all block hashes, indexed by height: per-segment subtree roots, combined in the nodes; re-prove the chain | done (2026-10-09): `tree_root_sound`, `chain_from_genesis_T`, MMR fold, inclusion proofs; full chain re-proven ([report](../reports/2026-10-09-full-chain-tree.md)) | D-032, D-033 |
 | BLOCK-DATA | Per-block proof: raw block ↔ Merkle root; Blake2s commitment to the canonical encoding, including spent outputs | done 2026-10-10 (`hash_pub`, prove-block/verify-block, D-039 proposed); full blocks need lifting for memory | [overview.md § Architecture](../design/overview.md) |
-| UTXO | State module: sorted Merkle tree (Blake2s), inclusion and non-inclusion, matching Core's UTXO set; prove Core's assumeUTXO `hash_serialized` (D-037) | design proposed (D-040, needs owner) | [utxo.md](../design/utxo.md): multiset argument recommended over a per-block tree |
+| UTXO | State module: sorted Merkle tree (Blake2s), inclusion and non-inclusion, matching Core's UTXO set; prove Core's assumeUTXO `hash_serialized` (D-037) | in progress: multiset argument built and proven at spec level; epochs from genesis run (0–170 verified) | [utxo.md](../design/utxo.md); next: coin-component Lean links, final sorted pass |
 | CATCHUP | Catch up from genesis | blocked: compute (cluster/GPU + lifting), after M3b | |
 
 ## Later
