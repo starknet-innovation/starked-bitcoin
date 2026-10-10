@@ -36,6 +36,43 @@ Done:
 - Duplicate inputs stay with M3b (D-031, already settled).
 Next: owner review of D-035, then stage M3a.5a (`Spec/BlockFlat.lean`).
 
+## 2026-10-09/10 (session 5) — PROOF-STORE done; trust reductions; M3a.5a
+Who: Claude (agent, Opus 5.5), owner away 48 h with agreed priorities
+Roadmap: PROOF-STORE done; REC-FUZZ done; SPEC-FUZZ done; MMR-LEAN done; LOGUP-SZ done;
+LEAF-ONE-PROOF done; BLOCK-AIR: M3a.5a done (AIR stages parked)
+Done:
+- **M3a.5 design (D-035, proposed), then parked** on the owner's request.
+- **PROOF-STORE (D-036):**
+  - the `chainproof` CLI, the pinned VK and the frozen shape;
+  - pinned requests (review finding 2), checkpoints, extension, the genesis leaf;
+  - `prove_loop.sh` and `extend_tip.sh`.
+- **Full chain saved and verified;** `T` equals the 2026-10-09 run and an independent recomputation.
+  Extended to 970,733 in 334 s; the tip matches your node.
+- **REC-FUZZ:** 102,013 mutations over three campaigns, all rejected by the circuit.
+- **Spec vs Core** (header and block specs): about 860k cases, 0 mismatches. Constants checked
+  against `chainparams.cpp`.
+- **Lean:**
+  - `Mmr.lean` (`mmr_inclusion`, `fold_eq_mmr`);
+  - `RootChecks.lean` (genesis checks exported; `verifyRoot` reads them);
+  - `LogUpSZ.lean` and `LogUpSZSystems.lean`;
+  - `Spec/BlockFlat.lean` (`checkBlock_none_iff`, `walk_eq_sigOps`, ...).
+- **AIR digests** bound to Lean's exact text (byte-identical re-serialization).
+- **Scoping note:** proving Core's assumeUTXO `HASH_SERIALIZED`.
+Evidence:
+- `chainproof verify mainnet data/store/mainnet-0-970347.sbchain`: VERIFIED in 1.5 s;
+  `mainnet-to-970734.sbchain`: VERIFIED.
+- `#print axioms` gives standard axioms for every new theorem; the drift check (17 exports) is
+  identical.
+- Tests: `proof store`, `rec fuzz`, `header tree`, `genesis checks` and `re-serializes` all pass.
+Problems / lessons:
+- **Log-20 leaves peak at 34–37 GB on a 24 GB machine,** so the first two attempts swapped and were
+  stopped. Measuring showed transient peaks, not a leak. Fixed with log-19 segments, bounded
+  per-process steps, and one-proof leaves. Measure the footprint over time before calling a leak.
+- **The Mac sleeps when no `caffeinate` holds it;** keep one running for long jobs.
+- **`git add docs` swept in an untracked file** the owner had not approved. Add explicit paths.
+Next: owner review (D-035, D-036, the review report, push). Then M3a.5b, or keep the proof fresh with
+`extend_tip.sh`.
+
 ## 2026-10-09 (session 4) — M3a.4 done: the txid Merkle root is proven
 Who: Claude (agent, Opus 5.5), on the owner's "go ahead"
 Roadmap: BLOCK-AIR → in progress (M3a.4 BLK-MERKLE done for the txid tree; witness tree with M3a.5)

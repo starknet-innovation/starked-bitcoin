@@ -7,43 +7,42 @@ follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work)
 - **Updated:** 2026-10-10 (owner away 48 h; agent working through the agreed priorities)
 - **HEAD at last update:** see `git log -1` (this file is committed with the work)
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
-- **Current item:** PROOF-STORE full-chain run (in progress, see below). M3a.5 AIR stages stay
+- **Current item:** PROOF-STORE done (full chain saved, verified, extended to 970,733). M3a.5 AIR stages **parked** (owner); M3a.5a (spec) done.
   **parked** (owner); its spec stage M3a.5a is done (`Spec/BlockFlat.lean`).
 
 ## State in one paragraph
 
-All 970,348 mainnet headers are proven to one root (M1/M2, [report](../reports/2026-10-08-full-chain.md)),
-before the header tree. Now each segment proves a (headers, Blake2s tree) system;
-public inputs gain the tree root `T` (indices 108–123), nodes compute `T` in-circuit,
-and the fold runs in MMR order, so the root's `T` is the MMR over all block hashes.
-Lean proves it end to end at the public-input level (`chain_from_genesis_T`,
-standard axioms only); the in-circuit verifiers and node code stay trusted
-(verification.md). Tested end to end on 52 headers.
+The whole mainnet header chain is proven and **saved** as a file that verifies standalone and extends
+at the tip:
+- `data/store/mainnet-0-970347.sbchain` (12.8 MB), and `mainnet-to-970734.sbchain` after extension;
+- the pinned VK is in `vk/`, and `chainproof verify mainnet <file>` checks it;
+- `T` and the tip are checked against an independent recomputation and your node.
+
+Lean proves the chain end to end at the public-input level (`chain_from_genesis_checked`), plus:
+- the MMR inclusion and fold (`Spec/Mmr.lean`);
+- LogUp's Schwartz–Zippel step (`LogUpSZ.lean`);
+- the block rules as a conjunction (`Spec/BlockFlat.lean`).
+
+The plain in-circuit verifier is mutation-fuzzed (102k mutations, all rejected). The specs are fuzzed
+against Core's own C++ (about 860k cases, 0 mismatches).
 
 ## Next step (concrete)
 
-1. **The saved full-chain proof (PROOF-STORE, D-036).** `chainproof` is implemented and tested, and the
-   pinned production VK is in `vk/`. Run with:
-   `data/store/chainproof-run2 prove mainnet data/headers.bin 970348 data/store/mainnet-0-970347.sbchain`.
-   It resumes from `data/store/mainnet-0-970347.sbchain.ckpt` (90,112 headers when last checked).
-   - **Memory problem being investigated (2026-10-10):** the process footprint grew by GBs per production
-     segment and reached 36–38 GB (heavy swap), so the run was stopped twice. Checkpoints are intact.
-     Switching to libc malloc and fixing the checkpoint arena did not cure it at production size (test
-     sizes stay flat). The measurement is in `data/store/exp2/`.
-   - Then: verify in a fresh process; fetch the new headers (`scripts/fetch_headers.py`); extend with
-     `--from`; time it; write a report.
-2. **Done this session** (details in log.md):
-   - REC-FUZZ;
-   - spec-vs-Core fuzzing;
-   - the MMR in Lean (`mmr_inclusion`, `fold_eq_mmr`);
-   - genesis checks exported from Lean;
-   - LogUp's Schwartz–Zippel step in Lean;
-   - M3a.5a.
-3. **Waiting on the owner:**
-   - D-035 (M3a.5 AIR design) review;
-   - whether to commit `docs/reports/2026-10-09-proof-review.md`. It is untracked now but was committed
-     by mistake in e871e49 (local only; can be dropped from history before any push).
+1. **Owner review:**
+   - D-035 (M3a.5 AIR design), then M3a.5b–e;
+   - D-036 (proof store, implemented);
+   - whether `docs/reports/2026-10-09-proof-review.md` goes into the repo. It is untracked, but was
+     committed by mistake in `e871e49` (local; can be dropped before a push);
+   - whether to push.
+2. **Keeping the proof fresh:** `tools/extend_tip.sh data/store/chainproof-run5 <latest .sbchain>`.
+   About 5–6 min per 400 headers.
+3. **Backlog candidates:**
+   - REC-FUZZ with a native-verifier oracle;
+   - the completeness theorem (review §5 item 8);
+   - VERIFIER-LEAN (parked);
+   - the UTXO-hash scoping decisions (`docs/design/utxo-hash-scope.md`).
 
+Full account: [2026-10-10-away-session.md](../reports/2026-10-10-away-session.md).
 
 ## In flight
 
