@@ -338,6 +338,9 @@ pub const PlainStatement = struct {
     /// The LogUp balance check as a Lean program (`Circuit/Balance.lean`, `balance_sound`); null: the
     /// hand-written code. Hook 0 binds the claimed sums, the public entries' values, `z`, `α`.
     balance: ?*const glue.Program = null,
+    /// The statement mixing as a Lean program (`Circuit/Statement.lean`, `pub_mixed`): hook 0 binds the
+    /// public inputs; hook 3 is the channel's `mixU32s`; hook 4 creates a component's header constants.
+    statement: ?*const glue.Program = null,
 };
 
 const glue = @import("glue.zig");
@@ -514,14 +517,50 @@ pub fn verifyPlain(
     if (st.parts.len != config.parts.len) return error.InvalidPlainProof;
     // Statement (system proofs start with the component count); per component:
     // [log_size, digest (8 words), n_pubs], then one call per public input.
-    if (config.system) try channel.mixU32s(V, ctx, &.{try builder.wrappers.constU32(V, ctx, @intCast(st.parts.len))});
-    for (st.parts) |part| {
-        var words: [10]U32Wrapper(Var) = undefined;
-        words[0] = try builder.wrappers.constU32(V, ctx, log_trace);
-        for (0..8) |i| words[1 + i] = try builder.wrappers.constU32(V, ctx, std.mem.readInt(u32, part.digest[4 * i ..][0..4], .little));
-        words[9] = try builder.wrappers.constU32(V, ctx, @intCast(part.pubs.len));
-        try channel.mixU32s(V, ctx, &words);
-        for (part.pubs) |pv| try channel.mixU32s(V, ctx, &.{try builder.blake.m31ToU32(V, ctx, pv)});
+    if (st.statement) |prog| {
+        var ins: std.ArrayListUnmanaged(Var) = .empty;
+        for (st.parts) |part| try ins.appendSlice(ctx.scratch(), part.pubs);
+        const Hooks = struct {
+            ctx: *Context(V),
+            channel: *sv.channel.Channel,
+            st: *const PlainStatement,
+            log: u32,
+            inputs: []const Var,
+            next_part: *usize,
+            pub fn call(self: @This(), id: u32, args: []const Var) ![]const Var {
+                switch (id) {
+                    0 => return self.inputs,
+                    3 => {
+                        const words = try self.ctx.scratch().alloc(U32Wrapper(Var), args.len);
+                        for (words, args) |*w, v| w.* = .newUnsafe(v);
+                        try self.channel.mixU32s(V, self.ctx, words);
+                        return &.{};
+                    },
+                    4 => {
+                        const part = self.st.parts[self.next_part.*];
+                        self.next_part.* += 1;
+                        const out = try self.ctx.scratch().alloc(Var, 10);
+                        out[0] = (try builder.wrappers.constU32(V, self.ctx, self.log)).get();
+                        for (0..8) |i| out[1 + i] = (try builder.wrappers.constU32(V, self.ctx, std.mem.readInt(u32, part.digest[4 * i ..][0..4], .little))).get();
+                        out[9] = (try builder.wrappers.constU32(V, self.ctx, @intCast(part.pubs.len))).get();
+                        return out;
+                    },
+                    else => return error.UnknownHook,
+                }
+            }
+        };
+        var next_part: usize = 0;
+        _ = try glue.run(V, ctx, prog, &.{}, Hooks{ .ctx = ctx, .channel = &channel, .st = st, .log = log_trace, .inputs = ins.items, .next_part = &next_part });
+    } else {
+        if (config.system) try channel.mixU32s(V, ctx, &.{try builder.wrappers.constU32(V, ctx, @intCast(st.parts.len))});
+        for (st.parts) |part| {
+            var words: [10]U32Wrapper(Var) = undefined;
+            words[0] = try builder.wrappers.constU32(V, ctx, log_trace);
+            for (0..8) |i| words[1 + i] = try builder.wrappers.constU32(V, ctx, std.mem.readInt(u32, part.digest[4 * i ..][0..4], .little));
+            words[9] = try builder.wrappers.constU32(V, ctx, @intCast(part.pubs.len));
+            try channel.mixU32s(V, ctx, &words);
+            for (part.pubs) |pv| try channel.mixU32s(V, ctx, &.{try builder.blake.m31ToU32(V, ctx, pv)});
+        }
     }
 
     try channel.mixCommitment(V, ctx, p.trace_root);

@@ -100,5 +100,19 @@ fractions are zero over QM31, every entry's denominator nonzero. The leaf replay
 `combine − z`. The proofs are each internally consistent, and real proofs verify; align the prose (or
 restate `logup_sum`) when linking `batchTerm` to it.
 
-Next: the statement mixing (step 3b: the order of `mixU32s` calls is our code, the channel is stwo-zig's),
-then the DEEP response order (step 4).
+### Done (2026-10-10): the statement mixing
+
+`Circuit/Statement.lean`:
+- **`statement_sound`** (full form): given the log size and the AIR digests as constants, the words the
+  transcript absorbs are exactly the native statement encoding;
+- **production form** (`partOpsH`): the header constants come from hook 4, because the AIR digests are
+  computed in Zig. **`pub_mixed`**: each public input enters the transcript as its exact M31 value, in
+  order; that is the binding of the public inputs to the proof.
+
+The leaf replays `airs/statement_leaf.json`; it is gate-identical, and the mainnet VK is unchanged.
+
+**What of `verifyPlain` is now Lean-generated and proven:** the statement mixing (public inputs), the LogUp
+balance check, and the composition check. Still hand-written: the order of the transcript's other calls,
+the DEEP response list, and leaf hashing for the Merkle decommitment (calls into stwo-zig).
+
+Next: the DEEP response order (step 4), then the `sv.*` trust question (step 5).
