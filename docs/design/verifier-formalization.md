@@ -89,4 +89,16 @@ gate-parity test against the hand-written Zig, then proven):
   LogUp batch terms' meaning. That meaning (the native verifier's LogUp constraint) is `LogUp.lean`'s
   `logup_sum`; linking `batchTerm` to it is the next sub-step.
 
-Next: the statement mixing and the balance check (step 3), then the DEEP response order (step 4).
+### Done (2026-10-10): the LogUp balance check
+
+`Circuit/Balance.lean`: `balanceProg` (zero, the claimed sums, per public entry its denominator,
+multiplicity, inverse, product), `balance_sound`. If the ops hold, the claimed sums plus the entries'
+fractions are zero over QM31, every entry's denominator nonzero. The leaf replays
+`airs/balance_leaf.json`; the leaf circuit stays gate-identical and the mainnet VK unchanged.
+
+**Open note:** `LogUp.lean`'s prose writes the denominator `z − combine`; the circuit and native code use
+`combine − z`. The proofs are each internally consistent, and real proofs verify; align the prose (or
+restate `logup_sum`) when linking `batchTerm` to it.
+
+Next: the statement mixing (step 3b: the order of `mixU32s` calls is our code, the channel is stwo-zig's),
+then the DEEP response order (step 4).

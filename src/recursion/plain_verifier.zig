@@ -335,6 +335,9 @@ pub const PlainStatement = struct {
     /// The composition check as a Lean-generated program (`Circuit/CompositionLogUp.lean`, proven in
     /// `CompositionSound.lean`); null: the hand-written `compositionAtOods` (the parity reference).
     composition: ?*const glue.Program = null,
+    /// The LogUp balance check as a Lean program (`Circuit/Balance.lean`, `balance_sound`); null: the
+    /// hand-written code. Hook 0 binds the claimed sums, the public entries' values, `z`, `α`.
+    balance: ?*const glue.Program = null,
 };
 
 const glue = @import("glue.zig");
@@ -531,13 +534,27 @@ pub fn verifyPlain(
         }
         if (p.claimed_sums.len != n_with) return error.InvalidPlainProof;
         // The relations balance: the claimed sums and the public entries add to zero.
-        var total = ctx.zero();
-        for (p.claimed_sums) |c| total = try ctx.add(total, c);
-        for (st.ext) |e| {
-            const d = try denominatorVar(V, ctx, e.rel, e.vals, elements.?[0], elements.?[1]);
-            total = try ctx.add(total, try ctx.mul(try ctx.constant(QM31.fromBase(e.mult)), try ctx.inv(d)));
+        if (st.balance) |prog| {
+            var ins: std.ArrayListUnmanaged(Var) = .empty;
+            try ins.appendSlice(ctx.scratch(), p.claimed_sums);
+            for (st.ext) |e| try ins.appendSlice(ctx.scratch(), e.vals);
+            try ins.appendSlice(ctx.scratch(), &elements.?);
+            const Hooks = struct {
+                inputs: []const Var,
+                pub fn call(self: @This(), id: u32, _: []const Var) ![]const Var {
+                    return if (id == 0) self.inputs else error.UnknownHook;
+                }
+            };
+            _ = try glue.run(V, ctx, prog, &.{}, Hooks{ .inputs = ins.items });
+        } else {
+            var total = ctx.zero();
+            for (p.claimed_sums) |c| total = try ctx.add(total, c);
+            for (st.ext) |e| {
+                const d = try denominatorVar(V, ctx, e.rel, e.vals, elements.?[0], elements.?[1]);
+                total = try ctx.add(total, try ctx.mul(try ctx.constant(QM31.fromBase(e.mult)), try ctx.inv(d)));
+            }
+            try ctx.eq(total, ctx.zero());
         }
-        try ctx.eq(total, ctx.zero());
         try channel.mixQm31s(V, ctx, p.claimed_sums);
         try channel.mixCommitment(V, ctx, p.interaction_root orelse return error.InvalidPlainProof);
     }

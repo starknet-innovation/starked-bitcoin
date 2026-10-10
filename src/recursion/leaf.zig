@@ -127,6 +127,7 @@ pub fn buildLeafCircuit(
     // The composition check: the Lean program (Circuit/CompositionLogUp.lean, proven in
     // CompositionSound.lean); the reference builder keeps the hand-written one.
     const comp = try glue.parse(ctx.scratch(), @embedFile("air:composition_leaf"));
+    const bal = try glue.parse(ctx.scratch(), @embedFile("air:balance_leaf"));
     const ext = try ctx.scratch().alloc(QM31, pubs.len);
     for (ext, pubs) |*e, v| e.* = QM31.fromBase(v);
     const Hooks = struct {
@@ -139,6 +140,7 @@ pub fn buildLeafCircuit(
         k: u32,
         proof_vars: *pv.PlainProof(Var),
         comp: *const glue.Program,
+        bal: *const glue.Program,
         /// 0: guess the proof; 1: verify it, with the public entry `node(k, 0, pubs[T_BASE..])`.
         pub fn call(self: @This(), id: u32, args: []const Var) ![]const Var {
             if (id == 0) {
@@ -154,13 +156,14 @@ pub fn buildLeafCircuit(
                 .preprocessed_root = self.pre_root,
                 .ext = &.{.{ .rel = HT.REL_NODE, .vals = entry_vals, .mult = M31.zero().sub(M31.one()) }},
                 .composition = self.comp,
+                .balance = self.bal,
             };
             try pv.verifyPlain(QM31, self.ctx, self.proof_vars, self.config, &st);
             return &.{};
         }
     };
     var proof_vars: pv.PlainProof(Var) = undefined;
-    const res = try glue.run(QM31, &ctx, &prog, ext, Hooks{ .ctx = &ctx, .values = values, .config = config, .airs = airs, .digests = digests, .pre_root = pre_root, .k = k, .proof_vars = &proof_vars, .comp = &comp });
+    const res = try glue.run(QM31, &ctx, &prog, ext, Hooks{ .ctx = &ctx, .values = values, .config = config, .airs = airs, .digests = digests, .pre_root = pre_root, .k = k, .proof_vars = &proof_vars, .comp = &comp, .bal = &bal });
     var digest: HashValue(Var) = undefined;
     for (&digest.words, res) |*w, v| w.* = .newUnsafe(v);
     try finish(QM31, &ctx, digest);

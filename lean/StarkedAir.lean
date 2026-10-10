@@ -118,3 +118,4 @@ import StarkedAir.Spec.Coins
 import StarkedAir.Circuit.Composition
 import StarkedAir.Circuit.CompositionLogUp
 import StarkedAir.Circuit.CompositionSound
+import StarkedAir.Circuit.Balance

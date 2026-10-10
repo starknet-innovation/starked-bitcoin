@@ -1,5 +1,6 @@
 import StarkedAir.Export
 import StarkedAir.Circuit.CompositionLogUp
+import StarkedAir.Circuit.Balance
 import StarkedAir.Block.ExtSum
 import StarkedAir.Block.FpWalk
 import StarkedAir.Block.URec
@@ -37,6 +38,7 @@ def main (args : List String) : IO Unit := do
       [StarkedAir.HeaderTree.headers, StarkedAir.HeaderTree.tree]
       [StarkedAir.Circuit.Composition.compShape StarkedAir.HeaderTree.headers 108,
        StarkedAir.Circuit.Composition.compShape StarkedAir.HeaderTree.tree 0] 0)
+  | ["balance_leaf"] => IO.println (StarkedAir.Circuit.Composition.balanceJson 2 [(2, 18, 2 ^ 31 - 2)])
   | ["composition_header_chain"] => IO.println (StarkedAir.Circuit.Composition.programJson StarkedAir.HeaderChain.air
       { nPre := StarkedAir.HeaderChain.air.pre.length, nMain := StarkedAir.HeaderChain.air.nMain,
         offs := StarkedAir.Circuit.Composition.mainOffsets StarkedAir.HeaderChain.air.toDag.1, nPub := 108 })
