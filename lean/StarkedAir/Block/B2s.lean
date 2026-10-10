@@ -91,7 +91,7 @@ def perConst : List ℕ := [STR, BLKI, FST, NIL, LASTF, T]
 
 def flagC : List Expr :=
   [FST, NIL, LASTF, MU0, MU1, MU2].map (fun c => boolC (k c)) ++
-  [ .mul (k FST) (k NIL),
+  [ .mul (k FST) (k NIL), .mul outp (k NIL),
     .sub (k CHN) (.mul (om (.add (k FST) (k NIL))) (om outp)),
     .sub (k USEW) (.mul (om (k NIL)) (om outp)),
     .sub (k YD) (.mul (k USEW) (k LASTF)),

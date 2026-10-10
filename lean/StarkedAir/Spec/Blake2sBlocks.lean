@@ -128,3 +128,35 @@ theorem hashBlocks_eq : ∀ m (h : ℕ → Word) (t : ℕ) (b : List UInt8), b.l
     exact chainS_shift h t b m i hi
 
 end StarkedAir.Spec.Blake2s
+
+namespace StarkedAir.Spec.Blake2s
+
+theorem digest_length (h : ℕ → Word) : (digest h).length = 32 := by simp [digest]
+
+theorem digest_getD (h : ℕ → Word) {k j : ℕ} (hk : k < 8) (hj : j < 4) :
+    (digest h).getD (4 * k + j) 0 = UInt8.ofNat ((h k).toNat / 2 ^ (8 * j)) := by
+  interval_cases k <;> interval_cases j <;> simp [digest, List.range_succ]
+
+theorem word_of_bytes (w : Word) :
+    BitVec.ofNat 32 ((UInt8.ofNat (w.toNat / 2 ^ (8 * 0))).toNat + 256 * (UInt8.ofNat (w.toNat / 2 ^ (8 * 1))).toNat +
+      65536 * (UInt8.ofNat (w.toNat / 2 ^ (8 * 2))).toNat + 16777216 * (UInt8.ofNat (w.toNat / 2 ^ (8 * 3))).toNat) = w := by
+  have hw := w.isLt
+  apply BitVec.eq_of_toNat_eq
+  simp [UInt8.toNat_ofNat']
+  omega
+
+/-- **A digest pair read as 16 message words** is the two chaining values. -/
+theorem leWord_digests (h h' : ℕ → Word) {k : ℕ} (hk : k < 16) :
+    leWord (digest h ++ digest h') k = if k < 8 then h k else h' (k - 8) := by
+  have g : ∀ j < 4, (digest h ++ digest h').getD (4 * k + j) 0 =
+      if k < 8 then UInt8.ofNat ((h k).toNat / 2 ^ (8 * j)) else UInt8.ofNat ((h' (k - 8)).toNat / 2 ^ (8 * j)) := by
+    intro j hj
+    split_ifs with h8
+    · rw [List.getD_append _ _ _ _ (by rw [digest_length]; omega), digest_getD h h8 hj]
+    · rw [List.getD_append_right _ _ _ _ (by rw [digest_length]; omega), digest_length,
+        show 4 * k + j - 32 = 4 * (k - 8) + j by omega, digest_getD h' (by omega) hj]
+  unfold leWord
+  rw [show 4 * k = 4 * k + 0 by ring, g 0 (by norm_num), g 1 (by norm_num), g 2 (by norm_num), g 3 (by norm_num)]
+  split_ifs <;> exact word_of_bytes _
+
+end StarkedAir.Spec.Blake2s

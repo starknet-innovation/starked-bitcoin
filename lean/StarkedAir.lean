@@ -94,6 +94,15 @@ import StarkedAir.Block.BlockSums
 import StarkedAir.Block.BlockFinal
 import StarkedAir.Block.BlockCommit
 import StarkedAir.Block.BlockSound
+import StarkedAir.Spec.BlockCommit
+import StarkedAir.Spec.Blake2sBlocks
+import StarkedAir.Block.Undo
+import StarkedAir.Block.B2Msg
+import StarkedAir.Block.B2s
+import StarkedAir.Block.B2Bridge
+import StarkedAir.Block.B2sSound
+import StarkedAir.Block.B2MsgSound
+import StarkedAir.Block.B2Link
 import StarkedAir.Spec.BlockTokens
 import StarkedAir.Spec.TxSplit
 import StarkedAir.Spec.MerkleLevels
