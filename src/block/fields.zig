@@ -271,59 +271,44 @@ pub fn generate(a: std.mem.Allocator, log_size: u32, raw: []const u8, rows: []co
     return cols;
 }
 
-test "block fields: the sample blocks tokenize and satisfy the fields AIR; small blocks prove with the byte table" {
+test "block fields: the sample blocks tokenize and satisfy the fields AIR (with the M3a.5 checks)" {
     const ir = @import("../air/ir.zig");
     const interp = @import("../air/interp.zig");
-    const system = @import("../air/system.zig");
-    const rec = @import("../air/prove_rec.zig");
-    const bytes = @import("bytes.zig");
+    const checks = @import("checks.zig");
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
     const fields_air = (try ir.Air.parseJson(a, json)).value;
-    const bytes_air = (try ir.Air.parseJson(a, bytes.json)).value;
-    const samples = [_][]const u8{
-        @embedFile("testdata:block_0"),     @embedFile("testdata:block_170"),   @embedFile("testdata:block_91722"),
-        @embedFile("testdata:block_91812"), @embedFile("testdata:block_91842"), @embedFile("testdata:block_91880"),
-    };
-    for (samples) |raw| {
+    for (checks.samples_small) |s| {
+        const raw = s.raw;
         const rows = try tokenize(a, raw);
-        const log_size: u32 = @max(std.math.log2_int_ceil(usize, raw.len + 1), std.math.log2_int_ceil(usize, rows.len + 1));
+        const log_size: u32 = @max(8, std.math.log2_int_ceil(usize, raw.len + 1), std.math.log2_int_ceil(usize, rows.len + 1));
         const fm = try generate(a, log_size, raw, rows);
-        const pubs = [_]M31{ f(raw.len), f(rows[0].val) };
+        _ = try checks.fill(a, fm, raw, rows, s.ctx);
+        const pubs = checks.pubs(raw, rows[0].val, s.ctx);
         const tr = interp.RowTrace{ .log_size = log_size, .pubs = &pubs, .preprocessed = @ptrCast(try fields_air.genPreprocessed(a, log_size)), .main = @ptrCast(fm) };
         if (try interp.firstViolation(a, fields_air, tr)) |v| {
             std.debug.print("block of {d} bytes: row {d} violates constraint {d}\n", .{ raw.len, v.row, v.constraint });
             return error.TestUnexpectedResult;
         }
-        // Prove (bytes, fields) together: the reads balance against the byte table.
-        const bm = try bytes.generate(a, log_size, raw, try reads(a, rows));
-        const parts = [_]system.Part{
-            .{ .air = &bytes_air, .log_size = log_size, .pubs = pubs[0..1] },
-            .{ .air = &fields_air, .log_size = log_size, .pubs = &pubs },
-        };
-        const cfg = rec.Config.fromFriAndTraceSize(try @import("stwo_core").pcs.config_v2.FriConfigV2.init(10, 0, 1, 3, 1), log_size);
-        const E = rec.Engine(@import("stwo_cpu_backend").CpuBackend);
-        const mains = [_][]const []const M31{ @ptrCast(bm), @ptrCast(fm) };
-        try system.verifyExt(a, cfg, &parts, &.{}, try system.prove(E, a, cfg, &parts, &mains));
     }
 }
 
 test "block fields: tampered rows or bytes are rejected" {
     const ir = @import("../air/ir.zig");
     const interp = @import("../air/interp.zig");
-    const system = @import("../air/system.zig");
-    const rec = @import("../air/prove_rec.zig");
+    const checks = @import("checks.zig");
+    const bsys = @import("system.zig");
     const bytes = @import("bytes.zig");
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
     const fields_air = (try ir.Air.parseJson(a, json)).value;
-    const bytes_air = (try ir.Air.parseJson(a, bytes.json)).value;
-    const raw = @embedFile("testdata:block_170");
+    const s = checks.samples_small[1];
+    const raw = s.raw;
     const rows = try tokenize(a, raw);
     const log_size: u32 = 9;
-    const pubs = [_]M31{ f(raw.len), f(rows[0].val) };
+    const pubs = checks.pubs(raw, rows[0].val, s.ctx);
     const pre = try fields_air.genPreprocessed(a, log_size);
     // A script length off by one: the rows no longer tile the block.
     {
@@ -338,33 +323,25 @@ test "block fields: tampered rows or bytes are rejected" {
     }
     // The block's byte under a CompactSize differs from what the fields read: unbalanced.
     {
-        const fm = try generate(a, log_size, raw, rows);
+        const airs = try bsys.parseAirs(a);
+        var b = try bsys.build(a, raw, s.ctx);
         const tampered = try a.dupe(u8, raw);
         tampered[rows[1].start + rows[1].off] ^= 1;
-        const bm = try bytes.generate(a, log_size, tampered, try reads(a, rows));
-        const parts = [_]system.Part{
-            .{ .air = &bytes_air, .log_size = log_size, .pubs = pubs[0..1] },
-            .{ .air = &fields_air, .log_size = log_size, .pubs = &pubs },
-        };
-        const cfg = rec.Config.fromFriAndTraceSize(try @import("stwo_core").pcs.config_v2.FriConfigV2.init(10, 0, 1, 3, 1), log_size);
-        const E = rec.Engine(@import("stwo_cpu_backend").CpuBackend);
-        const mains = [_][]const []const M31{ @ptrCast(bm), @ptrCast(fm) };
-        try std.testing.expectError(error.LookupsUnbalanced, system.verifyExt(a, cfg, &parts, &.{}, try system.prove(E, a, cfg, &parts, &mains)));
+        b.mains[0] = try bytes.generate(a, b.log_size, tampered, b.reads);
+        try std.testing.expect(try bsys.unbalanced(a, &airs, &b) != null);
     }
 }
 
 test "block fields: large and segwit samples satisfy the fields AIR (run with ReleaseFast)" {
     const ir = @import("../air/ir.zig");
     const interp = @import("../air/interp.zig");
+    const checks = @import("checks.zig");
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
     const fields_air = (try ir.Air.parseJson(a, json)).value;
-    const samples = [_][]const u8{
-        @embedFile("testdata:block_400000"), @embedFile("testdata:block_481824"), @embedFile("testdata:block_709632"),
-        @embedFile("testdata:block_970347"), @embedFile("testdata:block_774628"),
-    };
-    for (samples) |raw| {
+    for (checks.samples_large) |s| {
+        const raw = s.raw;
         const rows = try tokenize(a, raw);
         var nseg: usize = 0;
         for (rows) |r| if (r.kind == K_TXH and r.seg) {
@@ -372,7 +349,8 @@ test "block fields: large and segwit samples satisfy the fields AIR (run with Re
         };
         const log_size: u32 = std.math.log2_int_ceil(usize, rows.len + 1);
         const fm = try generate(a, log_size, raw, rows);
-        const pubs = [_]M31{ f(raw.len), f(rows[0].val) };
+        _ = try checks.fill(a, fm, raw, rows, s.ctx);
+        const pubs = checks.pubs(raw, rows[0].val, s.ctx);
         const tr = interp.RowTrace{ .log_size = log_size, .pubs = &pubs, .preprocessed = @ptrCast(try fields_air.genPreprocessed(a, log_size)), .main = @ptrCast(fm) };
         std.debug.print("block of {d} bytes: {d} rows ({d} segwit txs), log {d}\n", .{ raw.len, rows.len, nseg, log_size });
         if (try interp.firstViolation(a, fields_air, tr)) |v| {

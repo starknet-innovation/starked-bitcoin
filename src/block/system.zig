@@ -31,6 +31,8 @@ pub const Built = struct {
     sigops: u32,
     weight: u64,
     commitment: bool,
+    /// Block positions read by the other components (the byte table's multiplicities).
+    reads: []u32,
 };
 
 pub fn parseAirs(a: std.mem.Allocator) ![N_COMP]ir.Air {
@@ -102,6 +104,7 @@ pub fn build(a: std.mem.Allocator, raw: []const u8, ctx: checks.Ctx) !Built {
         .sigops = wk.sigops,
         .weight = 4 * @as(u64, raw.len) - 3 * @as(u64, chk.w),
         .commitment = cx.hc,
+        .reads = reads.items,
     };
 }
 
@@ -156,7 +159,7 @@ pub fn unbalanced(a: std.mem.Allocator, airs: *const [N_COMP]ir.Air, b: *const B
     return null;
 }
 
-fn proveVerify(a: std.mem.Allocator, airs: *const [N_COMP]ir.Air, b: *const Built) !void {
+pub fn proveVerify(a: std.mem.Allocator, airs: *const [N_COMP]ir.Air, b: *const Built) !void {
     const rec = @import("../air/prove_rec.zig");
     const ps = parts(airs, b);
     const cfg = rec.Config.fromFriAndTraceSize(try @import("stwo_core").pcs.config_v2.FriConfigV2.init(10, 0, 1, 3, 1), b.log_size);

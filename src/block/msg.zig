@@ -198,18 +198,13 @@ pub fn generate(a: std.mem.Allocator, log_size: u32, raw: []const u8, msgs: []co
     return cols;
 }
 
-test "block msg: header, txid and wtxid messages of the samples satisfy the message AIR; small blocks prove" {
+test "block msg: header, txid and wtxid messages of the samples satisfy the message AIR" {
     const ir = @import("../air/ir.zig");
     const interp = @import("../air/interp.zig");
-    const system = @import("../air/system.zig");
-    const rec = @import("../air/prove_rec.zig");
-    const bytes = @import("bytes.zig");
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
     const msg_air = (try ir.Air.parseJson(a, json)).value;
-    const fields_air = (try ir.Air.parseJson(a, fields.json)).value;
-    const bytes_air = (try ir.Air.parseJson(a, bytes.json)).value;
     const samples = [_][]const u8{
         @embedFile("testdata:block_0"), @embedFile("testdata:block_170"), @embedFile("testdata:block_91812"),
     };
@@ -227,20 +222,6 @@ test "block msg: header, txid and wtxid messages of the samples satisfy the mess
             std.debug.print("block of {d} bytes: msg row {d} violates constraint {d}\n", .{ raw.len, v.row, v.constraint });
             return error.TestUnexpectedResult;
         }
-        // Prove (bytes, fields, msg): byte reads and tx tuples balance.
-        const fm = try fields.generate(a, log_size, raw, rows);
-        fields.setTxUses(fm, rows, 2);
-        try reads.appendSlice(a, try fields.reads(a, rows));
-        const bm = try bytes.generate(a, log_size, raw, reads.items);
-        const parts = [_]system.Part{
-            .{ .air = &bytes_air, .log_size = log_size, .pubs = pubs[0..1] },
-            .{ .air = &fields_air, .log_size = log_size, .pubs = &pubs },
-            .{ .air = &msg_air, .log_size = log_size },
-        };
-        const cfg = rec.Config.fromFriAndTraceSize(try @import("stwo_core").pcs.config_v2.FriConfigV2.init(10, 0, 1, 3, 1), log_size);
-        const E = rec.Engine(@import("stwo_cpu_backend").CpuBackend);
-        const mains = [_][]const []const M31{ @ptrCast(bm), @ptrCast(fm), @ptrCast(mm) };
-        try system.verifyExt(a, cfg, &parts, &.{}, try system.prove(E, a, cfg, &parts, &mains));
     }
 }
 

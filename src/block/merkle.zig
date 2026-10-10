@@ -199,72 +199,26 @@ pub fn generate(a: std.mem.Allocator, log_size: u32, ntx: u32, nodes: []const No
     return cols;
 }
 
-test "block merkle: (bytes, fields, msg, sha, merkle) prove for small blocks; tampering is rejected" {
-    const ir = @import("../air/ir.zig");
-    const interp = @import("../air/interp.zig");
-    const system = @import("../air/system.zig");
-    const rec = @import("../air/prove_rec.zig");
-    const bytes = @import("bytes.zig");
-    const fields = @import("fields.zig");
-    const shaw = @import("../sha256/witness.zig");
+test "block merkle: small blocks prove with the full block system; a wrong root limb is rejected" {
+    const bsys = @import("system.zig");
+    const checks = @import("checks.zig");
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const merkle_air = (try ir.Air.parseJson(a, json)).value;
-    const sha_air = (try ir.Air.parseJson(a, bsha.json)).value;
-    const msg_air = (try ir.Air.parseJson(a, msg.json)).value;
-    const fields_air = (try ir.Air.parseJson(a, fields.json)).value;
-    const bytes_air = (try ir.Air.parseJson(a, bytes.json)).value;
-    const samples = [_][]const u8{ @embedFile("testdata:block_0"), @embedFile("testdata:block_170"), @embedFile("testdata:block_91812") };
-    for (samples) |raw| {
-        const rows = try fields.tokenize(a, raw);
-        const ntx: u32 = @intCast(rows[0].val);
-        const txs = try msg.txRanges(a, rows);
-        const msgs = try msg.messages(a, txs);
-        var pl = try bsha.plan(a, raw, msgs);
-        const nodes = try tree(a, ntx);
-        const root = try extendPlan(a, &pl, nodes);
-        try std.testing.expectEqualSlices(u8, raw[36..68], &bsha.digestBytes(root));
-        const need = @max(msg.rowsNeeded(msgs), raw.len + 1, rows.len + 1, (pl.compressions.len + 1) * shaw.PERIOD, nodes.len + 2);
-        const log_size: u32 = std.math.log2_int_ceil(usize, need);
-        const pubs = [_]M31{ f(raw.len), f(ntx) };
-        var reads = std.ArrayList(u32).empty;
-        const mm = try msg.generate(a, log_size, raw, msgs, &reads);
-        msg.setUses(mm);
-        addHeaderUses(mm);
-        const sm = try bsha.generate(a, log_size, pl);
-        const km = try generate(a, log_size, ntx, nodes, root);
-        // Each AIR on its own first (clear failures).
-        inline for (.{ .{ sha_air, sm, "sha" }, .{ merkle_air, km, "merkle" } }) |t| {
-            const tr = interp.RowTrace{ .log_size = log_size, .pubs = &pubs, .preprocessed = @ptrCast(try t[0].genPreprocessed(a, log_size)), .main = @ptrCast(t[1]) };
-            if (try interp.firstViolation(a, t[0], tr)) |v| {
-                std.debug.print("block of {d} bytes: {s} row {d} violates constraint {d}\n", .{ raw.len, t[2], v.row, v.constraint });
-                return error.TestUnexpectedResult;
-            }
-        }
-        const fm = try fields.generate(a, log_size, raw, rows);
-        fields.setTxUses(fm, rows, 2);
-        try reads.appendSlice(a, try fields.reads(a, rows));
-        const bm = try bytes.generate(a, log_size, raw, reads.items);
-        const parts = [_]system.Part{
-            .{ .air = &bytes_air, .log_size = log_size, .pubs = pubs[0..1] },
-            .{ .air = &fields_air, .log_size = log_size, .pubs = &pubs },
-            .{ .air = &msg_air, .log_size = log_size },
-            .{ .air = &sha_air, .log_size = log_size },
-            .{ .air = &merkle_air, .log_size = log_size, .pubs = &pubs },
-        };
-        const cfg = rec.Config.fromFriAndTraceSize(try @import("stwo_core").pcs.config_v2.FriConfigV2.init(10, 0, 1, 3, 1), log_size);
-        const E = rec.Engine(@import("stwo_cpu_backend").CpuBackend);
-        const mains = [_][]const []const M31{ @ptrCast(bm), @ptrCast(fm), @ptrCast(mm), @ptrCast(sm), @ptrCast(km) };
-        try system.verifyExt(a, cfg, &parts, &.{}, try system.prove(E, a, cfg, &parts, &mains));
-        std.debug.print("block of {d} bytes, {d} txs: {d} nodes, {d} compressions, log {d}: proved and verified\n", .{ raw.len, ntx, nodes.len, pl.compressions.len, log_size });
-        // A wrong root limb in the Merkle row: the header words no longer match.
+    const airs = try bsys.parseAirs(a);
+    for ([_]usize{ 0, 1, 3 }) |si| {
+        const s = checks.samples_small[si];
+        const b = try bsys.build(a, s.raw, s.ctx);
+        try bsys.proveVerify(a, &airs, &b);
+        // A wrong root limb in the root row: the header words no longer match.
+        const nodes = try tree(a, b.ntx);
         if (nodes.len > 0) {
-            const km2 = try a.alloc([]M31, km.len);
-            for (km2, km) |*d, s| d.* = try a.dupe(M31, s);
+            var b2 = b;
+            const km2 = try a.alloc([]M31, b.mains[4].len);
+            for (km2, b.mains[4]) |*d, src| d.* = try a.dupe(M31, src);
             km2[RL0][nodes.len] = km2[RL0][nodes.len].add(M31.one());
-            const mains2 = [_][]const []const M31{ @ptrCast(bm), @ptrCast(fm), @ptrCast(mm), @ptrCast(sm), @ptrCast(km2) };
-            try std.testing.expectError(error.LookupsUnbalanced, system.verifyExt(a, cfg, &parts, &.{}, try system.prove(E, a, cfg, &parts, &mains2)));
+            b2.mains[4] = km2;
+            try std.testing.expect(try bsys.unbalanced(a, &airs, &b2) != null);
         }
     }
 }

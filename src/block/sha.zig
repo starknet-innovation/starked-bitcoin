@@ -207,20 +207,14 @@ test "block sha: segwit samples satisfy the SHA AIR; digests Merkle-hash to the 
     }
 }
 
-test "block sha: (bytes, fields, msg, sha) prove for small blocks; digests are the txids and header hash" {
+test "block sha: small blocks satisfy the SHA AIR; digests are the txids and header hash" {
     const ir = @import("../air/ir.zig");
     const interp = @import("../air/interp.zig");
-    const system = @import("../air/system.zig");
-    const rec = @import("../air/prove_rec.zig");
-    const bytes = @import("bytes.zig");
     const fields = @import("fields.zig");
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
     const sha_air = (try ir.Air.parseJson(a, json)).value;
-    const msg_air = (try ir.Air.parseJson(a, msg.json)).value;
-    const fields_air = (try ir.Air.parseJson(a, fields.json)).value;
-    const bytes_air = (try ir.Air.parseJson(a, bytes.json)).value;
     const samples = [_][]const u8{ @embedFile("testdata:block_0"), @embedFile("testdata:block_170"), @embedFile("testdata:block_91812") };
     for (samples) |raw| {
         const rows = try fields.tokenize(a, raw);
@@ -244,73 +238,41 @@ test "block sha: (bytes, fields, msg, sha) prove for small blocks; digests are t
             std.debug.print("block of {d} bytes: sha row {d} violates constraint {d}\n", .{ raw.len, v.row, v.constraint });
             return error.TestUnexpectedResult;
         }
-        const fm = try fields.generate(a, log_size, raw, rows);
-        fields.setTxUses(fm, rows, 2);
-        try reads.appendSlice(a, try fields.reads(a, rows));
-        const bm = try bytes.generate(a, log_size, raw, reads.items);
-        const pubs = [_]M31{ f(raw.len), f(rows[0].val) };
-        const parts = [_]system.Part{
-            .{ .air = &bytes_air, .log_size = log_size, .pubs = pubs[0..1] },
-            .{ .air = &fields_air, .log_size = log_size, .pubs = &pubs },
-            .{ .air = &msg_air, .log_size = log_size },
-            .{ .air = &sha_air, .log_size = log_size },
-        };
-        const cfg = rec.Config.fromFriAndTraceSize(try @import("stwo_core").pcs.config_v2.FriConfigV2.init(10, 0, 1, 3, 1), log_size);
-        const E = rec.Engine(@import("stwo_cpu_backend").CpuBackend);
-        const mains = [_][]const []const M31{ @ptrCast(bm), @ptrCast(fm), @ptrCast(mm), @ptrCast(sm) };
-        try system.verifyExt(a, cfg, &parts, &.{}, try system.prove(E, a, cfg, &parts, &mains));
-        std.debug.print("block of {d} bytes: {d} messages, {d} compressions, log {d}: proved and verified\n", .{ raw.len, msgs.len, pl.compressions.len, log_size });
+        std.debug.print("block of {d} bytes: {d} messages, {d} compressions, log {d}: SHA constraints hold\n", .{ raw.len, msgs.len, pl.compressions.len, log_size });
     }
 }
 
 test "block sha: a wrong message word or a message hashed short is rejected" {
-    const ir = @import("../air/ir.zig");
-    const system = @import("../air/system.zig");
-    const rec = @import("../air/prove_rec.zig");
-    const bytes = @import("bytes.zig");
+    const bsys = @import("system.zig");
+    const checks = @import("checks.zig");
+    const merkle = @import("merkle.zig");
     const fields = @import("fields.zig");
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const sha_air = (try ir.Air.parseJson(a, json)).value;
-    const msg_air = (try ir.Air.parseJson(a, msg.json)).value;
-    const fields_air = (try ir.Air.parseJson(a, fields.json)).value;
-    const bytes_air = (try ir.Air.parseJson(a, bytes.json)).value;
-    const raw = @embedFile("testdata:block_0");
+    const airs = try bsys.parseAirs(a);
+    const s0 = checks.samples_small[0];
+    const raw = s0.raw;
+    const b0 = try bsys.build(a, raw, s0.ctx);
     const rows = try fields.tokenize(a, raw);
     const msgs = try msg.messages(a, try msg.txRanges(a, rows));
-    const log_size: u32 = 10;
-    var reads = std.ArrayList(u32).empty;
-    const mm = try msg.generate(a, log_size, raw, msgs, &reads);
-    msg.setUses(mm);
-    const fm = try fields.generate(a, log_size, raw, rows);
-    fields.setTxUses(fm, rows, 2);
-    try reads.appendSlice(a, try fields.reads(a, rows));
-    const bm = try bytes.generate(a, log_size, raw, reads.items);
-    const pubs = [_]M31{ f(raw.len), f(rows[0].val) };
-    const parts = [_]system.Part{
-        .{ .air = &bytes_air, .log_size = log_size, .pubs = pubs[0..1] },
-        .{ .air = &fields_air, .log_size = log_size, .pubs = &pubs },
-        .{ .air = &msg_air, .log_size = log_size },
-        .{ .air = &sha_air, .log_size = log_size },
-    };
-    const cfg = rec.Config.fromFriAndTraceSize(try @import("stwo_core").pcs.config_v2.FriConfigV2.init(10, 0, 1, 3, 1), log_size);
-    const E = rec.Engine(@import("stwo_cpu_backend").CpuBackend);
     // A different word in the header's first block (the chain recomputed from it).
     {
         var pl = try plan(a, raw, msgs);
+        _ = try merkle.extendPlan(a, &pl, try merkle.tree(a, 1));
         pl.compressions[0].block[3] ^= 1;
         pl.compressions[1].input = spec.compress(pl.compressions[0].input, pl.compressions[0].block);
         const h1 = spec.compress(pl.compressions[1].input, pl.compressions[1].block);
         @memcpy(pl.compressions[2].block[0..8], &h1);
-        const sm = try generate(a, log_size, pl);
-        const mains = [_][]const []const M31{ @ptrCast(bm), @ptrCast(fm), @ptrCast(mm), @ptrCast(sm) };
-        try std.testing.expectError(error.LookupsUnbalanced, system.verifyExt(a, cfg, &parts, &.{}, try system.prove(E, a, cfg, &parts, &mains)));
+        var b = b0;
+        b.mains[3] = try generate(a, b.log_size, pl);
+        try std.testing.expect(try bsys.unbalanced(a, &airs, &b) != null);
     }
     // The header hashed one block short: its second hash follows block 0, and block 1's words are
     // withdrawn from the message component; the padded-length check still fails.
     {
-        const pl0 = try plan(a, raw, msgs);
+        var pl0 = try plan(a, raw, msgs);
+        _ = try merkle.extendPlan(a, &pl0, try merkle.tree(a, 1));
         var comps = std.ArrayList(sha.Compression).empty;
         var meta = std.ArrayList(Meta).empty;
         try comps.append(a, pl0.compressions[0]);
@@ -323,11 +285,12 @@ test "block sha: a wrong message word or a message hashed short is rejected" {
         try comps.appendSlice(a, pl0.compressions[3..]);
         try meta.appendSlice(a, pl0.meta[3..]);
         const pl: Plan = .{ .compressions = comps.items, .meta = meta.items, .digests = pl0.digests };
-        const mm2 = try a.alloc([]M31, mm.len);
-        for (mm2, mm) |*d, s| d.* = try a.dupe(M31, s);
+        var b = b0;
+        const mm2 = try a.alloc([]M31, b0.mains[2].len);
+        for (mm2, b0.mains[2]) |*d, src| d.* = try a.dupe(M31, src);
         for (64..128) |r| mm2[36][r] = M31.zero(); // WM: block 1's words not read
-        const sm = try generate(a, log_size, pl);
-        const mains = [_][]const []const M31{ @ptrCast(bm), @ptrCast(fm), @ptrCast(mm2), @ptrCast(sm) };
-        try std.testing.expectError(error.LookupsUnbalanced, system.verifyExt(a, cfg, &parts, &.{}, try system.prove(E, a, cfg, &parts, &mains)));
+        b.mains[2] = mm2;
+        b.mains[3] = try generate(a, b.log_size, pl);
+        try std.testing.expect(try bsys.unbalanced(a, &airs, &b) != null);
     }
 }
