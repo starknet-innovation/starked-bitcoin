@@ -409,21 +409,21 @@ pub fn tables(a: std.mem.Allocator, log_size: u32, ranges: []const u32, opcodes:
 }
 
 /// The sample blocks with their context (height, previous MTP from the proven header file).
-pub const Sample = struct { raw: []const u8, ctx: Ctx };
+pub const Sample = struct { raw: []const u8, ctx: Ctx, undo: []const u8 = &.{1} };
 pub const samples_small = [_]Sample{
-    .{ .raw = @embedFile("testdata:block_0"), .ctx = .{ .height = 0, .prev_mtp = 0 } },
-    .{ .raw = @embedFile("testdata:block_170"), .ctx = .{ .height = 170, .prev_mtp = 1231715347 } },
-    .{ .raw = @embedFile("testdata:block_91722"), .ctx = .{ .height = 91722, .prev_mtp = 1289721830 } },
-    .{ .raw = @embedFile("testdata:block_91812"), .ctx = .{ .height = 91812, .prev_mtp = 1289756038 } },
-    .{ .raw = @embedFile("testdata:block_91842"), .ctx = .{ .height = 91842, .prev_mtp = 1289767733 } },
-    .{ .raw = @embedFile("testdata:block_91880"), .ctx = .{ .height = 91880, .prev_mtp = 1289778307 } },
+    .{ .raw = @embedFile("testdata:block_0"), .undo = @embedFile("testdata:undo_0"), .ctx = .{ .height = 0, .prev_mtp = 0 } },
+    .{ .raw = @embedFile("testdata:block_170"), .undo = @embedFile("testdata:undo_170"), .ctx = .{ .height = 170, .prev_mtp = 1231715347 } },
+    .{ .raw = @embedFile("testdata:block_91722"), .undo = @embedFile("testdata:undo_91722"), .ctx = .{ .height = 91722, .prev_mtp = 1289721830 } },
+    .{ .raw = @embedFile("testdata:block_91812"), .undo = @embedFile("testdata:undo_91812"), .ctx = .{ .height = 91812, .prev_mtp = 1289756038 } },
+    .{ .raw = @embedFile("testdata:block_91842"), .undo = @embedFile("testdata:undo_91842"), .ctx = .{ .height = 91842, .prev_mtp = 1289767733 } },
+    .{ .raw = @embedFile("testdata:block_91880"), .undo = @embedFile("testdata:undo_91880"), .ctx = .{ .height = 91880, .prev_mtp = 1289778307 } },
 };
 pub const samples_large = [_]Sample{
-    .{ .raw = @embedFile("testdata:block_400000"), .ctx = .{ .height = 400000, .prev_mtp = 1456414666 } },
-    .{ .raw = @embedFile("testdata:block_481824"), .ctx = .{ .height = 481824, .prev_mtp = 1503536364 } },
-    .{ .raw = @embedFile("testdata:block_709632"), .ctx = .{ .height = 709632, .prev_mtp = 1636860027 } },
-    .{ .raw = @embedFile("testdata:block_970347"), .ctx = .{ .height = 970347, .prev_mtp = 1791376871 } },
-    .{ .raw = @embedFile("testdata:block_774628"), .ctx = .{ .height = 774628, .prev_mtp = 1675281795 } },
+    .{ .raw = @embedFile("testdata:block_400000"), .undo = @embedFile("testdata:undo_400000"), .ctx = .{ .height = 400000, .prev_mtp = 1456414666 } },
+    .{ .raw = @embedFile("testdata:block_481824"), .undo = @embedFile("testdata:undo_481824"), .ctx = .{ .height = 481824, .prev_mtp = 1503536364 } },
+    .{ .raw = @embedFile("testdata:block_709632"), .undo = @embedFile("testdata:undo_709632"), .ctx = .{ .height = 709632, .prev_mtp = 1636860027 } },
+    .{ .raw = @embedFile("testdata:block_970347"), .undo = @embedFile("testdata:undo_970347"), .ctx = .{ .height = 970347, .prev_mtp = 1791376871 } },
+    .{ .raw = @embedFile("testdata:block_774628"), .undo = @embedFile("testdata:undo_774628"), .ctx = .{ .height = 774628, .prev_mtp = 1675281795 } },
 };
 
 test "block checks: the samples satisfy the extended fields AIR" {

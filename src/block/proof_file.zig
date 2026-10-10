@@ -243,7 +243,7 @@ test "block proof file: round trip, verify, and the header checks (block 170, te
     const airs = try bs.parseAirs(a);
     const s = checks.samples_small[1];
     try std.testing.expectEqual(@as(u32, 170), s.ctx.height);
-    const b = try bs.build(a, s.raw, s.ctx);
+    const b = try bs.buildU(a, s.raw, s.undo, s.ctx);
     const proof = try prove(a, &airs, &b, testFri());
     const bytes = try encode(a, &.{ .log_size = b.log_size, .pubs = b.pubs, .proof = proof, .provenance = "test" });
     const f = try decode(a, bytes);
@@ -272,7 +272,7 @@ test "block proof file: round trip, verify, and the header checks (block 170, te
     var c: [32]u8 = undefined;
     for (0..8) |w| std.mem.writeInt(u32, c[4 * w ..][0..4], b.commitment_words[w], .little);
     var want: [32]u8 = undefined;
-    std.crypto.hash.blake2.Blake2s256.hash(&[_]u8{1}, &want, .{});
+    std.crypto.hash.blake2.Blake2s256.hash(s.undo, &want, .{});
     try std.testing.expectEqualSlices(u8, &want, &c);
 }
 

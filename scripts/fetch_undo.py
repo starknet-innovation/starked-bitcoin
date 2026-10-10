@@ -15,7 +15,8 @@ Credentials: BITCOIN_RPC_USER (default `application`) and BITCOIN_RPC_PASSWORD f
 or from the file given with --env (KEY=VALUE lines). The password is never printed.
 
 Usage:
-    python3 -I scripts/fetch_undo.py [--env FILE] [--url http://127.0.0.1:18332] [--out DIR] HEIGHT...
+    python3 -I scripts/fetch_undo.py [--env FILE] [--url http://127.0.0.1:18332] [--out DIR] [--blocks] HEIGHT...
+`--blocks` also saves the raw block to testdata/blocks/<height>.bin when missing.
 Writes <out>/<height>.undo (default out: testdata/undo).
 """
 import base64, hashlib, json, os, sys, urllib.request
@@ -80,6 +81,7 @@ def undo_stream(block):
 def main():
     args = sys.argv[1:]
     env_file, url, out = None, "http://127.0.0.1:18332", ROOT / "testdata" / "undo"
+    save_blocks = False
     heights = []
     i = 0
     while i < len(args):
@@ -87,6 +89,8 @@ def main():
             env_file = args[i + 1]; i += 2
         elif args[i] == "--url":
             url = args[i + 1]; i += 2
+        elif args[i] == "--blocks":
+            save_blocks = True; i += 1
         elif args[i] == "--out":
             out = Path(args[i + 1]); i += 2
         else:
@@ -108,8 +112,13 @@ def main():
         if got != want:
             raise SystemExit(f"{h}: node hash {got} differs from data/headers.bin ({want}); refusing")
         local = BLOCKS / f"{h}.bin"
-        if local.exists() and bytes.fromhex(rpc("getblock", got, 0)) != local.read_bytes():
+        rawb = bytes.fromhex(rpc("getblock", got, 0))
+        if rawb[:80] != header:
+            raise SystemExit(f"{h}: node's block header differs from data/headers.bin; refusing")
+        if local.exists() and rawb != local.read_bytes():
             raise SystemExit(f"{h}: node's raw block differs from {local}; refusing")
+        if save_blocks and not local.exists():
+            local.write_bytes(rawb)
         block = rpc("getblock", got, 3)
         n_in = sum(len(tx["vin"]) for tx in block["tx"][1:])
         u = undo_stream(block)

@@ -205,9 +205,13 @@ test "block commitment: a 3-block undo stream satisfies and balances; a wrong pu
     const a = arena.allocator();
     const airs = try bsys.parseAirs(a);
     const s = checks.samples_small[1];
-    var undo: [150]u8 = undefined;
+    // One record (block 170 spends one coin): code, amount, a 137-byte script: 151 bytes, 3 blocks.
+    var undo: [151]u8 = undefined;
     undo[0] = 1;
-    for (undo[1..], 1..) |*x, i| x.* = @truncate(i *% 37 +% 11);
+    std.mem.writeInt(u32, undo[1..5], 2 * 9 + 1, .little);
+    std.mem.writeInt(u64, undo[5..13], 5000000000, .little);
+    undo[13] = 137;
+    for (undo[14..], 0..) |*x, i| x.* = @truncate(i *% 37 +% 11);
     var b = try bsys.buildU(a, s.raw, &undo, s.ctx);
     try std.testing.expect((try bsys.firstViolation(a, &airs, &b)) == null);
     try std.testing.expect((try bsys.unbalanced(a, &airs, &b)) == null);

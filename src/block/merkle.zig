@@ -208,7 +208,7 @@ test "block merkle: small blocks prove with the full block system; a wrong root 
     const airs = try bsys.parseAirs(a);
     for ([_]usize{ 0, 1, 3 }) |si| {
         const s = checks.samples_small[si];
-        const b = try bsys.build(a, s.raw, s.ctx);
+        const b = try bsys.buildU(a, s.raw, s.undo, s.ctx);
         try bsys.proveVerify(a, &airs, &b);
         // A wrong root limb in the root row: the header words no longer match.
         const nodes = try tree(a, b.ntx);

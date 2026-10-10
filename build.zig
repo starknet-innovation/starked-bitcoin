@@ -92,8 +92,10 @@ pub fn build(b: *std.Build) void {
     lib.addAnonymousImport("air:block_b2msg", .{ .root_source_file = b.path("airs/block_b2msg.json") });
     lib.addAnonymousImport("air:block_b2s", .{ .root_source_file = b.path("airs/block_b2s.json") });
     lib.addAnonymousImport("air:extsum_test", .{ .root_source_file = b.path("airs/extsum_test.json") });
+    lib.addAnonymousImport("air:block_fpwalk", .{ .root_source_file = b.path("airs/block_fpwalk.json") });
+    lib.addAnonymousImport("air:block_urec", .{ .root_source_file = b.path("airs/block_urec.json") });
+    lib.addAnonymousImport("air:block_coin", .{ .root_source_file = b.path("airs/block_coin.json") });
     lib.addAnonymousImport("testdata:block_170", .{ .root_source_file = b.path("testdata/blocks/170.bin") });
-    lib.addAnonymousImport("testdata:undo_170", .{ .root_source_file = b.path("testdata/undo/170.undo") });
     lib.addAnonymousImport("testdata:block_91722", .{ .root_source_file = b.path("testdata/blocks/91722.bin") });
     lib.addAnonymousImport("testdata:block_91812", .{ .root_source_file = b.path("testdata/blocks/91812.bin") });
     lib.addAnonymousImport("testdata:block_91842", .{ .root_source_file = b.path("testdata/blocks/91842.bin") });
@@ -104,6 +106,18 @@ pub fn build(b: *std.Build) void {
     lib.addAnonymousImport("testdata:block_970347", .{ .root_source_file = b.path("testdata/blocks/970347.bin") });
     lib.addAnonymousImport("testdata:block_774628", .{ .root_source_file = b.path("testdata/blocks/774628.bin") });
     lib.addAnonymousImport("testdata:block_0", .{ .root_source_file = b.path("testdata/blocks/0.bin") });
+    lib.addAnonymousImport("testdata:block_9", .{ .root_source_file = b.path("testdata/blocks/9.bin") });
+    lib.addAnonymousImport("testdata:undo_0", .{ .root_source_file = b.path("testdata/undo/0.undo") });
+    lib.addAnonymousImport("testdata:undo_170", .{ .root_source_file = b.path("testdata/undo/170.undo") });
+    lib.addAnonymousImport("testdata:undo_91722", .{ .root_source_file = b.path("testdata/undo/91722.undo") });
+    lib.addAnonymousImport("testdata:undo_91812", .{ .root_source_file = b.path("testdata/undo/91812.undo") });
+    lib.addAnonymousImport("testdata:undo_91842", .{ .root_source_file = b.path("testdata/undo/91842.undo") });
+    lib.addAnonymousImport("testdata:undo_91880", .{ .root_source_file = b.path("testdata/undo/91880.undo") });
+    lib.addAnonymousImport("testdata:undo_400000", .{ .root_source_file = b.path("testdata/undo/400000.undo") });
+    lib.addAnonymousImport("testdata:undo_481824", .{ .root_source_file = b.path("testdata/undo/481824.undo") });
+    lib.addAnonymousImport("testdata:undo_709632", .{ .root_source_file = b.path("testdata/undo/709632.undo") });
+    lib.addAnonymousImport("testdata:undo_970347", .{ .root_source_file = b.path("testdata/undo/970347.undo") });
+    lib.addAnonymousImport("testdata:undo_774628", .{ .root_source_file = b.path("testdata/undo/774628.undo") });
 
     // `zig build test -Dtest-filter=<substring>` runs only matching tests (the full suite takes ~16 min).
     const test_filters = b.option([]const []const u8, "test-filter", "Only run tests whose names contain this") orelse &.{};
