@@ -1,4 +1,5 @@
 import StarkedAir.Export
+import StarkedAir.Block.ExtSum
 import StarkedAir.Gadgets.Add32Chain
 import StarkedAir.Testing.Probe
 import StarkedAir.Gadgets.Sha256
@@ -25,6 +26,7 @@ def main (args : List String) : IO Unit := do
   | ["sha256_compress"] => IO.println StarkedAir.Sha256.air.toJson
   | ["header_chain"] => IO.println StarkedAir.HeaderChain.air.toJson
   | ["blake2s_compress"] => IO.println StarkedAir.Blake2s.air.toJson
+  | ["extsum_test"] => IO.println StarkedAir.Block.ExtSum.air.toJson
   | ["blake2s_tree"] => IO.println StarkedAir.HeaderTree.tree.toJson
   | ["header_chain_v7"] => IO.println StarkedAir.HeaderTree.headers.toJson
   | ["byte_table"] => IO.println StarkedAir.ByteLookup.table.toJson
