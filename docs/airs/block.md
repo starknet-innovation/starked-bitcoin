@@ -288,3 +288,39 @@ system with `BlockPubs c pub`, `height < 2^23`, `prevMtp < 2^32` and `8 ≤ L �
 | `FieldsTotals`, `FieldsScripts`, `FieldsCommit`, `TxWits`, `Coinbase` | fields-side totals, script terms, output selection, witness sections, coinbase input |
 | `SysLink` | the cross-component tuples (`tx0_link`, `tot_link`, `sigops_link`, `commit_link`, `cutoff_link`) and read oracles |
 | `TxChecks`, `ValueSound`, `CtxSound`, `WalkSound` | per-component checks |
+
+## The commitment: `block_undo`, `block_b2msg`, `block_b2s` (M3a.6 `BLK-COMMIT`, done and proven)
+
+Lean: `Block/Undo.lean`, `Block/B2Msg.lean`, `Block/B2s.lean`; proofs `Block/B2MsgSound.lean`,
+`Block/B2sSound.lean`, `Block/B2Bridge.lean`, `Block/B2Link.lean`; spec `Spec/BlockCommit.lean`,
+`Spec/Blake2sBlocks.lean`. Zig: `src/block/commit.zig`. Design: [block-data.md § M3a.6](../design/block-data.md),
+decision D-038.
+
+`C = blake2s(blake2s(raw) ++ blake2s(undo))`, with `undo = 0x01 ++ records` (one `TxOutSer`-without-
+outpoint per input after the coinbase, unchecked here, D-029). Public inputs: `pub 8` the undo length,
+`pub 9 + 2i + h` limb `h` of commitment word `i`. The system now has 12 components and 25 public inputs;
+99 lookup sites per row.
+
+- **`block_undo`:** the byte table's AIR with its length read from `pub 8`, relation `UBYTE` (17).
+- **`block_b2msg`:** one row per 32-bit message word of the two streams (raw, then undo); bytes past the
+  length are zero. Active-byte flags are monotone and counted against the length, and only block 0 may
+  start inactive, so a stream has `max 1 ⌈len/64⌉` blocks. Yields `b2w(stream, block, k, lo, hi)` and
+  `b2b(stream, block, last, t)`.
+- **`block_b2s`:** the proven Blake2s gadget (300 columns) plus 17: period 0 is the outer hash (`h0`,
+  `t = 64`, `f = 1`, message = the two digests read as `b2d`), other periods are stream blocks chained
+  from the previous period, and a stream's last block yields its digest words.
+
+**Soundness.** Headline **`commit_sound`** (`B2Link`, standard axioms only): in a satisfied 12-component
+system with `8 ≤ L ≤ 24`, `pub (9 + 2i + h) = half16 (C i) h` where `C = hashBlocks h0 0 (blake2s raw ++
+blake2s undo)`, and `blockCommit raw undo = digest C` (`blockCommit_eq`). Parts:
+
+| File | Result |
+|---|---|
+| `B2MsgSound` | `prefix_of_count`, `on_prefix`, `streams`, `layout`, `stream_count`, `walker_sound` |
+| `B2sSound` | `period_compress` (gadget), `h_first`, `h_chain`, `tf`, `msg_word` |
+| `B2Link` | `undo_read`, `walker_fact`, `period_block`, `chain_state`, `last_digest`, `digest_yield`, `outer_words`, `commit_sound` |
+| `Spec/Blake2sBlocks` | `compress_congr`, `hashBlocks_eq` (block by block), `leWord_digests` |
+
+**Limits.** At one shared trace size the system has about 900 columns. A block above about 3.5 MB needs
+`2^23` rows, more memory than a 24 GB machine has for the in-memory check, so the large-sample test
+skips 774628 (3.96 MB). Proving such blocks needs per-component sizes (lifting) or a larger machine.

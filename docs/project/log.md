@@ -46,7 +46,12 @@ Problems / lessons:
 - A single public value split into private limbs is not bound modulo P: either bound the limbs
   (range) or make the limbs public.
 - `Setup` (a structure of the parsed block and grammar facts) kept the final assembly short.
-Next: M3a.6 BLK-COMMIT design (canonical encoding with spent-output slots, Blake2s commitment).
+- M3a.6 BLK-COMMIT, same session: D-038 (proposed) `C = blake2s(blake2s(raw) ++ blake2s(0x01 ++ undo))`;
+  AIRs `block_undo`, `block_b2msg`, `block_b2s` (the proven gadget, chained); **`commit_sound`**
+  (a77183f, 86df454). Found while proving: the outer period needed `OUTP·NIL = 0`.
+- Memory: the 12-component system at `2^23` rows (774628, 3.96 MB) exceeds 24 GB in the in-memory
+  check; that sample is now skipped by the large test.
+Next: BLOCK-DATA (block hash public, undo records from the node, per-block CLI with MMR check).
 
 ## 2026-10-09 (session 5) — M3a.5 design pass
 Who: Claude (agent, Opus 5.5), on the owner's request

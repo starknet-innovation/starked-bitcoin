@@ -7,9 +7,9 @@ follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work)
 - **Updated:** 2026-10-10 (owner away 48 h; agent working through the agreed priorities)
 - **HEAD at last update:** see `git log -1` (this file is committed with the work)
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
-- **Current item:** M3a.5 `BLK-CHECKS` **done and proven** (`block_sound`, 2026-10-10); M3a.6
-  `BLK-COMMIT` next. D-035 has two amendments for the owner to confirm (8-bit range table; `prevMtp`
-  as two public limbs, a soundness fix).
+- **Current item:** BLOCK-AIR complete: M3a.5 (`block_sound`) and M3a.6 (`commit_sound`) done and
+  proven (2026-10-10). Next: BLOCK-DATA. For the owner: D-035's amendments (8-bit range table; `prevMtp`
+  as two public limbs, a soundness fix) and D-038 (the commitment format, proposed).
 
 ## State in one paragraph
 
@@ -23,22 +23,22 @@ Lean proves the chain end to end at the public-input level (`chain_from_genesis_
 - the MMR inclusion and fold (`Spec/Mmr.lean`);
 - LogUp's Schwartz–Zippel step (`LogUpSZ.lean`);
 - the block rules as a conjunction (`Spec/BlockFlat.lean`);
-- **`block_sound`**: a satisfied nine-component block system proves `checkBlock c raw = none`
-  (Core's `CheckBlock` without PoW, and `ContextualCheckBlock`), given no repeated prevout (M3b's
-  obligation, D-031).
+- **`block_sound`**: a satisfied block system proves `checkBlock c raw = none` (Core's `CheckBlock`
+  without PoW, and `ContextualCheckBlock`), given no repeated prevout (M3b's obligation, D-031);
+- **`commit_sound`**: its public inputs 9–24 are `blake2s(blake2s(raw) ++ blake2s(undo))` (D-038).
 
 The plain in-circuit verifier is mutation-fuzzed (102k mutations, all rejected). The specs are fuzzed
 against Core's own C++ (about 860k cases, 0 mismatches).
 
 ## Next step (concrete)
 
-1. **M3a.6 `BLK-COMMIT`** ([block-data.md](../design/block-data.md), D-029, D-030): design the
-   canonical encoding (blocks with spent-output slots) and its Blake2s commitment, then the AIR and
-   proof. Record the layout as a decision for the owner.
-2. **Owner:** confirm D-035's amendments (8-bit range table; `prevMtp` limbs public as `pub 3`/`pub 7`).
-3. **Keeping the proof fresh:** `tools/extend_tip.sh data/store/chainproof-run5 <latest .sbchain>`.
-4. **M3b design input:** assumeUTXO compatibility is a goal (D-037), so `Q-TREE` must allow a
+1. **BLOCK-DATA:** expose the block hash as public inputs (the header's SHA256d, already computed),
+   fetch undo records from the node (`getblock … 3` prevouts), and a per-block prove/verify CLI that
+   checks the block hash against the chain proof's MMR at the block's height.
+2. **Owner:** confirm D-035's amendments and D-038 (commitment format) before any large proving run.
+3. **M3b (UTXO) design:** assumeUTXO compatibility is a goal (D-037), so `Q-TREE` must allow a
    traversal in Core's coin order.
+4. **Memory:** blocks above ~3.5 MB need lifting (per-component sizes) or a larger machine.
 
 ## In flight
 
@@ -57,7 +57,7 @@ Run from the repo root. All must pass before new work starts.
 
 ```sh
 git status --short                      # expect: clean, or explained under "In flight"
-zig build test --summary all 2>&1 | grep "tests passed"   # expect: 32/32 tests passed (about 16 min in Debug)
+zig build test -Doptimize=ReleaseFast --summary all 2>&1 | grep "tests passed"   # expect: all pass (about 45 min; large blocks are slow)
 (cd lean && lake build)                 # expect: "Build completed successfully"
 grep -rnE "\bsorry\b|native_decide|bv_decide" lean/StarkedAir   # expect: no matches
 
@@ -74,11 +74,12 @@ open StarkedAir.HeaderChain StarkedAir.Spec.Bitcoin
 #print axioms StarkedAir.Block.merkle_sound
 #print axioms StarkedAir.Block.wmerkle_sound
 #print axioms StarkedAir.Block.block_sound
+#print axioms StarkedAir.Block.commit_sound
 EOS
 (cd lean && lake env lean /tmp/ax.lean)  # expect: propext, Classical.choice, Quot.sound
 
 # JSON drift: committed AIRs must equal the Lean export
-(cd lean && for n in add32_chain sha256_compress header_chain probe_oracle byte_table byte_user blake2s_compress blake2s_tree header_chain_v7 node_glue leaf_glue block_bytes block_reader block_fields block_msg block_sha block_merkle block_tables block_walk block_ctx block_wmerkle genesis_checks; do
+(cd lean && for n in add32_chain sha256_compress header_chain probe_oracle byte_table byte_user blake2s_compress blake2s_tree header_chain_v7 node_glue leaf_glue block_bytes block_reader block_fields block_msg block_sha block_merkle block_tables block_walk block_ctx block_wmerkle block_undo block_b2msg block_b2s genesis_checks; do
   lake env lean --run Export.lean $n | cmp -s - ../airs/$n.json && echo "$n ok" || echo "$n DRIFT"; done)
 
 python3 ~/.claude/skills/document/scripts/check_docs.py .   # expect: 0 errors

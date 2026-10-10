@@ -446,7 +446,7 @@ Changes from the design (D-035 amendments):
   `COMMIT (start, len)`, `SIGOPS`, `WCID`; the commitment output's position travels in `COMMIT`, not
   `TOT`.
 
-### M3a.6 `BLK-COMMIT` design (proposed 2026-10-10, D-038)
+### M3a.6 `BLK-COMMIT` design (proposed 2026-10-10, D-038; built and proven 2026-10-10)
 
 **What it commits.** The block proof outputs, as public inputs, an 8-word Blake2s-256 commitment
 
@@ -473,14 +473,14 @@ Each record plus the input's outpoint is exactly `TxOutSer`, which assumeUTXO's 
 
 **Components** (one shared trace size):
 - **`undo` byte table:** like `block_bytes`, a `(pos, byte)` table with a range check. Its length is
-  public input 8.
+  public input 8. The stream starts with a version byte `0x01` (so the table is never empty).
 - **`b2msg`:** a byte walker for the two streams and the outer message. It reads bytes by lookup,
   packs little-endian 32-bit words as 16-bit limbs, zero-pads the last block, and yields
   `b2word(stream, block, k, lo, hi)`.
 - **`b2s`:** the proven Blake2s compression, 88 rows per block. It reads its 16 message words and
   chains `h` from the previous block of the same stream. The counter `t` and final flag `f` are
   derived from the stream's length. The outer hash's message is the two inner digests. Its output
-  words are public inputs 9–16.
+  words' 16-bit limbs are public inputs 9–24.
 
 **Lean target.** `commit_sound`: in a satisfied system, `pub 9..16` equals
 `blake2s(blake2s(raw) ++ blake2s(undo))`, as words, with `raw` the block's bytes and `undo` the undo
