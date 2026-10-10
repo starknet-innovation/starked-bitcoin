@@ -158,17 +158,18 @@ theorem step_eqs {r : ℕ} (hr : r + 1 < n) :
 /-- **The block-level equations.** -/
 theorem glob_eqs (hn : 0 < n) :
     M HC 0 = pub 6 * M HASC 0 ∧ M HC 0 * (M L0 0 - (M W0 0 + 34)) = 0 ∧ (1 - M HC 0) * M NSEG 0 = 0 ∧
-    M MLO 0 + 65536 * M MHI 0 = pub 3 ∧ M CLO 0 = pub 5 * M MLO 0 + (1 - pub 5) * M TL16 0 ∧
+    M MLO 0 = pub 3 ∧ M MHI 0 = pub 7 ∧ M CLO 0 = pub 5 * M MLO 0 + (1 - pub 5) * M TL16 0 ∧
     M CHI 0 = pub 5 * M MHI 0 + (1 - pub 5) * M TH16 0 := by
   have q := fun (cc : Expr) (h : cc ∈ constraints) => sat hsat h hn
   have c1 := q (.sub (k HC) (.mul (.pub 6) (k HASC))) (by simp [constraints])
   have c2 := q (.mul (k HC) (.sub (k L0) (.add (k W0) (cst 34)))) (by simp [constraints])
   have c3 := q (.mul (om (k HC)) (k NSEG)) (by simp [constraints])
-  have c4 := q (.sub (.add (k MLO) (.mul (cst 65536) (k MHI))) (.pub 3)) (by simp [constraints])
+  have c4 := q (.sub (k MLO) (.pub 3)) (by simp [constraints])
+  have c7 := q (.sub (k MHI) (.pub 7)) (by simp [constraints])
   have c5 := q (.sub (k CLO) (.add (.mul (.pub 5) (k MLO)) (.mul (om (.pub 5)) (k TL16)))) (by simp [constraints])
   have c6 := q (.sub (k CHI) (.add (.mul (.pub 5) (k MHI)) (.mul (om (.pub 5)) (k TH16)))) (by simp [constraints])
-  simp only [Expr.eval, ev_k hn, eval_cst, Nat.cast_ofNat, om, one, Nat.cast_one, sub_eq_zero] at c1 c2 c3 c4 c5 c6
-  exact ⟨c1, by linear_combination c2, by linear_combination c3, c4, c5, c6⟩
+  simp only [Expr.eval, ev_k hn, eval_cst, Nat.cast_ofNat, om, one, Nat.cast_one, sub_eq_zero] at c1 c2 c3 c4 c5 c6 c7
+  exact ⟨c1, by linear_combination c2, by linear_combination c3, c4, c7, c5, c6⟩
 
 end Rows
 

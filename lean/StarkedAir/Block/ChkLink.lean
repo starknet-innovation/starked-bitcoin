@@ -12,7 +12,7 @@ open StarkedAir.Sha256 (pre cst)
 section System
 
 variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ}
-  (hL : ∀ i < 9, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : L ≤ 24)
+  (hL : ∀ i < 12, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : L ≤ 24)
 include hL hsat hL24
 
 /-- **Range uses are bytes.** A use of the range table with multiplicity `−1` looks up a value below 256. -/

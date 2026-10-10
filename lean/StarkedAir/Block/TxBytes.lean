@@ -272,11 +272,15 @@ theorem block_index {m : ℕ} (hmn : m < 2 ^ L) (hnp : ∀ r < m, (inst 1).main 
     ∃ b, Spec.Block.parseBlock (blockBytes (inst 0).main (pub 0).val) = some b ∧
       b.header = slice (blockBytes (inst 0).main (pub 0).val) 0 80 ∧
       b.txs.length = ((inst 1).main VAL 0).val ∧ 1 ≤ b.txs.length ∧ b.txs.length < 2 ^ L ∧
-      ∀ ρ < 2 ^ L, (inst 1).main K_LOCK ρ = 1 → ∀ tx, TxAt (inst 1).main (blockBytes (inst 0).main (pub 0).val) m ρ tx →
-        b.txs[locks (inst 1).main ρ]? = some tx := by
+      (∀ ρ < 2 ^ L, (inst 1).main K_LOCK ρ = 1 → ∀ tx, TxAt (inst 1).main (blockBytes (inst 0).main (pub 0).val) m ρ tx →
+        b.txs[locks (inst 1).main ρ]? = some tx) ∧
+      Spec.Block.toksBlock (toksFrom (inst 1).main (blockBytes (inst 0).main (pub 0).val) m 0) = some b ∧
+      ∀ j < b.txs.length, ∃ ρ tx, ρ < m ∧ (inst 1).main K_LOCK ρ = 1 ∧ locks (inst 1).main ρ = j ∧ b.txs[j]? = some tx ∧
+        TxAt (inst 1).main (blockBytes (inst 0).main (pub 0).val) m ρ tx := by
   set R := blockBytes (inst 0).main (pub 0).val with hR
   have hn : 0 < 2 ^ L := by positivity
   obtain ⟨b, hb⟩ := block_sim fs R hcs hmn hpad hfit hnp
+  have hbtok := hb
   -- the bytes are the tokens' bytes
   have htb : Spec.Block.toksBytes (toksFrom (inst 1).main R m 0) = R := by
     have := cat m le_rfl
@@ -324,9 +328,14 @@ theorem block_index {m : ℕ} (hmn : m < 2 ^ L) (hnp : ∀ r < m, (inst 1).main 
     have := congrArg List.length hrest
     simp [toksFrom_length] at this; omega
   subst hem
-  refine ⟨_, hparse, rfl, by simpa [hnv] using hlen, by simp only at hlen ⊢; omega, ?_, ?_⟩
+  refine ⟨_, hparse, rfl, by simpa [hnv] using hlen, by simp only at hlen ⊢; omega, ?_, ?_, hbtok, ?_⟩
   · have := locks_le (M := (inst 1).main) e
     simp only at hlen ⊢; rw [hlen]; omega
+  rotate_left
+  · intro j hj
+    simp only at hj
+    obtain ⟨ρ, tx, hρ, hl, hlk, hget, hat⟩ := rows j (by omega)
+    exact ⟨ρ, tx, hρ, hl, by rw [hlk, hl1]; simp, hget, hat⟩
   intro ρ0 hρ0 hl0 tx0 hat0
   have hpρ : (inst 1).main K_PAD ρ0 = 0 :=
     kind_unique fs hρ0 (a := K_LOCK) (b := K_PAD) (by simp [K_LOCK]) (by simp [K_PAD]) (by simp [K_LOCK, K_PAD]) hl0

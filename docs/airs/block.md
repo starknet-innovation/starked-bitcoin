@@ -1,6 +1,6 @@
 # Block AIRs (M3a)
 
-Status: current · Updated: 2026-10-08
+Status: current · Updated: 2026-10-10
 
 Design: [design/block-data.md](../design/block-data.md). One system per block,
 with components linked by LogUp lookups (D-028). Component 0 is the byte table;
@@ -232,5 +232,59 @@ Lean: `Block/Merkle.lean`, `Block/Sha.lean` (node blocks); proofs `Block/MerkleS
   - Spec: `Spec.MerkleLevels` (`level_get`, `dupPair_false`, `merkleRoot_lvs`); `HashSpec`
     (`sha256d_pair`, `stateBytes_inj`, `stateBytes_of_words`).
 
-**Next (with M3a.5):** the witness tree over `[0^32, wtxid(tx1), …]` reuses this machinery. Its commitment
-check is contextual (height, coinbase output), so it goes with the M3a.5 checks.
+**Witness tree:** done with M3a.5 (`block_wmerkle`, below).
+
+## The checks: `block_tables`, `block_walk`, `block_ctx`, `block_wmerkle` (M3a.5 `BLK-CHECKS`, done and proven)
+
+Lean: `Block/Tables.lean`, `Block/Walk.lean`, `Block/Ctx.lean`, `Block/WMerkle.lean`, and the fields
+extension in `Block/Fields.lean` (`chkC`, `chkLookups`). Zig: `src/block/checks.zig`, `walk.zig`,
+`ctx.zig`, `wmerkle.zig`, `system.zig`. Design: [block-data.md § M3a.5](../design/block-data.md#m3a5-blk-checks-design-approved-2026-10-10-d-035)
+and its as-built notes; decision D-035 (with its amendments).
+
+**System.** Nine components share one trace size: 0 bytes, 1 fields, 2 msg, 3 sha, 4 merkle,
+5 tables, 6 walk, 7 ctx, 8 wmerkle; 77 lookup sites per row, `L ≤ 24`. Eight public inputs:
+`len`, `nTx`, `height`, `prevMtp mod 2^16`, the BIP34/CSV/segwit bits, `prevMtp div 2^16`.
+
+| Relation | Id | Tuple | Yielded by | Used by |
+|---|---|---|---|---|
+| `R8` | 9 | `(x)`, `x < 256` | tables | fields, walk, ctx range slots |
+| `OPC` | 10 | opcode row `(b, pushN, isK 4c/4d/4e, sigN, nzp)` | tables | walk |
+| `SCRIPT` | 11 | `(start, len)` of a non-empty script | fields | walk (first row) |
+| `TOT` | 12 | `(W, NSEG, HASC)` | fields (last row) | ctx |
+| `CTX` | 13 | `(cutoff lo, cutoff hi)` | ctx | fields (row 0) |
+| `COMMIT` | 14 | `(start, len)` of the marked output | fields | ctx |
+| `SIGOPS` | 15 | `(total)` | walk (last row) | ctx |
+| `WCID` | 16 | commitment node id | wmerkle | ctx |
+
+- **`block_tables`:** 7 periodic preprocessed columns over `0…255` (`id`, `pushN`, `isK` ×3, `sigN`,
+  `nzp`) and two multiplicity columns.
+- **Fields extension** (columns 118–189): per-tx finality mode (`FZ`/`FL`/`FS`, `TY`), output value
+  bytes and running totals (`TLO`/`THI` with carry, `MAXLO`/`MAXHI` bounds), the non-null-prevout
+  witness (`ZT`, `GIN`, one auxiliary byte read `AQ`/`BQ`), lock-time limbs against the cutoff, `W`
+  and `NSEG` running sums (`DW = 2·TXH·SEG + (WCNT+WITEM)·LEN`, row-local), script spans, and the
+  commitment output selection (`ISC`, `AFT`, `HASC`, `REQ` with `MML`/`MMB` mismatch witnesses).
+- **`block_walk`:** one row per script byte; an automaton (`op`, push length bytes, push data,
+  truncated tail) accumulating `sigW` per opcode; 51 columns.
+- **`block_ctx`:** rows 0–131 of a 256-row period read the coinbase (input count, null prevout,
+  scriptSig length, BIP34 push), the header time, the coinbase witness and the commitment script, and
+  check the weight and sigop limits; 41 columns, 11 lookups.
+- **`block_wmerkle`:** the txid tree's layout over `[0^32, wtxid(tx 1), …]` plus the commitment node
+  `(root, NONCE_ID)`; 27 columns.
+
+**Soundness.** Headline: **`block_sound`** (`Block/BlockSound.lean`, standard axioms only). A satisfied
+system with `BlockPubs c pub`, `height < 2^23`, `prevMtp < 2^32` and `8 ≤ L ≤ 24` gives
+`∃ b, parseBlock raw = some b` and, if no transaction repeats a prevout (M3b, D-031),
+`checkBlock c raw = none`. Its parts:
+
+| File | Result |
+|---|---|
+| `BlockSetup` | `Setup` (grammar context, parsed block, txs at lock rows); the fields' read oracles in block bytes |
+| `BlockTxs` | `txs_basic` (inputs, outputs, values), `txs_later` (no null prevout after tx 0), `cb_facts` (coinbase shape, scriptSig, BIP34 bytes) |
+| `BlockSums` | `weight_ok`, `sigops_ok` |
+| `BlockFinal` | `final_ok` (every tx final for the cutoff), `bip34_ok` |
+| `BlockCommit` | `commit_ok` (`commitmentIndex`, `witCheck`, or no witness) |
+| `WMerkleSound`, `WMerkleLink` | witness-tree rows; `wmerkle_sound`: the commitment digest is `SHA256d(root ++ nonce)` |
+| `ScriptSum` | the script multiset (`yields_eq_uses`): walker total = fields' scripts' sigops |
+| `FieldsTotals`, `FieldsScripts`, `FieldsCommit`, `TxWits`, `Coinbase` | fields-side totals, script terms, output selection, witness sections, coinbase input |
+| `SysLink` | the cross-component tuples (`tx0_link`, `tot_link`, `sigops_link`, `commit_link`, `cutoff_link`) and read oracles |
+| `TxChecks`, `ValueSound`, `CtxSound`, `WalkSound` | per-component checks |

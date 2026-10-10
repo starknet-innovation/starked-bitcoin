@@ -7,8 +7,9 @@ follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work)
 - **Updated:** 2026-10-10 (owner away 48 h; agent working through the agreed priorities)
 - **HEAD at last update:** see `git log -1` (this file is committed with the work)
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
-- **Current item:** M3a.5 `BLK-CHECKS`: D-035 **approved** (2026-10-10); M3a.5a (spec) done, M3a.5b (per-transaction checks) next. PROOF-STORE done (D-036 confirmed).
-  **parked** (owner); its spec stage M3a.5a is done (`Spec/BlockFlat.lean`).
+- **Current item:** M3a.5 `BLK-CHECKS` **done and proven** (`block_sound`, 2026-10-10); M3a.6
+  `BLK-COMMIT` next. D-035 has two amendments for the owner to confirm (8-bit range table; `prevMtp`
+  as two public limbs, a soundness fix).
 
 ## State in one paragraph
 
@@ -21,26 +22,23 @@ at the tip:
 Lean proves the chain end to end at the public-input level (`chain_from_genesis_checked`), plus:
 - the MMR inclusion and fold (`Spec/Mmr.lean`);
 - LogUp's Schwartz–Zippel step (`LogUpSZ.lean`);
-- the block rules as a conjunction (`Spec/BlockFlat.lean`).
+- the block rules as a conjunction (`Spec/BlockFlat.lean`);
+- **`block_sound`**: a satisfied nine-component block system proves `checkBlock c raw = none`
+  (Core's `CheckBlock` without PoW, and `ContextualCheckBlock`), given no repeated prevout (M3b's
+  obligation, D-031).
 
 The plain in-circuit verifier is mutation-fuzzed (102k mutations, all rejected). The specs are fuzzed
 against Core's own C++ (about 860k cases, 0 mismatches).
 
 ## Next step (concrete)
 
-1. **M3a.5b, per-transaction checks** (D-035, approved 2026-10-10;
-   [block-data.md § M3a.5](../design/block-data.md#m3a5-blk-checks-design-approved-2026-10-10-d-035)):
-   - the 16-bit range table;
-   - public inputs 2–6 (height, prevMtp, activation bits);
-   - the fields-component extensions: values (`values_ok_iff`), non-empty outputs, non-null prevouts,
-     finality, witness bytes `W`, `NSEG`, script spans and `totals`;
-   - Lean: the per-transaction facts of `CtxFreeOK`/`CtxOK` (Spec/BlockFlat.lean).
-2. **Keeping the proof fresh:** `tools/extend_tip.sh data/store/chainproof-run5 <latest .sbchain>`.
-   About 5–6 min per 400 headers.
-3. **M3b design input:** assumeUTXO compatibility is a goal (D-037), so `Q-TREE` must allow a
+1. **M3a.6 `BLK-COMMIT`** ([block-data.md](../design/block-data.md), D-029, D-030): design the
+   canonical encoding (blocks with spent-output slots) and its Blake2s commitment, then the AIR and
+   proof. Record the layout as a decision for the owner.
+2. **Owner:** confirm D-035's amendments (8-bit range table; `prevMtp` limbs public as `pub 3`/`pub 7`).
+3. **Keeping the proof fresh:** `tools/extend_tip.sh data/store/chainproof-run5 <latest .sbchain>`.
+4. **M3b design input:** assumeUTXO compatibility is a goal (D-037), so `Q-TREE` must allow a
    traversal in Core's coin order.
-
-Full account of the away session: [2026-10-10-away-session.md](../reports/2026-10-10-away-session.md).
 
 ## In flight
 
@@ -72,12 +70,15 @@ open StarkedAir.HeaderChain StarkedAir.Spec.Bitcoin
 #print axioms chain_from_genesis
 #print axioms StarkedAir.HeaderTree.chain_from_genesis_T
 #print axioms StarkedAir.Circuit.node_compose
-#print axioms StarkedAir.Block.Fields.fields_sound
+#print axioms StarkedAir.Block.Fields.fields_sound_gen
+#print axioms StarkedAir.Block.merkle_sound
+#print axioms StarkedAir.Block.wmerkle_sound
+#print axioms StarkedAir.Block.block_sound
 EOS
 (cd lean && lake env lean /tmp/ax.lean)  # expect: propext, Classical.choice, Quot.sound
 
 # JSON drift: committed AIRs must equal the Lean export
-(cd lean && for n in add32_chain sha256_compress header_chain probe_oracle byte_table byte_user blake2s_compress blake2s_tree header_chain_v7 node_glue leaf_glue block_bytes block_reader block_fields; do
+(cd lean && for n in add32_chain sha256_compress header_chain probe_oracle byte_table byte_user blake2s_compress blake2s_tree header_chain_v7 node_glue leaf_glue block_bytes block_reader block_fields block_msg block_sha block_merkle block_tables block_walk block_ctx block_wmerkle genesis_checks; do
   lake env lean --run Export.lean $n | cmp -s - ../airs/$n.json && echo "$n ok" || echo "$n DRIFT"; done)
 
 python3 ~/.claude/skills/document/scripts/check_docs.py .   # expect: 0 errors

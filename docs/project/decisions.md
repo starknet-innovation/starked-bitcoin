@@ -220,6 +220,17 @@ Why:
 - Public activation bits avoid comparisons on public values inside the AIR.
 - Reusing the SHA and Merkle components keeps the proven compression untouched.
 
+Amendments (2026-10-10, Claude, during implementation; the owner should confirm):
+- **The range table is 8-bit** (`block_tables`, relation `R8`), not 16-bit. All block components
+  share one trace size, so a `2^16`-row table would force every block to `L ≥ 16`. Wider values
+  are split into bytes.
+- **The previous MTP is public as two 16-bit limbs:** `pub 3` (low) and a new `pub 7` (high). With
+  one public value and private limbs, limbs summing to `prevMtp + P` also satisfied
+  `lo + 65536·hi = pub 3` in M31, which would have loosened the finality cutoff. Found while
+  proving `block_sound`. The side condition is now `prevMtp < 2^32`, not `< P`.
+- **`block_sound` is proven** (`Block/BlockSound.lean`, standard axioms only), with hypotheses
+  `height < 2^23`, `prevMtp < 2^32`, `BlockPubs c pub`, and no repeated prevout in a transaction (D-031).
+
 ### D-036 — The chain proof is a file of MMR peaks under a pinned, frozen VK
 Date: 2026-10-10 · By: Claude (agent), on the owner's "get started" (owner chose extendable over re-verifiable only); **confirmed by the owner 2026-10-10** · Status: active
 Decision:
@@ -253,3 +264,23 @@ Why: it makes an assumeUTXO snapshot checkable without trusting the constant in 
 `chainparams.cpp`. As far as we know, no one does this today.
 
 Scoping: [utxo-hash-scope.md](../design/utxo-hash-scope.md).
+
+### D-038 — The block commitment hashes the raw block and an undo record
+Date: 2026-10-10 · By: Claude (agent), on the owner's "go forward, finish M3" · Status: proposed
+(implementation proceeds; the owner should confirm before any large proving run, since proven blocks
+fix the format)
+Decision:
+- `C = blake2s(blake2s(raw) ++ blake2s(undo))`, output as 8 public words.
+- `undo` is a version byte `0x01` then one record per input after the coinbase, in block order (the
+  byte also keeps the undo table non-empty). A record is Core's
+  `TxOutSer` without the outpoint: the 4-byte code (height·2 + coinbase), the 8-byte amount and the
+  script with its CompactSize length.
+- M3a hashes `undo` unchecked (D-029); M3b proves it.
+
+Design: [block-data.md § M3a.6](../design/block-data.md#m3a6-blk-commit-design-proposed-2026-10-10-d-038).
+Why:
+- The raw block makes the encoding trivially canonical: modules re-parse with the proven fields
+  component, and no second encoding needs a proof.
+- The records plus outpoints are `TxOutSer`, the unit of assumeUTXO's `hash_serialized` (D-037).
+- Two inner hashes let a module open only what it needs.
+

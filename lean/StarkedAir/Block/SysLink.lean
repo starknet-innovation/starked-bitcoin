@@ -17,7 +17,7 @@ open StarkedAir.Sha256 (pre cst)
 section System
 
 variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ}
-  (hL : ∀ i < 9, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : L ≤ 24)
+  (hL : ∀ i < 12, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : L ≤ 24)
 include hL hsat hL24
 
 /-- A byte position below the length is in the block, and its byte is the block's. -/

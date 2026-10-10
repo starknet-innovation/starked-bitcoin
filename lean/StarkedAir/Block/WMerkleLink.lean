@@ -68,7 +68,7 @@ theorem wleaves_get {b : Spec.Block.Blk} {i : ℕ} (hi : 1 ≤ i) {tx : Spec.Blo
 section System
 
 variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ}
-  (hL : ∀ i < 9, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub [])
+  (hL : ∀ i < 12, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub [])
 include hL hsat
 
 theorem hash_ctx_sat' : ∀ r < 2 ^ L, ∀ c ∈ Ctx.constraints,

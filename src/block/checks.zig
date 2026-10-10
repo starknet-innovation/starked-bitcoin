@@ -102,11 +102,13 @@ pub const Ctx = struct {
 };
 
 /// Public inputs 0–6: length, transaction count, height, prevMtp, and the three activation bits.
-pub fn pubs(raw: []const u8, ntx: u32, ctx: Ctx) [7]M31 {
+/// The block's public inputs: length, transaction count, height, the previous MTP's low 16 bits, the
+/// activation bits (BIP34, CSV, segwit), and the previous MTP's high 16 bits.
+pub fn pubs(raw: []const u8, ntx: u32, ctx: Ctx) [8]M31 {
     return .{
         f(raw.len),                    f(ntx),                         f(ctx.height),
-        f(ctx.prev_mtp),               f(@intFromBool(ctx.bip34())),   f(@intFromBool(ctx.csv())),
-        f(@intFromBool(ctx.segwit())),
+        f(ctx.prev_mtp & 0xffff),      f(@intFromBool(ctx.bip34())),   f(@intFromBool(ctx.csv())),
+        f(@intFromBool(ctx.segwit())), f(ctx.prev_mtp >> 16),
     };
 }
 

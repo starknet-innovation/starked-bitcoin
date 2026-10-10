@@ -78,7 +78,7 @@ theorem slice_bb (Mb : ℕ → ℕ → F) {len a k : ℕ} (h : a + k ≤ len) :
 section System
 
 variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ}
-  (hL : ∀ i < 9, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub [])
+  (hL : ∀ i < 12, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub [])
 include hL hsat
 
 /-- The data bytes of the message starting at message row `r0` (data rows `0..d`). -/
@@ -482,7 +482,7 @@ theorem digest_tx (hL24 : L ≤ 24) {q : ℕ} (hq : 1 ≤ q) (hn : 72 * q + 72 �
   have hb0 := hash_bytes_sat hL hsat
   obtain ⟨m, hmn, hnp, hpad, hfit, hcs, cat, mono, hSm⟩ :=
     Fields.block_ctx (le_trans hL24 (by norm_num)) fs hb0 (hash_fields_read hL hsat hL24)
-  obtain ⟨b, hparse, hhead, -, -, -, hidx⟩ :=
+  obtain ⟨b, hparse, hhead, -, -, -, hidx, -⟩ :=
     Fields.block_index (le_trans hL24 (by norm_num)) fs hb0 (hash_fields_read hL hsat hL24) hmn hnp hpad hfit hcs cat mono hSm
   obtain ⟨r0, d, h0, f, hmid', hc, he, hdig⟩ := digest_sha256d hL hsat hL24 hq hn hd hmid
   refine ⟨b, hparse, r0, h0, f, hmid', fun hh => ?_, fun hh => ?_⟩

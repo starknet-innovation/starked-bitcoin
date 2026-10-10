@@ -200,7 +200,7 @@ def constraints : List Expr :=
     .sub (k HC) (.mul (.pub 6) (k HASC)),
     .mul (k HC) (.sub (k L0) (.add (k W0) (cst 34))),
     .mul (om (k HC)) (k NSEG),
-    .sub (.add (k MLO) (.mul (cst 65536) (k MHI))) (.pub 3),
+    .sub (k MLO) (.pub 3), .sub (k MHI) (.pub 7),
     .sub (k CLO) (.add (.mul (.pub 5) (k MLO)) (.mul (om (.pub 5)) (k TL16))),
     .sub (k CHI) (.add (.mul (.pub 5) (k MHI)) (.mul (om (.pub 5)) (k TH16))) ]
 

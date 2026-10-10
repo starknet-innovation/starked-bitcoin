@@ -9,18 +9,20 @@ import StarkedAir.Block.TxIndex
 import StarkedAir.Block.MerkleSound
 import StarkedAir.Block.WMerkleSound
 import StarkedAir.Block.FieldsChk
+import StarkedAir.Block.B2s
 
 namespace StarkedAir.Block
 
 open StarkedAir
 open StarkedAir.Sha256 (pre cst)
 
-/-- The block system (M3a.5): bytes, fields, messages, SHA, txid tree, tables, sigop walker, context, witness
-tree. -/
+/-- The block system (M3a.5–6): bytes, fields, messages, SHA, txid tree, tables, sigop walker, context, witness
+tree, undo bytes, Blake2s message words, Blake2s. -/
 def hashSys : System :=
-  ⟨9, fun i => if i = 0 then bytes else if i = 1 then Fields.fields else if i = 2 then Msg.msg else if i = 3 then Sha.sha
+  ⟨12, fun i => if i = 0 then bytes else if i = 1 then Fields.fields else if i = 2 then Msg.msg else if i = 3 then Sha.sha
     else if i = 4 then Merkle.merkle else if i = 5 then Tables.tables else if i = 6 then Walk.walk
-    else if i = 7 then Ctx.ctx else WMerkle.wmerkle⟩
+    else if i = 7 then Ctx.ctx else if i = 8 then WMerkle.wmerkle else if i = 9 then Undo.undo
+    else if i = 10 then B2Msg.b2msg else B2s.b2s⟩
 
 /-- Use sites `(component, lookup)`: multiplicity `−1` or `0` at every row. All other sites yield. -/
 def isUse : ℕ → ℕ → Bool
@@ -30,6 +32,8 @@ def isUse : ℕ → ℕ → Bool
   | 4, k => decide (2 ≤ k)
   | 6, k => decide (k < 4)
   | 7, k => !(k == 6 || k == 7 || k == 8)
+  | 10, k => decide (k < 8)
+  | 11, k => decide (k < 3)
   | _, _ => false
 
 def relAt (i k : ℕ) : ℕ := ((hashSys.comp i).lookups.getD k ⟨0, .const 0, []⟩).rel
@@ -40,15 +44,17 @@ def yieldTable : List (ℕ × ℕ × ℕ) :=
    (1, 33, Fields.REL_COMMIT), (2, 2, Msg.REL_MSGW), (2, 3, Msg.REL_MLEN), (3, 2, Sha.REL_DIGEST),
    (4, 0, Sha.REL_NODE), (4, 1, Msg.REL_MLEN), (5, 0, Tables.REL_R8), (5, 1, Tables.REL_OPC),
    (6, 4, Walk.REL_SIGOPS), (7, 6, Fields.REL_CTX), (7, 7, Sha.REL_DIGEST), (7, 8, Sha.REL_DIGEST),
-   (8, 0, Sha.REL_NODE), (8, 1, Msg.REL_MLEN), (8, 2, Ctx.REL_WCID)]
+   (8, 0, Sha.REL_NODE), (8, 1, Msg.REL_MLEN), (8, 2, Ctx.REL_WCID), (9, 0, Undo.REL_UBYTE),
+   (10, 8, B2Msg.REL_B2W), (10, 9, B2Msg.REL_B2B), (11, 3, B2s.REL_B2D), (11, 4, B2s.REL_B2D), (11, 5, B2s.REL_B2D),
+   (11, 6, B2s.REL_B2D), (11, 7, B2s.REL_B2D), (11, 8, B2s.REL_B2D), (11, 9, B2s.REL_B2D), (11, 10, B2s.REL_B2D)]
 
 def yieldOK : Bool :=
-  (List.range 9).all fun i => (List.range (hashSys.comp i).lookups.length).all fun k =>
+  (List.range 12).all fun i => (List.range (hashSys.comp i).lookups.length).all fun k =>
     isUse i k || yieldTable.contains (i, k, relAt i k)
 
 theorem yieldOK_true : yieldOK = true := by decide
 
-theorem yield_table : ∀ i < 9, ∀ k < (hashSys.comp i).lookups.length, isUse i k = false →
+theorem yield_table : ∀ i < 12, ∀ k < (hashSys.comp i).lookups.length, isUse i k = false →
     (i, k, relAt i k) ∈ yieldTable := by
   intro i hi k hk hu
   have h := yieldOK_true
@@ -60,7 +66,7 @@ theorem yield_table : ∀ i < 9, ∀ k < (hashSys.comp i).lookups.length, isUse 
 section System
 
 variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ}
-  (hL : ∀ i < 9, (inst i).logSize = L) (hL24 : L ≤ 24)
+  (hL : ∀ i < 12, (inst i).logSize = L) (hL24 : L ≤ 24)
   (hsat : hashSys.SatisfiedExt inst pub [])
 include hL hsat
 
@@ -92,9 +98,18 @@ theorem hash_ctx_sat : Ctx.ctx.air.Satisfied L pub (inst 7).main := by
 theorem hash_wmerkle_sat : WMerkle.wmerkle.air.Satisfied L pub (inst 8).main := by
   have := hsat.1 8 (by decide); rw [hL 8 (by decide)] at this; exact this
 
+theorem hash_undo_sat : ∀ r < 2 ^ L, ∀ c ∈ Undo.constraints, c.eval (2 ^ L) preCols pub (inst 9).main r = 0 := by
+  have := hsat.1 9 (by decide); rw [hL 9 (by decide)] at this; exact this
+
+theorem hash_b2msg_sat : ∀ r < 2 ^ L, ∀ c ∈ B2Msg.constraints, c.eval (2 ^ L) B2Msg.preCols pub (inst 10).main r = 0 := by
+  have := hsat.1 10 (by decide); rw [hL 10 (by decide)] at this; exact this
+
+theorem hash_b2s_sat : ∀ r < 2 ^ L, ∀ c ∈ B2s.constraints, c.eval (2 ^ L) B2s.preCols pub (inst 11).main r = 0 := by
+  have := hsat.1 11 (by decide); rw [hL 11 (by decide)] at this; exact this
+
 omit hsat in
 theorem mem_sites {i r k : ℕ} : ((i, r, k) : Site) ∈ sites hashSys inst ↔
-    i < 9 ∧ r < 2 ^ L ∧ k < (hashSys.comp i).lookups.length := by
+    i < 12 ∧ r < 2 ^ L ∧ k < (hashSys.comp i).lookups.length := by
   simp only [sites, List.mem_flatMap, List.mem_range, List.mem_map, Prod.mk.injEq]
   constructor
   · rintro ⟨i', hi, r', hr', k', hk', rfl, rfl, rfl⟩
@@ -103,19 +118,20 @@ theorem mem_sites {i r k : ℕ} : ((i, r, k) : Site) ∈ sites hashSys inst ↔
     exact ⟨i, hi, r, by rw [hL i hi]; exact hr', k, hk', rfl, rfl, rfl⟩
 
 omit hsat in
-/-- 77 lookup sites per row: bytes 1, fields 34, messages 4, SHA 6, txid tree 11, tables 2, walker 5,
-context 11, witness tree 3. -/
-theorem hash_sites_len : (sites hashSys inst).length = 77 * 2 ^ L := by
+/-- 99 lookup sites per row: bytes 1, fields 34, messages 4, SHA 6, txid tree 11, tables 2, walker 5,
+context 11, witness tree 3, undo bytes 1, Blake2s words 10, Blake2s 11. -/
+theorem hash_sites_len : (sites hashSys inst).length = 99 * 2 ^ L := by
   simp [sites, hashSys, hL 0 (by decide), hL 1 (by decide), hL 2 (by decide), hL 3 (by decide), hL 4 (by decide),
-    hL 5 (by decide), hL 6 (by decide), hL 7 (by decide), hL 8 (by decide),
+    hL 5 (by decide), hL 6 (by decide), hL 7 (by decide), hL 8 (by decide), hL 9 (by decide), hL 10 (by decide),
+    hL 11 (by decide),
     List.length_flatMap, bytes, Fields.fields, Fields.lookups, Fields.chkLookups, Msg.msg, Msg.lookups, Sha.sha,
     Sha.lookups, Merkle.merkle, Merkle.lookups, Tables.tables, Walk.walk, Walk.lookups, Ctx.ctx, Ctx.lookups,
-    WMerkle.wmerkle, WMerkle.lookups, List.sum_range_succ]
+    WMerkle.wmerkle, WMerkle.lookups, Undo.undo, B2Msg.b2msg, B2Msg.lookups, B2s.b2s, B2s.lookups, List.sum_range_succ]
   ring
 
 omit hL hsat in
-theorem hash_rows_lt_P (hL24 : L ≤ 24) : 77 * 2 ^ L < P :=
-  lt_of_le_of_lt (Nat.mul_le_mul_left 77 (Nat.pow_le_pow_right (by norm_num) hL24)) (by unfold P; norm_num)
+theorem hash_rows_lt_P (hL24 : L ≤ 24) : 99 * 2 ^ L < P :=
+  lt_of_le_of_lt (Nat.mul_le_mul_left 99 (Nat.pow_le_pow_right (by norm_num) hL24)) (by unfold P; norm_num)
 
 /-- SHA's word and length uses have multiplicity `−1` or `0`. -/
 theorem sha_use_mult {r : ℕ} (hr : r < 2 ^ L) {kk : ℕ} (hk : kk < 2) :
@@ -302,6 +318,51 @@ theorem use_mult : ∀ s ∈ sites hashSys inst, isUse s.1 s.2.2 = true →
         | exact neg01 (mul01 fst hc)
         | exact neg01 (mul01 lt hc)
   · simp [isUse] at hu
+  · simp [isUse] at hu
+  · -- Blake2s message words: byte reads `−A·(1 − STR)`, `−A·STR`
+    have hk8 : k < 8 := by simpa [isUse] using hu
+    have bs : ∀ c ∈ B2Msg.boolCols, (inst 10).main c r = 0 ∨ (inst 10).main c r = 1 := by
+      intro c hc
+      have hm : StarkedAir.Sha256.boolC (StarkedAir.Sha256.col c) ∈ B2Msg.b2msg.air.constraints := by
+        have : StarkedAir.Sha256.boolC (StarkedAir.Sha256.col c) ∈ B2Msg.boolCols.map (fun x => StarkedAir.Sha256.boolC (B2Msg.k x)) :=
+          List.mem_map.mpr ⟨c, hc, rfl⟩
+        simp only [B2Msg.b2msg, B2Msg.constraints, List.mem_append]
+        tauto
+      exact air_bool (hash_b2msg_sat hL hsat) hm hr
+    have hstr := bs B2Msg.STR (by simp [B2Msg.boolCols])
+    have ev : ∀ kk, siteMult hashSys inst pub (10, r, kk) =
+        ((B2Msg.lookups.getD kk ⟨0, .const 0, []⟩).mult.eval (2 ^ L) B2Msg.preCols pub (inst 10).main r) := by
+      intro kk; simp only [siteMult, siteEval, siteLookup, hashSys, hL 10 (by decide)]; rfl
+    rw [ev]
+    have om01 : ∀ {x : F}, (x = 0 ∨ x = 1) → (1 - x = 0 ∨ 1 - x = 1) := by
+      intro x h; rcases h with h | h <;> simp [h]
+    interval_cases k <;>
+      simp only [B2Msg.lookups, List.range_succ, List.range_zero, List.nil_append, List.map_cons, List.map_nil,
+        List.cons_append, List.nil_append, List.getD_cons_zero, List.getD_cons_succ, Expr.eval, B2Msg.k, B2Msg.om,
+        B2Msg.one, StarkedAir.Sha256.eval_col, StarkedAir.Sha256.eval_cst, wrap_zero hr, Nat.cast_one] <;>
+      first
+        | exact neg01 (mul01 (bs _ (by simp [B2Msg.boolCols, B2Msg.A])) (om01 hstr))
+        | exact neg01 (mul01 (bs _ (by simp [B2Msg.boolCols, B2Msg.A])) hstr)
+  · -- Blake2s: `−USEW·LT16`, `−OUTP·LT16`, `−USEW·R0`
+    have hk3 : k < 3 := by simpa [isUse] using hu
+    have bs : ∀ c ∈ [B2s.MU0, B2s.MU1, B2s.MU2], (inst 11).main c r = 0 ∨ (inst 11).main c r = 1 := by
+      intro c hc
+      have hm : StarkedAir.Sha256.boolC (StarkedAir.Sha256.col c) ∈ B2s.b2s.air.constraints := by
+        have h1 : StarkedAir.Sha256.boolC (StarkedAir.Sha256.col c) ∈ B2s.flagC := by
+          simp only [B2s.flagC, List.mem_append, List.mem_map]
+          left; left; refine ⟨c, ?_, rfl⟩
+          simp only [List.mem_cons, List.not_mem_nil, or_false] at hc ⊢; tauto
+        simp only [B2s.b2s, B2s.constraints, List.mem_append]
+        tauto
+      exact air_bool (hash_b2s_sat hL hsat) hm hr
+    interval_cases k <;>
+      simp only [siteMult, siteEval, siteLookup, hashSys, hL 11 (by decide), B2s.b2s, B2s.lookups,
+        show (11 : ℕ) ≠ 0 by decide, show (11 : ℕ) ≠ 1 by decide, show (11 : ℕ) ≠ 2 by decide, show (11 : ℕ) ≠ 3 by decide,
+        show (11 : ℕ) ≠ 4 by decide, show (11 : ℕ) ≠ 5 by decide, show (11 : ℕ) ≠ 6 by decide, show (11 : ℕ) ≠ 7 by decide,
+        show (11 : ℕ) ≠ 8 by decide, show (11 : ℕ) ≠ 9 by decide, show (11 : ℕ) ≠ 10 by decide, if_false, if_true,
+        List.getD_cons_zero, List.getD_cons_succ, List.cons_append, Expr.eval, B2s.k, StarkedAir.Sha256.eval_col,
+        wrap_zero hr] <;>
+      exact neg01 (bs _ (by simp))
 
 /-- **A use is matched by a yield.** A use site with multiplicity `−1` has a yield site (not a use) with
 nonzero multiplicity, the same relation and the same tuple. -/
@@ -330,8 +391,9 @@ theorem yield_of {i r k : ℕ} (hs : ((i, r, k) : Site) ∈ sites hashSys inst) 
 omit hL hsat in
 theorem rels : REL_BYTE = 3 ∧ Fields.REL_TX = 4 ∧ Msg.REL_MSGW = 5 ∧ Msg.REL_MLEN = 6 ∧ Sha.REL_DIGEST = 7 ∧
     Sha.REL_NODE = 8 ∧ Tables.REL_R8 = 9 ∧ Tables.REL_OPC = 10 ∧ Fields.REL_SCRIPT = 11 ∧ Fields.REL_TOT = 12 ∧
-    Fields.REL_CTX = 13 ∧ Fields.REL_COMMIT = 14 ∧ Walk.REL_SIGOPS = 15 ∧ Ctx.REL_WCID = 16 := by
-  refine ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
+    Fields.REL_CTX = 13 ∧ Fields.REL_COMMIT = 14 ∧ Walk.REL_SIGOPS = 15 ∧ Ctx.REL_WCID = 16 ∧
+    Undo.REL_UBYTE = 17 ∧ B2Msg.REL_B2W = 18 ∧ B2Msg.REL_B2B = 19 ∧ B2s.REL_B2D = 20 := by
+  refine ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
 
 omit hL hsat in
 theorem yt (i k R : ℕ) : (i, k, R) ∈ yieldTable ↔
@@ -339,10 +401,13 @@ theorem yt (i k R : ℕ) : (i, k, R) ∈ yieldTable ↔
     (i = 1 ∧ k = 33 ∧ R = 14) ∨ (i = 2 ∧ k = 2 ∧ R = 5) ∨ (i = 2 ∧ k = 3 ∧ R = 6) ∨ (i = 3 ∧ k = 2 ∧ R = 7) ∨
     (i = 4 ∧ k = 0 ∧ R = 8) ∨ (i = 4 ∧ k = 1 ∧ R = 6) ∨ (i = 5 ∧ k = 0 ∧ R = 9) ∨ (i = 5 ∧ k = 1 ∧ R = 10) ∨
     (i = 6 ∧ k = 4 ∧ R = 15) ∨ (i = 7 ∧ k = 6 ∧ R = 13) ∨ (i = 7 ∧ k = 7 ∧ R = 7) ∨ (i = 7 ∧ k = 8 ∧ R = 7) ∨
-    (i = 8 ∧ k = 0 ∧ R = 8) ∨ (i = 8 ∧ k = 1 ∧ R = 6) ∨ (i = 8 ∧ k = 2 ∧ R = 16) := by
-  obtain ⟨r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, r13, r14⟩ := rels
-  simp only [yieldTable, r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, r13, r14, List.mem_cons, Prod.mk.injEq,
-    List.not_mem_nil, or_false]
+    (i = 8 ∧ k = 0 ∧ R = 8) ∨ (i = 8 ∧ k = 1 ∧ R = 6) ∨ (i = 8 ∧ k = 2 ∧ R = 16) ∨ (i = 9 ∧ k = 0 ∧ R = 17) ∨
+    (i = 10 ∧ k = 8 ∧ R = 18) ∨ (i = 10 ∧ k = 9 ∧ R = 19) ∨ (i = 11 ∧ k = 3 ∧ R = 20) ∨ (i = 11 ∧ k = 4 ∧ R = 20) ∨
+    (i = 11 ∧ k = 5 ∧ R = 20) ∨ (i = 11 ∧ k = 6 ∧ R = 20) ∨ (i = 11 ∧ k = 7 ∧ R = 20) ∨ (i = 11 ∧ k = 8 ∧ R = 20) ∨
+    (i = 11 ∧ k = 9 ∧ R = 20) ∨ (i = 11 ∧ k = 10 ∧ R = 20) := by
+  obtain ⟨r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, r13, r14, r15, r16, r17, r18⟩ := rels
+  simp only [yieldTable, r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, r13, r14, r15, r16, r17, r18, List.mem_cons,
+    Prod.mk.injEq, List.not_mem_nil, or_false]
 
 /-- **Linking a use to its yield, by relation.** For a use site `s0` with multiplicity `−1` and relation
 `R`, a yield site `(i, r', k)` with nonzero multiplicity and the same tuple, listed under `R`. -/
@@ -356,7 +421,7 @@ theorem link (hL24 : L ≤ 24) {i0 r0 k0 : ℕ} (hs0 : ((i0, r0, k0) : Site) ∈
   rw [← hsr]; exact yield_of hL hs hnu
 
 omit hsat in
-theorem site_mem {i r k : ℕ} (hi : i < 9) (hr : r < 2 ^ L) (hk : k < (hashSys.comp i).lookups.length) :
+theorem site_mem {i r k : ℕ} (hi : i < 12) (hr : r < 2 ^ L) (hk : k < (hashSys.comp i).lookups.length) :
     ((i, r, k) : Site) ∈ sites hashSys inst := (mem_sites hL).mpr ⟨hi, hr, hk⟩
 
 /-- **SHA's uses are message (or tree) yields.** A SHA word use (`kk = 0`) or length use (`kk = 1`) with

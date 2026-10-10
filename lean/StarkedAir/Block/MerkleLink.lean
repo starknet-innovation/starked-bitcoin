@@ -39,7 +39,7 @@ theorem npad_eq : Sha.npadBlock = HashSpec.npadBlk := by
 section System
 
 variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ}
-  (hL : ∀ i < 9, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub [])
+  (hL : ∀ i < 12, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub [])
 include hL hsat
 
 /-- The digest tuple of a second-hash period: its id and the limbs of its output state's words. -/

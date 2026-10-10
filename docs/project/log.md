@@ -21,6 +21,32 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-10-10 (session 6) — M3a.5 BLK-CHECKS done and proven (`block_sound`)
+Who: Claude (agent, Opus 5.5), on the owner's "go forward, finish M3"
+Roadmap: BLOCK-AIR → M3a.5 done (M3a.6 next); BLOCK-DATA, UTXO, CATCHUP todo
+Done:
+- AIRs and witnesses for the checks: fields extension, `block_tables` (8-bit range and opcode
+  table), `block_walk`, `block_ctx`, `block_wmerkle`; the nine-component system proves and verifies
+  on small samples and satisfies and balances on large ones (b3969e6, cb4a0e6).
+- Lean: per-transaction checks (`tx_values`, `tx_prevouts`, `tx_final`), the walker's total, the
+  context facts, the witness tree (`wmerkle_sound`), totals, script multiset, commitment selection,
+  coinbase structure, and the assembly **`block_sound`** (`Block/BlockSound.lean`): a satisfied system
+  with `BlockPubs c pub` gives `checkBlock c raw = none`, given no repeated prevout (D-031).
+- Soundness fix found by the proof: `prevMtp` was public as one value with private 16-bit limbs, so
+  limbs for `prevMtp + P` also passed. Now two public limbs (`pub 3`, new `pub 7`); D-035 amended.
+- D-035 amended: the range table is 8-bit (one shared trace size).
+- `tx_final` takes `cutoff < 2^32` (was `2^31`), so header times need no hypothesis.
+Evidence:
+- `lake build`: green, 8809 jobs; no `sorry`, `native_decide` or `bv_decide`.
+- `#print axioms block_sound` (and `merkle_sound`, `wmerkle_sound`, `fields_sound_gen`):
+  `propext, Classical.choice, Quot.sound`.
+- JSON drift: all 22 exported AIRs equal the Lean export.
+- `zig build test`: see the commit that merges this work.
+Problems / lessons:
+- A single public value split into private limbs is not bound modulo P: either bound the limbs
+  (range) or make the limbs public.
+- `Setup` (a structure of the parsed block and grammar facts) kept the final assembly short.
+Next: M3a.6 BLK-COMMIT design (canonical encoding with spent-output slots, Blake2s commitment).
 
 ## 2026-10-09 (session 5) — M3a.5 design pass
 Who: Claude (agent, Opus 5.5), on the owner's request

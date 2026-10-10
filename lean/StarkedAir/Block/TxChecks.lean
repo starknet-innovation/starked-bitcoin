@@ -309,7 +309,7 @@ set_option maxHeartbeats 4000000 in
 are `CLO`, `CHI`. -/
 theorem tx_final {ρ : ℕ} {tx : Spec.Block.Tx} (hat : TxAt M R m ρ tx) (hρm : ρ < m) (hl : M K_LOCK ρ = 1)
     {height cutoff : ℕ} (hh : pub 2 = (height : F)) (hh23 : height < 2 ^ 23)
-    (hco : M CLO ρ = ((cutoff % 65536 : ℕ) : F) ∧ M CHI ρ = ((cutoff / 65536 : ℕ) : F)) (hco31 : cutoff < 2 ^ 31) :
+    (hco : M CLO ρ = ((cutoff % 65536 : ℕ) : F) ∧ M CHI ρ = ((cutoff / 65536 : ℕ) : F)) (hco32 : cutoff < 2 ^ 32) :
     Spec.Block.isFinal tx height cutoff = true := by
   obtain ⟨rh, hrh, ht, hnt, hvl, h1, hins, hno, hnv, houts, hwit, hlt, hseg, hle, hlk⟩ :=
     tx_rows' hsat R hcs hmn hpad hfit hn hat hρm
@@ -423,7 +423,7 @@ theorem tx_final {ρ : ℕ} {tx : Spec.Block.Tx} (hat : TxAt M R m ρ tx) (hρm 
         have y7 := rg' 7 (by norm_num); have y8 := rg' 8 (by norm_num); have y9 := rg' 9 (by norm_num)
         have y10 := rg' 10 (by norm_num); have y11 := rg' 11 (by norm_num)
         have co1 : cutoff % 65536 < 65536 := Nat.mod_lt _ (by norm_num)
-        have co2 : cutoff / 65536 < 32768 := by omega
+        have co2 : cutoff / 65536 < 65536 := by omega
         rw [hco.1] at c8; rw [hco.2] at c9
         have n6 : (M (RG 4) ρ).val + 256 * (M (RG 5) ρ).val + 25856 =
             ((M (BY 0) ρ).val + 256 * (M (BY 1) ρ).val) + 65536 * (M B2 ρ).val := by

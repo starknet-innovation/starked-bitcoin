@@ -15,12 +15,12 @@ open StarkedAir.Sha256 (pre cst)
 
 /-- The script relation's sites: the fields' yield (lookup 30) and the walker's use (lookup 0). -/
 def scriptOK : Bool :=
-  (List.range 9).all fun i => (List.range (hashSys.comp i).lookups.length).all fun k =>
+  (List.range 12).all fun i => (List.range (hashSys.comp i).lookups.length).all fun k =>
     relAt i k != 11 || (i == 1 && k == 30) || (i == 6 && k == 0)
 
 theorem scriptOK_true : scriptOK = true := by decide
 
-theorem script_rel {i k : ℕ} (hi : i < 9) (hk : k < (hashSys.comp i).lookups.length) (h : relAt i k = 11) :
+theorem script_rel {i k : ℕ} (hi : i < 12) (hk : k < (hashSys.comp i).lookups.length) (h : relAt i k = 11) :
     (i = 1 ∧ k = 30) ∨ (i = 6 ∧ k = 0) := by
   have hh := scriptOK_true
   simp only [scriptOK, List.all_eq_true, List.mem_range] at hh
@@ -51,18 +51,18 @@ theorem eq_single_of_nodup {l : List ℕ} {a : ℕ} (hn : l.Nodup) (ha : a ∈ l
 section System
 
 variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ}
-  (hL : ∀ i < 9, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : L ≤ 24)
+  (hL : ∀ i < 12, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : L ≤ 24)
 include hL hsat hL24
 
 /-- **Sites of one lookup.** Filtering the sites by a predicate true only at lookup `k0` of component `i0`
 leaves that lookup's rows. -/
-theorem filter_sites {P : Site → Prop} [DecidablePred P] {i0 k0 : ℕ} (hi0 : i0 < 9)
-    (hP : ∀ i r k, i < 9 → r < 2 ^ L → k < (hashSys.comp i).lookups.length → P (i, r, k) → i = i0 ∧ k = k0)
+theorem filter_sites {P : Site → Prop} [DecidablePred P] {i0 k0 : ℕ} (hi0 : i0 < 12)
+    (hP : ∀ i r k, i < 12 → r < 2 ^ L → k < (hashSys.comp i).lookups.length → P (i, r, k) → i = i0 ∧ k = k0)
     (hk0 : k0 < (hashSys.comp i0).lookups.length) :
     (sites hashSys inst).filter P = ((List.range (2 ^ L)).filter fun r => P (i0, r, k0)).map fun r => (i0, r, k0) := by
   unfold sites
-  rw [show hashSys.m = 9 from rfl, List.filter_flatMap]
-  have inner : ∀ i < 9, ((List.range (2 ^ (inst i).logSize)).flatMap fun r =>
+  rw [show hashSys.m = 12 from rfl, List.filter_flatMap]
+  have inner : ∀ i < 12, ((List.range (2 ^ (inst i).logSize)).flatMap fun r =>
       (List.range (hashSys.comp i).lookups.length).map fun k => ((i, r, k) : Site)).filter P =
       if i = i0 then ((List.range (2 ^ L)).filter fun r => P (i0, r, k0)).map fun r => (i0, r, k0) else [] := by
     intro i hi
@@ -138,7 +138,7 @@ theorem script_sum (g : List F → ℕ) :
     have := natCast_inj_of_lt (a := 2) (b := 0) (by unfold P; norm_num) (by unfold P; norm_num) (by simpa using this)
     omega
   -- the relation's sites
-  have rel11 : ∀ i r k, i < 9 → r < 2 ^ L → k < (hashSys.comp i).lookups.length →
+  have rel11 : ∀ i r k, i < 12 → r < 2 ^ L → k < (hashSys.comp i).lookups.length →
       siteRel hashSys (i, r, k) = 11 → (i = 1 ∧ k = 30) ∨ (i = 6 ∧ k = 0) := fun i r k hi _ hk h =>
     script_rel hi hk h
   have hm : ∀ s ∈ sites hashSys inst, siteRel hashSys s = 11 →

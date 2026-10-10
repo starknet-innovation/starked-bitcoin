@@ -1,6 +1,7 @@
-//! The block system (M3a.5, D-035): every component of the block proof, at one log size, in the
-//! order the Lean statement uses: bytes, fields, messages, SHA, txid tree, tables, sigop walker,
-//! context, witness tree. `build` computes all witnesses for a raw block in its context.
+//! The block system (M3a.5–6, D-035, D-038): every component of the block proof, at one log size, in
+//! the order the Lean statement uses: bytes, fields, messages, SHA, txid tree, tables, sigop walker,
+//! context, witness tree, undo bytes, Blake2s message words, Blake2s. `build` computes all witnesses
+//! for a raw block (and its undo stream) in its context.
 
 const std = @import("std");
 const M31 = @import("stwo_core").fields.m31.M31;
@@ -16,16 +17,21 @@ const checks = @import("checks.zig");
 const walk = @import("walk.zig");
 const ctxw = @import("ctx.zig");
 const wmerkle = @import("wmerkle.zig");
+const commit = @import("commit.zig");
 
-pub const N_COMP = 9;
-pub const jsons = [N_COMP][]const u8{ bytes.json, fields.json, msg.json, bsha.json, merkle.json, checks.tables_json, walk.json, ctxw.json, wmerkle.json };
-pub const names = [N_COMP][]const u8{ "bytes", "fields", "msg", "sha", "merkle", "tables", "walk", "ctx", "wmerkle" };
-/// Public inputs each component's AIR references (a prefix of the block's seven).
-pub const n_pubs = [N_COMP]usize{ 1, 7, 0, 0, 2, 0, 0, 7, 2 };
+pub const N_COMP = 12;
+pub const jsons = [N_COMP][]const u8{ bytes.json, fields.json, msg.json, bsha.json, merkle.json, checks.tables_json, walk.json, ctxw.json, wmerkle.json, commit.undo_json, commit.msg_json, commit.b2s_json };
+pub const names = [N_COMP][]const u8{ "bytes", "fields", "msg", "sha", "merkle", "tables", "walk", "ctx", "wmerkle", "undo", "b2msg", "b2s" };
+/// Public inputs each component's AIR references (a prefix of the block's 25: the eight checks inputs,
+/// the undo length, the commitment's 16 limbs).
+pub const N_PUB = 25;
+pub const n_pubs = [N_COMP]usize{ 1, 7, 0, 0, 2, 0, 0, 8, 2, 9, 9, 25 };
 
 pub const Built = struct {
     log_size: u32,
-    pubs: [7]M31,
+    pubs: [N_PUB]M31,
+    /// The block commitment `blake2s(blake2s(raw) ++ blake2s(undo))` (D-038).
+    commitment_words: [8]u32,
     mains: [N_COMP][][]M31,
     ntx: u32,
     sigops: u32,
@@ -41,7 +47,12 @@ pub fn parseAirs(a: std.mem.Allocator) ![N_COMP]ir.Air {
     return out;
 }
 
+/// `build` with an empty undo record (`undo = 0x01`).
 pub fn build(a: std.mem.Allocator, raw: []const u8, ctx: checks.Ctx) !Built {
+    return buildU(a, raw, &[_]u8{1}, ctx);
+}
+
+pub fn buildU(a: std.mem.Allocator, raw: []const u8, undo: []const u8, ctx: checks.Ctx) !Built {
     const rows = try fields.tokenize(a, raw);
     const ntx: u32 = @intCast(rows[0].val);
     const txs = try msg.txRanges(a, rows);
@@ -58,7 +69,7 @@ pub fn build(a: std.mem.Allocator, raw: []const u8, ctx: checks.Ctx) !Built {
         scripts_len += r.val;
     };
     const comps_est = pl.compressions.len + 3 * (wnodes.len + 1);
-    const need = @max(@max(msg.rowsNeeded(msgs), raw.len + 1, rows.len + 1, (comps_est + 1) * shaw.PERIOD), @max(nodes.len + 2, wnodes.len + 2, scripts_len + 1, 256));
+    const need = @max(@max(msg.rowsNeeded(msgs), raw.len + 1, rows.len + 1, (comps_est + 1) * shaw.PERIOD), @max(nodes.len + 2, wnodes.len + 2, scripts_len + 1, 256), @max(undo.len + 1, commit.rowsNeeded(raw.len, undo.len)));
     const log_size: u32 = std.math.log2_int_ceil(usize, need);
 
     const fm = try fields.generate(a, log_size, raw, rows);
@@ -89,6 +100,10 @@ pub fn build(a: std.mem.Allocator, raw: []const u8, ctx: checks.Ctx) !Built {
     try reads.appendSlice(a, chk.reads);
     try reads.appendSlice(a, wk.reads);
     try reads.appendSlice(a, cx.reads);
+    var undo_reads = std.ArrayList(u32).empty;
+    const b2m = try commit.msgColumns(a, log_size, raw, undo, &reads, &undo_reads);
+    const um = try commit.undoColumns(a, log_size, undo, undo_reads.items);
+    const b2sm = try commit.b2sColumns(a, log_size, raw, undo);
     const bm = try bytes.generate(a, log_size, raw, reads.items);
     var ranges = std.ArrayList(u32).empty;
     try ranges.appendSlice(a, chk.ranges);
@@ -96,10 +111,16 @@ pub fn build(a: std.mem.Allocator, raw: []const u8, ctx: checks.Ctx) !Built {
     try ranges.appendSlice(a, cx.ranges);
     const tm = try checks.tables(a, log_size, ranges.items, wk.opcodes);
 
+    const cw = try commit.commitment(a, raw, undo);
+    var pubs: [N_PUB]M31 = undefined;
+    @memcpy(pubs[0..8], &checks.pubs(raw, ntx, ctx));
+    pubs[8] = M31.fromCanonical(@intCast(undo.len));
+    @memcpy(pubs[9..25], &commit.pubLimbs(cw));
     return .{
         .log_size = log_size,
-        .pubs = checks.pubs(raw, ntx, ctx),
-        .mains = .{ bm, fm, mm, sm, km, tm, wk.cols, cx.cols, wm },
+        .pubs = pubs,
+        .commitment_words = cw,
+        .mains = .{ bm, fm, mm, sm, km, tm, wk.cols, cx.cols, wm, um, b2m, b2sm },
         .ntx = ntx,
         .sigops = wk.sigops,
         .weight = 4 * @as(u64, raw.len) - 3 * @as(u64, chk.w),
@@ -190,11 +211,19 @@ test "block system: small samples prove and verify with all nine components" {
 }
 
 test "block system: large samples satisfy every component (run with ReleaseFast)" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const a = arena.allocator();
-    const airs = try parseAirs(a);
+    var air_arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer air_arena.deinit();
+    const airs = try parseAirs(air_arena.allocator());
     for (checks.samples_large) |s| {
+        // About 900 columns at one shared size: a block above ~3.5 MB needs 2^23 rows and more memory
+        // than a 24 GB machine has for the in-memory check (proving needs lifting or a bigger machine).
+        if (s.raw.len > 3_500_000) {
+            std.debug.print("height {d}: {d} bytes, skipped (in-memory check exceeds 24 GB)\n", .{ s.ctx.height, s.raw.len });
+            continue;
+        }
+        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer arena.deinit();
+        const a = arena.allocator();
         const b = try build(a, s.raw, s.ctx);
         if (try firstViolation(a, &airs, &b)) |v| {
             std.debug.print("height {d}: {s} row {d} violates constraint {d}\n", .{ s.ctx.height, names[v.comp], v.row, v.constraint });

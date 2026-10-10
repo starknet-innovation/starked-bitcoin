@@ -262,14 +262,14 @@ the samples and the 9 mutations.
 **Public inputs.** These are added after `pub 0 = len` and `pub 1 = nTx`:
 
 - `pub 2 = height`
-- `pub 3 = prevMtp`
+- `pub 3 = prevMtp` (amended: `pub 3 = prevMtp mod 2^16` and `pub 7 = prevMtp div 2^16`; see below)
 - `pub 4..6`: the activation bits `[height ≥ BIP34]`, `[height ≥ CSV]` and `[height ≥ SEGWIT]`
 
 The verifier and glue compute all of them from the header chain, as they already do for the
 height. Making the bits public avoids comparisons on public values inside the AIR. The statement
 takes `pubs = blockPubs ctx len nTx` as a hypothesis.
 
-**New shared gadget: a 16-bit range table.** A fixed component with `2^16` rows: a preprocessed value
+**New shared gadget: a 16-bit range table** (amended: built as an 8-bit table; see below). A fixed component with `2^16` rows: a preprocessed value
 column, a multiplicity column and relation `REL_R16`. A value `x` is in `[0, B]` when `x` and `B − x`
 are both in the table, or are split into in-table limbs. Bit columns, as in the fields component,
 would cost about 30 columns per comparison; this costs one or two lookup sites.
@@ -426,6 +426,72 @@ uniform row lemma.
   targets a simple spec.
 - The time-based thresholds (`prevMtp`, header time) are kept below `P` by hypothesis. Past about
   2038 the comparison must move to limbs.
+
+### M3a.5 as built (2026-10-10)
+
+**Done and proven.** `block_sound` (`Block/BlockSound.lean`) holds with standard axioms only; the
+proof map is in [airs/block.md](../airs/block.md#the-checks-block_tables-block_walk-block_ctx-block_wmerkle-m3a5-blk-checks-done-and-proven).
+Changes from the design (D-035 amendments):
+
+- **8-bit range table.** The nine components share one trace size; a `2^16` table would set
+  `L ≥ 16` for every block. Values are split into bytes (`block_tables`, `R8`).
+- **Eight public inputs.** `prevMtp` is public as two 16-bit limbs (`pub 3` low, `pub 7` high). With
+  private limbs and one public value, `lo + 65536·hi ≡ prevMtp` also admitted `prevMtp + P`, a loose
+  cutoff. The side conditions are `height < 2^23` and `prevMtp < 2^32`; the cutoff and lock times
+  are compared in 16-bit limbs, so the 2038 limit in the risks below no longer applies.
+- **Statement.** With `BlockPubs c pub` (`pub 2..7`), `8 ≤ L ≤ 24`:
+  `∃ b, parseBlock raw = some b ∧ ((∀ t ∈ b.txs, nodupBy (t.vin.map (·.prevout))) → checkBlock c raw = none)`.
+  `pub 0 = len` and `pub 1 = nTx` are fixed by the trace.
+- **Relations.** As built: `R8`, `OPC`, `SCRIPT`, `TOT (W, NSEG, HASC)`, `CTX (cutoff limbs)`,
+  `COMMIT (start, len)`, `SIGOPS`, `WCID`; the commitment output's position travels in `COMMIT`, not
+  `TOT`.
+
+### M3a.6 `BLK-COMMIT` design (proposed 2026-10-10, D-038)
+
+**What it commits.** The block proof outputs, as public inputs, an 8-word Blake2s-256 commitment
+
+    C = blake2s(blake2s(raw) ++ blake2s(undo))
+
+- `raw` is the block's bytes (the byte table).
+- `undo` is a version byte `0x01`, then the prover's spent-output records (D-029): one per input of
+  every transaction after the coinbase, in block order. Each record is Core's `TxOutSer` without the outpoint:
+  - `code = height·2 + coinbase` (4 bytes, LE);
+  - the amount (8 bytes, LE);
+  - the script, with its CompactSize length.
+
+M3a hashes `undo` without checking it (D-029); M3b proves that the records equal the coins it removes.
+Records are self-delimiting and follow input order, so M3b reads them alongside the parsed inputs.
+Each record plus the input's outpoint is exactly `TxOutSer`, which assumeUTXO's `hash_serialized` hashes
+(D-037).
+
+**Why two inner hashes.**
+- `blake2s(raw)` lets a module open the raw block with Blake2s alone, without redoing SHA256d and the
+  Merkle tree.
+- `blake2s(undo)` is independent of the block bytes, so a module that needs only the spent outputs
+  opens only them.
+- The outer hash is one compression (64 bytes).
+
+**Components** (one shared trace size):
+- **`undo` byte table:** like `block_bytes`, a `(pos, byte)` table with a range check. Its length is
+  public input 8.
+- **`b2msg`:** a byte walker for the two streams and the outer message. It reads bytes by lookup,
+  packs little-endian 32-bit words as 16-bit limbs, zero-pads the last block, and yields
+  `b2word(stream, block, k, lo, hi)`.
+- **`b2s`:** the proven Blake2s compression, 88 rows per block. It reads its 16 message words and
+  chains `h` from the previous block of the same stream. The counter `t` and final flag `f` are
+  derived from the stream's length. The outer hash's message is the two inner digests. Its output
+  words are public inputs 9–16.
+
+**Lean target.** `commit_sound`: in a satisfied system, `pub 9..16` equals
+`blake2s(blake2s(raw) ++ blake2s(undo))`, as words, with `raw` the block's bytes and `undo` the undo
+table's bytes. It extends `block_sound`'s statement.
+
+**Stages.**
+1. `Spec`: the commitment `blockCommit raw undo`, and a pure-Zig cross-check against `std.crypto`
+   Blake2s.
+2. AIRs and witnesses (`undo`, `b2msg`, `b2s` as a block component), with tests.
+3. Lean: the message walker reads the stream (`b2msg_sound`); chained compressions compute
+   `hashBlocks` (`chain_sound`, using `compress_sound_air`); the outer hash; `commit_sound`.
 
 ## Cost (rough, to be measured)
 
