@@ -123,3 +123,5 @@ import StarkedAir.Circuit.Statement
 import StarkedAir.Circuit.LeafHash
 import StarkedAir.Circuit.Deep
 import StarkedAir.Circuit.Merkle
+import StarkedAir.Circuit.Channel
+import StarkedAir.Circuit.Transcript

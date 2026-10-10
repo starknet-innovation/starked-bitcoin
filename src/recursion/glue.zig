@@ -131,7 +131,9 @@ pub fn parse(a: std.mem.Allocator, json: []const u8) !Program {
             .{ .unused = try num(f[1]) }
         else
             return error.BadGlue;
-        for (f[1..]) |x| if (x == .integer) {
+        // Register fields only: a constant's coordinates are values, not registers.
+        const reg_fields = if (op.* == .@"const") f[1..2] else f[1..];
+        for (reg_fields) |x| if (x == .integer) {
             max_reg = @max(max_reg, try num(x));
         };
         if (op.* == .hook) for (op.hook.outs) |o| {

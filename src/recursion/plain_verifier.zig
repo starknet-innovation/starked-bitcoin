@@ -351,6 +351,143 @@ pub const PlainStatement = struct {
     /// root check below mirror `path`/`pathCheck`, `path_check_sound`); null: stwo-zig's
     /// `verifyMerklePath`.
     merkle_node: ?*const glue.Program = null,
+    /// The channel operations as Lean programs (`Circuit/Channel.lean`); an operation without a
+    /// matching program uses stwo-zig's.
+    channel: ChannelProgs = .{},
+    /// The transcript order (`Circuit/Transcript.lean`, the `*_bound` theorems): `verifyPlain` checks
+    /// its channel events against it, in order; null: no check.
+    transcript: ?[]const []const u8 = null,
+};
+
+/// Parses a `starked-transcript-v1` event list.
+pub fn parseTranscript(a: std.mem.Allocator, json: []const u8) ![]const []const u8 {
+    const root = (try std.json.parseFromSliceLeaky(std.json.Value, a, json, .{})).object;
+    if (!std.mem.eql(u8, root.get("schema").?.string, "starked-transcript-v1")) return error.BadTranscript;
+    const items = root.get("events").?.array.items;
+    const out = try a.alloc([]const u8, items.len);
+    for (out, items) |*o, it| o.* = it.string;
+    return out;
+}
+
+/// Steps through the Lean transcript next to each channel event.
+const TranscriptCheck = struct {
+    events: ?[]const []const u8,
+    at: usize = 0,
+    fn step(self: *TranscriptCheck, name: []const u8) !void {
+        const evs = self.events orelse return;
+        if (self.at >= evs.len or !std.mem.eql(u8, evs[self.at], name)) return error.TranscriptOrder;
+        self.at += 1;
+    }
+    fn done(self: *const TranscriptCheck) !void {
+        const evs = self.events orelse return;
+        if (self.at != evs.len) return error.TranscriptOrder;
+    }
+};
+
+/// Lean channel programs (`Circuit/Channel.lean`): hook 0 binds the digest halves, then the inputs.
+pub const ChannelProgs = struct {
+    /// `mixU32sP` (`mixU32s_sound`), one per word count (8 is `mix_commitment`).
+    mix_u32s: []const *const glue.Program = &.{},
+    /// `mixQm31sP` (`mixQm31s_sound`), one per value count.
+    mix_qm31s: []const *const glue.Program = &.{},
+    /// `drawP` (`draw_sound`), `drawQm31P`, `drawPointP` (`drawPoint_sound`): right after a mix.
+    draw: ?*const glue.Program = null,
+    draw_qm31: ?*const glue.Program = null,
+    draw_point: ?*const glue.Program = null,
+    /// `powMixP` (`powMix_sound`): the digest update after the proof of work.
+    pow_mix: ?*const glue.Program = null,
+};
+
+/// stwo-zig's channel state, driven by the Lean programs where one matches (gate-identical: tested).
+const LeanChannel = struct {
+    ch: *sv.channel.Channel,
+    progs: *const ChannelProgs,
+
+    const InputHooks = struct {
+        inputs: []const Var,
+        pub fn call(self: @This(), id: u32, _: []const Var) ![]const Var {
+            return if (id == 0) self.inputs else error.UnknownHook;
+        }
+    };
+
+    fn find(list: []const *const glue.Program, n_in: usize) ?*const glue.Program {
+        for (list) |prog| if (prog.ops.len != 0 and prog.ops[0] == .hook and prog.ops[0].hook.outs.len == 2 + n_in) return prog;
+        return null;
+    }
+
+    fn run(self: LeanChannel, comptime V: type, ctx: *Context(V), prog: *const glue.Program, data: []const Var) ![]Var {
+        const ins = try ctx.scratch().alloc(Var, 2 + data.len);
+        ins[0] = self.ch.digest.low;
+        ins[1] = self.ch.digest.high;
+        @memcpy(ins[2..], data);
+        return glue.run(V, ctx, prog, &.{}, InputHooks{ .inputs = ins });
+    }
+
+    fn setDigest(self: LeanChannel, res: []const Var) void {
+        self.ch.digest = .{ .low = res[0], .high = res[1] };
+        self.ch.n_draws = 0;
+    }
+
+    fn mixU32s(self: LeanChannel, comptime V: type, ctx: *Context(V), words: []const U32Wrapper(Var)) !void {
+        const prog = find(self.progs.mix_u32s, words.len) orelse return self.ch.mixU32s(V, ctx, words);
+        const data = try ctx.scratch().alloc(Var, words.len);
+        for (data, words) |*d, w| d.* = w.get();
+        self.setDigest(try self.run(V, ctx, prog, data));
+    }
+
+    fn mixCommitment(self: LeanChannel, comptime V: type, ctx: *Context(V), root: HashValue(Var)) !void {
+        if (find(self.progs.mix_u32s, 8) == null) return self.ch.mixCommitment(V, ctx, root);
+        return self.mixU32s(V, ctx, &root.words);
+    }
+
+    fn mixQm31s(self: LeanChannel, comptime V: type, ctx: *Context(V), values: []const Var) !void {
+        const prog = find(self.progs.mix_qm31s, values.len) orelse return self.ch.mixQm31s(V, ctx, values);
+        self.setDigest(try self.run(V, ctx, prog, values));
+    }
+
+    fn drawTwoQm31s(self: LeanChannel, comptime V: type, ctx: *Context(V)) ![2]Var {
+        const prog = self.progs.draw orelse return self.ch.drawTwoQm31s(V, ctx);
+        if (self.ch.n_draws != 0) return self.ch.drawTwoQm31s(V, ctx);
+        const res = try self.run(V, ctx, prog, &.{});
+        self.ch.n_draws += 1;
+        return .{ res[0], res[1] };
+    }
+
+    fn drawQm31(self: LeanChannel, comptime V: type, ctx: *Context(V)) !Var {
+        const prog = self.progs.draw_qm31 orelse return self.ch.drawQm31(V, ctx);
+        if (self.ch.n_draws != 0) return self.ch.drawQm31(V, ctx);
+        const res = try self.run(V, ctx, prog, &.{});
+        self.ch.n_draws += 1;
+        return res[0];
+    }
+
+    fn drawPoint(self: LeanChannel, comptime V: type, ctx: *Context(V)) !Point(Var) {
+        const prog = self.progs.draw_point orelse return self.ch.drawPoint(V, ctx);
+        if (self.ch.n_draws != 0) return self.ch.drawPoint(V, ctx);
+        const res = try self.run(V, ctx, prog, &.{});
+        self.ch.n_draws += 1;
+        return .{ .x = res[0], .y = res[1] };
+    }
+
+    /// The proof-of-work check is stwo-zig's (`Channel.pow`, copied: it only enforces the grinding
+    /// bits); the digest update is the Lean program.
+    fn pow(self: LeanChannel, comptime V: type, ctx: *Context(V), n_bits: u32, nonce: Var) !void {
+        const prog = self.progs.pow_mix orelse return self.ch.pow(V, ctx, n_bits, nonce);
+        std.debug.assert(n_bits <= 30);
+        const ivalue = builder.ivalue;
+        const prefix = try ctx.constant(ivalue.qm31FromU32s(0x12345678, 0, 0, 0));
+        const bits_word = try ctx.constant(ivalue.qm31FromU32s(n_bits, 0, 0, 0));
+        const prefixed = try builder.blake.blake2sM31(V, ctx, &.{ prefix, self.ch.digest.low, self.ch.digest.high, bits_word }, 52);
+        const high_mask = try ctx.constant(ivalue.qm31FromU32s(0, 0, 1, 1));
+        const masked_nonce = try ctx.pointwiseMul(nonce, high_mask);
+        try ctx.eq(masked_nonce, ctx.zero());
+        const res = try builder.blake.blake2sM31(V, ctx, &.{ prefixed.low, prefixed.high, nonce }, 40);
+        try ctx.markAsUnused(res.high);
+        const first_word = try ctx.pointwiseMul(res.low, ctx.one());
+        const bits = try builder.extract_bits.extractBits(V, ctx, .fromPacked(&.{first_word}, 1), 31);
+        for (bits[0..n_bits]) |bit| try ctx.eq(bit.data[0], ctx.zero());
+        self.setDigest(try self.run(V, ctx, prog, &.{nonce}));
+    }
 };
 
 /// `verifyMerklePath` by replaying the Lean level program: hook 0 binds the node, the sibling, the bit.
@@ -582,12 +719,17 @@ pub fn verifyPlain(
 ) !void {
     const log_trace = config.log_trace_size;
     var channel = sv.channel.Channel.init(V, ctx);
+    const lc = LeanChannel{ .ch = &channel, .progs = &st.channel };
+    var tr = TranscriptCheck{ .events = st.transcript };
+    try tr.step("fri_config");
     try sv.fri.mixFriConfig(V, ctx, &channel, config.fri);
 
     const pre_root = try builder.blake.constantHash(V, ctx, builder.blake.hashValueFromDigest(QM31, st.preprocessed_root));
-    try channel.mixCommitment(V, ctx, pre_root);
+    try tr.step("pre");
+    try lc.mixCommitment(V, ctx, pre_root);
 
     if (st.parts.len != config.parts.len) return error.InvalidPlainProof;
+    try tr.step("stmt");
     // Statement (system proofs start with the component count); per component:
     // [log_size, digest (8 words), n_pubs], then one call per public input.
     if (st.statement) |prog| {
@@ -595,7 +737,7 @@ pub fn verifyPlain(
         for (st.parts) |part| try ins.appendSlice(ctx.scratch(), part.pubs);
         const Hooks = struct {
             ctx: *Context(V),
-            channel: *sv.channel.Channel,
+            channel: LeanChannel,
             st: *const PlainStatement,
             log: u32,
             inputs: []const Var,
@@ -623,23 +765,25 @@ pub fn verifyPlain(
             }
         };
         var next_part: usize = 0;
-        _ = try glue.run(V, ctx, prog, &.{}, Hooks{ .ctx = ctx, .channel = &channel, .st = st, .log = log_trace, .inputs = ins.items, .next_part = &next_part });
+        _ = try glue.run(V, ctx, prog, &.{}, Hooks{ .ctx = ctx, .channel = lc, .st = st, .log = log_trace, .inputs = ins.items, .next_part = &next_part });
     } else {
-        if (config.system) try channel.mixU32s(V, ctx, &.{try builder.wrappers.constU32(V, ctx, @intCast(st.parts.len))});
+        if (config.system) try lc.mixU32s(V, ctx, &.{try builder.wrappers.constU32(V, ctx, @intCast(st.parts.len))});
         for (st.parts) |part| {
             var words: [10]U32Wrapper(Var) = undefined;
             words[0] = try builder.wrappers.constU32(V, ctx, log_trace);
             for (0..8) |i| words[1 + i] = try builder.wrappers.constU32(V, ctx, std.mem.readInt(u32, part.digest[4 * i ..][0..4], .little));
             words[9] = try builder.wrappers.constU32(V, ctx, @intCast(part.pubs.len));
-            try channel.mixU32s(V, ctx, &words);
-            for (part.pubs) |pv| try channel.mixU32s(V, ctx, &.{try builder.blake.m31ToU32(V, ctx, pv)});
+            try lc.mixU32s(V, ctx, &words);
+            for (part.pubs) |pv| try lc.mixU32s(V, ctx, &.{try builder.blake.m31ToU32(V, ctx, pv)});
         }
     }
 
-    try channel.mixCommitment(V, ctx, p.trace_root);
+    try tr.step("trace");
+    try lc.mixCommitment(V, ctx, p.trace_root);
     var elements: ?[2]Var = null;
     if (config.hasLookups()) {
-        elements = try channel.drawTwoQm31s(V, ctx);
+        try tr.step("elements");
+        elements = try lc.drawTwoQm31s(V, ctx);
         var n_with: usize = 0;
         for (st.parts) |part| {
             if (part.air.lookups.len != 0) n_with += 1;
@@ -667,12 +811,17 @@ pub fn verifyPlain(
             }
             try ctx.eq(total, ctx.zero());
         }
-        try channel.mixQm31s(V, ctx, p.claimed_sums);
-        try channel.mixCommitment(V, ctx, p.interaction_root orelse return error.InvalidPlainProof);
+        try tr.step("claimed");
+        try lc.mixQm31s(V, ctx, p.claimed_sums);
+        try tr.step("inter");
+        try lc.mixCommitment(V, ctx, p.interaction_root orelse return error.InvalidPlainProof);
     }
-    const coeff = try channel.drawQm31(V, ctx);
-    try channel.mixCommitment(V, ctx, p.composition_root);
-    const oods = try channel.drawPoint(V, ctx);
+    try tr.step("coeff");
+    const coeff = try lc.drawQm31(V, ctx);
+    try tr.step("comp");
+    try lc.mixCommitment(V, ctx, p.composition_root);
+    try tr.step("oods");
+    const oods = try lc.drawPoint(V, ctx);
 
     // All OODS samples: preprocessed, main (mask order), composition.
     var values: std.ArrayListUnmanaged(Var) = .empty;
@@ -680,7 +829,8 @@ pub fn verifyPlain(
     for (p.trace_at_oods) |col| try values.appendSlice(ctx.scratch(), col);
     for (p.interaction_at_oods) |col| try values.appendSlice(ctx.scratch(), col);
     try values.appendSlice(ctx.scratch(), &p.composition_eval_at_oods);
-    try channel.mixQm31s(V, ctx, values.items);
+    try tr.step("samples");
+    try lc.mixQm31s(V, ctx, values.items);
 
     const computed = if (st.composition) |prog|
         try compositionViaProgram(V, ctx, prog, st, config, p, oods.x, coeff, elements)
@@ -689,10 +839,15 @@ pub fn verifyPlain(
     const expected = try sv.oods.extractExpectedCompositionEval(V, ctx, &p.composition_eval_at_oods, oods, log_trace + 1);
     try ctx.eq(computed, expected);
 
-    const quotient_coef = try channel.drawQm31(V, ctx);
+    try tr.step("quotient");
+    const quotient_coef = try lc.drawQm31(V, ctx);
+    try tr.step("fri");
     const fri_alphas = try sv.fri.friCommit(V, ctx, &channel, &p.fri);
-    try channel.pow(V, ctx, config.fri.pow_bits, p.pow_nonce);
+    try tr.step("pow");
+    try lc.pow(V, ctx, config.fri.pow_bits, p.pow_nonce);
+    try tr.step("queries");
     const sel = try sv.select_queries.getQuerySelectionInputFromChannel(V, ctx, &channel, config.nQueries());
+    try tr.done();
     const queries = try sv.select_queries.selectQueries(V, ctx, sel, config.logEvaluationDomainSize());
     const bits = try ctx.scratch().alloc([]const Var, queries.bits.len);
     for (bits, queries.bits) |*u, b| u.* = try builder.simd.unpack(V, ctx, b);
@@ -1177,4 +1332,115 @@ test "Merkle path: the Lean level program (Circuit/Merkle.lean) replays gate for
         }
         try glue.expectSameCircuit(&ctxs[0].circuit, &ctxs[1].circuit);
     }
+}
+
+test "channel: the Lean programs (Circuit/Channel.lean) replay gate for gate as stwo-zig's channel" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const P = struct {
+        fn parse(al: std.mem.Allocator, comptime name: []const u8) !*const glue.Program {
+            const p = try al.create(glue.Program);
+            p.* = try glue.parse(al, @embedFile("air:channel_" ++ name));
+            return p;
+        }
+    };
+    const progs = ChannelProgs{
+        .mix_u32s = &.{ try P.parse(a, "mix_u32s_1"), try P.parse(a, "mix_u32s_8"), try P.parse(a, "mix_u32s_10") },
+        .mix_qm31s = &.{try P.parse(a, "mix_qm31s_2")},
+        .draw = try P.parse(a, "draw"),
+        .draw_qm31 = try P.parse(a, "draw_qm31"),
+        .draw_point = try P.parse(a, "draw_point"),
+        .pow_mix = try P.parse(a, "pow_mix"),
+    };
+    var prng = std.Random.DefaultPrng.init(11);
+    const r = prng.random();
+    const rq = struct {
+        fn f(rr: std.Random) QM31 {
+            return QM31.fromU32Unchecked(rr.int(u31) % 0x7fffffff, rr.int(u31) % 0x7fffffff, rr.int(u31) % 0x7fffffff, rr.int(u31) % 0x7fffffff);
+        }
+    }.f;
+    const d_lo = rq(r);
+    const d_hi = rq(r);
+    var words: [10]u32 = undefined;
+    for (&words) |*w| w.* = r.int(u32);
+    const qs = [2]QM31{ rq(r), rq(r) };
+    const nonce = QM31.fromU32Unchecked(r.int(u31) % 0x7fffffff, r.int(u31) % 0x7fffffff, 0, 0);
+
+    var ctxs: [2]Context(QM31) = .{ try Context(QM31).init(a, 0), try Context(QM31).init(a, 0) };
+    defer for (&ctxs) |*c| c.deinit();
+    var outs: [2]std.ArrayListUnmanaged(QM31) = .{ .empty, .empty };
+    for (&ctxs, &outs, 0..) |*ctx, *out, which| {
+        var ch = sv.channel.Channel{ .digest = .{ .low = try ctx.guess(d_lo), .high = try ctx.guess(d_hi) }, .n_draws = 0 };
+        const lc = LeanChannel{ .ch = &ch, .progs = &progs };
+        const ws = try a.alloc(U32Wrapper(Var), words.len);
+        for (ws, words) |*w, v| w.* = try builder.wrappers.guessU32(QM31, ctx, builder.wrappers.u32Value(QM31, v));
+        const qv = [2]Var{ try ctx.guess(qs[0]), try ctx.guess(qs[1]) };
+        const nv = try ctx.guess(nonce);
+        var root: HashValue(Var) = undefined;
+        @memcpy(&root.words, ws[0..8]);
+        if (which == 0) {
+            try ch.mixU32s(QM31, ctx, ws[0..1]);
+            const d2 = try ch.drawTwoQm31s(QM31, ctx);
+            try ch.mixU32s(QM31, ctx, ws[0..10]);
+            const d1 = try ch.drawQm31(QM31, ctx);
+            try ch.mixCommitment(QM31, ctx, root);
+            const pt = try ch.drawPoint(QM31, ctx);
+            try ch.mixQm31s(QM31, ctx, &qv);
+            try ch.pow(QM31, ctx, 0, nv);
+            for ([_]Var{ d2[0], d2[1], d1, pt.x, pt.y, ch.digest.low, ch.digest.high }) |v| try out.append(a, ctx.get(v));
+        } else {
+            try lc.mixU32s(QM31, ctx, ws[0..1]);
+            const d2 = try lc.drawTwoQm31s(QM31, ctx);
+            try lc.mixU32s(QM31, ctx, ws[0..10]);
+            const d1 = try lc.drawQm31(QM31, ctx);
+            try lc.mixCommitment(QM31, ctx, root);
+            const pt = try lc.drawPoint(QM31, ctx);
+            try lc.mixQm31s(QM31, ctx, &qv);
+            try lc.pow(QM31, ctx, 0, nv);
+            for ([_]Var{ d2[0], d2[1], d1, pt.x, pt.y, ch.digest.low, ch.digest.high }) |v| try out.append(a, ctx.get(v));
+        }
+    }
+    for (outs[0].items, outs[1].items) |x, y| try std.testing.expect(x.eql(y));
+    try glue.expectSameCircuit(&ctxs[0].circuit, &ctxs[1].circuit);
+}
+
+test "transcript: the Lean order is accepted step by step, a swapped one is refused" {
+    const a = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(a);
+    defer arena.deinit();
+    const evs = try parseTranscript(arena.allocator(), @embedFile("air:transcript_lookups"));
+    var ok = TranscriptCheck{ .events = evs };
+    for (evs) |e| try ok.step(e);
+    try ok.done();
+    var bad = TranscriptCheck{ .events = evs };
+    try bad.step("fri_config");
+    try bad.step("pre");
+    try bad.step("stmt");
+    try std.testing.expectError(error.TranscriptOrder, bad.step("elements"));
+}
+
+test "channel: mix_qm31s at the leaf's sample count (3757) replays gate for gate" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const prog = try a.create(glue.Program);
+    prog.* = try glue.parse(a, @embedFile("air:channel_mix_qm31s_3757"));
+    const progs = ChannelProgs{ .mix_qm31s = &.{prog} };
+    var prng = std.Random.DefaultPrng.init(5);
+    const r = prng.random();
+    const vals = try a.alloc(QM31, 3757);
+    for (vals) |*v| v.* = QM31.fromU32Unchecked(r.int(u31) % 0x7fffffff, r.int(u31) % 0x7fffffff, r.int(u31) % 0x7fffffff, r.int(u31) % 0x7fffffff);
+    var ctxs: [2]Context(QM31) = .{ try Context(QM31).init(a, 0), try Context(QM31).init(a, 0) };
+    defer for (&ctxs) |*c| c.deinit();
+    var digests: [2][2]QM31 = undefined;
+    for (&ctxs, &digests, 0..) |*ctx, *dg, which| {
+        var ch = sv.channel.Channel{ .digest = .{ .low = try ctx.guess(QM31.one()), .high = try ctx.guess(QM31.one()) }, .n_draws = 0 };
+        const vs = try a.alloc(Var, vals.len);
+        for (vs, vals) |*w, v| w.* = try ctx.guess(v);
+        if (which == 0) try ch.mixQm31s(QM31, ctx, vs) else try (LeanChannel{ .ch = &ch, .progs = &progs }).mixQm31s(QM31, ctx, vs);
+        dg.* = .{ ctx.get(ch.digest.low), ctx.get(ch.digest.high) };
+    }
+    try std.testing.expect(digests[0][0].eql(digests[1][0]) and digests[0][1].eql(digests[1][1]));
+    try glue.expectSameCircuit(&ctxs[0].circuit, &ctxs[1].circuit);
 }

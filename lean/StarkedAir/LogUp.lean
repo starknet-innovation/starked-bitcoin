@@ -3,7 +3,7 @@
 `logup_columns.build` and the in-circuit `finalizeLogupInPairs` implement it, over any field `K`
 (for us QM31):
 
-* each row has terms `nⱼ/dⱼ` (numerator: multiplicity; denominator: `z − combine(α, entry)`),
+* each row has terms `nⱼ/dⱼ` (numerator: multiplicity; denominator: `combine(α, entry) − z`, as stwo and our circuit compute it; the sign does not affect the argument),
   grouped in batches of at most two (`N/D = n₀/d₀ + n₁/d₁`, i.e. `N = n₀d₁ + n₁d₀`, `D = d₀d₁`);
 * secure columns `S₀ … S_{B−1}`: for `b < B−1`, `(S_b − S_{b−1})·D_b = N_b` (with `S_{−1} = 0`);
   for the last, `(S_last(r) − S_last(r−1) − S_{B−2}(r) + c/n)·D_last = N_last`, rows cyclic;

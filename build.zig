@@ -101,6 +101,17 @@ pub fn build(b: *std.Build) void {
     lib.addAnonymousImport("air:leafhash_434", .{ .root_source_file = b.path("airs/leafhash_434.json") });
     lib.addAnonymousImport("air:leafhash_12", .{ .root_source_file = b.path("airs/leafhash_12.json") });
     lib.addAnonymousImport("air:leafhash_8", .{ .root_source_file = b.path("airs/leafhash_8.json") });
+    lib.addAnonymousImport("air:channel_mix_u32s_1", .{ .root_source_file = b.path("airs/channel_mix_u32s_1.json") });
+    lib.addAnonymousImport("air:channel_mix_u32s_8", .{ .root_source_file = b.path("airs/channel_mix_u32s_8.json") });
+    lib.addAnonymousImport("air:channel_mix_u32s_10", .{ .root_source_file = b.path("airs/channel_mix_u32s_10.json") });
+    lib.addAnonymousImport("air:channel_mix_qm31s_2", .{ .root_source_file = b.path("airs/channel_mix_qm31s_2.json") });
+    lib.addAnonymousImport("air:channel_mix_qm31s_3757", .{ .root_source_file = b.path("airs/channel_mix_qm31s_3757.json") });
+    lib.addAnonymousImport("air:channel_draw", .{ .root_source_file = b.path("airs/channel_draw.json") });
+    lib.addAnonymousImport("air:channel_draw_qm31", .{ .root_source_file = b.path("airs/channel_draw_qm31.json") });
+    lib.addAnonymousImport("air:channel_draw_point", .{ .root_source_file = b.path("airs/channel_draw_point.json") });
+    lib.addAnonymousImport("air:channel_pow_mix", .{ .root_source_file = b.path("airs/channel_pow_mix.json") });
+    lib.addAnonymousImport("air:transcript_lookups", .{ .root_source_file = b.path("airs/transcript_lookups.json") });
+    lib.addAnonymousImport("air:transcript_plain", .{ .root_source_file = b.path("airs/transcript_plain.json") });
     lib.addAnonymousImport("air:merkle_node", .{ .root_source_file = b.path("airs/merkle_node.json") });
     lib.addAnonymousImport("air:deep_leaf", .{ .root_source_file = b.path("airs/deep_leaf.json") });
     lib.addAnonymousImport("vk:mainnet_test", .{ .root_source_file = b.path("vk/mainnet-q70-p26-l20.vk") });

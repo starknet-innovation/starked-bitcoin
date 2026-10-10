@@ -123,14 +123,6 @@ as u32 words, matching the Blake2sM31 hasher's leaf (trusted correspondence with
 The leaf replays `airs/leafhash_{104,434,12,8}.json` (its four trees' widths). Tests: direct parity at
 widths 8 and 434; the whole leaf circuit is gate-identical; the mainnet VK is unchanged.
 
-**Status of `verifyPlain`:**
-- **Lean-generated and proven:** the statement mixing (public inputs), the LogUp balance, the
-  composition check, the Merkle leaf hashing, the DEEP response list (step 4b, below).
-- **Hand-written (our code):** the order of the remaining transcript calls (around stwo-zig's channel),
-  and the shifted OODS points (one `addPoints` per distinct offset).
-- **stwo-zig (trusted, parity-tested port of StarkWare's):** the channel, FRI, Merkle path verification,
-  query selection, DEEP quotients, circle points.
-
 ### Done (2026-10-10): the DEEP response list
 
 `Circuit/Deep.lean`: `samples` labels the mixed OODS values (tree, column, offset) in mixing order;
@@ -141,4 +133,55 @@ label. `deep_complete`: every mixed sample is used. The leaf replays `airs/deep_
 the OODS point shifted by its offset (looked up from the points computed for that tree; an unknown
 offset is rejected). The order itself is stwo's, checked by verifying real proofs.
 
-Next: the `sv.*` trust question (step 5).
+### Done (2026-10-10): step 5, the channel, the Merkle paths, the transcript order
+
+Owner decision (2026-10-10): prove the channel transcript and the Merkle path; state FRI soundness as
+an assumption.
+
+- **Merkle paths** (`Circuit/Merkle.lean`): `merkleNode` (stwo-zig's cond-flip, then the proven Blake2s
+  of `left ‖ right`), the path fold and the root check. `path_check_sound`: with Boolean bits, the
+  committed root is `specRoot`, the Blake2s Merkle root of the leaf along the authentication path.
+  The leaf replays the level program (`airs/merkle_node.json`) for the trace trees. The level loop and
+  the final word-by-word equality in `merklePathVia` mirror `path`/`pathCheck` (a few lines of Zig).
+- **The channel** (`Circuit/Channel.lean`): a spec of `Blake2sM31Channel` (`Spec.mixU32s`,
+  `mixCommitment`, `mixQm31s`, `drawTwo`, `powMix`) and the circuit programs. `absorb_sound`: unpacking
+  QM31 inputs to words, Blake2s, `reduceHashValue` give the spec digest; per operation
+  `mixU32s_sound`, `mixQm31s_sound`, `draw_sound`, `drawQm31_sound`, `drawPoint_sound` (the point is
+  `((1 − t²)/(1 + t²), 2t/(1 + t²))`, `1 + t² ≠ 0`), `powMix_sound`. The leaf drives stwo-zig's channel
+  state with these programs (`LeanChannel`) for every top-level call: commitments, the statement, the
+  lookup elements, the claimed sums, the coefficient, the OODS point, the samples (3757 values), the
+  DEEP coefficient, the digest update after the proof of work.
+- **The transcript order** (`Circuit/Transcript.lean`): the event list and the Fiat–Shamir property
+  (`elements_bound`, `coeff_bound`, `oods_bound`, `quotient_bound`, `queries_bound`: each challenge
+  is drawn after everything it must bind). `verifyPlain` steps through the exported list next to each
+  channel event and refuses to build the circuit if its order differs (`TranscriptCheck`).
+- **New ops:** `pmul` (`pointwiseMul`) and `unused` (`markAsUnused`).
+- **Tests:** per-operation channel parity with stwo-zig (same gates, same digests and draws), including
+  the 3757-value mix; Merkle path parity (honest and tampered root); the transcript check (a swapped
+  order is refused); whole-leaf parity; the mainnet VK unchanged; leaf proving.
+- **Fix found on the way:** `glue.parse` counted a constant's coordinates as registers, so a program
+  with a large constant (the balance multiplicity, the unit-vector inverses) allocated ~2^31
+  registers per run. Registers now come from register fields only; the leaf tests' peak memory went
+  from 14 GB to 6 GB.
+
+**Not proven (stays stwo-zig's or ours, stated):**
+- **The proof-of-work check** (the hash's low bits are zero; `extractBits`): copied from stwo-zig into
+  `LeanChannel.pow`. It enforces the grinding bits only; the digest update after it is proven.
+- **FRI and query selection** (`friCommit`, `friDecommit`, `mixFriConfig`,
+  `getQuerySelectionInputFromChannel`, `selectQueries`), the DEEP quotients, circle points. Their
+  channel calls and the FRI layers' Merkle paths use the same primitives as above (gate-identical at the
+  tested sizes), but they run inside stwo-zig.
+- **The shifted OODS points** (one `addPoints` per distinct offset, ours).
+
+### Assumption: STARK (FRI) soundness
+
+Stated, not proven. For the leaf's parameters (Blake2s Merkle commitments, the configured blowup, query
+count and proof-of-work bits): if the circuit built by `verifyPlain` is satisfied, then except with
+probability at most the configuration's soundness error (in the random-oracle model for Blake2s),
+the committed traces are close to polynomials of the claimed degree whose values at the OODS point are
+the mixed samples. Everything Lean-proven above (composition, LogUp balance, statement, DEEP responses,
+leaf hashes, Merkle paths, channel, transcript order) is what turns that into "the AIR constraints and
+the lookup balance hold on the committed traces for the stated public inputs".
+
+**Still open:** the end-to-end theorem composing the pieces (each piece is proven separately), with the
+Schwartz–Zippel and LogUp soundness steps and this assumption as explicit hypotheses.

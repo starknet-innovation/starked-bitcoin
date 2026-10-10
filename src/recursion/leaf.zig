@@ -137,6 +137,14 @@ pub fn buildLeafCircuit(
     const lhp = [4]*const glue.Program{ &lh[0], &lh[1], &lh[2], &lh[3] };
     const deep = try pv.DeepTable.parse(ctx.scratch(), @embedFile("air:deep_leaf"));
     const mnode = try glue.parse(ctx.scratch(), @embedFile("air:merkle_node"));
+    // The channel operations (Circuit/Channel.lean), at the sizes the leaf uses.
+    var chp: [9]glue.Program = undefined;
+    inline for (.{ "mix_u32s_1", "mix_u32s_8", "mix_u32s_10", "mix_qm31s_2", "mix_qm31s_3757", "draw", "draw_qm31", "draw_point", "pow_mix" }, 0..) |name, i|
+        chp[i] = try glue.parse(ctx.scratch(), @embedFile("air:channel_" ++ name));
+    const chu = [3]*const glue.Program{ &chp[0], &chp[1], &chp[2] };
+    const chq = [2]*const glue.Program{ &chp[3], &chp[4] };
+    const transcript = try pv.parseTranscript(ctx.scratch(), @embedFile("air:transcript_lookups"));
+    const channel = pv.ChannelProgs{ .mix_u32s = &chu, .mix_qm31s = &chq, .draw = &chp[5], .draw_qm31 = &chp[6], .draw_point = &chp[7], .pow_mix = &chp[8] };
     const ext = try ctx.scratch().alloc(QM31, pubs.len);
     for (ext, pubs) |*e, v| e.* = QM31.fromBase(v);
     const Hooks = struct {
@@ -154,6 +162,8 @@ pub fn buildLeafCircuit(
         lh: []const *const glue.Program,
         deep: *const pv.DeepTable,
         mnode: *const glue.Program,
+        channel: *const pv.ChannelProgs,
+        transcript: []const []const u8,
         /// 0: guess the proof; 1: verify it, with the public entry `node(k, 0, pubs[T_BASE..])`.
         pub fn call(self: @This(), id: u32, args: []const Var) ![]const Var {
             if (id == 0) {
@@ -174,13 +184,15 @@ pub fn buildLeafCircuit(
                 .leaf_hashes = self.lh,
                 .deep = self.deep,
                 .merkle_node = self.mnode,
+                .channel = self.channel.*,
+                .transcript = self.transcript,
             };
             try pv.verifyPlain(QM31, self.ctx, self.proof_vars, self.config, &st);
             return &.{};
         }
     };
     var proof_vars: pv.PlainProof(Var) = undefined;
-    const res = try glue.run(QM31, &ctx, &prog, ext, Hooks{ .ctx = &ctx, .values = values, .config = config, .airs = airs, .digests = digests, .pre_root = pre_root, .k = k, .proof_vars = &proof_vars, .comp = &comp, .bal = &bal, .stm = &stm, .lh = &lhp, .deep = &deep, .mnode = &mnode });
+    const res = try glue.run(QM31, &ctx, &prog, ext, Hooks{ .ctx = &ctx, .values = values, .config = config, .airs = airs, .digests = digests, .pre_root = pre_root, .k = k, .proof_vars = &proof_vars, .comp = &comp, .bal = &bal, .stm = &stm, .lh = &lhp, .deep = &deep, .mnode = &mnode, .channel = &channel, .transcript = transcript });
     var digest: HashValue(Var) = undefined;
     for (&digest.words, res) |*w, v| w.* = .newUnsafe(v);
     try finish(QM31, &ctx, digest);

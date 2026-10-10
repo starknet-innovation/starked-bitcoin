@@ -5,6 +5,8 @@ import StarkedAir.Circuit.Statement
 import StarkedAir.Circuit.LeafHash
 import StarkedAir.Circuit.Deep
 import StarkedAir.Circuit.Merkle
+import StarkedAir.Circuit.Channel
+import StarkedAir.Circuit.Transcript
 import StarkedAir.Block.ExtSum
 import StarkedAir.Block.FpWalk
 import StarkedAir.Block.URec
@@ -45,6 +47,11 @@ def main (args : List String) : IO Unit := do
   | ["deep_leaf"] => IO.println (StarkedAir.Circuit.Deep.deepJson
       [StarkedAir.Circuit.Composition.compShape StarkedAir.HeaderTree.headers 108,
        StarkedAir.Circuit.Composition.compShape StarkedAir.HeaderTree.tree 0])
+  | "channel" :: rest => match StarkedAir.Circuit.Channel.channelJson rest with
+      | some j => IO.println j
+      | none => IO.eprintln "unknown channel op"
+  | ["transcript", "lookups"] => IO.println (StarkedAir.Circuit.Transcript.json true)
+  | ["transcript", "plain"] => IO.println (StarkedAir.Circuit.Transcript.json false)
   | ["merkle_node"] => IO.println StarkedAir.Circuit.Merkle.nodeJson
   | ["leafhash", k] => IO.println (StarkedAir.Circuit.leafHashJson k.toNat!)
   | ["statement_leaf"] => IO.println (StarkedAir.Circuit.Statement.stmtJson true [108, 0])
