@@ -183,7 +183,8 @@ theorem tx_cols {rh : ℕ} (hr : rh < m) (ht : M K_TXH rh = 1) :
       (M SEG rh ≠ 1 → rw = r') ∧
       Spec.Block.serNoWit tx = v ++ Spec.Block.serCompact nIn ++ Spec.Block.toksBytes (toksFrom M R rw (rh + 1)) ++ l ∧
       M TXA r' = M START rh ∧ M WST r' = M START rw ∧ M SEG r' = M SEG rh ∧
-      (∀ j, rh < j → j ≤ r' → M K_TXH j = 0) ∧ (∀ j, rh ≤ j → j < r' → M K_LOCK j = 0) := by
+      (∀ j, rh < j → j ≤ r' → M K_TXH j = 0) ∧ (∀ j, rh ≤ j → j < r' → M K_LOCK j = 0) ∧
+      (∀ j, rw ≤ j → j < r' → M K_WCNT j = 1 ∨ M K_WITEM j = 1) ∧ (M K_NOUT (rw - 1) = 1 ∨ M K_OUT (rw - 1) = 1) := by
   obtain ⟨tx, r', rw, v, nIn, l, htx, h1, h2, hr'm, hl, htok, hlock, hwit, hpre, hseg, hnl, hnw⟩ :=
     tx_layout hsat R hcs hmn hpad hfit hr ht
   have hrn : r' < n := by omega
@@ -288,7 +289,7 @@ theorem tx_cols {rh : ℕ} (hr : rh < m) (ht : M K_TXH rh = 1) :
       rw [show rw + (i + 1) = rw + i + 1 by ring, this, ih (by omega)]
   have hws := wst (r' - rw) le_rfl
   rw [show rw + (r' - rw) = r' by omega] at hws
-  exact ⟨tx, r', rw, v, nIn, l, htx, h1, h2, hr'm, hl, htok, hlock, hseg, hnw, hta, hws, hsg, notxh, nolock⟩
+  exact ⟨tx, r', rw, v, nIn, l, htx, h1, h2, hr'm, hl, htok, hlock, hseg, hnw, hta, hws, hsg, notxh, nolock, hwit, hpre⟩
 
 omit hsat hcs hmn hpad hfit in
 theorem locks_const {a b : ℕ} (h : ∀ j, a ≤ j → j < b → M K_LOCK j ≠ 1) (hab : a ≤ b) : locks M b = locks M a := by
@@ -320,7 +321,7 @@ theorem txs_rows : ∀ (k rh : ℕ) (txs : List Spec.Block.Tx) (rest : List Spec
     simp [Spec.Block.txsT] at h; obtain ⟨rfl, rfl⟩ := h
     exact ⟨rfl, fun j hj => absurd hj (Nat.not_lt_zero _), rh, by omega, rfl, rfl⟩
   | k + 1, rh, txs, rest, hr, ht, h => by
-    obtain ⟨tx, r', rw, v, nIn, l, htx, h1, h2, hr'm, hl, htok, hlock, hseg, hnw, hta, hws, hsg, notxh, nolock⟩ :=
+    obtain ⟨tx, r', rw, v, nIn, l, htx, h1, h2, hr'm, hl, htok, hlock, hseg, hnw, hta, hws, hsg, notxh, nolock, -⟩ :=
       tx_cols hsat R hcs hmn hpad hfit hr ht
     simp only [Spec.Block.txsT, htx] at h
     cases hk : Spec.Block.txsT k (toksFrom M R m (r' + 1)) with

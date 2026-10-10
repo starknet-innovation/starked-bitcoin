@@ -117,7 +117,7 @@ theorem tx_bytes {m : ℕ} (hmn : m < 2 ^ L) (hnp : ∀ r < m, (inst 1).main K_P
   have hpad0 : M K_PAD rh = 0 := by
     rw [kind_unique fs hr (a := K_TXH) (b := K_PAD) (by simp [K_TXH]) (by simp [K_PAD]) (by simp [K_TXH, K_PAD]) ht]
   have hrm : rh < m := lt_m fs R hcs hmn hpad hfit hr hpad0
-  obtain ⟨tx, r', rw, v, nIn, l, htx, h1, h2, hr'm, hl, htok, hlock, hseg, hnw, hta, hws, hsg, notxh, nolock⟩ :=
+  obtain ⟨tx, r', rw, v, nIn, l, htx, h1, h2, hr'm, hl, htok, hlock, hseg, hnw, hta, hws, hsg, notxh, nolock, -⟩ :=
     tx_cols fs R hcs hmn hpad hfit hrm ht
   -- the header token
   have hblk : M K_BLK rh ≠ 1 := by
