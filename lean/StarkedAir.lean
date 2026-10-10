@@ -108,3 +108,4 @@ import StarkedAir.Spec.BlockTokens
 import StarkedAir.Spec.TxSplit
 import StarkedAir.Spec.MerkleLevels
 import StarkedAir.Testing.BlockReader
+import StarkedAir.Spec.UtxoMultiset
