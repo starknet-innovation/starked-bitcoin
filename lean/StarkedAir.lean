@@ -114,3 +114,4 @@ import StarkedAir.Spec.UtxoEpoch
 import StarkedAir.Block.ExtSum
 import StarkedAir.Block.FpWalk
 import StarkedAir.Block.URec
+import StarkedAir.Spec.Coins
