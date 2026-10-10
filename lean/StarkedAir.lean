@@ -113,3 +113,4 @@ import StarkedAir.Spec.QM31
 import StarkedAir.Spec.UtxoEpoch
 import StarkedAir.Block.ExtSum
 import StarkedAir.Block.FpWalk
+import StarkedAir.Block.URec
