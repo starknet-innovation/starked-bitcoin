@@ -1062,9 +1062,10 @@ token input `q`. -/
 theorem coin_row_tx (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
     (hon : ∀ j < 2 ^ L, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
     (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
+    {parts : List (List Spec.Block.Tok)} (hf : List.Forall₂ Spec.Block.IoTx S.b.txs parts)
+    (htg : Spec.Block.tagged 0 (Fields.toksFrom (inst 1).main (Rb inst pub) S.m 0) = Spec.Block.tagParts 0 parts)
     {j : ℕ} (hj : j < e) :
-    ∃ (parts : List (List Spec.Block.Tok)) (t q : ℕ) (tx : Spec.Block.Tx),
-      List.Forall₂ Spec.Block.IoTx S.b.txs parts ∧ S.b.txs[t]? = some tx ∧
+    ∃ (t q : ℕ) (tx : Spec.Block.Tx), S.b.txs[t]? = some tx ∧
       (inst 14).main Coin.TXI j = (t : F) ∧
       j = ((parts.take t).map List.length).sum + q ∧ q < tx.vin.length + tx.vout.length ∧
       ((inst 14).main Coin.KO j = 1 → tx.vin.length ≤ q ∧ ∃ o, tx.vout[q - tx.vin.length]? = some o ∧
@@ -1073,7 +1074,6 @@ theorem coin_row_tx (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
         Spec.Block.InTok i (Fields.tokOf (inst 1).main (Rb inst pub) ((ioRows inst S.m).getD j 0))) := by
   have cs := coin_sat hL hsat hL24
   have fs := fields_sat' hL hsat hL24
-  obtain ⟨parts, hf, htg⟩ := Spec.Block.io_toksBlock_tag S.htok
   have hft := fields_tagged hL hsat hL24 S
   rw [htg] at hft
   set io := ioRows inst S.m with hio
@@ -1123,7 +1123,7 @@ theorem coin_row_tx (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
     · obtain ⟨-, hT⟩ := hrt.2 (by rw [h.2.1, h.2.2.1]; simp)
       rw [hT, htxi]
     · exact absurd ((hon j hj2).mpr hj) (by rw [h.2.2.2]; exact zero_ne_one)
-  refine ⟨parts, t, q, tx, hf, htx, hcoinTXI, hidx, by rw [hlilo] at hq; simp at hq; omega, fun hko => ?_, fun hki => ?_⟩
+  refine ⟨t, q, tx, htx, hcoinTXI, hidx, by rw [hlilo] at hq; simp at hq; omega, fun hko => ?_, fun hki => ?_⟩
   · obtain ⟨hk, -⟩ := hrt.1 hko
     -- an output token: not among the inputs' tokens
     have hout : ∃ v s, Fields.tokOf (inst 1).main (Rb inst pub) (io.getD j 0) = .out v s := by
@@ -1180,6 +1180,278 @@ theorem coin_row_tx (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
       rw [hlilo, List.getD_eq_getElem _ _ (by simp; omega), List.getElem_append_left hqlt]
     rw [htok, this]
     simpa using h2
+
+/-! ### Output indices -/
+
+omit hL hsat hL24 in
+/-- The earlier parts' total length. -/
+theorem pre_succ (parts : List (List Spec.Block.Tok)) {t : ℕ} (ht : t < parts.length) :
+    ((parts.take (t + 1)).map List.length).sum = ((parts.take t).map List.length).sum + (parts.getD t []).length := by
+  rw [List.take_succ, List.map_append, List.sum_append, List.getElem?_eq_getElem ht, List.getD_eq_getElem _ _ ht]
+  simp
+
+omit hL hsat hL24 in
+theorem pre_mono (parts : List (List Spec.Block.Tok)) : ∀ {t t' : ℕ}, t ≤ t' → t' ≤ parts.length →
+    ((parts.take t).map List.length).sum ≤ ((parts.take t').map List.length).sum := by
+  intro t t' h _
+  have := List.take_prefix_take_left (l := parts) h
+  exact List.Sublist.sum_le_sum ((this.sublist).map _) (fun _ _ => Nat.zero_le _)
+
+omit hL hsat hL24 in
+/-- **Positions decompose uniquely.** -/
+theorem decomp_unique (parts : List (List Spec.Block.Tok)) {t q t' q' : ℕ} (ht : t < parts.length)
+    (ht' : t' < parts.length) (hq : q < (parts.getD t []).length) (hq' : q' < (parts.getD t' []).length)
+    (he : ((parts.take t).map List.length).sum + q = ((parts.take t').map List.length).sum + q') : t = t' ∧ q = q' := by
+  rcases Nat.lt_trichotomy t t' with h | h | h
+  · exfalso
+    have h1 := pre_succ parts ht
+    have h2 := pre_mono parts (t := t + 1) (t' := t') (by omega) (by omega)
+    omega
+  · subst h; exact ⟨rfl, by omega⟩
+  · exfalso
+    have h1 := pre_succ parts ht'
+    have h2 := pre_mono parts (t := t' + 1) (t' := t) (by omega) (by omega)
+    omega
+
+omit hL hsat hL24 in
+theorem part_len {txs : List Spec.Block.Tx} {parts : List (List Spec.Block.Tok)} (hf : List.Forall₂ Spec.Block.IoTx txs parts)
+    {t : ℕ} {tx : Spec.Block.Tx} (htx : txs[t]? = some tx) :
+    t < parts.length ∧ (parts.getD t []).length = tx.vin.length + tx.vout.length := by
+  have hl := hf.length_eq
+  have htl : t < txs.length := (List.getElem?_eq_some_iff.mp htx).1
+  refine ⟨by omega, ?_⟩
+  have h2 := (List.forall₂_iff_get.mp hf).2 t htl (by omega)
+  simp only [List.get_eq_getElem] at h2
+  rw [List.getElem?_eq_getElem htl, Option.some.injEq] at htx
+  subst htx
+  obtain ⟨li, lo, he, hi, ho⟩ := h2
+  rw [List.getD_eq_getElem _ _ (by omega), he, List.length_append, hi.length_eq, ho.length_eq]
+
+/-- Every transaction has an input. -/
+theorem vin_pos (S : Setup inst pub L) {t : ℕ} {tx : Spec.Block.Tx} (htx : S.b.txs[t]? = some tx) :
+    1 ≤ tx.vin.length := by
+  have hwf := (Spec.Block.toksBlock_sound S.htok).1.2.2 tx (List.mem_of_getElem? htx)
+  have := hwf.2.2.1
+  exact List.length_pos_of_ne_nil this
+
+/-- **An output row's index** is the output's index in its transaction. -/
+theorem coin_vout (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
+    (hon : ∀ j < 2 ^ L, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
+    (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
+    {parts : List (List Spec.Block.Tok)} (hf : List.Forall₂ Spec.Block.IoTx S.b.txs parts)
+    (htg : Spec.Block.tagged 0 (Fields.toksFrom (inst 1).main (Rb inst pub) S.m 0) = Spec.Block.tagParts 0 parts) :
+    ∀ j < e, (inst 14).main Coin.KO j = 1 → ∀ t q tx, S.b.txs[t]? = some tx →
+      j = ((parts.take t).map List.length).sum + q → q < tx.vin.length + tx.vout.length →
+      (inst 14).main Coin.VOUT j = ((q - tx.vin.length : ℕ) : F) := by
+  have cs := coin_sat hL hsat hL24
+  intro j
+  induction j using Nat.strong_induction_on with
+  | _ j ih =>
+    intro hj hko t q tx htx hjq hq
+    have hrow := coin_row_tx hL hsat hL24 S he hon hlen hst hf htg hj
+    obtain ⟨t0, q0, tx0, htx0, -, hjq0, hq0, hko0, -⟩ := hrow
+    obtain ⟨hpl, hpe⟩ := part_len hf htx
+    obtain ⟨hpl0, hpe0⟩ := part_len hf htx0
+    obtain ⟨rfl, rfl⟩ := decomp_unique parts hpl hpl0 (by omega) (by omega) (hjq.symm.trans hjq0)
+    rw [htx] at htx0; obtain rfl := Option.some.inj htx0
+    have hvq := (hko0 hko).1
+    have hv1 := vin_pos hL hsat hL24 S htx
+    -- the previous row
+    have hj1 : 1 ≤ j := by
+      by_contra hc; push Not at hc
+      have : ((parts.take t).map List.length).sum = 0 := by omega
+      omega
+    obtain ⟨p, rfl⟩ : ∃ p, j = p + 1 := ⟨j - 1, by omega⟩
+    have hp : p < e := by omega
+    have hvs := (Coin.vout_spec cs (r := p) (by omega) hko).1
+    obtain ⟨t1, q1, tx1, htx1, -, hjq1, hq1, hko1, hki1⟩ := coin_row_tx hL hsat hL24 S he hon hlen hst hf htg hp
+    obtain ⟨hpl1, hpe1⟩ := part_len hf htx1
+    have hE : ((parts.take t).map List.length).sum + (q - 1) = ((parts.take t1).map List.length).sum + q1 := by
+      omega
+    obtain ⟨rfl, rfl⟩ := decomp_unique parts hpl hpl1 (q := q - 1) (by omega) (by omega) hE
+    rw [htx] at htx1; obtain rfl := Option.some.inj htx1
+    have hpon : Coin.onV (inst 14).main p = 1 := (hon p (by omega)).mpr hp
+    rcases Nat.eq_or_lt_of_le hvq with heq | hlt
+    · -- the transaction's first output: the previous row is an input
+      have hko0' : (inst 14).main Coin.KO p = 0 := by
+        rcases Coin.kinds cs (show p < 2 ^ L by omega) with h | h | h | h
+        · exact absurd (hko1 h.1).1 (by omega)
+        · exact h.1
+        · exact h.1
+        · rw [h.2.2.2] at hpon; exact absurd hpon zero_ne_one
+      rw [hvs, hko0', zero_mul, ← heq, Nat.sub_self, Nat.cast_zero]
+    · -- a later output: the previous row is the previous output
+      have hkop : (inst 14).main Coin.KO p = 1 := by
+        rcases Coin.kinds cs (show p < 2 ^ L by omega) with h | h | h | h
+        · exact h.1
+        · exact absurd (hki1 (by rw [h.2.1, h.2.2.1]; simp)).1 (by omega)
+        · exact absurd (hki1 (by rw [h.2.1, h.2.2.1]; simp)).1 (by omega)
+        · rw [h.2.2.2] at hpon; exact absurd hpon zero_ne_one
+      rw [hvs, hkop, one_mul, ih p (by omega) hp hkop t (q - 1) tx htx (by omega) (by omega)]
+      rw [show q - tx.vin.length = (q - 1 - tx.vin.length) + 1 by omega]
+      push_cast; ring
+
+/-- **A coin row's kind is its position's**: an output iff `q ≥ |vin|`; a non-coinbase input iff `q < |vin|`
+in a transaction `t ≥ 1`; the coinbase input iff `q < |vin|` in transaction 0. -/
+theorem coin_kind_pos (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
+    (hon : ∀ j < 2 ^ L, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
+    (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
+    {parts : List (List Spec.Block.Tok)} (hf : List.Forall₂ Spec.Block.IoTx S.b.txs parts)
+    (htg : Spec.Block.tagged 0 (Fields.toksFrom (inst 1).main (Rb inst pub) S.m 0) = Spec.Block.tagParts 0 parts)
+    {j t q : ℕ} {tx : Spec.Block.Tx} (hj : j < e) (htx : S.b.txs[t]? = some tx)
+    (hjq : j = ((parts.take t).map List.length).sum + q) (hq : q < tx.vin.length + tx.vout.length) :
+    ((inst 14).main Coin.KO j = 1 ↔ tx.vin.length ≤ q) ∧
+      ((inst 14).main Coin.KI j = 1 ↔ q < tx.vin.length ∧ 1 ≤ t) ∧
+      ((inst 14).main Coin.CBI j = 1 ↔ q < tx.vin.length ∧ t = 0) := by
+  have cs := coin_sat hL hsat hL24
+  have hj2 : j < 2 ^ L := by omega
+  obtain ⟨t0, q0, tx0, htx0, htxi, hjq0, hq0, hko, hki⟩ := coin_row_tx hL hsat hL24 S he hon hlen hst hf htg hj
+  obtain ⟨hpl, hpe⟩ := part_len hf htx
+  obtain ⟨hpl0, hpe0⟩ := part_len hf htx0
+  obtain ⟨rfl, rfl⟩ := decomp_unique parts hpl hpl0 (by omega) (by omega) (hjq.symm.trans hjq0)
+  rw [htx] at htx0; obtain rfl := Option.some.inj htx0
+  have htN : t < 2 ^ L := by have := (List.getElem?_eq_some_iff.mp htx).1; have := S.hN25; omega
+  have hLb : 2 ^ L ≤ 2 ^ 23 := Nat.pow_le_pow_right (by norm_num) hL24
+  have ht0 : (t : F) = 0 ↔ t = 0 := by
+    constructor
+    · intro h; exact Coin.lift (a := t) (b := 0) (by simpa using h) (by unfold P; omega) (by unfold P; norm_num)
+    · intro h; simp [h]
+  have hcbo := Coin.cbo_spec cs hj2
+  rw [htxi, ht0] at hcbo
+  have hon' := (hon j hj2).mpr hj
+  rcases Coin.kinds cs hj2 with h | h | h | h
+  · have := (hko h.1).1
+    refine ⟨⟨fun _ => this, fun _ => h.1⟩, ⟨fun e => by rw [h.2.1] at e; exact absurd e zero_ne_one, fun e => by omega⟩,
+      ⟨fun e => by rw [h.2.2.1] at e; exact absurd e zero_ne_one, fun e => by omega⟩⟩
+  · have hq' := (hki (by rw [h.2.1, h.2.2.1]; simp)).1
+    have hcb0 := hcbo.2.2.2 h.2.1
+    have ht1 : 1 ≤ t := by
+      by_contra hc; have : t = 0 := by omega
+      rw [hcbo.1.mpr this] at hcb0; exact one_ne_zero hcb0
+    refine ⟨⟨fun e => by rw [h.1] at e; exact absurd e zero_ne_one, fun e => by omega⟩, ⟨fun _ => ⟨hq', ht1⟩, fun _ => h.2.1⟩,
+      ⟨fun e => by rw [h.2.2.1] at e; exact absurd e zero_ne_one, fun e => by omega⟩⟩
+  · have hq' := (hki (by rw [h.2.1, h.2.2.1]; simp)).1
+    have hcb1 := hcbo.2.2.1 h.2.2.1
+    have ht0' : t = 0 := hcbo.1.mp hcb1
+    refine ⟨⟨fun e => by rw [h.1] at e; exact absurd e zero_ne_one, fun e => by omega⟩,
+      ⟨fun e => by rw [h.2.1] at e; exact absurd e zero_ne_one, fun e => by omega⟩, ⟨fun _ => ⟨hq', ht0'⟩, fun _ => h.2.2.1⟩⟩
+  · rw [h.2.2.2] at hon'; exact absurd hon' zero_ne_one
+
+omit hL hsat hL24 in
+theorem exists_get {α : Type} {l : List α} {i : ℕ} (h : i < l.length) : ∃ x, l[i]? = some x :=
+  ⟨l[i], List.getElem?_eq_getElem h⟩
+
+omit hL hsat hL24 in
+/-- The non-coinbase inputs before position `(t, q)`: all of transactions `1 … t − 1`, and `min q |vin|`
+of transaction `t` if `t ≥ 1`. -/
+def vinLen (txs : List Spec.Block.Tx) (t : ℕ) : ℕ := (txs[t]?.map (·.vin.length)).getD 0
+
+def inBefore (txs : List Spec.Block.Tx) (t q : ℕ) : ℕ :=
+  ((List.range t).map fun t' => if 1 ≤ t' then vinLen txs t' else 0).sum + (if 1 ≤ t then min q (vinLen txs t) else 0)
+
+/-- **An input row's record index** is the number of non-coinbase inputs before it. -/
+theorem coin_J (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
+    (hon : ∀ j < 2 ^ L, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
+    (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
+    {parts : List (List Spec.Block.Tok)} (hf : List.Forall₂ Spec.Block.IoTx S.b.txs parts)
+    (htg : Spec.Block.tagged 0 (Fields.toksFrom (inst 1).main (Rb inst pub) S.m 0) = Spec.Block.tagParts 0 parts) :
+    ∀ j < e, ∀ t q tx, S.b.txs[t]? = some tx → j = ((parts.take t).map List.length).sum + q →
+      q < tx.vin.length + tx.vout.length → (inst 14).main Coin.J j = ((inBefore S.b.txs t q : ℕ) : F) := by
+  have cs := coin_sat hL hsat hL24
+  have hjs := Coin.j_spec cs
+  intro j
+  induction j with
+  | zero =>
+    intro hj t q tx htx hjq hq
+    have h0 := hjs 0 (by omega)
+    simp only [Finset.range_zero, Finset.sum_empty] at h0
+    rw [h0]
+    -- position 0 is transaction 0's first token
+    have ht0 : t = 0 := by
+      by_contra hc
+      obtain ⟨hpl, -⟩ := part_len hf htx
+      have h1 := pre_mono parts (t := 1) (t' := t) (by omega) (by omega)
+      have hl0 : 0 < S.b.txs.length := by have := (List.getElem?_eq_some_iff.mp htx).1; omega
+      obtain ⟨tx0, htx0⟩ := exists_get hl0
+      have h2 := pre_succ parts (t := 0) (part_len hf htx0).1
+      have := (part_len hf htx0).2
+      have := vin_pos hL hsat hL24 S htx0
+      have h0 : ((parts.take 0).map List.length).sum = 0 := by simp
+      rw [Nat.zero_add] at h2
+      omega
+    subst ht0
+    have : q = 0 := by simp at hjq; omega
+    subst this
+    simp [inBefore]
+  | succ p ih =>
+    intro hj t q tx htx hjq hq
+    have hJ1 : (inst 14).main Coin.J (p + 1) = (inst 14).main Coin.J p + (inst 14).main Coin.KI p := by
+      rw [hjs (p + 1) (by omega), hjs p (by omega), Finset.sum_range_succ]
+    obtain ⟨hpl, hpe⟩ := part_len hf htx
+    rcases Nat.eq_zero_or_pos q with hq0 | hq1
+    · -- the transaction's first token: the previous row is transaction `t − 1`'s last
+      subst hq0
+      have ht1 : 1 ≤ t := by
+        by_contra hc; have : t = 0 := by omega
+        subst this; simp at hjq
+      have hl1 : t - 1 < S.b.txs.length := by have := (List.getElem?_eq_some_iff.mp htx).1; omega
+      obtain ⟨tx', htx'⟩ := exists_get hl1
+      obtain ⟨hpl', hpe'⟩ := part_len hf htx'
+      have hv' := vin_pos hL hsat hL24 S htx'
+      have hps := pre_succ parts (t := t - 1) hpl'
+      rw [show t - 1 + 1 = t by omega] at hps
+      have hpq : p = ((parts.take (t - 1)).map List.length).sum + (tx'.vin.length + tx'.vout.length - 1) := by omega
+      have ihp := ih (by omega) (t - 1) _ tx' htx' hpq (by omega)
+      have hk := (coin_kind_pos hL hsat hL24 S he hon hlen hst hf htg (by omega) htx' hpq (by omega)).2.1
+      rw [hJ1, ihp]
+      have hvl : vinLen S.b.txs (t - 1) = tx'.vin.length := by simp [vinLen, htx']
+      have hsplit : ((List.range t).map fun t' => if 1 ≤ t' then vinLen S.b.txs t' else 0).sum =
+          ((List.range (t - 1)).map fun t' => if 1 ≤ t' then vinLen S.b.txs t' else 0).sum +
+            (if 1 ≤ t - 1 then vinLen S.b.txs (t - 1) else 0) := by
+        conv_lhs => rw [show t = t - 1 + 1 by omega, List.range_succ]
+        simp
+      by_cases hki : (inst 14).main Coin.KI p = 1
+      · obtain ⟨hql, ht2⟩ := hk.mp hki
+        rw [hki]
+        have hn : inBefore S.b.txs t 0 = inBefore S.b.txs (t - 1) (tx'.vin.length + tx'.vout.length - 1) + 1 := by
+          simp only [inBefore, if_pos ht1, if_pos ht2, Nat.zero_min, add_zero, hsplit, hvl]
+          rw [min_eq_left (by omega)]; omega
+        rw [hn]; push_cast; ring
+      · have hki0 : (inst 14).main Coin.KI p = 0 := by
+          rcases Coin.bool_col cs (c := Coin.KI) (by simp) (show p < 2 ^ L by omega) with h | h
+          · exact h
+          · exact absurd h hki
+        rw [hki0, add_zero]
+        simp only [inBefore, if_pos ht1, Nat.zero_min, add_zero, hsplit, hvl]
+        congr 1
+        by_cases ht2 : 1 ≤ t - 1
+        · have : ¬ (tx'.vin.length + tx'.vout.length - 1 < tx'.vin.length) := fun hh => hki (hk.mpr ⟨hh, ht2⟩)
+          rw [if_pos ht2, if_pos ht2, min_eq_right (by omega)]
+        · rw [if_neg ht2, if_neg ht2]
+    · -- a later token of the same transaction
+      have hpq : p = ((parts.take t).map List.length).sum + (q - 1) := by omega
+      have ihp := ih (by omega) t (q - 1) tx htx hpq (by omega)
+      have hk := (coin_kind_pos hL hsat hL24 S he hon hlen hst hf htg (by omega) htx hpq (by omega)).2.1
+      have hvl : vinLen S.b.txs t = tx.vin.length := by simp [vinLen, htx]
+      rw [hJ1, ihp]
+      by_cases hki : (inst 14).main Coin.KI p = 1
+      · obtain ⟨hql, ht1⟩ := hk.mp hki
+        rw [hki]
+        have hn : inBefore S.b.txs t q = inBefore S.b.txs t (q - 1) + 1 := by
+          simp only [inBefore, if_pos ht1, hvl]
+          rw [min_eq_left (by omega), min_eq_left (by omega)]; omega
+        rw [hn]; push_cast; ring
+      · have hki0 : (inst 14).main Coin.KI p = 0 := by
+          rcases Coin.bool_col cs (c := Coin.KI) (by simp) (show p < 2 ^ L by omega) with h | h
+          · exact h
+          · exact absurd h hki
+        rw [hki0, add_zero]
+        simp only [inBefore, hvl]
+        congr 1
+        by_cases ht1 : 1 ≤ t
+        · have : ¬ (q - 1 < tx.vin.length) := fun hh => hki (hk.mpr ⟨hh, ht1⟩)
+          rw [if_pos ht1, if_pos ht1, min_eq_right (by omega), min_eq_right (by omega)]
+        · rw [if_neg ht1, if_neg ht1]
 
 end System
 
