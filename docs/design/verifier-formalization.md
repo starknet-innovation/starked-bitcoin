@@ -1,8 +1,9 @@
-# Formalizing our circuits in Lean (parked, 2026-10-08)
+# Formalizing our circuits in Lean (resumed 2026-10-10)
 
-Status: draft · Updated: 2026-10-08
+Status: in progress · Updated: 2026-10-10
 
-Parked by the owner on 2026-10-08. Resume from "Plan" below.
+Parked by the owner on 2026-10-08; resumed on the owner's request on 2026-10-10 ("the in-circuit
+plain verifier proof"). Steps 1–4 below are done (the glue, `glue-circuits.md`).
 **Goal:** everything *we* wrote is proven; only StarkWare-derived software is
 trusted. As of 2026-10-08, `src/recursion/plain_verifier.zig` (our in-circuit verifier for
 segment proofs) and `src/recursion/node.zig` (link checks, digests, key) are
@@ -47,3 +48,23 @@ circuit satisfied ⇒ our Lean spec of the native Stwo verifier accepts ⇒
 
 `REC-FUZZ`: differential fuzzing of the plain verifier against the native one
 (mutate real proofs; both must agree). Cheap, and still useful afterwards.
+
+## Resumed 2026-10-10: the plain verifier, our code first
+
+`verifyPlain` (`src/recursion/plain_verifier.zig`) mixes two kinds of code:
+- **stwo-zig's in-circuit verifier pieces** (`sv.*`): the channel, FRI commit/decommit, Merkle paths,
+  query selection, DEEP quotients (`computeFriInput`), circle arithmetic. These are a parity-tested port
+  of StarkWare's; trusted for now, like the native verifier.
+- **Our code:** the orchestration (transcript order, statement mixing, the LogUp balance check, the order
+  of the DEEP responses, leaf hashing) and `compositionAtOods`: every constraint at the OODS point
+  through the exported DAG, the LogUp batches, Horner-combined, divided by the vanishing polynomial.
+
+Order of work (each Lean-first: a program of `Circuit.Op`s, exported, replayed by `glue.zig`, with a
+gate-parity test against the hand-written Zig, then proven):
+1. **Ops** `zero`, `one`, `inv` (the builder elides gates around variables 0 and 1, so parity needs them).
+2. **`compositionAtOods`**: the DAG part (from `dag_correct`), then the LogUp batches. Theorem: the
+   circuit's value, in the QM31 field (`Spec/QM31.lean`), is the Horner combination of the constraints
+   (evaluated on the OODS samples) and the LogUp terms, times the hook's `1/Z(oods)`.
+3. The statement mixing and the LogUp balance check.
+4. The DEEP response order and leaf hashing.
+5. Then the trust question for `sv.*`.
