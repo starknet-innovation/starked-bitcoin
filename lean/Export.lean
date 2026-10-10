@@ -2,6 +2,7 @@ import StarkedAir.Export
 import StarkedAir.Circuit.CompositionLogUp
 import StarkedAir.Circuit.Balance
 import StarkedAir.Circuit.Statement
+import StarkedAir.Circuit.LeafHash
 import StarkedAir.Block.ExtSum
 import StarkedAir.Block.FpWalk
 import StarkedAir.Block.URec
@@ -39,6 +40,7 @@ def main (args : List String) : IO Unit := do
       [StarkedAir.HeaderTree.headers, StarkedAir.HeaderTree.tree]
       [StarkedAir.Circuit.Composition.compShape StarkedAir.HeaderTree.headers 108,
        StarkedAir.Circuit.Composition.compShape StarkedAir.HeaderTree.tree 0] 0)
+  | ["leafhash", k] => IO.println (StarkedAir.Circuit.leafHashJson k.toNat!)
   | ["statement_leaf"] => IO.println (StarkedAir.Circuit.Statement.stmtJson true [108, 0])
   | ["balance_leaf"] => IO.println (StarkedAir.Circuit.Composition.balanceJson 2 [(2, 18, 2 ^ 31 - 2)])
   | ["composition_header_chain"] => IO.println (StarkedAir.Circuit.Composition.programJson StarkedAir.HeaderChain.air

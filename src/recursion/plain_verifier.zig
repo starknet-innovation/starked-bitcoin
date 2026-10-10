@@ -341,7 +341,29 @@ pub const PlainStatement = struct {
     /// The statement mixing as a Lean program (`Circuit/Statement.lean`, `pub_mixed`): hook 0 binds the
     /// public inputs; hook 3 is the channel's `mixU32s`; hook 4 creates a component's header constants.
     statement: ?*const glue.Program = null,
+    /// Merkle leaf hashing as Lean programs (`Circuit/LeafHash.lean`, `leaf_sound`), one per row width;
+    /// a width without a program uses the hand-written `hashLeafM31s`.
+    leaf_hashes: []const *const glue.Program = &.{},
 };
+
+fn leafHashVia(comptime V: type, ctx: *Context(V), progs: []const *const glue.Program, values: []const M31Wrapper(Var)) !?HashValue(Var) {
+    for (progs) |prog| {
+        if (prog.ops.len == 0 or prog.ops[0] != .hook or prog.ops[0].hook.outs.len != values.len) continue;
+        const ins = try ctx.scratch().alloc(Var, values.len);
+        for (ins, values) |*w, v| w.* = v.get();
+        const Hooks = struct {
+            inputs: []const Var,
+            pub fn call(self: @This(), id: u32, _: []const Var) ![]const Var {
+                return if (id == 0) self.inputs else error.UnknownHook;
+            }
+        };
+        const res = try glue.run(V, ctx, prog, &.{}, Hooks{ .inputs = ins });
+        var out: HashValue(Var) = undefined;
+        for (&out.words, res) |*w, v| w.* = .newUnsafe(v);
+        return out;
+    }
+    return null;
+}
 
 const glue = @import("glue.zig");
 
@@ -633,7 +655,7 @@ pub fn verifyPlain(
         const leaf_values = try ctx.scratch().alloc(M31Wrapper(Var), n_columns);
         for (0..config.nQueries()) |q| {
             for (leaf_values, 0..) |*v, c| v.* = p.eval_domain_samples.at(tree, c, q);
-            const leaf = try hashLeafM31s(V, ctx, leaf_values);
+            const leaf = (try leafHashVia(V, ctx, st.leaf_hashes, leaf_values)) orelse try hashLeafM31s(V, ctx, leaf_values);
             for (bits_for_query, bits) |*b, qb| b.* = qb[q];
             try sv.merkle.verifyMerklePath(V, ctx, leaf, bits_for_query, root, p.eval_domain_auth_paths.at(tree, q));
         }
@@ -1006,4 +1028,30 @@ test "composition check with LogUp: the Lean program replays gate for gate (byte
     const res_b = try glue.run(QM31, &ctx_b, &prog, &.{}, Hooks{ .ctx = &ctx_b, .inputs = in_b, .log = log_size });
     try std.testing.expect(ctx_a.get(res_a).eql(ctx_b.get(res_b[0])));
     try glue.expectSameCircuit(&ctx_a.circuit, &ctx_b.circuit);
+}
+
+test "Merkle leaf hashing: the Lean program (Circuit/LeafHash.lean) replays gate for gate as hashLeafM31s" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const progs = [_]glue.Program{ try glue.parse(a, @embedFile("air:leafhash_8")), try glue.parse(a, @embedFile("air:leafhash_434")) };
+    for (progs, [_]usize{ 8, 434 }) |prog, k| {
+        var prng = std.Random.DefaultPrng.init(k);
+        const vals = try a.alloc(M31, k);
+        for (vals) |*v| v.* = M31.fromCanonical(prng.random().int(u31) % 0x7fffffff);
+        var ctx_a = try Context(QM31).init(a, 0);
+        defer ctx_a.deinit();
+        var ctx_b = try Context(QM31).init(a, 0);
+        defer ctx_b.deinit();
+        const wa = try a.alloc(M31Wrapper(Var), k);
+        const wb = try a.alloc(M31Wrapper(Var), k);
+        for (wa, wb, vals) |*x, *y, v| {
+            x.* = try builder.wrappers.guessM31(QM31, &ctx_a, builder.wrappers.m31Value(QM31, v));
+            y.* = try builder.wrappers.guessM31(QM31, &ctx_b, builder.wrappers.m31Value(QM31, v));
+        }
+        const ha = try hashLeafM31s(QM31, &ctx_a, wa);
+        const hb = (try leafHashVia(QM31, &ctx_b, &.{&prog}, wb)) orelse return error.TestUnexpectedResult;
+        for (ha.words, hb.words) |x, y| try std.testing.expect(ctx_a.get(x.get()).eql(ctx_b.get(y.get())));
+        try glue.expectSameCircuit(&ctx_a.circuit, &ctx_b.circuit);
+    }
 }

@@ -115,4 +115,21 @@ The leaf replays `airs/statement_leaf.json`; it is gate-identical, and the mainn
 balance check, and the composition check. Still hand-written: the order of the transcript's other calls,
 the DEEP response list, and leaf hashing for the Merkle decommitment (calls into stwo-zig).
 
-Next: the DEEP response order (step 4), then the `sv.*` trust question (step 5).
+### Done (2026-10-10): Merkle leaf hashing
+
+`Circuit/LeafHash.lean`: `leafHash` (each value through `m31_to_u32`, then the proven Blake2s gadget) and
+`leaf_sound`: the leaf the circuit checks against each Merkle path is `blake2sWords` of the row's values
+as u32 words, matching the Blake2sM31 hasher's leaf (trusted correspondence with stwo's native hasher).
+The leaf replays `airs/leafhash_{104,434,12,8}.json` (its four trees' widths). Tests: direct parity at
+widths 8 and 434; the whole leaf circuit is gate-identical; the mainnet VK is unchanged.
+
+**Status of `verifyPlain`:**
+- **Lean-generated and proven:** the statement mixing (public inputs), the LogUp balance, the
+  composition check, the Merkle leaf hashing.
+- **Hand-written (our code):** the order of the remaining transcript calls (around stwo-zig's channel),
+  and the DEEP response list (which samples, at which points, in which order).
+- **stwo-zig (trusted, parity-tested port of StarkWare's):** the channel, FRI, Merkle path verification,
+  query selection, DEEP quotients, circle points.
+
+Next: the DEEP response list (step 4b). The property worth proving: every response's value is a sample
+that was mixed into the transcript, at its column's point. Then the `sv.*` trust question (step 5).

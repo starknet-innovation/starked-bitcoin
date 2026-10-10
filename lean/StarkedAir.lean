@@ -120,3 +120,4 @@ import StarkedAir.Circuit.CompositionLogUp
 import StarkedAir.Circuit.CompositionSound
 import StarkedAir.Circuit.Balance
 import StarkedAir.Circuit.Statement
+import StarkedAir.Circuit.LeafHash

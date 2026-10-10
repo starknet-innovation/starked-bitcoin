@@ -97,6 +97,10 @@ pub fn build(b: *std.Build) void {
     lib.addAnonymousImport("air:composition_leaf", .{ .root_source_file = b.path("airs/composition_leaf.json") });
     lib.addAnonymousImport("air:balance_leaf", .{ .root_source_file = b.path("airs/balance_leaf.json") });
     lib.addAnonymousImport("air:statement_leaf", .{ .root_source_file = b.path("airs/statement_leaf.json") });
+    lib.addAnonymousImport("air:leafhash_104", .{ .root_source_file = b.path("airs/leafhash_104.json") });
+    lib.addAnonymousImport("air:leafhash_434", .{ .root_source_file = b.path("airs/leafhash_434.json") });
+    lib.addAnonymousImport("air:leafhash_12", .{ .root_source_file = b.path("airs/leafhash_12.json") });
+    lib.addAnonymousImport("air:leafhash_8", .{ .root_source_file = b.path("airs/leafhash_8.json") });
     lib.addAnonymousImport("vk:mainnet_test", .{ .root_source_file = b.path("vk/mainnet-q70-p26-l20.vk") });
     lib.addAnonymousImport("air:block_fpwalk", .{ .root_source_file = b.path("airs/block_fpwalk.json") });
     lib.addAnonymousImport("air:block_urec", .{ .root_source_file = b.path("airs/block_urec.json") });
