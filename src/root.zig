@@ -22,6 +22,7 @@ pub const block = struct {
     pub const proof_file = @import("block/proof_file.zig");
     pub const extsum = @import("block/extsum.zig");
     pub const coin = @import("block/coin.zig");
+    pub const epoch = @import("block/epoch.zig");
     pub const system = @import("block/system.zig");
     pub const negative = @import("block/negative.zig");
 };

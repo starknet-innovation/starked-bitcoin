@@ -30,6 +30,14 @@
 //!       Verifies the chain proof, the block file's headers against its MMR root, the block proof
 //!       under the pinned FRI configuration, and its height, context and block hash against those
 //!       headers. Needs no header file. Prints the proven statement.
+//!   chainproof prove-epoch <headers.bin> <dir> <to> <file.sbchain> [--test-strength]
+//!       M3b (D-040): proves blocks 0..to from <dir>/blocks/<h>.bin, <dir>/undo/<h>.undo and .ctx
+//!       (scripts/fetch_undo.py --ctx) under the epoch's challenge (derived from the blocks' hashes and
+//!       commitments), writing <dir>/proofs/<h>.sbblock and the coin set <dir>/set-<to>.bin.
+//!   chainproof verify-epoch <vk> <file.sbchain> <dir> <to> [--min-work <hex> | --min-work 0] [--test-strength]
+//!       Verifies every block proof against the chain, recomputes the challenge from their hashes and
+//!       commitments, and checks that their partial sums minus the coin set's fractions are zero, the
+//!       set strictly sorted: the coin set after block `to`. Prints Core's hash_serialized and total.
 //!   chainproof rebind-block <in.sbblock> <headers.bin> <file.sbchain> <out.sbblock>
 //!       Rebuilds a block file's header window for another (longer) chain proof, without re-proving.
 //!
@@ -57,6 +65,8 @@ fn usage() noreturn {
         \\  chainproof prove-block <block.bin> <undo.bin | -> <headers.bin> <height> <file.sbchain> <out.sbblock> [--test-strength]
         \\  chainproof verify-block <vk> <file.sbchain> <file.sbblock> [--min-work <hex> | --min-work 0] [--test-strength]
         \\  chainproof rebind-block <in.sbblock> <headers.bin> <file.sbchain> <out.sbblock>
+        \\  chainproof prove-epoch <headers.bin> <dir> <to> <file.sbchain> [--test-strength]
+        \\  chainproof verify-epoch <vk> <file.sbchain> <dir> <to> [--min-work <hex> | --min-work 0] [--test-strength]
         \\
     , .{});
     std.process.exit(2);
@@ -110,6 +120,23 @@ pub fn main() !void {
             } else usage();
         }
         return verifyBlock(gpa, a, args[2], args[3], args[4], min_work, weak);
+    }
+    if (std.mem.eql(u8, cmd, "prove-epoch") and (args.len == 6 or (args.len == 7 and std.mem.eql(u8, args[6], "--test-strength"))))
+        return proveEpoch(gpa, a, args[2], args[3], try std.fmt.parseInt(u32, args[4], 10), args[5], args.len == 7);
+    if (std.mem.eql(u8, cmd, "verify-epoch") and args.len >= 6) {
+        var min_work: u256 = core_min_work;
+        var weak = false;
+        var i: usize = 6;
+        while (i < args.len) {
+            if (std.mem.eql(u8, args[i], "--test-strength")) {
+                weak = true;
+                i += 1;
+            } else if (std.mem.eql(u8, args[i], "--min-work") and i + 1 < args.len) {
+                min_work = try std.fmt.parseInt(u256, args[i + 1], 16);
+                i += 2;
+            } else usage();
+        }
+        return verifyEpoch(gpa, a, args[2], args[3], args[4], try std.fmt.parseInt(u32, args[5], 10), min_work, weak);
     }
     if (std.mem.eql(u8, cmd, "rebind-block") and args.len == 6) return rebindBlock(gpa, a, args[2], args[3], args[4], args[5]);
     if (std.mem.eql(u8, cmd, "inclusion") and args.len == 6) return inclusion(gpa, a, args[2], args[3], args[4], try std.fmt.parseInt(usize, args[5], 10));
@@ -337,6 +364,114 @@ fn proveBlock(gpa: std.mem.Allocator, a: std.mem.Allocator, block_path: []const 
     const f = try PF.decode(a, try S.readFile(a, out));
     try PF.verifyStark(a, &airs, &f, fri);
     std.debug.print("wrote {s} ({d} bytes), reloaded and verified in {d:.1}s\n", .{ out, bytes.len, secs(timer.lap()) });
+}
+
+const EP = sb.block.epoch;
+
+fn pathOf(a: std.mem.Allocator, dir: []const u8, sub: []const u8, h: u32, ext: []const u8) ![]u8 {
+    return std.fmt.allocPrint(a, "{s}/{s}/{d}.{s}", .{ dir, sub, h, ext });
+}
+
+fn proveEpoch(gpa: std.mem.Allocator, a: std.mem.Allocator, headers_path: []const u8, dir: []const u8, to: u32, chain_path: []const u8, weak: bool) !void {
+    var c = try S.Chain.decode(gpa, a, try S.readFile(a, chain_path));
+    const n = c.headers();
+    c.deinit();
+    const all = try loadHeaderFile(a, headers_path);
+    if (to >= n or all.len < n) return error.HeightBeyondChain;
+    const nb = to + 1;
+    const raws = try a.alloc([]const u8, nb);
+    const undos = try a.alloc([]const u8, nb);
+    const ctxs = try a.alloc([]const u32, nb);
+    const hashes = try a.alloc([32]u8, nb);
+    const commits = try a.alloc([32]u8, nb);
+    for (0..nb) |h| {
+        const hh: u32 = @intCast(h);
+        raws[h] = try S.readFile(a, try pathOf(a, dir, "blocks", hh, "bin"));
+        if (!std.mem.eql(u8, raws[h][0..80], &all[h])) return error.HeaderMismatch;
+        undos[h] = try S.readFile(a, try pathOf(a, dir, "undo", hh, "undo"));
+        const cb = try S.readFile(a, try pathOf(a, dir, "undo", hh, "ctx"));
+        const cx = try a.alloc(u32, cb.len / 4);
+        for (cx, 0..) |*x, i| x.* = std.mem.readInt(u32, cb[4 * i ..][0..4], .little);
+        ctxs[h] = cx;
+        var h1: [32]u8 = undefined;
+        std.crypto.hash.sha2.Sha256.hash(raws[h][0..80], &h1, .{});
+        std.crypto.hash.sha2.Sha256.hash(&h1, &hashes[h], .{});
+        std.crypto.hash.blake2.Blake2s256.hash(undos[h], &commits[h], .{});
+    }
+    const ch = EP.challenge(EP.seed(0, to, hashes, commits));
+    const tree = try a.alloc(HT.Words, n);
+    for (tree, all[0..n]) |*h, *hd| h.* = HT.blockHash(hd);
+    const airs = try BS.parseAirs(a);
+    const fri = blockFri(weak);
+    const pdir = try std.fmt.allocPrint(a, "{s}/proofs", .{dir});
+    std.fs.cwd().makePath(pdir) catch {};
+    var timer = try std.time.Timer.start();
+    for (0..nb) |h| {
+        var arena = std.heap.ArenaAllocator.init(gpa);
+        defer arena.deinit();
+        const ba = arena.allocator();
+        const hh: u32 = @intCast(h);
+        const ctx = sb.block.checks.Ctx{ .height = hh, .prev_mtp = PF.prevMtp(all, h) };
+        const b = try BS.buildFull(ba, raws[h], undos[h], ctx, .{ .chal = ch, .ctx = ctxs[h] });
+        const proof = try PF.prove(ba, &airs, &b, fri);
+        const window = try PF.bindWindow(ba, all, tree, hh);
+        const bytes = try PF.encode(ba, &.{ .log_size = b.log_size, .pubs = b.pubs, .proof = proof, .provenance = "prove-epoch", .chain_len = @intCast(n), .window = window });
+        try S.writeFileAtomic(try pathOf(ba, dir, "proofs", hh, "sbblock"), bytes);
+        if (h % 50 == 0 or h == to) std.debug.print("block {d}: proved ({d:.0}s so far)\n", .{ h, secs(timer.read()) });
+    }
+    const set = try EP.coinSet(a, raws);
+    try S.writeFileAtomic(try std.fmt.allocPrint(a, "{s}/set-{d}.bin", .{ dir, to }), try EP.encodeSet(a, set));
+    std.debug.print("epoch 0..{d}: {d} block proofs, coin set of {d} coins written\n", .{ to, nb, set.len });
+}
+
+fn verifyEpoch(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8, chain_path: []const u8, dir: []const u8, to: u32, min_work: u256, weak: bool) !void {
+    var timer = try std.time.Timer.start();
+    const vk = try loadVk(a, vk_path);
+    const tables = try L.Tables.init(gpa);
+    defer tables.deinit(gpa);
+    var c = try S.Chain.decode(gpa, a, try S.readFile(a, chain_path));
+    defer c.deinit();
+    const s = try S.verifyChain(gpa, a, tables, &vk, &c);
+    if (min_work != 0 and s.work < min_work) return error.InsufficientWork;
+    std.debug.print("chain proof verified: headers 0..{d} ({d:.1}s)\n", .{ s.headers - 1, secs(timer.lap()) });
+    const airs = try BS.parseAirs(a);
+    const nb = to + 1;
+    const files = try a.alloc(PF.File, nb);
+    const hashes = try a.alloc([32]u8, nb);
+    const commits = try a.alloc([32]u8, nb);
+    var nin: u64 = 0;
+    for (0..nb) |h| {
+        const f = try PF.decode(a, try S.readFile(a, try pathOf(a, dir, "proofs", @intCast(h), "sbblock")));
+        const window = try PF.checkWindow(a, &f, s.headers, s.t);
+        try PF.verifyStark(a, &airs, &f, blockFri(weak));
+        const st = try PF.checkPubs(&f.pubs, window);
+        if (st.height != h) return error.WrongHeight;
+        var h1: [32]u8 = undefined;
+        std.crypto.hash.sha2.Sha256.hash(&window[window.len - 1], &h1, .{});
+        std.crypto.hash.sha2.Sha256.hash(&h1, &hashes[h], .{});
+        commits[h] = st.commitment;
+        nin += f.pubs[sb.block.coin.PUB_NIN].toU32();
+        files[h] = f;
+    }
+    const ch = EP.challenge(EP.seed(0, to, hashes, commits));
+    var sum = @import("stwo_core").fields.qm31.QM31.zero();
+    for (files, 0..) |f, h| {
+        try EP.checkPubs(&f.pubs, ch, @intCast(h));
+        sum = sum.add(EP.partialSum(&f.pubs));
+    }
+    std.debug.print("{d} block proofs verified, challenge recomputed from their hashes and commitments ({d:.1}s)\n", .{ nb, secs(timer.lap()) });
+    const set = try EP.decodeSet(a, try S.readFile(a, try std.fmt.allocPrint(a, "{s}/set-{d}.bin", .{ dir, to })));
+    if (!EP.sortedStrict(set)) return error.SetNotSorted;
+    // Events below p: created + spent + final (the creations are at most the outputs, bounded by bytes).
+    if (nin + set.len >= 1 << 30) return error.EpochTooLarge;
+    const fin = try EP.finalSum(ch, set);
+    if (!sum.eql(fin)) {
+        std.debug.print("REJECTED: the blocks' coin events do not end at this coin set\n", .{});
+        return error.EpochUnbalanced;
+    }
+    std.debug.print("VERIFIED epoch 0..{d}: the coin set after block {d} is {d} coins ({d} inputs spent in the epoch)\n", .{ to, to, set.len, nin });
+    std.debug.print("  total amount     {d} sat\n", .{EP.totalAmount(set)});
+    std.debug.print("  hash_serialized  {x}  (Core's HASH_SERIALIZED of this set)\n", .{EP.hashSerialized(set)});
 }
 
 fn rebindBlock(gpa: std.mem.Allocator, a: std.mem.Allocator, in_path: []const u8, headers_path: []const u8, chain_path: []const u8, out: []const u8) !void {

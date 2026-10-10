@@ -15,8 +15,11 @@ Credentials: BITCOIN_RPC_USER (default `application`) and BITCOIN_RPC_PASSWORD f
 or from the file given with --env (KEY=VALUE lines). The password is never printed.
 
 Usage:
-    python3 -I scripts/fetch_undo.py [--env FILE] [--url http://127.0.0.1:18332] [--out DIR] [--blocks] HEIGHT...
-`--blocks` also saves the raw block to testdata/blocks/<height>.bin when missing.
+    python3 -I scripts/fetch_undo.py [--env FILE] [--url http://127.0.0.1:18332] [--out DIR] [--blocks]
+        [--blocks-dir DIR] [--ctx] HEIGHT|FROM-TO...
+`--blocks` also saves the raw block (to testdata/blocks/, or `--blocks-dir`) when missing. `--ctx` also
+writes <out>/<height>.ctx: per record, the creating transaction's index in its block (LE32), found with
+`getrawtransaction` (needs txindex) and the creating block's transaction list.
 Writes <out>/<height>.undo (default out: testdata/undo).
 """
 import base64, hashlib, json, os, sys, urllib.request
@@ -63,6 +66,14 @@ def compact_size(n):
     return b"\xff" + n.to_bytes(8, "little")
 
 
+def creator_index(rpc, txid, cache):
+    """The index of transaction `txid` in its block."""
+    bh = rpc("getrawtransaction", txid, True)["blockhash"]
+    if bh not in cache:
+        cache[bh] = {t: i for i, t in enumerate(rpc("getblock", bh, 1)["tx"])}
+    return cache[bh][txid]
+
+
 def undo_stream(block):
     out = bytearray([1])
     for tx in block["tx"][1:]:
@@ -82,6 +93,8 @@ def main():
     args = sys.argv[1:]
     env_file, url, out = None, "http://127.0.0.1:18332", ROOT / "testdata" / "undo"
     save_blocks = False
+    blocks_dir = BLOCKS
+    want_ctx = False
     heights = []
     i = 0
     while i < len(args):
@@ -91,8 +104,14 @@ def main():
             url = args[i + 1]; i += 2
         elif args[i] == "--blocks":
             save_blocks = True; i += 1
+        elif args[i] == "--blocks-dir":
+            blocks_dir = Path(args[i + 1]); save_blocks = True; i += 2
+        elif args[i] == "--ctx":
+            want_ctx = True; i += 1
         elif args[i] == "--out":
             out = Path(args[i + 1]); i += 2
+        elif "-" in args[i]:
+            a0, a1 = args[i].split("-"); heights.extend(range(int(a0), int(a1) + 1)); i += 1
         else:
             heights.append(int(args[i])); i += 1
     env = dict(os.environ)
@@ -103,6 +122,7 @@ def main():
     rpc = Rpc(url, env.get("BITCOIN_RPC_USER", "application"), env["BITCOIN_RPC_PASSWORD"])
     headers = HEADERS.read_bytes()
     out.mkdir(parents=True, exist_ok=True)
+    cache = {}
     for h in heights:
         header = headers[80 * h:80 * h + 80]
         if len(header) != 80:
@@ -111,18 +131,25 @@ def main():
         got = rpc("getblockhash", h)
         if got != want:
             raise SystemExit(f"{h}: node hash {got} differs from data/headers.bin ({want}); refusing")
-        local = BLOCKS / f"{h}.bin"
+        local = blocks_dir / f"{h}.bin"
         rawb = bytes.fromhex(rpc("getblock", got, 0))
         if rawb[:80] != header:
             raise SystemExit(f"{h}: node's block header differs from data/headers.bin; refusing")
         if local.exists() and rawb != local.read_bytes():
             raise SystemExit(f"{h}: node's raw block differs from {local}; refusing")
         if save_blocks and not local.exists():
+            blocks_dir.mkdir(parents=True, exist_ok=True)
             local.write_bytes(rawb)
         block = rpc("getblock", got, 3)
         n_in = sum(len(tx["vin"]) for tx in block["tx"][1:])
         u = undo_stream(block)
         (out / f"{h}.undo").write_bytes(u)
+        if want_ctx:
+            ctx = bytearray()
+            for tx in block["tx"][1:]:
+                for vin in tx["vin"]:
+                    ctx += creator_index(rpc, vin["txid"], cache).to_bytes(4, "little")
+            (out / f"{h}.ctx").write_bytes(bytes(ctx))
         print(f"{h}: {n_in} spent outputs, undo stream {len(u)} bytes")
 
 

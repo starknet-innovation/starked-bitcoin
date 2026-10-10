@@ -155,7 +155,7 @@ pub fn buildFull(a: std.mem.Allocator, raw: []const u8, undo: []const u8, ctx: c
     };
     var coin_raw_reads = std.ArrayList(u32).empty;
     var coin_ranges = std.ArrayList(u32).empty;
-    const lost = ctx.height == 91722 or ctx.height == 91812;
+    const lost = lostHeight(ctx.height);
     const co = try coin.coinColumns(a, log_size, .{ .raw = raw, .undo = undo, .rows = rows, .height = ctx.height, .txids = txids, .recs = recs, .ctx = opts.ctx, .lost = lost, .chal = opts.chal }, &coin_raw_reads, &coin_ranges);
     var fp_raw_reads = std.ArrayList(u32).empty;
     var fp_undo_reads = std.ArrayList(u32).empty;
@@ -228,6 +228,12 @@ pub fn buildFull(a: std.mem.Allocator, raw: []const u8, undo: []const u8, ctx: c
 
 /// The block hash's public limbs: SHA256d of the header as SHA-256 state words (big-endian words of
 /// the hash in internal byte order), limb `2w + h` half `h` of word `w` (Lean: `HashPub.hash_pub`).
+/// Coinbases whose outputs are never created: genesis (Core never connects it) and the two BIP30
+/// coinbases Core overwrote unspent (public input 158).
+pub fn lostHeight(h: u32) bool {
+    return h == 0 or h == 91722 or h == 91812;
+}
+
 pub fn hashLimbs(header: *const [80]u8) [16]M31 {
     var h1: [32]u8 = undefined;
     var h2: [32]u8 = undefined;

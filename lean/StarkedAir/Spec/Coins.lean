@@ -6,6 +6,8 @@
 - spent coins are removed;
 - the spendable outputs are added.
 
+Genesis: Core never connects block 0, so its coinbase output is never created; the same holds here.
+
 Two deviations, both stricter than Core (they can only reject more):
 - the outputs of the two coinbases Core overwrote unspent (heights 91,722 and 91,812, BIP30) are never
   created. Core replaced them at 91,880 and 91,842, so the views agree from 91,880 on;
@@ -37,8 +39,9 @@ def COINBASE_MATURITY : ℕ := 100
 /-- `CScript::IsUnspendable`: `OP_RETURN` first, or longer than `MAX_SCRIPT_SIZE`. -/
 def unspendable (o : TxOut) : Bool := o.scriptPubKey.head? == some 0x6a || decide (10000 < o.scriptPubKey.length)
 
-/-- The two coinbases whose outputs Core overwrote unspent (BIP30). -/
-def bip30Lost (h : ℕ) : Bool := h == 91722 || h == 91812
+/-- Coinbases whose outputs are never created: genesis (never connected) and the two Core overwrote
+unspent (BIP30). -/
+def bip30Lost (h : ℕ) : Bool := h == 0 || h == 91722 || h == 91812
 
 abbrev CView := OutPoint → Option Coin
 
