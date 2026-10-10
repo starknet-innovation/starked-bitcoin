@@ -37,9 +37,8 @@ against Core's own C++ (about 860k cases, 0 mismatches).
    - Lean: the per-transaction facts of `CtxFreeOK`/`CtxOK` (Spec/BlockFlat.lean).
 2. **Keeping the proof fresh:** `tools/extend_tip.sh data/store/chainproof-run5 <latest .sbchain>`.
    About 5–6 min per 400 headers.
-3. **Owner:** whether and where to push. `docs/reports/2026-10-09-proof-review.md` stays out of the
-   repo (owner, 2026-10-10); it was removed from the unpushed history, and the file is still on disk,
-   untracked.
+3. **M3b design input:** assumeUTXO compatibility is a goal (D-037), so `Q-TREE` must allow a
+   traversal in Core's coin order.
 
 Full account of the away session: [2026-10-10-away-session.md](../reports/2026-10-10-away-session.md).
 
@@ -49,7 +48,7 @@ Full account of the away session: [2026-10-10-away-session.md](../reports/2026-1
 
 ## Needs owner
 
-- **Push / remote:** private repo starknet-innovation/starked-bitcoin exists; nothing pushed. Wait for the owner's go.
+- **Pushing:** `main` was pushed to the private repo starknet-innovation/starked-bitcoin on 2026-10-10, on the owner's go. Each later push still needs the owner's approval (D-016).
 - **M3 node:** available (data source only; proving stays on the Mac). Credentials are in `prove-any-chain/.env.local`, never committed.
 - **LICENSE:** none chosen.
 - **STWO-225-FU:** follow up on stwo-zig#225 upstream? This is outward-facing.

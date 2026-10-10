@@ -238,3 +238,18 @@ Why:
 - The first full run kept nothing.
 - An unpinned request let a stored proof claim weaker FRI parameters.
 - A run-dependent node shape would have orphaned the stored peaks at the first extension.
+
+### D-037 — assumeUTXO compatibility is a goal
+Date: 2026-10-10 · By: owner · Status: active
+Decision: The UTXO module (M3b) must be able to prove that the UTXO set reached by valid blocks from
+genesis hashes to the `hash_serialized` value Bitcoin Core pins for its assumeUTXO snapshots
+(`HASH_SERIALIZED`, SHA256d over the coins in Core's key order). So:
+- the UTXO commitment (`Q-TREE`, still open) must allow a sorted traversal in Core's coin order,
+  with each coin's `TxOutSer` fields (outpoint, height and coinbase flag, amount, script);
+- the target is `HASH_SERIALIZED` at Core's snapshot heights, not MuHash (see the scoping note);
+- the same traversal yields the total amount, for a no-inflation statement.
+
+Why: it makes an assumeUTXO snapshot checkable without trusting the constant in Core's
+`chainparams.cpp`. As far as we know, no one does this today.
+
+Scoping: [utxo-hash-scope.md](../design/utxo-hash-scope.md).

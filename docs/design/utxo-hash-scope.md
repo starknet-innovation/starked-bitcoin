@@ -1,6 +1,6 @@
 # Scoping: proving Core's UTXO-set hash (assumeUTXO) — note
 
-Status: scoping note (2026-10-10), no decision. From the proof review's recommended order (item 4:
+Status: scoping note (2026-10-10). The owner made assumeUTXO compatibility a goal (D-037, 2026-10-10). From the proof review's recommended order (item 4:
 "scope the MuHash / no-inflation outputs early, because they shape the UTXO commitment"). Figures
 marked *est.* are rough and need checking before any external use.
 
@@ -68,5 +68,5 @@ It is one linear hash over the whole set; it cannot be updated per block.
 
 ## Not decided here
 
-This is scoping only. Choosing the UTXO commitment (`Q-TREE`) and whether assumeUTXO compatibility is
-a goal are owner decisions.
+Choosing the UTXO commitment (`Q-TREE`) is still an owner decision. assumeUTXO compatibility is a goal
+(D-037).

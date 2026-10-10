@@ -7,7 +7,7 @@
 4. the spec fuzzed against Core;
 5. M3a.5a as a fallback.
 
-Nothing was pushed. Every commit is local, on `main`.
+During the session nothing was pushed. `main` was pushed afterwards, on the owner's go (2026-10-10).
 
 **Status at a glance** (filled in at the end of the session):
 
@@ -147,4 +147,5 @@ D-035, the AIR design, was approved on 2026-10-10. Stages 5b–5e come next.
   - D-035 approved;
   - D-036 confirmed;
   - the review report stays out.
-- **Still open:** whether to push.
+- **Pushed** to the private origin on 2026-10-10, on the owner's go.
+- **assumeUTXO compatibility is a goal** (D-037).
