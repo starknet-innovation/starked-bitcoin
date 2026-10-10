@@ -141,6 +141,59 @@ commitments.
 6. the final sorted pass, with `HASH_SERIALIZED`;
 7. the aggregator.
 
+## The coin-event component, as designed (2026-10-10)
+
+One row per input and per output token of the block, **ordered by position** (strictly increasing
+start, range-checked). Every fields token is consumed exactly once, so the rows are the block's inputs and
+outputs in order. That fixes:
+- the output index (`vout`), which restarts after each transaction's inputs;
+- the record index `j` (the count of earlier non-coinbase inputs), which pairs input `j` with undo
+  record `j` canonically.
+
+The canonical pairing matters: the commitment must be the undo stream in input order.
+
+**Kinds.** `KO` (output), `KI` (non-coinbase input), `CBI` (the coinbase input: consumed, no event).
+
+**Tuple** (`w = 26` elements):
+- txid's 16 limbs;
+- `vout` as two limbs;
+- `code = 2h + cb` as two limbs;
+- the `serTxOut` fingerprint (4 coordinates);
+- its length;
+- the creation transaction index.
+
+**Creations (`KO`):**
+- txid from SHA's digest of message `1 + 2·tx`;
+- `code` from `pub 2` and `tx = 0`;
+- the segment `(0, row, start, len)` is offered to the fingerprint walker;
+- `m = 1` unless the script is unspendable (first byte `0x6a`, or longer than 10,000 bytes) or this is a
+  BIP30-lost coinbase (a public bit the verifier sets at 91,722 and 91,812).
+
+**Spends (`KI`):**
+- txid and `vout` limbs from the 36 prevout bytes;
+- `code` and the amount from undo record `j`, and the fingerprint from the undo segment `(1, j)`;
+- the claimed creation `(height, tx)` must be lexicographically before `(pub 2, tx)`;
+- a coinbase coin must be at least 100 blocks old;
+- `m = −1`.
+
+**Public inputs** (after the block's 41):
+- `γ` (4);
+- `z` (4);
+- `αₖ` (26 × 4);
+- the partial sum (4);
+- the input count;
+- the BIP30-lost bit.
+
+**Lookup sites** grow to about 170 per row, so the system bound becomes `L ≤ 23`. That costs nothing in
+practice: a `2^24`-row block is beyond memory anyway.
+
+**Still to add after the events:** per-transaction amounts (inputs ≥ outputs, ≤ `MAX_MONEY`) and the
+coinbase's subsidy plus fees, as limb arithmetic like the fields' output totals.
+
+**Formal gap to close:** `epoch_sound` assumes an injective tuple encoding. The fingerprint is injective
+only outside a small set of `γ` (Schwartz–Zippel over QM31: at most `N²·10⁴/|K|`), which needs a second
+probabilistic step in Lean.
+
 ## Recommendation (D-040, proposed)
 
 B for catch-up and for the assumeUTXO statement. Revisit A (or a hybrid) only for tip following. Lean:
