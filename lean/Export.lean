@@ -1,4 +1,5 @@
 import StarkedAir.Export
+import StarkedAir.Circuit.Composition
 import StarkedAir.Block.ExtSum
 import StarkedAir.Block.FpWalk
 import StarkedAir.Block.URec
@@ -28,6 +29,9 @@ def main (args : List String) : IO Unit := do
   | ["add32_chain"] => IO.println StarkedAir.Add32Chain.air.toJson
   | ["sha256_compress"] => IO.println StarkedAir.Sha256.air.toJson
   | ["header_chain"] => IO.println StarkedAir.HeaderChain.air.toJson
+  | ["composition_header_chain"] => IO.println (StarkedAir.Circuit.Composition.programJson StarkedAir.HeaderChain.air
+      { nPre := StarkedAir.HeaderChain.air.pre.length, nMain := StarkedAir.HeaderChain.air.nMain,
+        offs := StarkedAir.Circuit.Composition.mainOffsets StarkedAir.HeaderChain.air.toDag.1, nPub := 108 })
   | ["blake2s_compress"] => IO.println StarkedAir.Blake2s.air.toJson
   | ["extsum_test"] => IO.println StarkedAir.Block.ExtSum.air.toJson
   | ["block_fpwalk"] => IO.println StarkedAir.Block.FpWalk.fpwalk.toJson

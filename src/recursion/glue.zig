@@ -35,6 +35,9 @@ const Op = union(enum) {
     blake_g: [7]u32,
     triple_xor: [4]u32,
     hook: struct { id: u32, args: []const u32, outs: []const u32 },
+    zero: u32,
+    one: u32,
+    inv: [2]u32,
 };
 
 pub const Program = struct {
@@ -114,6 +117,12 @@ pub fn parse(a: std.mem.Allocator, json: []const u8) !Program {
             .{ .triple_xor = .{ try num(f[1]), try num(f[2]), try num(f[3]), try num(f[4]) } }
         else if (std.mem.eql(u8, tag, "hook"))
             .{ .hook = .{ .id = try num(f[1]), .args = try nums(a, f[2]), .outs = try nums(a, f[3]) } }
+        else if (std.mem.eql(u8, tag, "zero"))
+            .{ .zero = try num(f[1]) }
+        else if (std.mem.eql(u8, tag, "one"))
+            .{ .one = try num(f[1]) }
+        else if (std.mem.eql(u8, tag, "inv"))
+            .{ .inv = .{ try num(f[1]), try num(f[2]) } }
         else
             return error.BadGlue;
         for (f[1..]) |x| if (x == .integer) {
@@ -159,6 +168,9 @@ pub fn run(comptime V: type, ctx: *Context(V), prog: *const Program, ext: []cons
             for (out, 0..) |w, k| try rr.set(g[0] + @as(u32, @intCast(k)), w.get());
         },
         .triple_xor => |g| try rr.set(g[0], (try builder.blake.tripleXor(V, ctx, .newUnsafe(try rr.get(g[1])), .newUnsafe(try rr.get(g[2])), .newUnsafe(try rr.get(g[3])))).get()),
+        .zero => |o| try rr.set(o, ctx.zero()),
+        .one => |o| try rr.set(o, ctx.one()),
+        .inv => |g| try rr.set(g[0], try ctx.inv(try rr.get(g[1]))),
         .hook => |h| {
             const args = try ctx.scratch().alloc(Var, h.args.len);
             for (args, h.args) |*v, r| v.* = try rr.get(r);

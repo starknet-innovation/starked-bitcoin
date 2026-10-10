@@ -745,3 +745,73 @@ test "plain in-circuit verifier accepts a LogUp system proof, rejects unbalanced
 test "plain verifier circuit size for one header-chain segment (2^12 rows)" {
     // Informational: printed, not asserted.
 }
+
+test "composition check: the Lean program (Circuit/Composition.lean) replays gate for gate as compositionAtOods" {
+    const H = @import("../btc/header_chain.zig");
+    const glue = @import("glue.zig");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const air = (try ir.Air.parseJson(a, H.lean_json)).value;
+    const log_size: u32 = 12;
+    const offs = try mainOffsets(a, air);
+    const config = try PlainConfig.single(log_size, try FriConfig.init(10, 0, 1, 3, 1), air.n_preprocessed, offs, a);
+    var n_main_samples: usize = 0;
+    for (offs) |o| n_main_samples += o.len;
+    const n_in = air.n_preprocessed + n_main_samples + H.N_PUB + 2;
+    // The same pseudo-random input values in both circuits.
+    const vals = try a.alloc(QM31, n_in);
+    var prng = std.Random.DefaultPrng.init(5);
+    for (vals) |*v| v.* = QM31.fromU32Unchecked(prng.random().int(u31), prng.random().int(u31), prng.random().int(u31), prng.random().int(u31));
+
+    const Built = struct { ctx: Context(QM31), res: Var };
+    const guessAll = struct {
+        fn f(ctx: *Context(QM31), vs: []const QM31, al: std.mem.Allocator) ![]Var {
+            const out = try al.alloc(Var, vs.len);
+            for (out, vs) |*w, v| w.* = try ctx.guess(v);
+            return out;
+        }
+    }.f;
+    // 1. The hand-written function.
+    var ctx_a = try Context(QM31).init(a, 0);
+    defer ctx_a.deinit();
+    const in_a = try guessAll(&ctx_a, vals, a);
+    var p: PlainProof(Var) = undefined;
+    p.preprocessed_at_oods = in_a[0..air.n_preprocessed];
+    p.trace_at_oods = try a.alloc([]Var, offs.len);
+    {
+        var at: usize = air.n_preprocessed;
+        for (offs, p.trace_at_oods) |o, *col| {
+            col.* = in_a[at .. at + o.len];
+            at += o.len;
+        }
+    }
+    const pubs_at = air.n_preprocessed + n_main_samples;
+    const st = PlainStatement{ .parts = &.{.{ .air = &air, .digest = [_]u8{0} ** 32, .pubs = in_a[pubs_at .. pubs_at + H.N_PUB] }}, .preprocessed_root = [_]u8{0} ** 32 };
+    const res_a = try compositionAtOods(QM31, &ctx_a, &st, config, &p, in_a[pubs_at + H.N_PUB + 1], in_a[pubs_at + H.N_PUB], null);
+    // 2. The replayed Lean program.
+    var ctx_b = try Context(QM31).init(a, 0);
+    defer ctx_b.deinit();
+    const in_b = try guessAll(&ctx_b, vals, a);
+    const prog = try glue.parse(a, @embedFile("air:composition_header_chain"));
+    const Hooks = struct {
+        ctx: *Context(QM31),
+        inputs: []const Var,
+        log: u32,
+        pub fn call(self: @This(), id: u32, args: []const Var) ![]const Var {
+            return switch (id) {
+                0 => self.inputs,
+                1 => blk: {
+                    const out = try self.ctx.scratch().alloc(Var, 1);
+                    out[0] = try sv.circle.denomInverse(QM31, self.ctx, args[0], self.log);
+                    break :blk out;
+                },
+                else => error.UnknownHook,
+            };
+        }
+    };
+    const res_b = try glue.run(QM31, &ctx_b, &prog, &.{}, Hooks{ .ctx = &ctx_b, .inputs = in_b, .log = log_size });
+    _ = Built;
+    try std.testing.expect(ctx_a.get(res_a).eql(ctx_b.get(res_b[0])));
+    try glue.expectSameCircuit(&ctx_a.circuit, &ctx_b.circuit);
+}

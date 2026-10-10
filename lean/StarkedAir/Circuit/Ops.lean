@@ -96,6 +96,11 @@ inductive Op where
   | xor3 (o x y z : ℕ)
   /-- Host code (the trusted verifier) runs with `args` and defines `outs`. -/
   | hook (id : ℕ) (args outs : List ℕ)
+  /-- The builder's variables 0 and 1 (gates around them are elided). -/
+  | zero (o : ℕ)
+  | one (o : ℕ)
+  /-- `o = 1/x`: a guess with `x · o = 1` (the builder's `inv`). -/
+  | inv (o x : ℕ)
 
 open Q in
 /-- **What an op enforces** on a register assignment `ρ`. -/
@@ -114,6 +119,9 @@ def Op.holds (ρ : ℕ → Q) : Op → Prop
     ρ o = pack r.1 ∧ ρ (o + 1) = pack r.2.1 ∧ ρ (o + 2) = pack r.2.2.1 ∧ ρ (o + 3) = pack r.2.2.2
   | .xor3 o x y z => IsU32 (ρ x) ∧ IsU32 (ρ y) ∧ IsU32 (ρ z) ∧ ρ o = pack (word (ρ x) ^^^ word (ρ y) ^^^ word (ρ z))
   | .hook _ _ _ => True
+  | .zero o => ρ o = lit 0 0 0 0
+  | .one o => ρ o = lit 1 0 0 0
+  | .inv o x => ρ x * ρ o = lit 1 0 0 0
 
 def Holds (ρ : ℕ → Q) (ops : List Op) : Prop := ∀ op ∈ ops, op.holds ρ
 
@@ -141,6 +149,9 @@ def Op.toJson : Op → String
   | .xor3 o x y z => s!"[\"triple_xor\",{o},{x},{y},{z}]"
   | .hook id args outs =>
     s!"[\"hook\",{id},[{",".intercalate (args.map toString)}],[{",".intercalate (outs.map toString)}]]"
+  | .zero o => s!"[\"zero\",{o}]"
+  | .one o => s!"[\"one\",{o}]"
+  | .inv o x => s!"[\"inv\",{o},{x}]"
 
 /-- A glue program: its ops and its result registers. -/
 structure Program where
