@@ -54,8 +54,13 @@ Not yet:
    component's actual encoding (item 1).
 3. The final sorted pass as a proof (`HASH_SERIALIZED` in-circuit). For now the verifier computes
    the final set's fractions and hash natively from an explicit, sorted coin list. Fine at height
-   1,000; at a snapshot height that list is ~13 GB.
-4. Epochs that start from a previous set; the aggregator as a circuit (`BLOCK-REC`).
+   1,000; at a snapshot height that list is ~13 GB. Deprioritized (2026-10-11): a node using
+   assumeUTXO already holds the snapshot file, so a verifier with it checks the set natively without
+   trusting anyone; in-circuit only makes the proof succinct, and its cost is compute-bound at that
+   scale anyway.
+4. ~~Epochs that start from a previous set~~ (done 2026-10-11: `--from <a> <prev-set>`, the previous
+   set's hash in the seed, `epoch_from_sound`; 0..170 then 171..1000 verify and match the genesis run's
+   hash). The aggregator as a circuit (`BLOCK-REC`) is still to do.
 5. **CATCHUP:** a compute wall. Full blocks need lifting or a larger machine, and the in-memory check
    of a 1 MB block already took ~14 GB before M3b's extra ~190 columns.
 
