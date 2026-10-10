@@ -77,7 +77,14 @@ pub fn challenge(s: [32]u8) coin.Challenge {
     var ch: coin.Challenge = undefined;
     ch.gamma = st.q();
     ch.z = st.q();
-    for (&ch.alpha) |*a| a.* = st.q();
+    // The tuple's weights are powers of one α: φ(t) = Σₖ tₖ αᵏ, the value at α of the polynomial
+    // `tuplePoly t` that the epoch theorem uses (`Spec/UtxoEpoch.lean`, `LogUpSZ.lean`).
+    const a = st.q();
+    var x = QM31.one();
+    for (&ch.alpha) |*w| {
+        w.* = x;
+        x = x.mul(a);
+    }
     return ch;
 }
 

@@ -179,7 +179,9 @@ The canonical pairing matters: the commitment must be the undo stream in input o
 **Public inputs** (after the block's 41):
 - `γ` (4);
 - `z` (4);
-- `αₖ` (26 × 4);
+- `αₖ` (26 × 4), with `αₖ = αᵏ` (`α₀ = 1`) for one drawn `α` (the epoch theorem's `tuplePoly`; before
+  2026-10-11 the implementation drew the 26 weights independently, which is also sound but not what the
+  proof covers);
 - the partial sum (4);
 - the input count;
 - the BIP30-lost bit.

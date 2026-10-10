@@ -38,8 +38,9 @@ pub const Challenge = struct {
 
     /// A fixed test challenge (not secure: production derives it from the epoch's commitments).
     pub fn testing() Challenge {
+        // Powers of one α, as in production (`epoch.challenge`).
         var al: [W]QM31 = undefined;
-        var x = QM31.fromU32Unchecked(3, 5, 7, 11);
+        var x = QM31.one();
         for (&al) |*v| {
             v.* = x;
             x = x.mul(QM31.fromU32Unchecked(1000003, 17, 19, 23));
