@@ -122,3 +122,4 @@ import StarkedAir.Circuit.Balance
 import StarkedAir.Circuit.Statement
 import StarkedAir.Circuit.LeafHash
 import StarkedAir.Circuit.Deep
+import StarkedAir.Circuit.Merkle

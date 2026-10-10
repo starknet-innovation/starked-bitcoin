@@ -347,7 +347,32 @@ pub const PlainStatement = struct {
     /// The DEEP response table (`Circuit/Deep.lean`, `deep_sound`/`deep_complete`); null: the
     /// hand-written response loop.
     deep: ?*const DeepTable = null,
+    /// One Merkle level as a Lean program (`Circuit/Merkle.lean`, `node_sound`; the levels and the
+    /// root check below mirror `path`/`pathCheck`, `path_check_sound`); null: stwo-zig's
+    /// `verifyMerklePath`.
+    merkle_node: ?*const glue.Program = null,
 };
+
+/// `verifyMerklePath` by replaying the Lean level program: hook 0 binds the node, the sibling, the bit.
+fn merklePathVia(comptime V: type, ctx: *Context(V), prog: *const glue.Program, leaf: HashValue(Var), bits: []const Var, root: HashValue(Var), auth_path: []const HashValue(Var)) !void {
+    if (bits.len != auth_path.len) return error.InvalidPlainProof;
+    const Hooks = struct {
+        inputs: []const Var,
+        pub fn call(self: @This(), id: u32, _: []const Var) ![]const Var {
+            return if (id == 0) self.inputs else error.UnknownHook;
+        }
+    };
+    var node = leaf;
+    const ins = try ctx.scratch().alloc(Var, 17);
+    for (bits, auth_path) |bit, sibling| {
+        for (ins[0..8], node.words) |*w, x| w.* = x.get();
+        for (ins[8..16], sibling.words) |*w, x| w.* = x.get();
+        ins[16] = bit;
+        const res = try glue.run(V, ctx, prog, &.{}, Hooks{ .inputs = ins });
+        for (&node.words, res) |*w, v| w.* = .newUnsafe(v);
+    }
+    for (node.words, root.words) |recomputed, expected| try ctx.eq(recomputed.get(), expected.get());
+}
 
 /// One DEEP response: tree, global column, mask offset, and the index of its value among the mixed
 /// OODS samples.
@@ -683,7 +708,10 @@ pub fn verifyPlain(
             for (leaf_values, 0..) |*v, c| v.* = p.eval_domain_samples.at(tree, c, q);
             const leaf = (try leafHashVia(V, ctx, st.leaf_hashes, leaf_values)) orelse try hashLeafM31s(V, ctx, leaf_values);
             for (bits_for_query, bits) |*b, qb| b.* = qb[q];
-            try sv.merkle.verifyMerklePath(V, ctx, leaf, bits_for_query, root, p.eval_domain_auth_paths.at(tree, q));
+            if (st.merkle_node) |prog|
+                try merklePathVia(V, ctx, prog, leaf, bits_for_query, root, p.eval_domain_auth_paths.at(tree, q))
+            else
+                try sv.merkle.verifyMerklePath(V, ctx, leaf, bits_for_query, root, p.eval_domain_auth_paths.at(tree, q));
         }
     }
 
@@ -1094,5 +1122,59 @@ test "Merkle leaf hashing: the Lean program (Circuit/LeafHash.lean) replays gate
         const hb = (try leafHashVia(QM31, &ctx_b, &.{&prog}, wb)) orelse return error.TestUnexpectedResult;
         for (ha.words, hb.words) |x, y| try std.testing.expect(ctx_a.get(x.get()).eql(ctx_b.get(y.get())));
         try glue.expectSameCircuit(&ctx_a.circuit, &ctx_b.circuit);
+    }
+}
+
+test "Merkle path: the Lean level program (Circuit/Merkle.lean) replays gate for gate as verifyMerklePath" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const prog = try glue.parse(a, @embedFile("air:merkle_node"));
+    const W = builder.wrappers;
+    const depth = 6;
+    var prng = std.Random.DefaultPrng.init(7);
+    var leaf_w: [8]u32 = undefined;
+    for (&leaf_w) |*w| w.* = prng.random().int(u32);
+    var sib_w: [depth][8]u32 = undefined;
+    for (&sib_w) |*s| for (s) |*w| {
+        w.* = prng.random().int(u32);
+    };
+    var bit_v: [depth]u32 = undefined;
+    for (&bit_v) |*b| b.* = prng.random().int(u1);
+    // The root, computed by stwo-zig's level function in a scratch context.
+    var root_w: [8]u32 = undefined;
+    {
+        var ctx = try Context(QM31).init(a, 0);
+        defer ctx.deinit();
+        var node: HashValue(Var) = undefined;
+        for (&node.words, leaf_w) |*x, w| x.* = try W.guessU32(QM31, &ctx, W.u32Value(QM31, w));
+        for (sib_w, bit_v) |s, b| {
+            var sib: HashValue(Var) = undefined;
+            for (&sib.words, s) |*x, w| x.* = try W.guessU32(QM31, &ctx, W.u32Value(QM31, w));
+            node = try sv.merkle.merkleNode(QM31, &ctx, node, sib, try ctx.guess(QM31.fromBase(M31.fromCanonical(b))));
+        }
+        for (&root_w, node.words) |*w, x| w.* = builder.ivalue.unpackU32(QM31, ctx.get(x.get()));
+    }
+    for ([_]bool{ true, false }) |honest| {
+        var ctxs: [2]Context(QM31) = .{ try Context(QM31).init(a, 0), try Context(QM31).init(a, 0) };
+        defer for (&ctxs) |*c| c.deinit();
+        for (&ctxs, 0..) |*ctx, which| {
+            var leaf: HashValue(Var) = undefined;
+            for (&leaf.words, leaf_w) |*x, w| x.* = try W.guessU32(QM31, ctx, W.u32Value(QM31, w));
+            var root: HashValue(Var) = undefined;
+            for (&root.words, root_w, 0..) |*x, w, k| x.* = try W.guessU32(QM31, ctx, W.u32Value(QM31, if (!honest and k == 3) w ^ 1 else w));
+            var path: [depth]HashValue(Var) = undefined;
+            var bits: [depth]Var = undefined;
+            for (&path, &bits, sib_w, bit_v) |*p, *b, s, bv| {
+                for (&p.words, s) |*x, w| x.* = try W.guessU32(QM31, ctx, W.u32Value(QM31, w));
+                b.* = try ctx.guess(QM31.fromBase(M31.fromCanonical(bv)));
+            }
+            if (which == 0)
+                try sv.merkle.verifyMerklePath(QM31, ctx, leaf, &bits, root, &path)
+            else
+                try merklePathVia(QM31, ctx, &prog, leaf, &bits, root, &path);
+            try std.testing.expectEqual(honest, try ctx.isCircuitValid());
+        }
+        try glue.expectSameCircuit(&ctxs[0].circuit, &ctxs[1].circuit);
     }
 }

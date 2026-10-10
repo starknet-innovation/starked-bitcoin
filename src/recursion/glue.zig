@@ -38,6 +38,8 @@ const Op = union(enum) {
     zero: u32,
     one: u32,
     inv: [2]u32,
+    pointwise_mul: [3]u32,
+    unused: u32,
 };
 
 pub const Program = struct {
@@ -123,6 +125,10 @@ pub fn parse(a: std.mem.Allocator, json: []const u8) !Program {
             .{ .one = try num(f[1]) }
         else if (std.mem.eql(u8, tag, "inv"))
             .{ .inv = .{ try num(f[1]), try num(f[2]) } }
+        else if (std.mem.eql(u8, tag, "pointwise_mul"))
+            .{ .pointwise_mul = .{ try num(f[1]), try num(f[2]), try num(f[3]) } }
+        else if (std.mem.eql(u8, tag, "unused"))
+            .{ .unused = try num(f[1]) }
         else
             return error.BadGlue;
         for (f[1..]) |x| if (x == .integer) {
@@ -171,6 +177,8 @@ pub fn run(comptime V: type, ctx: *Context(V), prog: *const Program, ext: []cons
         .zero => |o| try rr.set(o, ctx.zero()),
         .one => |o| try rr.set(o, ctx.one()),
         .inv => |g| try rr.set(g[0], try ctx.inv(try rr.get(g[1]))),
+        .pointwise_mul => |g| try rr.set(g[0], try ctx.pointwiseMul(try rr.get(g[1]), try rr.get(g[2]))),
+        .unused => |r| try ctx.markAsUnused(try rr.get(r)),
         .hook => |h| {
             const args = try ctx.scratch().alloc(Var, h.args.len);
             for (args, h.args) |*v, r| v.* = try rr.get(r);

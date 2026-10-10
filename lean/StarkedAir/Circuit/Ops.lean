@@ -101,6 +101,10 @@ inductive Op where
   | one (o : ℕ)
   /-- `o = 1/x`: a guess with `x · o = 1` (the builder's `inv`). -/
   | inv (o x : ℕ)
+  /-- `pointwiseMul`: coordinate-wise product. -/
+  | pmul (o x y : ℕ)
+  /-- `markAsUnused`: no constraint. -/
+  | unused (x : ℕ)
 
 open Q in
 /-- **What an op enforces** on a register assignment `ρ`. -/
@@ -122,6 +126,8 @@ def Op.holds (ρ : ℕ → Q) : Op → Prop
   | .zero o => ρ o = lit 0 0 0 0
   | .one o => ρ o = lit 1 0 0 0
   | .inv o x => ρ x * ρ o = lit 1 0 0 0
+  | .pmul o x y => ρ o = ⟨(ρ x).a * (ρ y).a, (ρ x).b * (ρ y).b, (ρ x).c * (ρ y).c, (ρ x).d * (ρ y).d⟩
+  | .unused _ => True
 
 def Holds (ρ : ℕ → Q) (ops : List Op) : Prop := ∀ op ∈ ops, op.holds ρ
 
@@ -152,6 +158,8 @@ def Op.toJson : Op → String
   | .zero o => s!"[\"zero\",{o}]"
   | .one o => s!"[\"one\",{o}]"
   | .inv o x => s!"[\"inv\",{o},{x}]"
+  | .pmul o x y => s!"[\"pointwise_mul\",{o},{x},{y}]"
+  | .unused x => s!"[\"unused\",{x}]"
 
 /-- A glue program: its ops and its result registers. -/
 structure Program where
