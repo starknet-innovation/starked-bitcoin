@@ -8,7 +8,7 @@
 set -eu
 CP="$1"; IN="$2"; DIR="${3:-data/store}"
 cd "$(dirname "$0")/.."
-python3 -I scripts/fetch_headers.py
+python3 -I scripts/fetch_headers.py || echo "extend_tip: header fetch failed; extending to the headers already in data/headers.bin"
 N=$(( $(wc -c < data/headers.bin) / 80 ))
 OUT="$DIR/mainnet-to-$N.sbchain"
 [ -f "$OUT" ] && { echo "extend_tip: $OUT exists"; exit 0; }
