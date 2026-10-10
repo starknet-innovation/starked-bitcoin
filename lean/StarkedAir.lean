@@ -91,6 +91,7 @@ import StarkedAir.Block.Coinbase
 import StarkedAir.Block.RunSum
 import StarkedAir.Block.CoinSound
 import StarkedAir.Block.CoinLink
+import StarkedAir.Block.CoinEvents
 import StarkedAir.Block.BlockSetup
 import StarkedAir.Block.BlockTxs
 import StarkedAir.Block.BlockSums
