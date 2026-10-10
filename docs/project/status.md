@@ -7,7 +7,7 @@ follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work)
 - **Updated:** 2026-10-10 (owner away 48 h; agent working through the agreed priorities)
 - **HEAD at last update:** see `git log -1` (this file is committed with the work)
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
-- **Current item:** PROOF-STORE done (full chain saved, verified, extended to 970,733). M3a.5 AIR stages **parked** (owner); M3a.5a (spec) done.
+- **Current item:** M3a.5 `BLK-CHECKS`: D-035 **approved** (2026-10-10); M3a.5a (spec) done, M3a.5b (per-transaction checks) next. PROOF-STORE done (D-036 confirmed).
   **parked** (owner); its spec stage M3a.5a is done (`Spec/BlockFlat.lean`).
 
 ## State in one paragraph
@@ -28,21 +28,20 @@ against Core's own C++ (about 860k cases, 0 mismatches).
 
 ## Next step (concrete)
 
-1. **Owner review:**
-   - D-035 (M3a.5 AIR design), then M3a.5b–e;
-   - D-036 (proof store, implemented);
-   - whether `docs/reports/2026-10-09-proof-review.md` goes into the repo. It is untracked, but was
-     committed by mistake in `e871e49` (local; can be dropped before a push);
-   - whether to push.
+1. **M3a.5b, per-transaction checks** (D-035, approved 2026-10-10;
+   [block-data.md § M3a.5](../design/block-data.md#m3a5-blk-checks-design-approved-2026-10-10-d-035)):
+   - the 16-bit range table;
+   - public inputs 2–6 (height, prevMtp, activation bits);
+   - the fields-component extensions: values (`values_ok_iff`), non-empty outputs, non-null prevouts,
+     finality, witness bytes `W`, `NSEG`, script spans and `totals`;
+   - Lean: the per-transaction facts of `CtxFreeOK`/`CtxOK` (Spec/BlockFlat.lean).
 2. **Keeping the proof fresh:** `tools/extend_tip.sh data/store/chainproof-run5 <latest .sbchain>`.
    About 5–6 min per 400 headers.
-3. **Backlog candidates:**
-   - REC-FUZZ with a native-verifier oracle;
-   - the completeness theorem (review §5 item 8);
-   - VERIFIER-LEAN (parked);
-   - the UTXO-hash scoping decisions (`docs/design/utxo-hash-scope.md`).
+3. **Owner:** whether and where to push. `docs/reports/2026-10-09-proof-review.md` stays out of the
+   repo (owner, 2026-10-10); it was removed from the unpushed history, and the file is still on disk,
+   untracked.
 
-Full account: [2026-10-10-away-session.md](../reports/2026-10-10-away-session.md).
+Full account of the away session: [2026-10-10-away-session.md](../reports/2026-10-10-away-session.md).
 
 ## In flight
 

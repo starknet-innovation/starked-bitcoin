@@ -135,14 +135,16 @@ Details:
 - `commitmentIndex_eq` / `commitmentIndex_some`;
 - `not_coinbase_of_inputs`.
 
-D-035, the AIR design, still awaits your review. Stages 5b–5e were not started.
+D-035, the AIR design, was approved on 2026-10-10. Stages 5b–5e come next.
 
 ## 4. Mistakes and open points
 
-- I committed `docs/reports/2026-10-09-proof-review.md` by mistake in `e871e49` (via `git add docs`).
-  It is untracked again (`f1ffeac`) and can be dropped from local history before any push.
+- I committed `docs/reports/2026-10-09-proof-review.md` by mistake (via `git add docs`). On your decision
+  to leave it out, it was removed from the unpushed history (2026-10-10); the file is still on disk,
+  untracked.
 - The first full-run attempt with log-20 leaves had to be stopped twice (memory, above).
-- **Needs you:**
-  - D-035;
-  - whether the review report goes into the repo;
-  - whether to push.
+- **Decided 2026-10-10:**
+  - D-035 approved;
+  - D-036 confirmed;
+  - the review report stays out.
+- **Still open:** whether to push.

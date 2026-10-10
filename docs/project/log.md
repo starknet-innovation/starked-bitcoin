@@ -26,7 +26,7 @@ Next: <the exact next step; must match status.md>
 Who: Claude (agent, Opus 5.5), on the owner's request
 Roadmap: BLOCK-AIR → in progress (M3a.5 BLK-CHECKS designed, not started)
 Done:
-- Design: [block-data.md § M3a.5](../design/block-data.md#m3a5-blk-checks-design-draft-2026-10-09).
+- Design: [block-data.md § M3a.5](../design/block-data.md#m3a5-blk-checks-design-approved-2026-10-10-d-035).
   - It flattens `checkBlock` into `BlockOK`.
   - It adds public inputs 2–6 for the context.
   - It adds four components: a range table, an opcode table, the sigop walker and `ctx`.

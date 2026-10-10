@@ -229,7 +229,7 @@ Within a block, M3b's UTXO update rejects a second spend of the same coin, so M3
 rule to M3b. The statement then says so explicitly: `BlockValid` minus duplicate inputs, plus
 M3b. Settled by D-031 (owner, 2026-10-08): M3b's obligation.
 
-### M3a.5 `BLK-CHECKS` design (draft, 2026-10-09)
+### M3a.5 `BLK-CHECKS` design (approved 2026-10-10, D-035)
 
 **Target.** `block_sound`: a satisfied block system, with public inputs `blockPubs ctx len nTx`, gives
 `∃ b, parseBlock raw = some b`, and

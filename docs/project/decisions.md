@@ -189,7 +189,7 @@ Decision: Inner Merkle nodes are hashed by the existing SHA component, with two 
 Why: Reuses the proven compression and `digest_sound`; child digests are already state words, so no byte handling. Without a public (or otherwise bound) count, a prover could hash a prefix of the transactions.
 
 ### D-035 — M3a.5 checks a flattened spec with four new components
-Date: 2026-10-09 · By: Claude (agent), design pass on the owner's request · Status: proposed (owner to confirm)
+Date: 2026-10-09 · By: Claude (agent), design pass on the owner's request; **approved by the owner 2026-10-10** · Status: active
 Decision:
 - **The spec is flattened in Lean first.** `checkBlock = none` is proven equivalent to a conjunction
   `BlockOK`, with simplifications:
@@ -211,7 +211,7 @@ Decision:
   nonce and the zero leaf supplied as pseudo-digests.
 
 Duplicate inputs stay with M3b (D-031). Design:
-[block-data.md](../design/block-data.md#m3a5-blk-checks-design-draft-2026-10-09).
+[block-data.md](../design/block-data.md#m3a5-blk-checks-design-approved-2026-10-10-d-035).
 
 Why:
 - Proving `= none` needs only the conditions, not Core's error order.
@@ -221,7 +221,7 @@ Why:
 - Reusing the SHA and Merkle components keeps the proven compression untouched.
 
 ### D-036 — The chain proof is a file of MMR peaks under a pinned, frozen VK
-Date: 2026-10-10 · By: Claude (agent), on the owner's "get started" (owner chose extendable over re-verifiable only) · Status: active
+Date: 2026-10-10 · By: Claude (agent), on the owner's "get started" (owner chose extendable over re-verifiable only); **confirmed by the owner 2026-10-10** · Status: active
 Decision:
 - **The node shape is frozen.** It covers leaves of every segment log size 9..20, so the VK never
   changes with the run.
