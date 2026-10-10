@@ -19,6 +19,7 @@ pub const block = struct {
     pub const ctx = @import("block/ctx.zig");
     pub const wmerkle = @import("block/wmerkle.zig");
     pub const commit = @import("block/commit.zig");
+    pub const proof_file = @import("block/proof_file.zig");
     pub const system = @import("block/system.zig");
     pub const negative = @import("block/negative.zig");
 };

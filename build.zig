@@ -23,6 +23,18 @@ pub fn build(b: *std.Build) void {
     const stwo_circuit_cpu = b.dependency("stwo_circuit_cpu_integration", .{ .target = target, .optimize = optimize }).module("stwo_circuit_cpu_integration");
     const stwo_wire = stwo_circuit_cpu.import_table.get("stwo_circuit_recursion_wire") orelse @panic("circuit CPU integration is missing its recursion wire module");
 
+    // stwo's postcard proof encoding (block proof files), built from the submodule's source.
+    const stwo_proof_wire = b.dependency("stwo_proof_wire", .{ .target = target, .optimize = optimize }).module("stwo_proof_wire");
+    const stwo_postcard = b.createModule(.{
+        .root_source_file = b.path("third_party/stwo-zig/src/interop/postcard.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "stwo_core", .module = stwo_core },
+            .{ .name = "stwo_proof_wire", .module = stwo_proof_wire },
+        },
+    });
+
     const lib = b.addModule("starked_bitcoin", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
@@ -31,7 +43,8 @@ pub fn build(b: *std.Build) void {
             .{ .name = "stwo_core", .module = stwo_core },
             .{ .name = "stwo_prover_engine", .module = stwo_prover_engine },
             .{ .name = "stwo_cpu_backend", .module = stwo_cpu_backend },
-            .{ .name = "stwo_proof_wire", .module = b.dependency("stwo_proof_wire", .{ .target = target, .optimize = optimize }).module("stwo_proof_wire") },
+            .{ .name = "stwo_proof_wire", .module = stwo_proof_wire },
+            .{ .name = "stwo_postcard", .module = stwo_postcard },
             .{ .name = "stwo_circuit_frontend", .module = b.dependency("stwo_circuit_frontend", .{ .target = target, .optimize = optimize }).module("stwo_circuit_frontend") },
             .{ .name = "stwo_circuit_cpu_integration", .module = stwo_circuit_cpu },
             .{ .name = "stwo_circuit_recursion_wire", .module = stwo_wire },
@@ -79,6 +92,7 @@ pub fn build(b: *std.Build) void {
     lib.addAnonymousImport("air:block_b2msg", .{ .root_source_file = b.path("airs/block_b2msg.json") });
     lib.addAnonymousImport("air:block_b2s", .{ .root_source_file = b.path("airs/block_b2s.json") });
     lib.addAnonymousImport("testdata:block_170", .{ .root_source_file = b.path("testdata/blocks/170.bin") });
+    lib.addAnonymousImport("testdata:undo_170", .{ .root_source_file = b.path("testdata/undo/170.undo") });
     lib.addAnonymousImport("testdata:block_91722", .{ .root_source_file = b.path("testdata/blocks/91722.bin") });
     lib.addAnonymousImport("testdata:block_91812", .{ .root_source_file = b.path("testdata/blocks/91812.bin") });
     lib.addAnonymousImport("testdata:block_91842", .{ .root_source_file = b.path("testdata/blocks/91842.bin") });

@@ -284,3 +284,43 @@ Why:
 - The records plus outpoints are `TxOutSer`, the unit of assumeUTXO's `hash_serialized` (D-037).
 - Two inner hashes let a module open only what it needs.
 
+
+### D-039 — A block proof is a file bound to the chain proof by its public block hash
+Date: 2026-10-10 · By: Claude (agent), on the owner's "go forward, finish M3" · Status: proposed
+(implemented; the owner should confirm the file format and the verifier's checks)
+Decision:
+- **Block hash public:** public inputs 25–40 are the 16-bit limbs of `SHA256d(header)`. The context
+  component reads `digest(0, pub 25..40)` once, and SHA's free yield multiplicity serves it, so no new
+  component and no external lookup entries. Proven: `HashPub.hash_pub`.
+- **File `.sbblock`:** log size, the 41 public inputs, the claimed LogUp sums, stwo's postcard
+  encoding of the STARK, provenance (`src/block/proof_file.zig`).
+- **Verifier (`chainproof verify-block`):**
+  1. verify the chain proof under its pinned VK and the minimum chainwork;
+  2. bind `headers.bin` to it: its block hashes fold to the proof's MMR root `T`;
+  3. verify the block STARK under a pinned FRI configuration (70 queries, 26 PoW bits, as the chain
+     proof), refusing a file made with any other;
+  4. check public inputs 2–7 (height, previous median time past, soft-fork flags) against the headers,
+     and 25–40 against the header at that height.
+  Inputs 0, 1, 8 (block length, transaction count, undo length) and 9–24 (the commitment) are
+  outputs of the statement.
+- **Undo data** comes from a node's `getblock <hash> 3` (`scripts/fetch_undo.py`), checked against the
+  proven headers; the prover refuses an empty undo stream for a block that spends outputs.
+
+Why:
+- Binding through the headers (not an in-circuit inclusion path) reuses the chain proof unchanged and
+  costs the verifier one pass over 80-byte headers (about 2 s for 970k headers).
+- The block proof is not yet folded into the recursive chain proof: a ~900-column, 12-component
+  verifier circuit is a separate step (`BLOCK-REC`, backlog). Until then a block proof is a standalone
+  file of about 0.5–2 MB.
+
+### D-040 — M3b keeps the UTXO set by a chain-wide multiset argument, not a per-block tree
+Date: 2026-10-10 · By: Claude (agent) · Status: **proposed, needs the owner** (decides `Q-TREE`)
+Decision (proposed): created coins add `1/(z − coin)` and spent coins subtract it, with the coin's
+tuple taken from the parsed outputs and from the undo records. Each spend checks that the coin's position
+`(height, tx index)` is earlier. Over an epoch the sum, minus the strictly sorted final set, is zero.
+`z` is drawn from the MMR of the block commitments, computed before proving and checked at the end.
+The final set's pass also gives `HASH_SERIALIZED` (D-037) and the total amount.
+Design: [utxo.md](../design/utxo.md).
+Why: about 10¹⁰ rows over history against about 4 × 10¹³ for a per-block sorted Merkle tree (*est.*);
+it checks the undo records (D-029) and duplicate inputs (D-031) by construction. Cost: statements hold
+per epoch, not per block, and tip following needs short epochs or a tree for the last stretch.
