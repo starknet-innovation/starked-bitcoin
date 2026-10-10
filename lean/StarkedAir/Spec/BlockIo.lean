@@ -395,4 +395,30 @@ theorem tagged_range (f : ℕ → Tok) (c : ℕ) : ∀ m, tagged c ((List.range 
     simp only [List.map_singleton, tagged, List.filter_cons, List.filter_nil, List.nil_append, List.append_nil]
     split_ifs <;> simp
 
+theorem tagParts_length (c : ℕ) : ∀ parts : List (List Tok), (tagParts c parts).length = (parts.map List.length).sum
+  | [] => rfl
+  | p :: ps => by simp [tagParts, tagParts_length (c + 1) ps]
+
+/-- **Locating a tagged token**: element `j` is token `q` of part `t`, tagged `c + t`, with `j` the
+earlier parts' total length plus `q`. -/
+theorem tagParts_get (c : ℕ) : ∀ (parts : List (List Tok)) (j : ℕ), j < (tagParts c parts).length →
+    ∃ t q, t < parts.length ∧ q < (parts.getD t []).length ∧
+      (tagParts c parts)[j]? = some (c + t, (parts.getD t []).getD q (.lock [])) ∧
+      j = ((parts.take t).map List.length).sum + q
+  | [], j, h => by simp [tagParts] at h
+  | p :: ps, j, h => by
+    by_cases hj : j < p.length
+    · refine ⟨0, j, by simp, by simpa using hj, ?_, by simp⟩
+      simp only [tagParts]
+      rw [List.getElem?_append_left (by simpa using hj)]
+      simp [List.getD_eq_getElem?_getD, List.getElem?_eq_getElem hj]
+    · have hj' : j - p.length < (tagParts (c + 1) ps).length := by
+        simp only [tagParts, List.length_append, List.length_map] at h; omega
+      obtain ⟨t, q, ht, hq, hget, hidx⟩ := tagParts_get (c + 1) ps (j - p.length) hj'
+      refine ⟨t + 1, q, by simpa using ht, by simpa using hq, ?_, ?_⟩
+      · simp only [tagParts]
+        rw [List.getElem?_append_right (by simp; omega), List.length_map]
+        rw [hget]; simp; omega
+      · rw [List.take_succ_cons, List.map_cons, List.sum_cons]; omega
+
 end StarkedAir.Spec.Block

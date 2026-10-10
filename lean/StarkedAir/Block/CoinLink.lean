@@ -1056,6 +1056,131 @@ theorem fields_tagged (S : Setup inst pub L) :
     simp only [Bool.not_eq_true] at h
     simp [Function.comp, h, this]
 
+/-- **A coin row's transaction and position.** Coin row `j` (in use) is token `q` of transaction `t`'s
+input/output tokens, with `TXI = t`: an output row's token describes output `q − |vin|`, an input row's
+token input `q`. -/
+theorem coin_row_tx (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
+    (hon : ∀ j < 2 ^ L, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
+    (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
+    {j : ℕ} (hj : j < e) :
+    ∃ (parts : List (List Spec.Block.Tok)) (t q : ℕ) (tx : Spec.Block.Tx),
+      List.Forall₂ Spec.Block.IoTx S.b.txs parts ∧ S.b.txs[t]? = some tx ∧
+      (inst 14).main Coin.TXI j = (t : F) ∧
+      j = ((parts.take t).map List.length).sum + q ∧ q < tx.vin.length + tx.vout.length ∧
+      ((inst 14).main Coin.KO j = 1 → tx.vin.length ≤ q ∧ ∃ o, tx.vout[q - tx.vin.length]? = some o ∧
+        Spec.Block.OutTok o (Fields.tokOf (inst 1).main (Rb inst pub) ((ioRows inst S.m).getD j 0))) ∧
+      ((inst 14).main Coin.KI j + (inst 14).main Coin.CBI j = 1 → q < tx.vin.length ∧ ∃ i, tx.vin[q]? = some i ∧
+        Spec.Block.InTok i (Fields.tokOf (inst 1).main (Rb inst pub) ((ioRows inst S.m).getD j 0))) := by
+  have cs := coin_sat hL hsat hL24
+  have fs := fields_sat' hL hsat hL24
+  obtain ⟨parts, hf, htg⟩ := Spec.Block.io_toksBlock_tag S.htok
+  have hft := fields_tagged hL hsat hL24 S
+  rw [htg] at hft
+  set io := ioRows inst S.m with hio
+  have hjl : j < (Spec.Block.tagParts 0 parts).length := by
+    rw [hft, List.length_map]; omega
+  obtain ⟨t, q, ht, hq, hget, hidx⟩ := Spec.Block.tagParts_get 0 parts j hjl
+  have hpair : (Fields.locks (inst 1).main (io.getD j 0), Fields.tokOf (inst 1).main (Rb inst pub) (io.getD j 0)) =
+      (0 + t, (parts.getD t []).getD q (.lock [])) := by
+    have := congrArg (fun l => l[j]?) hft
+    rw [hget, List.getElem?_map, List.getElem?_eq_getElem (by omega), Option.map_some, Option.some.injEq] at this
+    rw [List.getD_eq_getElem _ _ (by omega)]; exact this.symm
+  simp only [Prod.mk.injEq, Nat.zero_add] at hpair
+  obtain ⟨hlocks, htok⟩ := hpair
+  -- the transaction
+  have hlenp := hf.length_eq
+  obtain ⟨tx, htx⟩ : ∃ tx, S.b.txs[t]? = some tx := ⟨S.b.txs[t], List.getElem?_eq_getElem (by omega)⟩
+  have hpt : List.Forall₂ Spec.Block.IoTx [tx] [parts.getD t []] := by
+    have := List.forall₂_iff_get.mp hf
+    refine List.Forall₂.cons ?_ List.Forall₂.nil
+    have h2 := this.2 t (by omega) (by omega)
+    rw [List.getD_eq_getElem _ _ (by omega)]
+    rw [List.getElem?_eq_getElem (by omega), Option.some.injEq] at htx
+    simpa [← htx] using h2
+  obtain ⟨li, lo, hlilo, hfi, hfo⟩ : Spec.Block.IoTx tx (parts.getD t []) := by
+    cases hpt with | cons h _ => exact h
+  have hli := hfi.length_eq
+  have hlo := hfo.length_eq
+  -- the coin row's TXI is its token's lock count
+  have hρ : io.getD j 0 ∈ io := by rw [List.getD_eq_getElem _ _ (by omega)]; exact List.getElem_mem _
+  obtain ⟨hρm, -⟩ := mem_ioRows.mp hρ
+  have hρn : io.getD j 0 < 2 ^ L := by have := S.hmn; omega
+  have htxi : (inst 1).main Fields.TXI (io.getD j 0) = (t : F) := by
+    rw [Fields.txi_count fs _ hρn, hlocks]
+  have htxi' : (inst 1).main Fields.TXI ((ioRows inst S.m)[j]?.getD 0) = (t : F) := by
+    rw [← List.getD_eq_getElem?_getD]; exact htxi
+  have hrt := coin_row_tok hL hsat hL24 S he hon hlen hst hj
+  have hj2 : j < 2 ^ L := by omega
+  have hcoinTXI : (inst 14).main Coin.TXI j = (t : F) := by
+    have cs' := cs
+    rcases Coin.kinds cs hj2 with h | h | h | h
+    · obtain ⟨-, hT⟩ := hrt.1 h.1
+      have := congrArg (fun l => l.getD 0 0) hT
+      simp only [cOut, fOut] at this
+      simpa [htxi'] using this
+    · obtain ⟨-, hT⟩ := hrt.2 (by rw [h.2.1, h.2.2.1]; simp)
+      rw [hT, htxi]
+    · obtain ⟨-, hT⟩ := hrt.2 (by rw [h.2.1, h.2.2.1]; simp)
+      rw [hT, htxi]
+    · exact absurd ((hon j hj2).mpr hj) (by rw [h.2.2.2]; exact zero_ne_one)
+  refine ⟨parts, t, q, tx, hf, htx, hcoinTXI, hidx, by rw [hlilo] at hq; simp at hq; omega, fun hko => ?_, fun hki => ?_⟩
+  · obtain ⟨hk, -⟩ := hrt.1 hko
+    -- an output token: not among the inputs' tokens
+    have hout : ∃ v s, Fields.tokOf (inst 1).main (Rb inst pub) (io.getD j 0) = .out v s := by
+      have kat := Fields.kinds_at fs hρn (a := Fields.K_OUT) (by decide) hk
+      unfold Fields.tokOf
+      rw [if_neg (by rw [kat Fields.K_BLK (by decide)]; simp [Fields.K_BLK, Fields.K_OUT]),
+        if_neg (by rw [kat Fields.K_TXH (by decide)]; simp [Fields.K_TXH, Fields.K_OUT]),
+        if_neg (by rw [kat Fields.K_IN (by decide)]; simp [Fields.K_IN, Fields.K_OUT]),
+        if_neg (by rw [kat Fields.K_NOUT (by decide)]; simp [Fields.K_NOUT, Fields.K_OUT]), if_pos hk]
+      exact ⟨_, _, rfl⟩
+    obtain ⟨v, s, hvs⟩ := hout
+    have hqge : li.length ≤ q := by
+      by_contra hc; push Not at hc
+      have hin := List.forall₂_iff_get.mp hfi
+      have h2 := hin.2 q (by omega) hc
+      simp only [List.get_eq_getElem] at h2
+      have : (parts.getD t []).getD q (.lock []) = li[q] := by
+        rw [hlilo, List.getD_eq_getElem _ _ (by simp; omega), List.getElem_append_left hc]
+      rw [← this, ← htok, hvs] at h2
+      simp [Spec.Block.InTok] at h2
+    refine ⟨by omega, ?_⟩
+    have hout2 := List.forall₂_iff_get.mp hfo
+    have hq2 : q - li.length < lo.length := by rw [hlilo] at hq; simp at hq; omega
+    refine ⟨tx.vout[q - li.length], by rw [hli]; exact List.getElem?_eq_getElem (by omega), ?_⟩
+    have h2 := hout2.2 (q - li.length) (by omega) hq2
+    simp only [List.get_eq_getElem] at h2
+    have : (parts.getD t []).getD q (.lock []) = lo[q - li.length] := by
+      rw [hlilo, List.getD_eq_getElem _ _ (by simp; omega), List.getElem_append_right hqge]
+    rw [htok, this]
+    simpa [hli] using h2
+  · obtain ⟨hk, -⟩ := hrt.2 hki
+    have hinp : ∃ a b c d, Fields.tokOf (inst 1).main (Rb inst pub) (io.getD j 0) = .inp a b c d := by
+      have kat := Fields.kinds_at fs hρn (a := Fields.K_IN) (by decide) hk
+      unfold Fields.tokOf
+      rw [if_neg (by rw [kat Fields.K_BLK (by decide)]; simp [Fields.K_BLK, Fields.K_IN]),
+        if_neg (by rw [kat Fields.K_TXH (by decide)]; simp [Fields.K_TXH, Fields.K_IN]), if_pos hk]
+      exact ⟨_, _, _, _, rfl⟩
+    obtain ⟨a, b, c, d, hab⟩ := hinp
+    have hqlt : q < li.length := by
+      by_contra hc; push Not at hc
+      have hout2 := List.forall₂_iff_get.mp hfo
+      have hq2 : q - li.length < lo.length := by rw [hlilo] at hq; simp at hq; omega
+      have h2 := hout2.2 (q - li.length) (by omega) hq2
+      simp only [List.get_eq_getElem] at h2
+      have : (parts.getD t []).getD q (.lock []) = lo[q - li.length] := by
+        rw [hlilo, List.getD_eq_getElem _ _ (by simp; omega), List.getElem_append_right hc]
+      rw [← this, ← htok, hab] at h2
+      simp [Spec.Block.OutTok] at h2
+    refine ⟨by omega, tx.vin[q], List.getElem?_eq_getElem (by omega), ?_⟩
+    have hin := List.forall₂_iff_get.mp hfi
+    have h2 := hin.2 q (by omega) hqlt
+    simp only [List.get_eq_getElem] at h2
+    have : (parts.getD t []).getD q (.lock []) = li[q] := by
+      rw [hlilo, List.getD_eq_getElem _ _ (by simp; omega), List.getElem_append_left hqlt]
+    rw [htok, this]
+    simpa using h2
+
 end System
 
 end StarkedAir.Block
