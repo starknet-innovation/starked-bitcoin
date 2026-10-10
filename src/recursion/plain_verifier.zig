@@ -344,6 +344,32 @@ pub const PlainStatement = struct {
     /// Merkle leaf hashing as Lean programs (`Circuit/LeafHash.lean`, `leaf_sound`), one per row width;
     /// a width without a program uses the hand-written `hashLeafM31s`.
     leaf_hashes: []const *const glue.Program = &.{},
+    /// The DEEP response table (`Circuit/Deep.lean`, `deep_sound`/`deep_complete`); null: the
+    /// hand-written response loop.
+    deep: ?*const DeepTable = null,
+};
+
+/// One DEEP response: tree, global column, mask offset, and the index of its value among the mixed
+/// OODS samples.
+pub const DeepResp = struct { tree: u32, col: u32, off: i32, idx: u32 };
+
+pub const DeepTable = struct {
+    n_samples: u32,
+    responses: []const DeepResp,
+
+    /// Parses a `starked-deep-v1` table (exported by `lean/Export.lean deep_*`).
+    pub fn parse(a: std.mem.Allocator, json: []const u8) !DeepTable {
+        const root = (try std.json.parseFromSliceLeaky(std.json.Value, a, json, .{})).object;
+        if (!std.mem.eql(u8, root.get("schema").?.string, "starked-deep-v1")) return error.BadDeep;
+        const items = root.get("responses").?.array.items;
+        const out = try a.alloc(DeepResp, items.len);
+        for (out, items) |*r, item| {
+            const f = item.array.items;
+            if (f.len != 4) return error.BadDeep;
+            r.* = .{ .tree = @intCast(f[0].integer), .col = @intCast(f[1].integer), .off = @intCast(f[2].integer), .idx = @intCast(f[3].integer) };
+        }
+        return .{ .n_samples = @intCast(root.get("n_samples").?.integer), .responses = out };
+    }
 };
 
 fn leafHashVia(comptime V: type, ctx: *Context(V), progs: []const *const glue.Program, values: []const M31Wrapper(Var)) !?HashValue(Var) {
@@ -661,49 +687,64 @@ pub fn verifyPlain(
         }
     }
 
-    // DEEP quotient inputs, in the native sample order (tree, column, mask; a two-sample column
-    // is preceded by its periodicity sample, which coincides with the first one here).
+    // The points: the OODS point shifted by each main offset (in first-use order), and by −1 for
+    // the interaction tree.
     const trace_gen = core.poly.circle.canonic.CanonicCoset.new(log_trace).coset_value.step;
-    var responses: std.ArrayListUnmanaged(sv.oods.OodsResponse) = .empty;
-    for (p.preprocessed_at_oods, 0..) |v, c|
-        try responses.append(ctx.scratch(), .{ .trace_idx = TREE_PRE, .column_idx = c, .pt = oods, .value = v });
     var shifted = std.AutoHashMapUnmanaged(i32, Point(Var)).empty;
     var all_offsets: std.ArrayListUnmanaged([]const i32) = .empty;
     for (config.parts) |pc| try all_offsets.appendSlice(ctx.scratch(), pc.main_offsets);
-    for (all_offsets.items, p.trace_at_oods, 0..) |offs, vals, c| {
-        const pts = try ctx.scratch().alloc(Point(Var), offs.len);
-        for (offs, pts) |off, *pt| {
-            if (off == 0) {
-                pt.* = oods;
-                continue;
-            }
-            const got = try shifted.getOrPut(ctx.scratch(), off);
-            if (!got.found_existing) {
-                const g = trace_gen.mulSigned(@intCast(off));
-                got.value_ptr.* = try sv.circle.addPoints(V, ctx, oods, .{
-                    .x = try ctx.constant(QM31.fromBase(g.x)),
-                    .y = try ctx.constant(QM31.fromBase(g.y)),
-                });
-            }
-            pt.* = got.value_ptr.*;
+    for (all_offsets.items) |offs| for (offs) |off| {
+        if (off == 0) continue;
+        const got = try shifted.getOrPut(ctx.scratch(), off);
+        if (!got.found_existing) {
+            const g = trace_gen.mulSigned(@intCast(off));
+            got.value_ptr.* = try sv.circle.addPoints(V, ctx, oods, .{
+                .x = try ctx.constant(QM31.fromBase(g.x)),
+                .y = try ctx.constant(QM31.fromBase(g.y)),
+            });
         }
-        if (offs.len == 2) try responses.append(ctx.scratch(), .{ .trace_idx = TREE_MAIN, .column_idx = c, .pt = pts[1], .value = vals[1] });
-        for (pts, vals) |pt, v| try responses.append(ctx.scratch(), .{ .trace_idx = TREE_MAIN, .column_idx = c, .pt = pt, .value = v });
-    }
-    if (p.interaction_at_oods.len != 0) {
+    };
+    const prev: ?Point(Var) = if (p.interaction_at_oods.len != 0) blk: {
         const g = trace_gen.mulSigned(-1);
-        const prev = try sv.circle.addPoints(V, ctx, oods, .{ .x = try ctx.constant(QM31.fromBase(g.x)), .y = try ctx.constant(QM31.fromBase(g.y)) });
+        break :blk try sv.circle.addPoints(V, ctx, oods, .{ .x = try ctx.constant(QM31.fromBase(g.x)), .y = try ctx.constant(QM31.fromBase(g.y)) });
+    } else null;
+
+    var responses: std.ArrayListUnmanaged(sv.oods.OodsResponse) = .empty;
+    if (st.deep) |table| {
+        // The Lean table: each value is a mixed sample, at its label's point (`deep_sound`), and every
+        // mixed sample is used (`deep_complete`).
+        if (table.n_samples != values.items.len) return error.InvalidPlainProof;
+        for (table.responses) |r| {
+            const pt = if (r.off == 0) oods else switch (r.tree) {
+                TREE_MAIN => shifted.get(r.off) orelse return error.InvalidPlainProof,
+                TREE_INTER => if (r.off == -1) prev orelse return error.InvalidPlainProof else return error.InvalidPlainProof,
+                else => return error.InvalidPlainProof,
+            };
+            if (r.idx >= values.items.len) return error.InvalidPlainProof;
+            try responses.append(ctx.scratch(), .{ .trace_idx = r.tree, .column_idx = r.col, .pt = pt, .value = values.items[r.idx] });
+        }
+    } else {
+        // DEEP quotient inputs, in the native sample order (tree, column, mask; a two-sample column
+        // is preceded by its periodicity sample, which coincides with the first one here).
+        for (p.preprocessed_at_oods, 0..) |v, c|
+            try responses.append(ctx.scratch(), .{ .trace_idx = TREE_PRE, .column_idx = c, .pt = oods, .value = v });
+        for (all_offsets.items, p.trace_at_oods, 0..) |offs, vals, c| {
+            const pts = try ctx.scratch().alloc(Point(Var), offs.len);
+            for (offs, pts) |off, *pt| pt.* = if (off == 0) oods else shifted.get(off).?;
+            if (offs.len == 2) try responses.append(ctx.scratch(), .{ .trace_idx = TREE_MAIN, .column_idx = c, .pt = pts[1], .value = vals[1] });
+            for (pts, vals) |pt, v| try responses.append(ctx.scratch(), .{ .trace_idx = TREE_MAIN, .column_idx = c, .pt = pt, .value = v });
+        }
         for (p.interaction_at_oods, 0..) |vals, c| {
             if (vals.len == 2) {
                 // [prev, cur], preceded by the periodicity sample (as for two-offset main columns).
                 try responses.append(ctx.scratch(), .{ .trace_idx = TREE_INTER, .column_idx = c, .pt = oods, .value = vals[1] });
-                try responses.append(ctx.scratch(), .{ .trace_idx = TREE_INTER, .column_idx = c, .pt = prev, .value = vals[0] });
+                try responses.append(ctx.scratch(), .{ .trace_idx = TREE_INTER, .column_idx = c, .pt = prev.?, .value = vals[0] });
                 try responses.append(ctx.scratch(), .{ .trace_idx = TREE_INTER, .column_idx = c, .pt = oods, .value = vals[1] });
             } else try responses.append(ctx.scratch(), .{ .trace_idx = TREE_INTER, .column_idx = c, .pt = oods, .value = vals[0] });
         }
+        for (p.composition_eval_at_oods, 0..) |v, c|
+            try responses.append(ctx.scratch(), .{ .trace_idx = TREE_COMPOSITION, .column_idx = c, .pt = oods, .value = v });
     }
-    for (p.composition_eval_at_oods, 0..) |v, c|
-        try responses.append(ctx.scratch(), .{ .trace_idx = TREE_COMPOSITION, .column_idx = c, .pt = oods, .value = v });
 
     const fri_input = try sv.oods.computeFriInput(V, ctx, responses.items, queries, &p.eval_domain_samples, quotient_coef);
     try sv.fri.friDecommit(V, ctx, &p.fri, log_trace, config.fri, fri_input, bits, queries, fri_alphas);

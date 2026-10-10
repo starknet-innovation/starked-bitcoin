@@ -135,6 +135,7 @@ pub fn buildLeafCircuit(
     lh[2] = try glue.parse(ctx.scratch(), @embedFile("air:leafhash_12"));
     lh[3] = try glue.parse(ctx.scratch(), @embedFile("air:leafhash_8"));
     const lhp = [4]*const glue.Program{ &lh[0], &lh[1], &lh[2], &lh[3] };
+    const deep = try pv.DeepTable.parse(ctx.scratch(), @embedFile("air:deep_leaf"));
     const ext = try ctx.scratch().alloc(QM31, pubs.len);
     for (ext, pubs) |*e, v| e.* = QM31.fromBase(v);
     const Hooks = struct {
@@ -150,6 +151,7 @@ pub fn buildLeafCircuit(
         bal: *const glue.Program,
         stm: *const glue.Program,
         lh: []const *const glue.Program,
+        deep: *const pv.DeepTable,
         /// 0: guess the proof; 1: verify it, with the public entry `node(k, 0, pubs[T_BASE..])`.
         pub fn call(self: @This(), id: u32, args: []const Var) ![]const Var {
             if (id == 0) {
@@ -168,13 +170,14 @@ pub fn buildLeafCircuit(
                 .balance = self.bal,
                 .statement = self.stm,
                 .leaf_hashes = self.lh,
+                .deep = self.deep,
             };
             try pv.verifyPlain(QM31, self.ctx, self.proof_vars, self.config, &st);
             return &.{};
         }
     };
     var proof_vars: pv.PlainProof(Var) = undefined;
-    const res = try glue.run(QM31, &ctx, &prog, ext, Hooks{ .ctx = &ctx, .values = values, .config = config, .airs = airs, .digests = digests, .pre_root = pre_root, .k = k, .proof_vars = &proof_vars, .comp = &comp, .bal = &bal, .stm = &stm, .lh = &lhp });
+    const res = try glue.run(QM31, &ctx, &prog, ext, Hooks{ .ctx = &ctx, .values = values, .config = config, .airs = airs, .digests = digests, .pre_root = pre_root, .k = k, .proof_vars = &proof_vars, .comp = &comp, .bal = &bal, .stm = &stm, .lh = &lhp, .deep = &deep });
     var digest: HashValue(Var) = undefined;
     for (&digest.words, res) |*w, v| w.* = .newUnsafe(v);
     try finish(QM31, &ctx, digest);

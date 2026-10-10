@@ -101,6 +101,7 @@ pub fn build(b: *std.Build) void {
     lib.addAnonymousImport("air:leafhash_434", .{ .root_source_file = b.path("airs/leafhash_434.json") });
     lib.addAnonymousImport("air:leafhash_12", .{ .root_source_file = b.path("airs/leafhash_12.json") });
     lib.addAnonymousImport("air:leafhash_8", .{ .root_source_file = b.path("airs/leafhash_8.json") });
+    lib.addAnonymousImport("air:deep_leaf", .{ .root_source_file = b.path("airs/deep_leaf.json") });
     lib.addAnonymousImport("vk:mainnet_test", .{ .root_source_file = b.path("vk/mainnet-q70-p26-l20.vk") });
     lib.addAnonymousImport("air:block_fpwalk", .{ .root_source_file = b.path("airs/block_fpwalk.json") });
     lib.addAnonymousImport("air:block_urec", .{ .root_source_file = b.path("airs/block_urec.json") });

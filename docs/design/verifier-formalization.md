@@ -125,11 +125,20 @@ widths 8 and 434; the whole leaf circuit is gate-identical; the mainnet VK is un
 
 **Status of `verifyPlain`:**
 - **Lean-generated and proven:** the statement mixing (public inputs), the LogUp balance, the
-  composition check, the Merkle leaf hashing.
+  composition check, the Merkle leaf hashing, the DEEP response list (step 4b, below).
 - **Hand-written (our code):** the order of the remaining transcript calls (around stwo-zig's channel),
-  and the DEEP response list (which samples, at which points, in which order).
+  and the shifted OODS points (one `addPoints` per distinct offset).
 - **stwo-zig (trusted, parity-tested port of StarkWare's):** the channel, FRI, Merkle path verification,
   query selection, DEEP quotients, circle points.
 
-Next: the DEEP response list (step 4b). The property worth proving: every response's value is a sample
-that was mixed into the transcript, at its column's point. Then the `sv.*` trust question (step 5).
+### Done (2026-10-10): the DEEP response list
+
+`Circuit/Deep.lean`: `samples` labels the mixed OODS values (tree, column, offset) in mixing order;
+`deepList` is the response table in stwo's order (a two-sample column preceded by its periodicity
+sample). `deep_sound`: every response's value index points at the mixed sample with the response's
+label. `deep_complete`: every mixed sample is used. The leaf replays `airs/deep_leaf.json`
+(`PlainStatement.deep`): each response's value is the very variable that was mixed, and its point is
+the OODS point shifted by its offset (looked up from the points computed for that tree; an unknown
+offset is rejected). The order itself is stwo's, checked by verifying real proofs.
+
+Next: the `sv.*` trust question (step 5).
