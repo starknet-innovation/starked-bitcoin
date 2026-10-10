@@ -245,32 +245,47 @@ def seqOuts : ℕ → List (ℕ → Out ℕ) → List Op × List ℕ × ℕ
   | n, [] => ([], [], n)
   | n, f :: fs => let o := f n; let r := seqOuts o.next fs; (o.ops ++ r.1, o.res :: r.2.1, r.2.2)
 
+section Part
+
+variable (c : Comp) (pr : PartRegs) (sh : Shared) (n accIn : ℕ)
+
+def pIds : List ℕ := (compDag c).1
+def pNodes : Array Node := (compDag c).2.out
+def pReg : ℕ → ℕ := nodeReg n (pNodes c) pr.ci
+def pNc : ℕ := c.air.constraints.length
+def pHb : ℕ := n + 2 * (pNodes c).size
+def pCOps : List Op := dagOps n (pNodes c) pr.ci ++ hornerOps accIn (pHb c n) sh.coeff (((pIds c).take (pNc c)).map (pReg c pr n))
+def pAcc1 : ℕ := accReg accIn (pHb c n) (pNc c)
+def pP0 : ℕ := pHb c n + 2 * pNc c
+def pL : ℕ := c.lookups.length
+def pB : ℕ := (pL c + 1) / 2
+def pIdAt (i : ℕ) : ℕ := pReg c pr n ((pIds c).getD i 0)
+def pMults (j : ℕ) : ℕ := pIdAt c pr n (lookupAt c j)
+def pValsOf (j : ℕ) : List ℕ :=
+  (List.range ((c.lookups.getD j ⟨0, .const 0, []⟩).vals.length)).map fun i => pIdAt c pr n (lookupAt c j + 1 + i)
+def pDens : List Op × List ℕ × ℕ :=
+  seqOuts (pP0 c n) ((List.range (pL c)).map fun j => fun m =>
+    denOps m (c.lookups.getD j ⟨0, .const 0, []⟩).rel sh.z sh.alpha (pValsOf c pr n j))
+def pSS : List Op × List ℕ × ℕ :=
+  seqOuts (pDens c pr sh n).2.2 ((List.range (pB c)).map fun b => fun m =>
+    secureOps m (fun k => pr.inter (4 * b + k) (if b + 1 = pB c then 1 else 0)))
+def pSp : Out ℕ := secureOps (pSS c pr sh n).2.2 (fun k => pr.inter (4 * (pB c - 1) + k) 0)
+def pQ : ℕ := (pSp c pr sh n).next
+def pShOps : List Op := [.const (pQ c pr sh n) (ninv sh.logSize) 0 0 0, .mul (pQ c pr sh n + 1) pr.claimed (pQ c pr sh n)]
+def pBx : BatchIn := ⟨pMults c pr n, fun j => (pDens c pr sh n).2.1.getD j 0, fun b => (pSS c pr sh n).2.1.getD b 0,
+  (pSp c pr sh n).res, pQ c pr sh n + 1, pL c, pB c⟩
+def pBt : List Op × ℕ × ℕ :=
+  (List.range (pB c)).foldl (fun (acc : List Op × ℕ × ℕ) b =>
+    let o := batchOps acc.2.2 acc.2.1 sh.coeff b (pBx c pr sh n); (acc.1 ++ o.ops, o.res, o.next))
+    (([] : List Op), pAcc1 c n accIn, pQ c pr sh n + 2)
+
+end Part
+
 /-- A component's program from register `n`, accumulating from `accIn`. -/
 def partProg (c : Comp) (pr : PartRegs) (sh : Shared) (n accIn : ℕ) : Out ℕ :=
-  let (ids, st) := compDag c
-  let nodes := st.out
-  let reg := nodeReg n nodes pr.ci
-  let nc := c.air.constraints.length
-  let hb := n + 2 * nodes.size
-  let cOps := dagOps n nodes pr.ci ++ hornerOps accIn hb sh.coeff ((ids.take nc).map reg)
-  let acc1 := accReg accIn hb nc
-  let p0 := hb + 2 * nc
-  if c.lookups.isEmpty then ⟨cOps, acc1, p0⟩ else
-  let L := c.lookups.length
-  let B := (L + 1) / 2
-  let idAt := fun i => reg (ids.getD i 0)
-  let mults := fun j => idAt (lookupAt c j)
-  let valsOf := fun j => ((List.range ((c.lookups.getD j ⟨0, .const 0, []⟩).vals.length)).map fun i => idAt (lookupAt c j + 1 + i))
-  let dens := seqOuts p0 ((List.range L).map fun j => fun m => denOps m (c.lookups.getD j ⟨0, .const 0, []⟩).rel sh.z sh.alpha (valsOf j))
-  let ss := seqOuts dens.2.2 ((List.range B).map fun b => fun m =>
-    secureOps m (fun k => pr.inter (4 * b + k) (if b + 1 = B then 1 else 0)))
-  let sp := secureOps ss.2.2 (fun k => pr.inter (4 * (B - 1) + k) 0)
-  let q := sp.next
-  let shOps : List Op := [.const q (ninv sh.logSize) 0 0 0, .mul (q + 1) pr.claimed q]
-  let bx : BatchIn := ⟨mults, fun j => dens.2.1.getD j 0, fun b => ss.2.1.getD b 0, sp.res, q + 1, L, B⟩
-  let bt := (List.range B).foldl (fun (acc : List Op × ℕ × ℕ) b =>
-    let o := batchOps acc.2.2 acc.2.1 sh.coeff b bx; (acc.1 ++ o.ops, o.res, o.next)) ([], acc1, q + 2)
-  ⟨cOps ++ dens.1 ++ ss.1 ++ sp.ops ++ shOps ++ bt.1, bt.2.1, bt.2.2⟩
+  if c.lookups.isEmpty then ⟨pCOps c pr sh n accIn, pAcc1 c n accIn, pP0 c n⟩ else
+  ⟨pCOps c pr sh n accIn ++ (pDens c pr sh n).1 ++ (pSS c pr sh n).1 ++ (pSp c pr sh n).ops ++ pShOps c pr sh n ++
+    (pBt c pr sh n accIn).1, (pBt c pr sh n accIn).2.1, (pBt c pr sh n accIn).2.2⟩
 
 /-- The system's program: input hook, zero accumulator, components in order, `1/Z(oods)`, product. -/
 def sysProg (parts : List (Comp × PartRegs)) (sh : Shared) (nIn oodsX : ℕ) : List Op × ℕ :=
