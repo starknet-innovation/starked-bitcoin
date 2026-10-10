@@ -13,7 +13,7 @@ Nothing was pushed. Every commit is local, on `main`.
 
 | Workstream | Result |
 |---|---|
-| PROOF-STORE | Implemented and tested; full-chain run *(result below)* |
+| PROOF-STORE | Done: full chain saved and verified (`mainnet-0-970347.sbchain`, 12.8 MB); extended to the tip (970,733) in 334 s |
 | REC-FUZZ | Done: 102,013 mutations, all rejected by the circuit (every site of a header-chain and a LogUp proof, plus 4,012 on a real header-tree segment through the leaf circuit) |
 | MMR in Lean | Done: `mmr_inclusion`, `fold_eq_mmr`; Zig sides cross-checked |
 | Genesis checks from Lean | Done: `chain_from_genesis_checked`; `verifyRoot` reads the exported table |
@@ -47,7 +47,35 @@ Design: [proof-store.md](../design/proof-store.md), decision D-036. Commits from
 
 ### The full-chain run
 
-*(Filled in when the run ends.)*
+- **Result:**
+  - **file:** `data/store/mainnet-0-970347.sbchain`, 12,785,054 bytes, gitignored like all of
+    `data/`;
+  - **content:** headers 0–970,347 in 457 segments (22 at log 20, 429 at log 19, and the tail),
+    12 peaks;
+  - **verification:** standalone with the pinned VK in 1.5 s, in a fresh process, with chainwork above
+    Core's `nMinimumChainWork`.
+- **Outputs:**
+  - tip `…2d87bcdd` at height 970,347, matching your node;
+  - chainwork `0x14d8dcca8e53277d43d257680`, equal to Core's;
+  - MMR root `T = 06385baf…7e9a0bf0`.
+- **Cross-checks on `T`:** it is identical to the 2026-10-09 run's, which cut the chain into segments
+  differently (as expected: the MMR is canonical). An independent Python recomputation from the raw
+  headers gives the same value.
+- **Inclusion:** the path for block 840,000 (the 2024 halving, `…1cda83a5`) verifies against the file.
+- **Wall time:** about 7 h for the final 435 segments in bounded steps (leaves 40–45 s, merges about
+  34 s), after two stopped attempts whose checkpoints carried 90,112 headers over.
+
+**Extension at the tip:**
+- `tools/extend_tip.sh` fetched new headers and extended from the saved file to height 970,733 (386
+  headers) in **334 s**: 15,734,830 bytes, 14 peaks, verified.
+- Tip `000000000000000000003dbc22e47d6c064a607fd5c5f8a9b23f6a9e2f77da87` and chainwork
+  `0x14e43cd4eddd46e7533462b70` match your node, which had it as its tip (1 confirmation).
+- `T = 356b4e79…969a7427` matches the Python recomputation.
+- The first attempt failed on a network reset from mempool.space; the script now continues with the
+  headers on disk.
+- **One-proof leaves (LEAF-ONE-PROOF, done during the run):** each header segment is now proved once
+  (stwo-zig's borrowed native capture). The circuits and VK are unchanged; peak leaf memory went from
+  17.5 to 12.8 GB, and the binary was swapped between steps.
 
 ### Memory: what went wrong and the fix
 
