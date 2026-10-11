@@ -71,6 +71,11 @@ Not yet:
 5. **CATCHUP:** a compute wall. Full blocks need lifting or a larger machine, and the in-memory check
    of a 1 MB block already took ~14 GB before M3b's extra ~190 columns.
 
+**Also scheduled (owner, 2026-10-11):** the remaining VERIFIER-LEAN work, as the
+[VL table in the roadmap](roadmap.md#vl-the-in-circuit-plain-verifier-proven-verifier-lean):
+VL-E2E (the end-to-end theorem) first, then VL-POW, VL-OODS and VL-ORACLE. VL-FRI and VL-NODE are
+trust-boundary decisions waiting on the owner.
+
 ## In flight
 
 - Nothing.

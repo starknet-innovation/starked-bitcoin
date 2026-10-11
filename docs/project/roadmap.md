@@ -1,6 +1,6 @@
 # Roadmap
 
-Status: current · Updated: 2026-10-07
+Status: current · Updated: 2026-10-11
 
 Rules:
 
@@ -69,6 +69,23 @@ Done 2026-10-08 (CPU, laptop): heights 0..970,347 in one root proof; [report](..
 | UTXO | State module: sorted Merkle tree (Blake2s), inclusion and non-inclusion, matching Core's UTXO set; prove Core's assumeUTXO `hash_serialized` (D-037) | in progress: multiset argument built and proven at spec level; epochs from genesis run (0–170 verified) | [utxo.md](../design/utxo.md); next: coin-component Lean links, final sorted pass |
 | CATCHUP | Catch up from genesis | blocked: compute (cluster/GPU + lifting), after M3b | |
 
+## VL: the in-circuit plain verifier, proven (VERIFIER-LEAN)
+
+Scoped 2026-10-11 (owner). Steps 1–5 of
+[verifier-formalization.md](../design/verifier-formalization.md) are done: the statement mixing,
+transcript order, channel, Merkle paths, leaf hashing, DEEP responses, composition and balance checks
+are Lean-generated and proven, gate-identical to the hand-written leaf (mainnet VK unchanged). What
+remains:
+
+| ID | Item | Status | Done when / notes |
+|---|---|---|---|
+| VL-E2E | End-to-end theorem for the plain verifier: compose the proven pieces, with LogUp soundness (`logup_sz`), the fingerprint Schwartz–Zippel step and the FRI assumption as named hypotheses | todo | One theorem: "leaf circuit satisfied ⇒ the AIR constraints and lookup balance hold on the committed traces for the stated public inputs ⇒ `leaf_valid`", standard axioms; recorded in verification.md. Do first: it turns the per-piece lemmas into one statement the project can make. |
+| VL-POW | The proof-of-work bit check (`LeanChannel.pow`, `extractBits`) Lean-first | todo | Program + soundness theorem, gate parity with the hand-written Zig, mainnet VK unchanged. Small. |
+| VL-OODS | The shifted OODS points (one `addPoints` per distinct offset — our code) Lean-first | todo | Same pattern as VL-POW. Small. |
+| VL-ORACLE | REC-FUZZ native oracle: replay the mutation campaigns through the native verifier; accept/reject must agree with the circuit | todo | Campaign run and recorded in verification.md. Tests exactly the `sv.*` code that stays trusted under VL-FRI's option (a). |
+| VL-FRI | The remaining stwo-zig code inside the leaf (`sv.*`): FRI commit/decommit and folding, the first circle-to-line layer, the last layer, query selection, DEEP quotients, circle arithmetic | blocked (owner: trust boundary) | Either (a) a decisions.md entry recording them as StarkWare-derived, parity-tested, trusted; or (b) the Lean-first program treatment extended to them. (b) is weeks of effort, comparable to steps 1–5 together, and would make the whole leaf circuit Lean-generated. |
+| VL-NODE | The node circuit's use of stwo-zig's recursive verifier (`stark_verifier.verify`, `CircuitStatement`) | blocked (owner: trust boundary) | A decisions.md entry: keep trusted as StarkWare-derived (the node glue is already proven), or schedule an extension as its own item. |
+
 ## Later
 
 Script module (secp256k1, Schnorr, interpreter) · OP_RETURN index module ·
@@ -82,8 +99,8 @@ history module · browser/phone verifier.
 | AIRSTMT | `AirStatement` carries a pointer and an allocator (prototype ergonomics) | `src/air/prove.zig` |
 | LIFT | Mixed trace sizes / lifting | Needed once components differ in size |
 | INTERP-PROOF | Prove the Zig interpreter ≡ Lean semantics, or generate it | Currently differential-tested only |
-| VERIFIER-LEAN | Prove our circuits (plain verifier, node) in Lean against a spec of the native verifier | **Parked** by the owner 2026-10-08; notes and plan in [verifier-formalization.md](../design/verifier-formalization.md) |
-| REC-FUZZ | Mutation testing of `plain_verifier.zig` | **done (2026-10-10)**: `src/recursion/fuzz.zig`, every guessed value and statement input of a header-chain and a LogUp-system proof; all mutations rejected by the circuit. Follow-up: a native-verifier oracle on the same mutations |
+| VERIFIER-LEAN | Prove our circuits (plain verifier, node) in Lean against a spec of the native verifier | Resumed 2026-10-10 (owner); steps 1–5 done. The remaining work is scheduled as the **VL table** above (owner, 2026-10-11). |
+| REC-FUZZ | Mutation testing of `plain_verifier.zig` | **done (2026-10-10)**: `src/recursion/fuzz.zig`, every guessed value and statement input of a header-chain and a LogUp-system proof; all mutations rejected by the circuit. Follow-up: scheduled as VL-ORACLE |
 | SPEC-FUZZ | Differential fuzzing of the Lean header and block specs against Bitcoin Core's own C++ | **done (2026-10-10)**: `tools/specfuzz`; header kinds (SetCompact, GetCompact, retarget, block proof, CheckProofOfWork, MTP) 750k cases and block kinds (sigops, Merkle root + mutation, CheckTransaction, txid/wtxid) 100k cases, 0 mismatches; constants checked against `chainparams.cpp` |
 | LOGUP-SZ | LogUp's Schwartz–Zippel step in Lean | **done (2026-10-10)**: `LogUpSZ.lean` (`logup_sz`, `balancedExt_of_poly`); side conditions discharged per system by `decide` (`LogUpSZSystems.lean`) |
 | MMR-LEAN | The MMR and inclusion proofs in Lean | **done (2026-10-10)**: `Spec/Mmr.lean` (`mmr_inclusion`, `fold_eq_mmr`), Zig sides cross-checked; genesis checks from Lean (`Gadgets/RootChecks.lean`) |
