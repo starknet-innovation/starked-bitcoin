@@ -79,8 +79,8 @@ VL-E2E, VL-POW, VL-OODS and VL-ORACLE are **done** (2026-10-11: `plain_sound`, `
 **BLOCK-REC (2026-10-12, overnight):** the block-proof aggregation runs end to end at small scale — block
 leaves (the plain verifier over the 15-component block system, 8.3 M variables, 5 s to prove), block
 nodes, an epoch as a forest of trees over the seed v3 decomposition, and an outer verifier
-(`chainproof prove-epoch-tree` / `verify-epoch-tree`; epoch 0–3 verified, tampers rejected; 0–170 in
-progress). Lean: `SumOk`, `sumOk_leaf`, `sumOk_node`, `rng_forest`, the leaf's checks and context. Needs
+(`chainproof prove-epoch-tree` / `verify-epoch-tree`; epoch 0–3 verified, tampers rejected; **epoch 0–170
+through 5 recursion trees: proved in 90 min, verified in 0.6 s, same coin set `7105b60f…`**). Lean: `SumOk`, `sumOk_leaf`, `sumOk_node`, `rng_forest`, the leaf's checks and context. Needs
 the owner: **D-043** (proposed) — the seed v3 is implemented (forced by recursion), the previous-block
 MTP (part 3) is not bound until the owner picks option A or B. VL-FRI and VL-NODE are trust-boundary decisions waiting on the owner. And **D-042** (owner): the hybrid UTXO tip tree is
 scheduled as `UTXO-TREE`, the aggregator as `BLOCK-REC` — design in

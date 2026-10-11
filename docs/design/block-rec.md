@@ -190,6 +190,10 @@ estimated: per-leaf cost is seconds, not the header leaf's 31 s.
   Epoch 0–3: one tree, proved in 115 s, verified in 0.1 s after the chain (2.1 s); tampers rejected
   (a summary limb: `WrongDigest`; a path bit: `HashesNotTheChain`; a set missing a coin:
   `ChallengeMismatch`).
+  **Epoch 0–170 (2026-10-12):** 171 block proofs as 5 trees (128 + 32 + 8 + 2 + 1), proved in 90 min
+  (M4 Pro CPU, peak RSS 17.7 GB), forest file 4.9 MB; verified in 0.6 s after the chain proof (2.1 s):
+  the coin set after block 170, 171 coins, `hash_serialized 7105b60f…` — the same as the native
+  `verify-epoch`.
 - **Still to build:** the MTP (D-043 part 3, needs the owner's choice); a persisted, pinned block VK
   shipped like the chain VK (today `blockvk.bin` is written by the prover's setup); the Lean statement
   of the outer verifier's composition is `rng_forest` (BlockTree.lean: linked proven ranges with one
