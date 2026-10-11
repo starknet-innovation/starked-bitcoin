@@ -7,6 +7,8 @@ import StarkedAir.Circuit.Deep
 import StarkedAir.Circuit.Merkle
 import StarkedAir.Circuit.Channel
 import StarkedAir.Circuit.Transcript
+import StarkedAir.Circuit.Pow
+import StarkedAir.Circuit.Oods
 import StarkedAir.Block.ExtSum
 import StarkedAir.Block.FpWalk
 import StarkedAir.Block.URec
@@ -50,6 +52,11 @@ def main (args : List String) : IO Unit := do
   | "channel" :: rest => match StarkedAir.Circuit.Channel.channelJson rest with
       | some j => IO.println j
       | none => IO.eprintln "unknown channel op"
+  | ["oods_shift_leaf"] => IO.println (StarkedAir.Circuit.Oods.shiftJson (List.range' 8 17)
+      (StarkedAir.Circuit.Oods.leafOffsets
+        [StarkedAir.Circuit.Composition.compShape StarkedAir.HeaderTree.headers 108,
+         StarkedAir.Circuit.Composition.compShape StarkedAir.HeaderTree.tree 0]))
+  | ["pow_check", k] => IO.println (StarkedAir.Circuit.Pow.powJson k.toNat!)
   | ["transcript", "lookups"] => IO.println (StarkedAir.Circuit.Transcript.json true)
   | ["transcript", "plain"] => IO.println (StarkedAir.Circuit.Transcript.json false)
   | ["merkle_node"] => IO.println StarkedAir.Circuit.Merkle.nodeJson

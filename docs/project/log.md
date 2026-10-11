@@ -23,7 +23,7 @@ Next: <the exact next step; must match status.md>
 
 ## 2026-10-11 (session 9) — VL-E2E: the plain verifier end to end
 Who: Claude (agent, Opus 5.5), on the owner's roadmap amendments (VL table, D-042)
-Roadmap: VL-E2E done
+Roadmap: VL-E2E, VL-POW, VL-OODS done
 Done:
 - `lean/StarkedAir/Circuit/EndToEnd.lean`: `plain_sound` (composition and balance programs hold ⇒ under
   `StarkSound` the AIRs hold on extracted columns ⇒ with `SZGood`, `sys.SatisfiedExt`), `plain_leaf_valid`
@@ -38,7 +38,16 @@ Problems / lessons:
 - `SZGood` is stated for the columns `StarkSound` returns; its probability bound needs them to be the
   committed ones (fixed before `(α, z)`). That ordering is outside the logical statement; recorded as
   such rather than encoded.
-Next: VL-POW and VL-OODS (small, Lean-first), then VL-ORACLE; BLOCK-REC design per block-rec.md.
+- VL-POW: `Circuit/Pow.lean` (`powCheckP`, `powCheck_sound`, `Spec.powOk`); op `guess`, hints `lsb`,
+  `inv_or_zero` (Lean `Ops.lean`, `glue.zig`); `LeanChannel.pow` replays it for n_bits 0/4/26.
+- VL-OODS: `Circuit/Oods.lean` (circle group spec, `shiftP`, `shift_sound`, `#guard`s on generator
+  orders); `ShiftTable`/`shiftPoint` in `plain_verifier.zig`; the leaf loads `airs/oods_shift_leaf.json`.
+- Evidence for both: full `zig build test` with VL-POW (exit 0, 30 min, all rec-fuzz mutations
+  rejected); then `-Dtest-filter` OODS, PoW, pinned mainnet VK, glue parity, leaf wrap: 6/6 passed;
+  `#print axioms` standard for `powCheck_sound`, `shift_sound`; exported JSON regenerates byte-identically.
+- Lesson: this repo's test filter is `-Dtest-filter=…`; `-- --test-filter` is ignored and runs the
+  whole suite.
+Next: VL-ORACLE (native-verifier oracle on the REC-FUZZ mutations); BLOCK-REC design per block-rec.md.
 
 ## 2026-10-11 (session 8) — M3b coin proof layers 4–5; challenge binding fixed (D-041)
 Who: Claude (agent, Opus 5.5), continuing the owner's "M3b and everything not blocked by compute"

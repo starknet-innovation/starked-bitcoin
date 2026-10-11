@@ -21,6 +21,8 @@ const Hint = union(enum) {
     reg: u32,
     coord: struct { j: u32, h: *const Hint },
     is_eq: struct { h: *const Hint, k: u32 },
+    lsb: *const Hint,
+    inv_or_zero: *const Hint,
 };
 
 const Op = union(enum) {
@@ -31,6 +33,7 @@ const Op = union(enum) {
     eq: [2]u32,
     guess_m31: struct { o: u32, h: Hint },
     guess_u16: struct { o: u32, h: Hint },
+    guess: struct { o: u32, h: Hint },
     m31_to_u32: [2]u32,
     blake_g: [7]u32,
     triple_xor: [4]u32,
@@ -82,12 +85,26 @@ fn parseHint(a: std.mem.Allocator, v: std.json.Value) !Hint {
         h.* = try parseHint(a, x.array.items[0]);
         return .{ .is_eq = .{ .h = h, .k = try num(x.array.items[1]) } };
     }
+    if (obj.get("lsb")) |x| {
+        const h = try a.create(Hint);
+        h.* = try parseHint(a, x);
+        return .{ .lsb = h };
+    }
+    if (obj.get("inv_or_zero")) |x| {
+        const h = try a.create(Hint);
+        h.* = try parseHint(a, x);
+        return .{ .inv_or_zero = h };
+    }
     return error.BadGlue;
 }
 
 /// Parses an exported program (allocations in `a`).
 pub fn parse(a: std.mem.Allocator, json: []const u8) !Program {
-    const root = (try std.json.parseFromSliceLeaky(std.json.Value, a, json, .{})).object;
+    return parseValue(a, (try std.json.parseFromSliceLeaky(std.json.Value, a, json, .{})).object);
+}
+
+/// Parses an exported program already read as a JSON object (allocations in `a`).
+pub fn parseValue(a: std.mem.Allocator, root: std.json.ObjectMap) !Program {
     if (!std.mem.eql(u8, root.get("schema").?.string, "starked-glue-v1")) return error.BadGlue;
     const items = root.get("ops").?.array.items;
     const ops = try a.alloc(Op, items.len);
@@ -109,6 +126,8 @@ pub fn parse(a: std.mem.Allocator, json: []const u8) !Program {
             .{ .guess_m31 = .{ .o = try num(f[1]), .h = try parseHint(a, f[2]) } }
         else if (std.mem.eql(u8, tag, "guess_u16"))
             .{ .guess_u16 = .{ .o = try num(f[1]), .h = try parseHint(a, f[2]) } }
+        else if (std.mem.eql(u8, tag, "guess"))
+            .{ .guess = .{ .o = try num(f[1]), .h = try parseHint(a, f[2]) } }
         else if (std.mem.eql(u8, tag, "m31_to_u32"))
             .{ .m31_to_u32 = .{ try num(f[1]), try num(f[2]) } }
         else if (std.mem.eql(u8, tag, "blake_g")) blk: {
@@ -168,6 +187,7 @@ pub fn run(comptime V: type, ctx: *Context(V), prog: *const Program, ext: []cons
         .eq => |g| try ctx.eq(try rr.get(g[0]), try rr.get(g[1])),
         .guess_m31 => |g| try rr.set(g.o, try ctx.guessM31(try hintValue(V, ctx, rr, ext, &g.h))),
         .guess_u16 => |g| try rr.set(g.o, try ctx.guessU16(try hintValue(V, ctx, rr, ext, &g.h))),
+        .guess => |g| try rr.set(g.o, try ctx.guess(try hintValue(V, ctx, rr, ext, &g.h))),
         .m31_to_u32 => |g| try rr.set(g[0], (try builder.blake.m31ToU32(V, ctx, try rr.get(g[1]))).get()),
         .blake_g => |g| {
             var in: [6]builder.wrappers.U32Wrapper(Var) = undefined;
@@ -201,6 +221,8 @@ fn hintValue(comptime V: type, ctx: anytype, rr: anytype, ext: []const V, h: *co
         .reg => |r| ctx.get(try rr.get(r)),
         .coord => |c| QM31.fromBase(M31.fromCanonical(builder.ivalue.limbs(try hintValue(V, ctx, rr, ext, c.h))[c.j])),
         .is_eq => |e| QM31.fromBase(M31.fromCanonical(if (builder.ivalue.limbs(try hintValue(V, ctx, rr, ext, e.h))[0] == e.k) 1 else 0)),
+        .lsb => |x| builder.ivalue.pointwiseLsb(V, try hintValue(V, ctx, rr, ext, x)),
+        .inv_or_zero => |x| builder.ivalue.pointwiseInvOrZero(V, try hintValue(V, ctx, rr, ext, x)),
     };
 }
 

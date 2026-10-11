@@ -136,6 +136,7 @@ pub fn buildLeafCircuit(
     lh[3] = try glue.parse(ctx.scratch(), @embedFile("air:leafhash_8"));
     const lhp = [4]*const glue.Program{ &lh[0], &lh[1], &lh[2], &lh[3] };
     const deep = try pv.DeepTable.parse(ctx.scratch(), @embedFile("air:deep_leaf"));
+    const shifts = try pv.ShiftTable.parse(ctx.scratch(), @embedFile("air:oods_shift_leaf"));
     const mnode = try glue.parse(ctx.scratch(), @embedFile("air:merkle_node"));
     // The channel operations (Circuit/Channel.lean), at the sizes the leaf uses.
     var chp: [9]glue.Program = undefined;
@@ -144,7 +145,12 @@ pub fn buildLeafCircuit(
     const chu = [3]*const glue.Program{ &chp[0], &chp[1], &chp[2] };
     const chq = [2]*const glue.Program{ &chp[3], &chp[4] };
     const transcript = try pv.parseTranscript(ctx.scratch(), @embedFile("air:transcript_lookups"));
-    const channel = pv.ChannelProgs{ .mix_u32s = &chu, .mix_qm31s = &chq, .draw = &chp[5], .draw_qm31 = &chp[6], .draw_point = &chp[7], .pow_mix = &chp[8] };
+    // The proof-of-work check (Circuit/Pow.lean), at the grinding bits we use.
+    var pwp: [2]glue.Program = undefined;
+    inline for (.{ "0", "26" }, 0..) |name, i|
+        pwp[i] = try glue.parse(ctx.scratch(), @embedFile("air:channel_pow_check_" ++ name));
+    const pw = [2]pv.PowCheck{ .{ .n_bits = 0, .prog = &pwp[0] }, .{ .n_bits = 26, .prog = &pwp[1] } };
+    const channel = pv.ChannelProgs{ .mix_u32s = &chu, .mix_qm31s = &chq, .draw = &chp[5], .draw_qm31 = &chp[6], .draw_point = &chp[7], .pow_mix = &chp[8], .pow_check = &pw };
     const ext = try ctx.scratch().alloc(QM31, pubs.len);
     for (ext, pubs) |*e, v| e.* = QM31.fromBase(v);
     const Hooks = struct {
@@ -161,6 +167,7 @@ pub fn buildLeafCircuit(
         stm: *const glue.Program,
         lh: []const *const glue.Program,
         deep: *const pv.DeepTable,
+        shifts: *const pv.ShiftTable,
         mnode: *const glue.Program,
         channel: *const pv.ChannelProgs,
         transcript: []const []const u8,
@@ -183,6 +190,7 @@ pub fn buildLeafCircuit(
                 .statement = self.stm,
                 .leaf_hashes = self.lh,
                 .deep = self.deep,
+                .shifts = self.shifts,
                 .merkle_node = self.mnode,
                 .channel = self.channel.*,
                 .transcript = self.transcript,
@@ -192,7 +200,7 @@ pub fn buildLeafCircuit(
         }
     };
     var proof_vars: pv.PlainProof(Var) = undefined;
-    const res = try glue.run(QM31, &ctx, &prog, ext, Hooks{ .ctx = &ctx, .values = values, .config = config, .airs = airs, .digests = digests, .pre_root = pre_root, .k = k, .proof_vars = &proof_vars, .comp = &comp, .bal = &bal, .stm = &stm, .lh = &lhp, .deep = &deep, .mnode = &mnode, .channel = &channel, .transcript = transcript });
+    const res = try glue.run(QM31, &ctx, &prog, ext, Hooks{ .ctx = &ctx, .values = values, .config = config, .airs = airs, .digests = digests, .pre_root = pre_root, .k = k, .proof_vars = &proof_vars, .comp = &comp, .bal = &bal, .stm = &stm, .lh = &lhp, .deep = &deep, .shifts = &shifts, .mnode = &mnode, .channel = &channel, .transcript = transcript });
     var digest: HashValue(Var) = undefined;
     for (&digest.words, res) |*w, v| w.* = .newUnsafe(v);
     try finish(QM31, &ctx, digest);

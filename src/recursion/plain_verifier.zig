@@ -357,7 +357,57 @@ pub const PlainStatement = struct {
     /// The transcript order (`Circuit/Transcript.lean`, the `*_bound` theorems): `verifyPlain` checks
     /// its channel events against it, in order; null: no check.
     transcript: ?[]const []const u8 = null,
+    /// The shifted OODS points as Lean programs (`Circuit/Oods.lean`, `shift_sound`), per log size and
+    /// offset; a pair without a program uses stwo-zig's `mulSigned` and `addPoints`.
+    shifts: ?*const ShiftTable = null,
 };
+
+/// The Lean-exported shifted-point programs (`lean/Export.lean oods_shift_*`).
+pub const ShiftTable = struct {
+    pub const Entry = struct { log: u32, off: i32, x: u32, y: u32, prog: glue.Program };
+    entries: []const Entry,
+
+    pub fn parse(a: std.mem.Allocator, json: []const u8) !ShiftTable {
+        const items = (try std.json.parseFromSliceLeaky(std.json.Value, a, json, .{})).array.items;
+        const out = try a.alloc(Entry, items.len);
+        for (out, items) |*e, item| {
+            const o = item.object;
+            e.* = .{
+                .log = @intCast(o.get("log").?.integer),
+                .off = @intCast(o.get("off").?.integer),
+                .x = @intCast(o.get("x").?.integer),
+                .y = @intCast(o.get("y").?.integer),
+                .prog = try glue.parseValue(a, o.get("program").?.object),
+            };
+        }
+        return .{ .entries = out };
+    }
+
+    pub fn find(self: *const ShiftTable, log: u32, off: i32) ?*const Entry {
+        for (self.entries) |*e| if (e.log == log and e.off == off) return e;
+        return null;
+    }
+};
+
+/// `oods + off·g_log`: the Lean program when the table has one, else stwo-zig's constants and
+/// `addPoints`.
+fn shiftPoint(comptime V: type, ctx: *Context(V), table: ?*const ShiftTable, log: u32, off: i32, oods: Point(Var)) !Point(Var) {
+    if (table) |t| if (t.find(log, off)) |e| {
+        const Hooks = struct {
+            inputs: []const Var,
+            pub fn call(self: @This(), id: u32, _: []const Var) ![]const Var {
+                return if (id == 0) self.inputs else error.UnknownHook;
+            }
+        };
+        const res = try glue.run(V, ctx, &e.prog, &.{}, Hooks{ .inputs = &.{ oods.x, oods.y } });
+        return .{ .x = res[0], .y = res[1] };
+    };
+    const g = core.poly.circle.canonic.CanonicCoset.new(log).coset_value.step.mulSigned(off);
+    return sv.circle.addPoints(V, ctx, oods, .{
+        .x = try ctx.constant(QM31.fromBase(g.x)),
+        .y = try ctx.constant(QM31.fromBase(g.y)),
+    });
+}
 
 /// Parses a `starked-transcript-v1` event list.
 pub fn parseTranscript(a: std.mem.Allocator, json: []const u8) ![]const []const u8 {
@@ -396,7 +446,11 @@ pub const ChannelProgs = struct {
     draw_point: ?*const glue.Program = null,
     /// `powMixP` (`powMix_sound`): the digest update after the proof of work.
     pow_mix: ?*const glue.Program = null,
+    /// `powCheckP` (`Circuit/Pow.lean`, `powCheck_sound`): the proof-of-work check, one per `n_bits`.
+    pow_check: []const PowCheck = &.{},
 };
+
+pub const PowCheck = struct { n_bits: u32, prog: *const glue.Program };
 
 /// stwo-zig's channel state, driven by the Lean programs where one matches (gate-identical: tested).
 const LeanChannel = struct {
@@ -469,23 +523,30 @@ const LeanChannel = struct {
         return .{ .x = res[0], .y = res[1] };
     }
 
-    /// The proof-of-work check is stwo-zig's (`Channel.pow`, copied: it only enforces the grinding
-    /// bits); the digest update is the Lean program.
+    /// The proof-of-work check: the Lean program for `n_bits` when there is one (`powCheck_sound`),
+    /// else stwo-zig's (`Channel.pow`, copied); the digest update is the Lean program.
     fn pow(self: LeanChannel, comptime V: type, ctx: *Context(V), n_bits: u32, nonce: Var) !void {
         const prog = self.progs.pow_mix orelse return self.ch.pow(V, ctx, n_bits, nonce);
         std.debug.assert(n_bits <= 30);
-        const ivalue = builder.ivalue;
-        const prefix = try ctx.constant(ivalue.qm31FromU32s(0x12345678, 0, 0, 0));
-        const bits_word = try ctx.constant(ivalue.qm31FromU32s(n_bits, 0, 0, 0));
-        const prefixed = try builder.blake.blake2sM31(V, ctx, &.{ prefix, self.ch.digest.low, self.ch.digest.high, bits_word }, 52);
-        const high_mask = try ctx.constant(ivalue.qm31FromU32s(0, 0, 1, 1));
-        const masked_nonce = try ctx.pointwiseMul(nonce, high_mask);
-        try ctx.eq(masked_nonce, ctx.zero());
-        const res = try builder.blake.blake2sM31(V, ctx, &.{ prefixed.low, prefixed.high, nonce }, 40);
-        try ctx.markAsUnused(res.high);
-        const first_word = try ctx.pointwiseMul(res.low, ctx.one());
-        const bits = try builder.extract_bits.extractBits(V, ctx, .fromPacked(&.{first_word}, 1), 31);
-        for (bits[0..n_bits]) |bit| try ctx.eq(bit.data[0], ctx.zero());
+        const check: ?*const glue.Program = for (self.progs.pow_check) |pc| {
+            if (pc.n_bits == n_bits) break pc.prog;
+        } else null;
+        if (check) |c| {
+            _ = try self.run(V, ctx, c, &.{nonce});
+        } else {
+            const ivalue = builder.ivalue;
+            const prefix = try ctx.constant(ivalue.qm31FromU32s(0x12345678, 0, 0, 0));
+            const bits_word = try ctx.constant(ivalue.qm31FromU32s(n_bits, 0, 0, 0));
+            const prefixed = try builder.blake.blake2sM31(V, ctx, &.{ prefix, self.ch.digest.low, self.ch.digest.high, bits_word }, 52);
+            const high_mask = try ctx.constant(ivalue.qm31FromU32s(0, 0, 1, 1));
+            const masked_nonce = try ctx.pointwiseMul(nonce, high_mask);
+            try ctx.eq(masked_nonce, ctx.zero());
+            const res = try builder.blake.blake2sM31(V, ctx, &.{ prefixed.low, prefixed.high, nonce }, 40);
+            try ctx.markAsUnused(res.high);
+            const first_word = try ctx.pointwiseMul(res.low, ctx.one());
+            const bits = try builder.extract_bits.extractBits(V, ctx, .fromPacked(&.{first_word}, 1), 31);
+            for (bits[0..n_bits]) |bit| try ctx.eq(bit.data[0], ctx.zero());
+        }
         self.setDigest(try self.run(V, ctx, prog, &.{nonce}));
     }
 };
@@ -872,25 +933,18 @@ pub fn verifyPlain(
 
     // The points: the OODS point shifted by each main offset (in first-use order), and by −1 for
     // the interaction tree.
-    const trace_gen = core.poly.circle.canonic.CanonicCoset.new(log_trace).coset_value.step;
     var shifted = std.AutoHashMapUnmanaged(i32, Point(Var)).empty;
     var all_offsets: std.ArrayListUnmanaged([]const i32) = .empty;
     for (config.parts) |pc| try all_offsets.appendSlice(ctx.scratch(), pc.main_offsets);
     for (all_offsets.items) |offs| for (offs) |off| {
         if (off == 0) continue;
         const got = try shifted.getOrPut(ctx.scratch(), off);
-        if (!got.found_existing) {
-            const g = trace_gen.mulSigned(@intCast(off));
-            got.value_ptr.* = try sv.circle.addPoints(V, ctx, oods, .{
-                .x = try ctx.constant(QM31.fromBase(g.x)),
-                .y = try ctx.constant(QM31.fromBase(g.y)),
-            });
-        }
+        if (!got.found_existing) got.value_ptr.* = try shiftPoint(V, ctx, st.shifts, log_trace, off, oods);
     };
-    const prev: ?Point(Var) = if (p.interaction_at_oods.len != 0) blk: {
-        const g = trace_gen.mulSigned(-1);
-        break :blk try sv.circle.addPoints(V, ctx, oods, .{ .x = try ctx.constant(QM31.fromBase(g.x)), .y = try ctx.constant(QM31.fromBase(g.y)) });
-    } else null;
+    const prev: ?Point(Var) = if (p.interaction_at_oods.len != 0)
+        try shiftPoint(V, ctx, st.shifts, log_trace, -1, oods)
+    else
+        null;
 
     var responses: std.ArrayListUnmanaged(sv.oods.OodsResponse) = .empty;
     if (st.deep) |table| {
@@ -1403,6 +1457,93 @@ test "channel: the Lean programs (Circuit/Channel.lean) replay gate for gate as 
     }
     for (outs[0].items, outs[1].items) |x, y| try std.testing.expect(x.eql(y));
     try glue.expectSameCircuit(&ctxs[0].circuit, &ctxs[1].circuit);
+}
+
+test "proof-of-work check: the Lean program (Circuit/Pow.lean) replays gate for gate as stwo-zig's, same verdicts" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const mix = try a.create(glue.Program);
+    mix.* = try glue.parse(a, @embedFile("air:channel_pow_mix"));
+    var checks: [3]glue.Program = undefined;
+    inline for (.{ "0", "4", "26" }, 0..) |name, i| checks[i] = try glue.parse(a, @embedFile("air:channel_pow_check_" ++ name));
+    const pcs = [3]PowCheck{ .{ .n_bits = 0, .prog = &checks[0] }, .{ .n_bits = 4, .prog = &checks[1] }, .{ .n_bits = 26, .prog = &checks[2] } };
+    const progs = ChannelProgs{ .pow_mix = mix, .pow_check = &pcs };
+    var prng = std.Random.DefaultPrng.init(17);
+    const r = prng.random();
+    const rq = struct {
+        fn f(rr: std.Random) QM31 {
+            return QM31.fromU32Unchecked(rr.int(u31) % 0x7fffffff, rr.int(u31) % 0x7fffffff, rr.int(u31) % 0x7fffffff, rr.int(u31) % 0x7fffffff);
+        }
+    }.f;
+    const d_lo = rq(r);
+    const d_hi = rq(r);
+    const Run = struct {
+        /// Builds the check with stwo-zig's channel (`which == 0`) or the Lean programs; returns validity.
+        fn build(al: std.mem.Allocator, ctx: *Context(QM31), lo: QM31, hi: QM31, n_bits: u32, nonce: QM31, which: usize, pr: *const ChannelProgs) !bool {
+            _ = al;
+            var ch = sv.channel.Channel{ .digest = .{ .low = try ctx.guess(lo), .high = try ctx.guess(hi) }, .n_draws = 0 };
+            const nv = try ctx.guess(nonce);
+            if (which == 0) try ch.pow(QM31, ctx, n_bits, nv) else try (LeanChannel{ .ch = &ch, .progs = pr }).pow(QM31, ctx, n_bits, nv);
+            return ctx.isCircuitValid();
+        }
+    };
+    // A nonce that passes 4 bits, found with stwo-zig's own check.
+    var good4: QM31 = undefined;
+    var k: u32 = 0;
+    while (true) : (k += 1) {
+        var ctx = try Context(QM31).init(a, 0);
+        defer ctx.deinit();
+        const cand = QM31.fromU32Unchecked(k, 0, 0, 0);
+        if (try Run.build(a, &ctx, d_lo, d_hi, 4, cand, 0, &progs)) {
+            good4 = cand;
+            break;
+        }
+        try std.testing.expect(k < 10_000);
+    }
+    const cases = [_]struct { n_bits: u32, nonce: QM31, valid: bool }{
+        .{ .n_bits = 0, .nonce = QM31.fromU32Unchecked(12345, 678, 0, 0), .valid = true },
+        .{ .n_bits = 0, .nonce = QM31.fromU32Unchecked(12345, 678, 1, 0), .valid = false },
+        .{ .n_bits = 4, .nonce = good4, .valid = true },
+        .{ .n_bits = 4, .nonce = good4.add(QM31.one()), .valid = false },
+        .{ .n_bits = 26, .nonce = QM31.fromU32Unchecked(99, 0, 0, 0), .valid = false },
+    };
+    for (cases) |c| {
+        var ctxs: [2]Context(QM31) = .{ try Context(QM31).init(a, 0), try Context(QM31).init(a, 0) };
+        defer for (&ctxs) |*cx| cx.deinit();
+        var verdicts: [2]bool = undefined;
+        for (&ctxs, &verdicts, 0..) |*ctx, *v, which| v.* = try Run.build(a, ctx, d_lo, d_hi, c.n_bits, c.nonce, which, &progs);
+        try glue.expectSameCircuit(&ctxs[0].circuit, &ctxs[1].circuit);
+        try std.testing.expectEqual(verdicts[0], verdicts[1]);
+        // `good4 + 1` may pass 4 bits by chance; skip that verdict check if stwo-zig accepts it.
+        if (!(c.n_bits == 4 and !c.valid and verdicts[0])) try std.testing.expectEqual(c.valid, verdicts[1]);
+    }
+}
+
+test "shifted OODS points: the Lean table (Circuit/Oods.lean) matches stwo-zig's mulSigned and addPoints gate for gate" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const table = try ShiftTable.parse(a, @embedFile("air:oods_shift_leaf"));
+    try std.testing.expect(table.entries.len > 0);
+    const oods_v = [2]QM31{ QM31.fromU32Unchecked(11, 22, 33, 44), QM31.fromU32Unchecked(55, 66, 77, 88) };
+    for (table.entries) |*e| {
+        // The Lean constant is stwo-zig's `off·g_log`.
+        const g = core.poly.circle.canonic.CanonicCoset.new(e.log).coset_value.step.mulSigned(e.off);
+        try std.testing.expectEqual(g.x.toU32(), e.x);
+        try std.testing.expectEqual(g.y.toU32(), e.y);
+        // The program's gates and values are `addPoints`'.
+        var ctxs: [2]Context(QM31) = .{ try Context(QM31).init(a, 0), try Context(QM31).init(a, 0) };
+        defer for (&ctxs) |*c| c.deinit();
+        var pts: [2][2]QM31 = undefined;
+        for (&ctxs, &pts, 0..) |*ctx, *pt, which| {
+            const oods = Point(Var){ .x = try ctx.guess(oods_v[0]), .y = try ctx.guess(oods_v[1]) };
+            const r = try shiftPoint(QM31, ctx, if (which == 0) null else &table, e.log, e.off, oods);
+            pt.* = .{ ctx.get(r.x), ctx.get(r.y) };
+        }
+        try std.testing.expect(pts[0][0].eql(pts[1][0]) and pts[0][1].eql(pts[1][1]));
+        try glue.expectSameCircuit(&ctxs[0].circuit, &ctxs[1].circuit);
+    }
 }
 
 test "transcript: the Lean order is accepted step by step, a swapped one is refused" {

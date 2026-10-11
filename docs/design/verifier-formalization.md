@@ -165,13 +165,37 @@ an assumption.
   from 14 GB to 6 GB.
 
 **Not proven (stays stwo-zig's or ours, stated):**
-- **The proof-of-work check** (the hash's low bits are zero; `extractBits`): copied from stwo-zig into
-  `LeanChannel.pow`. It enforces the grinding bits only; the digest update after it is proven.
+- ~~The proof-of-work check~~ (done 2026-10-11, VL-POW, below).
 - **FRI and query selection** (`friCommit`, `friDecommit`, `mixFriConfig`,
   `getQuerySelectionInputFromChannel`, `selectQueries`), the DEEP quotients, circle points. Their
   channel calls and the FRI layers' Merkle paths use the same primitives as above (gate-identical at the
   tested sizes), but they run inside stwo-zig.
-- **The shifted OODS points** (one `addPoints` per distinct offset, ours).
+- ~~The shifted OODS points~~ (done 2026-10-11, VL-OODS, below).
+
+### Done (2026-10-11): the proof-of-work check (VL-POW)
+
+`Circuit/Pow.lean`: `powCheckP` emits stwo-zig's `Channel.pow` check call for call (the prefixed hash,
+the nonce mask, the hash with the nonce, `extract_bits` over 31 bits with `validate_extract_bits`, the
+low `n_bits` equal to zero), with constants created where the Zig creates them (the builder interns
+constants by first use). New op `guess` (unconstrained) and hints `lsb`, `inv_or_zero` (`glue.zig`).
+`powCheck_sound`: if its ops hold and `n_bits ≤ 30`, `Spec.powOk`: the nonce's coordinates 2, 3 are zero
+and limb 0 of `blake2s_m31(blake2s_m31(0x12345678 ‖ digest ‖ n_bits) ‖ nonce)` is divisible by
+`2^n_bits` (the 31-bit decomposition is unique: `1…1` is excluded as the encoding of 0). Exported for
+`n_bits` 0, 4 and 26 (`airs/channel_pow_check_*.json`); `LeanChannel.pow` uses the program when one
+matches, else stwo-zig's. Tests: gate parity and equal verdicts with stwo-zig's `pow` (valid at 0 and
+4 bits with a ground nonce, invalid with a nonzero high coordinate, a wrong nonce, or 26 bits with a
+random nonce); the leaf's identity is still the pinned mainnet VK.
+
+### Done (2026-10-11): the shifted OODS points (VL-OODS)
+
+`Circuit/Oods.lean`: the M31 circle group (`cpAdd`, `cpMul` by doubling), stwo's generator
+`(2, 1268011823)`, `traceGen L` (`= gen · 2^(31−L)`), `shiftPt L off` (`mulSigned`); `#guard`s check the
+generator's order is exactly `2^31` and `traceGen L`'s divides `2^L` (`L ≤ 20`). `shiftP`: the
+Lean-computed constants `shiftPt L off`, then `addPoints`'s six gates; `shift_sound`: the result is
+the circle sum of the OODS point and `shiftPt L off` over QM31. `airs/oods_shift_leaf.json`: one program
+per log size 8–24 and per offset of the header-chain leaf's components (and −1). `verifyPlain` uses a
+table entry when there is one (`shiftPoint`), else stwo-zig's `mulSigned` and `addPoints`. Test: every
+entry's constants equal stwo-zig's `mulSigned` and its gates and values equal `addPoints`'.
 
 ### Assumption: STARK (FRI) soundness
 

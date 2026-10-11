@@ -80,6 +80,10 @@ inductive Hint where
   | reg (r : ℕ)
   | coord (j : ℕ) (h : Hint)
   | isEq (h : Hint) (k : ℕ)
+  /-- Each coordinate's least significant bit (`pointwise_lsb`). -/
+  | lsb (h : Hint)
+  /-- Each coordinate's inverse, or 0 (`pointwise_inv_or_zero`). -/
+  | invOrZero (h : Hint)
 
 /-- One op. Registers are naturals; `o` is the defined register. -/
 inductive Op where
@@ -90,6 +94,8 @@ inductive Op where
   | eq (x y : ℕ)
   | guessM31 (o : ℕ) (h : Hint)
   | guessU16 (o : ℕ) (h : Hint)
+  /-- An unconstrained QM31 guess (the builder's `guess`). -/
+  | guess (o : ℕ) (h : Hint)
   | m2u (o x : ℕ)
   /-- Outputs `o, o+1, o+2, o+3`. -/
   | blakeG (o a b c d f0 f1 : ℕ)
@@ -116,6 +122,7 @@ def Op.holds (ρ : ℕ → Q) : Op → Prop
   | .eq x y => ρ x = ρ y
   | .guessM31 o _ => IsBase (ρ o)
   | .guessU16 o _ => IsBase (ρ o) ∧ (ρ o).a.val < 65536
+  | .guess _ _ => True
   | .m2u o x => IsBase (ρ x) ∧ ρ o = Q.m2u (ρ x)
   | .blakeG o a b c d f0 f1 =>
     IsU32 (ρ a) ∧ IsU32 (ρ b) ∧ IsU32 (ρ c) ∧ IsU32 (ρ d) ∧ IsU32 (ρ f0) ∧ IsU32 (ρ f1) ∧
@@ -141,6 +148,8 @@ def Hint.toJson : Hint → String
   | .reg r => s!"\{\"reg\":{r}}"
   | .coord j h => s!"\{\"coord\":[{j},{h.toJson}]}"
   | .isEq h k => s!"\{\"is_eq\":[{h.toJson},{k}]}"
+  | .lsb h => s!"\{\"lsb\":{h.toJson}}"
+  | .invOrZero h => s!"\{\"inv_or_zero\":{h.toJson}}"
 
 def Op.toJson : Op → String
   | .const o a b c d => s!"[\"const\",{o},{a},{b},{c},{d}]"
@@ -150,6 +159,7 @@ def Op.toJson : Op → String
   | .eq x y => s!"[\"eq\",{x},{y}]"
   | .guessM31 o h => s!"[\"guess_m31\",{o},{h.toJson}]"
   | .guessU16 o h => s!"[\"guess_u16\",{o},{h.toJson}]"
+  | .guess o h => s!"[\"guess\",{o},{h.toJson}]"
   | .m2u o x => s!"[\"m31_to_u32\",{o},{x}]"
   | .blakeG o a b c d f0 f1 => s!"[\"blake_g\",{o},{a},{b},{c},{d},{f0},{f1}]"
   | .xor3 o x y z => s!"[\"triple_xor\",{o},{x},{y},{z}]"
