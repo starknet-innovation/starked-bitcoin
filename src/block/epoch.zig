@@ -1,8 +1,10 @@
 //! M3b epochs (D-040): the challenge, the native coin set, and the epoch check.
 //!
 //! An epoch is blocks `from … to` (from genesis for now). Its challenge `(γ, z, α)` is derived from a
-//! seed hashing, per height, the block hash and the block commitment (both public in the block proofs),
-//! so the verifier recomputes it from the proofs. The epoch holds when the blocks' partial sums minus the
+//! seed hashing the initial and final coin sets' encodings and, per height, the block hash and the block
+//! commitment (both public in the block proofs), so the verifier recomputes it from the proofs and the
+//! sets. Every value behind an event's tuple is fixed before the challenge: the LogUp bound holds only for
+//! events chosen independently of it. The epoch holds when the blocks' partial sums minus the
 //! final set's fractions are zero (`Spec/UtxoEpoch.lean`, `epoch_sound`), with the final set strictly
 //! sorted by outpoint.
 
@@ -14,16 +16,19 @@ const coin = @import("coin.zig");
 const fields = @import("fields.zig");
 
 const Blake2s = std.crypto.hash.blake2.Blake2s256;
-pub const TAG = "starked-bitcoin M3b epoch v1";
+pub const TAG = "starked-bitcoin M3b epoch v2";
 
-/// The seed: Blake2s of the tag, the range, and per height the block hash and commitment.
-pub fn seed(from: u32, to: u32, hashes: []const [32]u8, commits: []const [32]u8) [32]u8 {
-    return seedFrom(from, to, null, hashes, commits);
+/// The seed: Blake2s of the tag, the range, the final set's digest, and per height the block hash and
+/// commitment.
+pub fn seed(from: u32, to: u32, fin: [32]u8, hashes: []const [32]u8, commits: []const [32]u8) [32]u8 {
+    return seedFrom(from, to, null, fin, hashes, commits);
 }
 
-/// The seed of an epoch from a previous set: the previous set's `hash_serialized` follows the range, so
-/// the initial set is fixed before the challenge (`Spec/UtxoEpochFrom.lean`). Without one, it is `seed`.
-pub fn seedFrom(from: u32, to: u32, prev: ?[32]u8, hashes: []const [32]u8, commits: []const [32]u8) [32]u8 {
+/// The seed of an epoch from a previous set: the previous set's digest follows the range, then the final
+/// set's, so both are fixed before the challenge (`Spec/UtxoEpochFrom.lean`). Without one, it is `seed`.
+/// The digests are of the full encodings (`setDigest`): `hash_serialized` omits the transaction index,
+/// which the tuple holds.
+pub fn seedFrom(from: u32, to: u32, prev: ?[32]u8, fin: [32]u8, hashes: []const [32]u8, commits: []const [32]u8) [32]u8 {
     var h = Blake2s.init(.{});
     h.update(TAG);
     var buf: [8]u8 = undefined;
@@ -31,6 +36,7 @@ pub fn seedFrom(from: u32, to: u32, prev: ?[32]u8, hashes: []const [32]u8, commi
     std.mem.writeInt(u32, buf[4..8], to, .little);
     h.update(&buf);
     if (prev) |p| h.update(&p);
+    h.update(&fin);
     for (hashes, commits) |bh, c| {
         h.update(&bh);
         h.update(&c);
@@ -250,12 +256,15 @@ test "epoch: blocks 0-9 then 170's coin set; the challenge is deterministic" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const s1 = seed(0, 1, &.{[_]u8{1} ** 32}, &.{[_]u8{2} ** 32});
+    const s1 = seed(0, 1, [_]u8{0} ** 32, &.{[_]u8{1} ** 32}, &.{[_]u8{2} ** 32});
     const c1 = challenge(s1);
     const c2 = challenge(s1);
     try std.testing.expect(c1.z.eql(c2.z));
-    const s2 = seed(0, 1, &.{[_]u8{1} ** 32}, &.{[_]u8{3} ** 32});
+    const s2 = seed(0, 1, [_]u8{0} ** 32, &.{[_]u8{1} ** 32}, &.{[_]u8{3} ** 32});
     try std.testing.expect(!challenge(s2).z.eql(c1.z));
+    // The final set is bound: another final set, another challenge.
+    const s3 = seed(0, 1, [_]u8{9} ** 32, &.{[_]u8{1} ** 32}, &.{[_]u8{2} ** 32});
+    try std.testing.expect(!challenge(s3).z.eql(c1.z));
     // Genesis alone: an empty set (Core never connects block 0).
     const set0 = try coinSet(a, &.{@embedFile("testdata:block_0")});
     try std.testing.expectEqual(@as(usize, 0), set0.len);
@@ -288,6 +297,13 @@ pub fn encodeSet(a: std.mem.Allocator, set: []const Coin) ![]u8 {
         try w.writeAll(c.ser);
     }
     return out.toOwnedSlice(a);
+}
+
+/// A coin set's digest: Blake2s of its encoding (every field of every coin's tuple).
+pub fn setDigest(a: std.mem.Allocator, set: []const Coin) ![32]u8 {
+    var d: [32]u8 = undefined;
+    Blake2s.hash(try encodeSet(a, set), &d, .{});
+    return d;
 }
 
 pub fn decodeSet(a: std.mem.Allocator, bytes: []const u8) ![]Coin {

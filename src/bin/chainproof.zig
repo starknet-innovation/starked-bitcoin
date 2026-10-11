@@ -393,16 +393,16 @@ fn pathOf(a: std.mem.Allocator, dir: []const u8, sub: []const u8, h: u32, ext: [
 const EpochFrom = struct { height: u32 = 0, prev_set: ?[]const u8 = null };
 
 /// The initial set of an epoch from a previous set: decoded, strictly sorted, created before `from`.
-fn loadInit(a: std.mem.Allocator, from: EpochFrom) !struct { set: []const EP.Coin, hash: ?[32]u8 } {
+fn loadInit(a: std.mem.Allocator, from: EpochFrom) !struct { set: []const EP.Coin, hash: ?[32]u8, digest: ?[32]u8 } {
     const path = from.prev_set orelse {
         if (from.height != 0) return error.PrevSetRequired;
-        return .{ .set = &.{}, .hash = null };
+        return .{ .set = &.{}, .hash = null, .digest = null };
     };
     if (from.height == 0) return error.GenesisHasNoPrevSet;
     const set = try EP.decodeSet(a, try S.readFile(a, path));
     if (!EP.sortedStrict(set)) return error.SetNotSorted;
     if (!EP.createdBefore(set, from.height)) return error.PrevSetTooNew;
-    return .{ .set = set, .hash = EP.hashSerialized(set) };
+    return .{ .set = set, .hash = EP.hashSerialized(set), .digest = try EP.setDigest(a, set) };
 }
 
 fn proveEpoch(gpa: std.mem.Allocator, a: std.mem.Allocator, headers_path: []const u8, dir: []const u8, to: u32, chain_path: []const u8, weak: bool, from: EpochFrom) !void {
@@ -433,7 +433,9 @@ fn proveEpoch(gpa: std.mem.Allocator, a: std.mem.Allocator, headers_path: []cons
         std.crypto.hash.sha2.Sha256.hash(&h1, &hashes[i], .{});
         std.crypto.hash.blake2.Blake2s256.hash(undos[i], &commits[i], .{});
     }
-    const ch = EP.challenge(EP.seedFrom(from.height, to, init.hash, hashes, commits));
+    // The final set is computed first: the seed binds it.
+    const set = try EP.coinSetFrom(a, init.set, from.height, raws);
+    const ch = EP.challenge(EP.seedFrom(from.height, to, init.digest, try EP.setDigest(a, set), hashes, commits));
     const tree = try a.alloc(HT.Words, n);
     for (tree, all[0..n]) |*h, *hd| h.* = HT.blockHash(hd);
     const airs = try BS.parseAirs(a);
@@ -454,7 +456,6 @@ fn proveEpoch(gpa: std.mem.Allocator, a: std.mem.Allocator, headers_path: []cons
         try S.writeFileAtomic(try pathOf(ba, dir, "proofs", hh, "sbblock"), bytes);
         if (hh % 50 == 0 or hh == to) std.debug.print("block {d}: proved ({d:.0}s so far)\n", .{ hh, secs(timer.read()) });
     }
-    const set = try EP.coinSetFrom(a, init.set, from.height, raws);
     try S.writeFileAtomic(try std.fmt.allocPrint(a, "{s}/set-{d}.bin", .{ dir, to }), try EP.encodeSet(a, set));
     std.debug.print("epoch {d}..{d}: {d} block proofs, coin set of {d} coins written\n", .{ from.height, to, nb, set.len });
 }
@@ -491,15 +492,15 @@ fn verifyEpoch(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8
         nin += f.pubs[sb.block.coin.PUB_NIN].toU32();
         files[i] = f;
     }
-    const ch = EP.challenge(EP.seedFrom(from.height, to, init.hash, hashes, commits));
+    const set = try EP.decodeSet(a, try S.readFile(a, try std.fmt.allocPrint(a, "{s}/set-{d}.bin", .{ dir, to })));
+    if (!EP.sortedStrict(set)) return error.SetNotSorted;
+    const ch = EP.challenge(EP.seedFrom(from.height, to, init.digest, try EP.setDigest(a, set), hashes, commits));
     var sum = @import("stwo_core").fields.qm31.QM31.zero();
     for (files, 0..) |f, i| {
         try EP.checkPubs(&f.pubs, ch, from.height + @as(u32, @intCast(i)));
         sum = sum.add(EP.partialSum(&f.pubs));
     }
     std.debug.print("{d} block proofs verified, challenge recomputed from their hashes and commitments ({d:.1}s)\n", .{ nb, secs(timer.lap()) });
-    const set = try EP.decodeSet(a, try S.readFile(a, try std.fmt.allocPrint(a, "{s}/set-{d}.bin", .{ dir, to })));
-    if (!EP.sortedStrict(set)) return error.SetNotSorted;
     // Events below p: initial + created + spent + final (the creations are at most the outputs).
     if (nin + set.len + init.set.len >= 1 << 30) return error.EpochTooLarge;
     // The initial set counts as created (Spec/UtxoEpochFrom.lean).
