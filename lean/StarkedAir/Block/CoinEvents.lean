@@ -9,6 +9,7 @@ the index and code as two 16-bit limbs each, the four coordinates of `serTxOut`'
 `γ`, its length, and `ctx`.
 -/
 import StarkedAir.Block.CoinLink
+import StarkedAir.Spec.Coins
 
 namespace StarkedAir.Block
 
@@ -399,7 +400,7 @@ byte `SB` (when nonempty), `UNSP` is Boolean and is 1 exactly when `s` starts wi
 10,000 bytes (`Spec.Coins.unspendable`). -/
 theorem coin_unsp {j : ℕ} (hj : j < 2 ^ L) (hko : (inst 14).main Coin.KO j = 1) (s : Spec.Block.Bytes)
     (hsl : ((inst 14).main Coin.SVAL j).val = s.length) (hsb : ∀ b ∈ s.head?, ((inst 14).main Coin.SB j).val = b.toNat)
-    (hsmall : s.length < 2 ^ 20) :
+    (hsmall : s.length ≤ 2 ^ 25) :
     ((inst 14).main Coin.UNSP j = 1 ↔ (s.head? == some 0x6a || decide (10000 < s.length)) = true) ∧
       ((inst 14).main Coin.UNSP j = 0 ∨ (inst 14).main Coin.UNSP j = 1) := by
   have cs := coin_sat hL hsat hL24
@@ -475,6 +476,107 @@ theorem coin_unsp {j : ℕ} (hj : j < 2 ^ L) (hko : (inst 14).main Coin.KO j = 1
       · exact z
       · exact absurd (hzsv.mp z) h1
     · right; exact h
+
+/-- **An output row's multiplicity**: 1 for a spendable output that is not a lost coinbase output (the
+public lost bit, for transaction 0), else 0. -/
+theorem coin_out_mm (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
+    (hon : ∀ j < 2 ^ L, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
+    (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
+    {parts : List (List Spec.Block.Tok)} (hf : List.Forall₂ Spec.Block.IoTx S.b.txs parts)
+    (htg : Spec.Block.tagged 0 (Fields.toksFrom (inst 1).main (Rb inst pub) S.m 0) = Spec.Block.tagParts 0 parts)
+    {lost : Bool} (hlost : pub Coin.PUB_LOST = if lost then 1 else 0)
+    {j t q : ℕ} {tx : Spec.Block.Tx} {o : Spec.Block.TxOut} (hj : j < e) (hko : (inst 14).main Coin.KO j = 1)
+    (htx : S.b.txs[t]? = some tx) (hjq : j = ((parts.take t).map List.length).sum + q)
+    (hq : q < tx.vin.length + tx.vout.length) (ho : tx.vout[q - tx.vin.length]? = some o) :
+    (inst 14).main Coin.MM j = if !Spec.Coins.unspendable o && !(t == 0 && lost) then 1 else 0 := by
+  have cs := coin_sat hL hsat hL24
+  have fs := fields_sat' hL hsat hL24
+  have hj2 : j < 2 ^ L := by omega
+  obtain ⟨t0, q0, tx0, htx0, htxi, hjq0, hq0, hko0, -⟩ := coin_row_tx hL hsat hL24 S he hon hlen hst hf htg hj
+  obtain ⟨hpl, hpe⟩ := part_len hf htx
+  obtain ⟨hpl0, hpe0⟩ := part_len hf htx0
+  obtain ⟨rfl, rfl⟩ := decomp_unique parts hpl hpl0 (by omega) (by omega) (hjq.symm.trans hjq0)
+  rw [htx] at htx0; obtain rfl := Option.some.inj htx0
+  obtain ⟨-, o0, ho0, hot⟩ := hko0 hko
+  rw [ho] at ho0; obtain rfl := Option.some.inj ho0
+  have hki : (inst 14).main Coin.KI j = 0 := by
+    rcases Coin.kinds cs hj2 with h | h | h | h <;> simp_all
+  -- the script
+  set ρ := (ioRows inst S.m).getD j 0 with hρdef
+  have hρ : ρ ∈ ioRows inst S.m := by rw [hρdef, List.getD_eq_getElem _ _ (by omega)]; exact List.getElem_mem _
+  obtain ⟨hρm, -⟩ := mem_ioRows.mp hρ
+  have hρn : ρ < 2 ^ L := by have := S.hmn; omega
+  obtain ⟨hk, hT⟩ := (coin_row_tok hL hsat hL24 S he hon hlen hst hj).1 hko
+  have hSSC : (inst 14).main Coin.SSC j = (inst 1).main Fields.SSC ρ := by
+    have := congrArg (fun l => l.getD 3 0) hT
+    rw [hρdef, List.getD_eq_getElem?_getD]; simpa [cOut, fOut] using this
+  have hSVAL : (inst 14).main Coin.SVAL j = (inst 1).main Fields.VAL ρ := by
+    have := congrArg (fun l => l.getD 4 0) hT
+    rw [hρdef, List.getD_eq_getElem?_getD]; simpa [cOut, fOut] using this
+  obtain ⟨hvmax, hlenv, -, -, hfitv⟩ := Fields.row_info fs (Rb inst pub) S.hcs S.hmn S.hpad S.hfit hρm (a := Fields.K_OUT)
+    (by decide) hk (by decide) (by decide)
+  have hssc := Fields.ssc_val fs (Rb inst pub) S.hcs S.hmn S.hpad S.hfit hρm (a := Fields.K_OUT) (Or.inr rfl) hk
+  simp only [show ¬ (Fields.K_OUT = Fields.K_IN) by decide, if_false] at hssc
+  have htok : Fields.tokOf (inst 1).main (Rb inst pub) ρ = .out (Fields.slice (Rb inst pub) ((inst 1).main Fields.START ρ).val 8)
+      (Fields.slice (Rb inst pub) ((inst 1).main Fields.SSC ρ).val ((inst 1).main Fields.VAL ρ).val) := by
+    have kat := Fields.kinds_at fs hρn (a := Fields.K_OUT) (by decide) hk
+    unfold Fields.tokOf
+    rw [if_neg (by rw [kat Fields.K_BLK (by decide)]; simp [Fields.K_BLK, Fields.K_OUT]),
+      if_neg (by rw [kat Fields.K_TXH (by decide)]; simp [Fields.K_TXH, Fields.K_OUT]),
+      if_neg (by rw [kat Fields.K_IN (by decide)]; simp [Fields.K_IN, Fields.K_OUT]),
+      if_neg (by rw [kat Fields.K_NOUT (by decide)]; simp [Fields.K_NOUT, Fields.K_OUT]), if_pos hk, hssc]
+  rw [htok] at hot
+  obtain ⟨-, -, hscript⟩ := hot
+  have hsfit : ((inst 1).main Fields.SSC ρ).val + ((inst 1).main Fields.VAL ρ).val ≤ (Rb inst pub).length := by
+    rw [hssc]; rw [hlenv] at hfitv; simp [Fields.lenN, Fields.K_OUT, Fields.K_BLK, Fields.K_TXH, Fields.K_IN,
+      Fields.K_NOUT] at hfitv; omega
+  have hslen : o.scriptPubKey.length = ((inst 1).main Fields.VAL ρ).val := by rw [hscript, Fields.slice_length hsfit]
+  have hzs := (Coin.unsp_spec cs hj2 hko).1
+  obtain ⟨hU, hUb⟩ := coin_unsp hL hsat hL24 hj2 hko o.scriptPubKey (by rw [hSVAL, hslen]) (by
+      intro b hb
+      have hne : o.scriptPubKey ≠ [] := by intro h; rw [h] at hb; simp at hb
+      have hz : (inst 14).main Coin.ZS j = 0 := by
+        rcases Coin.bool_col cs (c := Coin.ZS) (by simp) hj2 with z | z
+        · exact z
+        · exfalso; apply hne
+          have h0 := hzs.mp z
+          rw [hSVAL, ← Coin.cast_val ((inst 1).main Fields.VAL ρ), ← hslen] at h0
+          have hsP : o.scriptPubKey.length < P := by
+            rw [hslen]; exact lt_of_le_of_lt hvmax (by unfold Fields.MAXS P; norm_num)
+          exact List.length_eq_zero_iff.mp (Coin.lift (b := 0) (by simpa using h0) hsP (by unfold P; norm_num))
+      obtain ⟨-, hsb⟩ := coin_script_byte hL hsat hL24 hj2 hko hz
+      rw [hsb, hSSC]
+      have hb0 : b = o.scriptPubKey.getD 0 0 := by
+        cases hs : o.scriptPubKey with
+        | nil => exact absurd hs hne
+        | cons c cs' => rw [hs] at hb; simp at hb; simp [hb]
+      rw [hb0, hscript, slice_getD (by have := List.length_pos_of_ne_nil hne; omega) hsfit, Nat.add_zero])
+    (by rw [hslen]; exact hvmax)
+  -- the multiplicity
+  have hmm := Coin.mm_spec cs hj2
+  rw [hko, hki, one_mul, sub_zero] at hmm
+  have hcbo := Coin.cbo_spec cs hj2
+  rw [htxi] at hcbo
+  have hLb : 2 ^ L ≤ 2 ^ 23 := Nat.pow_le_pow_right (by norm_num) hL24
+  have htN : t < 2 ^ L := by have := (List.getElem?_eq_some_iff.mp htx).1; have := S.hN25; omega
+  have ht0 : (t : F) = 0 ↔ t = 0 := ⟨fun e => Coin.lift (a := t) (b := 0) (by simpa using e)
+    (lt_of_lt_of_le (show t < 2 ^ 25 by omega) (by unfold P; norm_num)) (by unfold P; norm_num), fun e => by simp [e]⟩
+  have hcb : (inst 14).main Coin.CBO j = if t = 0 then 1 else 0 := by
+    split_ifs with h0
+    · exact hcbo.1.mpr (ht0.mpr h0)
+    · rcases hcbo.2.1 with e | e
+      · exact e
+      · exact absurd (ht0.mp (hcbo.1.mp e)) h0
+  rw [hmm, hcb, hlost]
+  unfold Spec.Coins.unspendable
+  rcases hUb with u | u <;> rw [u] at hU ⊢
+  · have hn : (o.scriptPubKey.head? == some 0x6a || decide (10000 < o.scriptPubKey.length)) = false := by
+      by_contra hc; simp only [Bool.not_eq_false] at hc; exact zero_ne_one (hU.mpr hc)
+    rw [hn]
+    by_cases h0 : t = 0 <;> cases lost <;> simp [h0]
+  · have hn : (o.scriptPubKey.head? == some 0x6a || decide (10000 < o.scriptPubKey.length)) = true := hU.mp rfl
+    rw [hn]
+    simp
 
 end System
 
