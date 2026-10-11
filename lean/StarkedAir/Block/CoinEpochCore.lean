@@ -148,4 +148,57 @@ theorem epoch_core (N : ℕ → ℕ) (γ : QM) (blocks : List BlockC) (g0 : ℕ)
       exact List.mem_map.mpr ⟨(p.1.vin[k], k), List.mem_zipIdx_iff_getElem?.mpr (by simp), rfl⟩
     exact hspR _ (mem_spent_all N blocks hBi htx hin)
 
+/-- **An epoch's block systems.** Block systems `i < nb` at heights `h0 + i` sharing the epoch's
+challenge (`γ`, `z`, weights `αᵏ`) give the epoch's blocks: their public partial sums add up to the
+blocks' sum at `(α, z)`, and their spends and transactions satisfy `epoch_core`'s block facts. -/
+theorem epoch_blocks (nb : ℕ) (inst : ℕ → ℕ → Inst) (pub : ℕ → ℕ → F) (L : ℕ → ℕ)
+    (hL : ∀ i < nb, ∀ c < 15, (inst i c).logSize = L i) (hsat : ∀ i < nb, hashSys.SatisfiedExt (inst i) (pub i) [])
+    (hL24 : ∀ i < nb, L i ≤ 23) (S : ∀ i, Setup (inst i) (pub i) (L i)) (h0 : ℕ) (hh : h0 + nb ≤ 2 ^ 23)
+    (hp2 : ∀ i < nb, pub i 2 = ((h0 + i : ℕ) : F)) (lost : ℕ → Bool)
+    (hlost : ∀ i < nb, pub i Coin.PUB_LOST = if lost i then 1 else 0)
+    (γ α z : QM) (hγ : ∀ i < nb, FpWalk.gQ (pub i) = γ) (hz : ∀ i < nb, RunSum.pQ (pub i) Coin.PUB_Z = z)
+    (hα : ∀ i < nb, ∀ k < Coin.W, RunSum.pQ (pub i) (Coin.PUB_ALPHA k) = α ^ k)
+    (hne : ∀ i < nb, ∀ (t : ℕ) (tx : Spec.Block.Tx), (S i).b.txs[t]? = some tx → tx.vin ≠ [] ∧ tx.vout ≠ []) :
+    ∃ blocks : List BlockC, blocks.length = nb ∧
+      (∀ i < nb, ∃ B, blocks[i]? = some B ∧ B.h = h0 + i ∧ B.txs = (S i).b.txs ∧ B.lost = lost i) ∧
+      ∀ N : ℕ → ℕ,
+        ∑ i ∈ Finset.range nb, RunSum.pQ (pub i) Coin.PUB_S = (blocks.map (blockSum N (efrac N γ α z))).sum ∧
+        (∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → ∀ (t : ℕ) (tx : Spec.Block.Tx), B.txs[t]? = some tx →
+          ∀ ev ∈ txIns N B t tx, ∃ c : Claim, ev = (ev.1, (c.code, c.ser), N (c.code / 2) + c.ctx) ∧
+            (c.code < 2 ^ 26 → c.ctx < 2 ^ 25 → (c.code / 2 < B.h ∨ (c.code / 2 = B.h ∧ c.ctx < t)))) ∧
+        (∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → ∀ (t : ℕ) (tx : Spec.Block.Tx), B.txs[t]? = some tx →
+          1 ≤ t → (∀ k < tx.vin.length, RealVal ((B.claim t k).code, (B.claim t k).ser)) →
+          Spec.Coins.outSum tx ≤ Spec.Block.MAX_MONEY → Spec.Coins.ClaimsOK (txcOf N B t tx)) := by
+  have key : ∀ i, ∃ claim : ℕ → ℕ → Claim, i < nb →
+      (∀ N : ℕ → ℕ, RunSum.pQ (pub i) Coin.PUB_S =
+        blockSum N (efrac N γ α z) ⟨h0 + i, (S i).b.txs, lost i, claim⟩) ∧
+      (∀ (N : ℕ → ℕ) (t : ℕ) (tx : Spec.Block.Tx), (S i).b.txs[t]? = some tx →
+        ∀ ev ∈ txIns N ⟨h0 + i, (S i).b.txs, lost i, claim⟩ t tx, ∃ c : Claim,
+          ev = (ev.1, (c.code, c.ser), N (c.code / 2) + c.ctx) ∧
+          (c.code < 2 ^ 26 → c.ctx < 2 ^ 25 → (c.code / 2 < h0 + i ∨ (c.code / 2 = h0 + i ∧ c.ctx < t)))) ∧
+      (∀ (N : ℕ → ℕ) (t : ℕ) (tx : Spec.Block.Tx), (S i).b.txs[t]? = some tx → 1 ≤ t →
+        (∀ k < tx.vin.length, 8 ≤ (claim t k).ser.length ∧
+          Spec.Block.le ((claim t k).ser.take 8) ≤ Fields.MAXHI * 2 ^ 24 + Fields.MAXLO ∧ (claim t k).code < 2 ^ 30) →
+        Spec.Coins.outSum tx ≤ Spec.Block.MAX_MONEY →
+        Spec.Coins.ClaimsOK (txcOf N ⟨h0 + i, (S i).b.txs, lost i, claim⟩ t tx)) := by
+    intro i
+    by_cases hi : i < nb
+    · obtain ⟨claim, h1, h2, h3⟩ := block_facts (hL i hi) (hsat i hi) (hL24 i hi) (S i) (hp2 i hi) (by omega)
+        (hlost i hi) (hα i hi) (hne i hi)
+      refine ⟨claim, fun _ => ⟨fun N => ?_, h2, h3⟩⟩
+      rw [h1 N, hγ i hi, hz i hi]
+    · exact ⟨fun _ _ => default, fun h => absurd h hi⟩
+  choose claim hclaim using key
+  refine ⟨(List.range nb).map fun i => ⟨h0 + i, (S i).b.txs, lost i, claim i⟩, by simp,
+    fun i hi => ⟨⟨h0 + i, (S i).b.txs, lost i, claim i⟩, by rw [List.getElem?_map, List.getElem?_range hi]; rfl,
+      rfl, rfl, rfl⟩, fun N => ⟨?_, ?_, ?_⟩⟩
+  · rw [List.map_map, list_sum_range_qm]
+    exact Finset.sum_congr rfl fun i hi => (hclaim i (Finset.mem_range.mp hi)).1 N
+  · intro i B hB t tx htx ev hev
+    obtain ⟨j, hj, rfl⟩ := List.mem_map.mp (List.mem_of_getElem? hB)
+    exact (hclaim j (List.mem_range.mp hj)).2.1 N t tx htx ev hev
+  · intro i B hB t tx htx ht1 hcv hout
+    obtain ⟨j, hj, rfl⟩ := List.mem_map.mp (List.mem_of_getElem? hB)
+    exact (hclaim j (List.mem_range.mp hj)).2.2 N t tx htx ht1 hcv hout
+
 end StarkedAir.Block
