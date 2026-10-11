@@ -74,7 +74,9 @@ Not yet:
 **Also scheduled (owner, 2026-10-11):** the remaining VERIFIER-LEAN work, as the
 [VL table in the roadmap](roadmap.md#vl-the-in-circuit-plain-verifier-proven-verifier-lean):
 VL-E2E (the end-to-end theorem) first, then VL-POW, VL-OODS and VL-ORACLE. VL-FRI and VL-NODE are
-trust-boundary decisions waiting on the owner.
+trust-boundary decisions waiting on the owner. And **D-042** (owner): the hybrid UTXO tip tree is
+scheduled as `UTXO-TREE`, the aggregator as `BLOCK-REC` — design in
+[block-rec.md](../design/block-rec.md); freeze the block-proof interface before CATCHUP.
 
 ## In flight
 

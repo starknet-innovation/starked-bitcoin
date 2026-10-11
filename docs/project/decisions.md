@@ -362,3 +362,25 @@ only to tile the stream, so the boundaries, and with them every claim, were a tr
 generalized-birthday (Wagner) search over QM31 sums can make a false epoch balance at feasible cost
 (*est.*: practical with 2^4 lists of 2^31 candidates). Cost: 5 columns, 5 byte lookups and 1 constraint
 in URec, 5 bytes per spend in the commitment; epoch proofs made before the fix must be re-proved.
+
+### D-042 — The hybrid UTXO tree is scheduled: per-block tree updates at the tip, epochs as baselines
+Date: 2026-10-11 · By: owner, in discussion with Claude (agent) · Status: active (amends D-040's tip clause)
+Decision: D-040 left the per-block tree as a contingency ("only if assessment shows tip following
+needs it"). The assessment is made: following the tip with proven state needs it, so it is scheduled
+(`UTXO-TREE`), structured as:
+- **Baseline:** a multiset epoch closed at a checkpoint height (assumeUTXO heights first), plus one
+  segmented pass proving the sorted final set builds a Blake2s sorted-tree root `R`;
+- **Tip stretch:** per-block tree-update proofs advance `R` (spends: inclusion + delete; creations:
+  non-inclusion + insert, in Core key order per D-037);
+- **Re-baseline:** the next epoch close, from the previous set, must rebuild to the same root the
+  incremental updates reached — the multiset and tree arguments cross-check each other.
+Until UTXO-TREE exists, the interim tip product is the baseline plus native application of each
+block's committed coin events.
+Design: [block-rec.md](../design/block-rec.md).
+Why:
+- An epoch close costs O(set) however few blocks it covers (the final-set pass), so rolling epochs
+  give a proven set daily at best, never per block. Per-block proven state needs per-block cost
+  proportional to the block, which only the tree gives (about 7,400 rows per coin event, *est.*).
+- RAM is not the constraint: no step needs chain-proportional memory (per-worker traces are bounded
+  by the 4M-weight consensus constant; the final-set pass and catch-up are segmentable and
+  parallel). The constraint is cadence, which the tree fixes.

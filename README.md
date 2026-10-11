@@ -84,6 +84,7 @@ docs/              Documentation (see below)
 | Understand how segment proofs will be aggregated (M2 recursion) | [docs/design/recursion.md](docs/design/recursion.md) |
 | Understand the header commitment tree (MMR over block hashes, HC-HASHTREE) | [docs/design/header-tree.md](docs/design/header-tree.md) |
 | Understand the M3a block-data proof: spec, tests, proposed AIR structure | [docs/design/block-data.md](docs/design/block-data.md) |
+| Understand the block-proof aggregator and tip following (BLOCK-REC, UTXO-TREE) | [docs/design/block-rec.md](docs/design/block-rec.md) |
 | Resume the parked plan to prove our circuits (plain verifier, node) in Lean | [docs/design/verifier-formalization.md](docs/design/verifier-formalization.md) |
 | Know exactly what is proven and what is trusted | [docs/reference/verification.md](docs/reference/verification.md) |
 | Understand an AIR's layout, versions, tests and benchmarks | [docs/airs/sha256.md](docs/airs/sha256.md), [docs/airs/blake2s.md](docs/airs/blake2s.md), [docs/airs/header-chain.md](docs/airs/header-chain.md) (earlier versions: [header-chain-history.md](docs/airs/header-chain-history.md)) |
