@@ -231,4 +231,23 @@ theorem ordered_all (N : ℕ → ℕ) (g0 : ℕ) : ∀ (blocks : List BlockC) (p
         simp only [List.take_succ_cons, List.map_cons, List.sum_cons] at this
         omega)
 
+/-- **The epoch's run.** With the balance `init + created = spent + final`, the circuit's ordering checks,
+and distinct created outpoints, the sequential update from the initial set over the epoch's transactions
+succeeds and ends holding exactly the final set. -/
+theorem epoch_run (N : ℕ → ℕ) (blocks : List BlockC) (g0 : ℕ) (init fin : List CEv)
+    (hpos : ∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → N B.h = g0 + ((blocks.take i).map (·.txs.length)).sum)
+    (hinc : ∀ (i i' : ℕ) (B B' : BlockC), blocks[i]? = some B → blocks[i']? = some B' → (B.h < B'.h ↔ i < i'))
+    (hlex : ∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → ∀ (t : ℕ) (tx : Tx), B.txs[t]? = some tx → ∀ e ∈ txIns N B t tx,
+      ∃ c : Claim, e = (e.1, (c.code, c.ser), N (c.code / 2) + c.ctx) ∧
+        (c.code / 2 < B.h ∨ (c.code / 2 = B.h ∧ c.ctx < t)))
+    (hinit : ∀ e ∈ init, e.2.2 < g0)
+    (hnd : (((init : Multiset CEv) + created g0 (allTxs N blocks)).map Prod.fst).Nodup)
+    (hbal : (init : Multiset CEv) + created g0 (allTxs N blocks) = spent (allTxs N blocks) + fin) :
+    ∃ m, run g0 (viewOf init) (allTxs N blocks) = some m ∧ ∀ k v j, m k = some (v, j) ↔ (k, v, j) ∈ fin := by
+  have hord := ordered_of_balance N blocks g0 init fin hpos hinc hlex hinit hbal
+  have hO : Ordered (g0 + 0) (allTxs N blocks) := ordered_all N g0 blocks 0 (fun i B hB t tx htx e he => by
+    have := hord i B hB t tx htx e he; rw [hpos i B hB] at this; omega)
+  obtain ⟨m, hm, hiff⟩ := run_from_balance init g0 hinit (allTxs N blocks) (fin : Multiset CEv) (by simpa using hO) hnd hbal
+  exact ⟨m, hm, fun k v j => by rw [hiff]; simp⟩
+
 end StarkedAir.Spec.CoinEpoch
