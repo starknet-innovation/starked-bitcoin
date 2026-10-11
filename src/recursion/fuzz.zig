@@ -177,7 +177,7 @@ fn campaign(a: std.mem.Allocator, values: *pv.PlainProof(QM31), runner: anytype,
     return findings.items;
 }
 
-fn sampleBudget() usize {
+pub fn sampleBudget() usize {
     const v = std.process.getEnvVarOwned(std.heap.page_allocator, "REC_FUZZ_BUDGET") catch return 150;
     defer std.heap.page_allocator.free(v);
     return std.fmt.parseInt(usize, v, 10) catch 150;
@@ -383,3 +383,270 @@ test "rec fuzz: every guessed value of a header-tree segment proof is bound, thr
     }
     try std.testing.expectEqual(@as(usize, 0), findings.len + stmt_findings);
 }
+
+// ---------------------------------------------------------------- VL-ORACLE: the native verifier as oracle
+
+/// A scalar of the native proof (`system.Proof`). `both`: the circuit receives the same value through
+/// `fromCapture`, so the two verifiers must agree; otherwise (Merkle hash witnesses, FRI witnesses) the
+/// circuit gets the honest per-query paths and cosets from the capture, and only the native verdict is
+/// checked (the circuit-side counterparts are mutated by the campaigns above).
+const NSite = union(enum) { hash: []u8, q: *QM31, m: *M31, w: *u64 };
+const NLabeled = struct { site: NSite, label: []const u8, both: bool };
+
+fn nHash(a: std.mem.Allocator, out: *std.ArrayList(NLabeled), h: anytype, both: bool, label: []const u8) !void {
+    try out.append(a, .{ .site = .{ .hash = std.mem.asBytes(h) }, .label = label, .both = both });
+}
+
+fn nativeSites(a: std.mem.Allocator, p: anytype) ![]NLabeled {
+    var out = std.ArrayList(NLabeled).empty;
+    const s = &p.stark.commitment_scheme_proof;
+    // Tree 0's root is not a proof input of the circuit: it pins the expected preprocessed root as a
+    // statement constant, so only the native verifier reads it.
+    for (s.commitments.items, 0..) |*h, t| try nHash(a, &out, h, t != 0, try std.fmt.allocPrint(a, "commitments[{d}]", .{t}));
+    for (s.sampled_values.items, 0..) |cols, t| for (cols, 0..) |xs, c| for (xs, 0..) |*x, i|
+        try out.append(a, .{ .site = .{ .q = x }, .label = try std.fmt.allocPrint(a, "sampled_values[{d}][{d}][{d}]", .{ t, c, i }), .both = true });
+    for (p.claimed_sums, 0..) |*x, i| try out.append(a, .{ .site = .{ .q = x }, .label = try std.fmt.allocPrint(a, "claimed_sums[{d}]", .{i}), .both = true });
+    for (s.queried_values.items, 0..) |cols, t| for (cols, 0..) |xs, c| for (xs, 0..) |*x, i|
+        try out.append(a, .{ .site = .{ .m = x }, .label = try std.fmt.allocPrint(a, "queried_values[{d}][{d}][{d}]", .{ t, c, i }), .both = true });
+    for (s.decommitments.items, 0..) |d, t| for (d.hash_witness, 0..) |*h, i|
+        try nHash(a, &out, h, false, try std.fmt.allocPrint(a, "decommitments[{d}].hash_witness[{d}]", .{ t, i }));
+    try out.append(a, .{ .site = .{ .w = &s.proof_of_work }, .label = "proof_of_work", .both = true });
+    const fri = &s.fri_proof;
+    const layers = try a.alloc(*@TypeOf(fri.first_layer), 1 + fri.inner_layers.len);
+    layers[0] = &fri.first_layer;
+    for (fri.inner_layers, layers[1..]) |*l, *o| o.* = l;
+    for (layers, 0..) |l, k| {
+        try nHash(a, &out, &l.commitment, true, try std.fmt.allocPrint(a, "fri.layer[{d}].commitment", .{k}));
+        for (l.fri_witness, 0..) |*x, i| try out.append(a, .{ .site = .{ .q = x }, .label = try std.fmt.allocPrint(a, "fri.layer[{d}].fri_witness[{d}]", .{ k, i }), .both = false });
+        for (l.decommitment.hash_witness, 0..) |*h, i|
+            try nHash(a, &out, h, false, try std.fmt.allocPrint(a, "fri.layer[{d}].hash_witness[{d}]", .{ k, i }));
+    }
+    for (fri.last_layer_poly.coeffs, 0..) |*x, i| try out.append(a, .{ .site = .{ .q = x }, .label = try std.fmt.allocPrint(a, "fri.last_layer[{d}]", .{i}), .both = true });
+    return out.items;
+}
+
+const NSaved = union(enum) { hash: [64]u8, q: QM31, m: M31, w: u64 };
+
+fn nMutate(site: NSite, rng: std.Random) NSaved {
+    switch (site) {
+        .hash => |b| {
+            var saved: [64]u8 = undefined;
+            @memcpy(saved[0..b.len], b);
+            const bit = rng.uintLessThan(usize, 8 * b.len);
+            b[bit / 8] ^= @as(u8, 1) << @intCast(bit % 8);
+            return .{ .hash = saved };
+        },
+        .q => |x| {
+            const old = x.*;
+            x.* = x.*.add(QM31.fromM31Array(.{ M31.fromCanonical(rng.intRangeAtMost(u32, 1, 0x7ffffffe)), M31.fromCanonical(rng.int(u16)), M31.zero(), M31.fromCanonical(rng.int(u8)) }));
+            return .{ .q = old };
+        },
+        .m => |x| {
+            const old = x.*;
+            x.* = x.*.add(M31.fromCanonical(rng.intRangeAtMost(u32, 1, 0x7ffffffe)));
+            return .{ .m = old };
+        },
+        .w => |x| {
+            const old = x.*;
+            x.* ^= @as(u64, 1) << rng.int(u6);
+            return .{ .w = old };
+        },
+    }
+}
+
+fn nRestore(site: NSite, s: NSaved) void {
+    switch (site) {
+        .hash => |b| @memcpy(b, s.hash[0..b.len]),
+        .q => |x| x.* = s.q,
+        .m => |x| x.* = s.m,
+        .w => |x| x.* = s.w,
+    }
+}
+
+/// Mutates native proof scalars one at a time; `runner.native(p)` and `runner.circuit(p)` give the
+/// verdicts. Returns the number of disagreements (both-sided sites) and native acceptances (native-only
+/// sites); each is printed.
+fn oracleCampaign(a: std.mem.Allocator, p: anytype, runner: anytype, name: []const u8, budget: usize, skip_fri: bool) !usize {
+    var prng = std.Random.DefaultPrng.init(0x0ac1e);
+    const rng = prng.random();
+    const all_sites = try nativeSites(a, p);
+    var kept = std.ArrayList(NLabeled).empty;
+    for (all_sites) |s| if (!(skip_fri and std.mem.startsWith(u8, s.label, "fri."))) try kept.append(a, s);
+    const all = kept.items;
+    const every = std.process.hasEnvVarConstant("REC_FUZZ_ALL");
+    const step = if (every or all.len <= budget) 1 else all.len / budget;
+    var bad: usize = 0;
+    var n_both: usize = 0;
+    var n_native: usize = 0;
+    var timer = try std.time.Timer.start();
+    var i: usize = rng.uintLessThan(usize, step);
+    while (i < all.len) : (i += step) {
+        const s = all[i];
+        const saved = nMutate(s.site, rng);
+        const nat = try runner.native(p);
+        const circ: ?bool = if (s.both) try runner.circuit(p) else null;
+        nRestore(s.site, saved);
+        if (circ) |c| {
+            n_both += 1;
+            if (c != nat) {
+                std.debug.print("VL-ORACLE DISAGREEMENT ({s}): {s}: native {s}, circuit {s}\n", .{ name, s.label, if (nat) "accepts" else "rejects", if (c) "accepts" else "rejects" });
+                bad += 1;
+            }
+        } else {
+            n_native += 1;
+            if (nat) {
+                std.debug.print("VL-ORACLE FINDING ({s}): {s} accepted natively\n", .{ name, s.label });
+                bad += 1;
+            }
+        }
+    }
+    std.debug.print("vl oracle {s}: {d} native sites, {d} mutations checked by both verifiers, {d} natively only, in {d:.1}s; {d} disagreements or acceptances\n", .{ name, all.len, n_both, n_native, @as(f64, @floatFromInt(timer.read())) / 1e9, bad });
+    if (!try runner.native(p) or !try runner.circuit(p)) return error.BaselineRejected;
+    return bad;
+}
+
+/// The oracle on a LogUp system proof (the byte system); returns the number of disagreements.
+pub fn oracleLogupSystem(gpa: std.mem.Allocator, budget: usize, skip_fri: bool) !usize {
+    const system = @import("../air/system.zig");
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const airs = try system.byteSystem(a);
+    const log_size: u32 = 8;
+    const parts = [_]system.Part{ .{ .air = &airs[0], .log_size = log_size }, .{ .air = &airs[1], .log_size = log_size } };
+    const cfg = prove_rec.Config.fromFriAndTraceSize(try pv.FriConfig.init(10, 0, 1, 3, 1), log_size);
+    var prng = std.Random.DefaultPrng.init(23);
+    const x = try a.alloc(M31, 256);
+    const mult = try a.alloc(M31, 256);
+    @memset(mult, M31.zero());
+    for (x) |*v| {
+        const b = prng.random().int(u8);
+        v.* = M31.fromCanonical(b);
+        mult[b] = mult[b].add(M31.one());
+    }
+    const config = pv.PlainConfig{ .log_trace_size = log_size, .fri = cfg.fri_config, .system = true, .parts = &.{
+        .{ .n_preprocessed = 1, .main_offsets = try pv.mainOffsets(a, airs[0]), .n_inter = 4 },
+        .{ .n_preprocessed = 0, .main_offsets = try pv.mainOffsets(a, airs[1]), .n_inter = 4 },
+    } };
+    const pre_root: [32]u8 = std.mem.toBytes(try system.preprocessedRoot(a, cfg, &parts));
+    const E = prove_rec.Engine(@import("stwo_cpu_backend").CpuBackend);
+    const mains = [_][]const []const M31{ &.{mult}, &.{x} };
+    var proof = try system.prove(E, a, cfg, &parts, &mains);
+    var capture: core.verifier.ProofCapture(prove_rec.Hasher) = undefined;
+    try system.verifyCaptureBorrowed(a, cfg, &parts, &.{}, &proof, &capture);
+
+    const Runner = struct {
+        airs: *const [2]ir.Air,
+        parts: []const system.Part,
+        cfg: prove_rec.Config,
+        config: pv.PlainConfig,
+        pre_root: [32]u8,
+        capture: *const core.verifier.ProofCapture(prove_rec.Hasher),
+        fn native(self: @This(), p: *const system.Proof) !bool {
+            var run_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+            defer run_arena.deinit();
+            var c: core.verifier.ProofCapture(prove_rec.Hasher) = undefined;
+            system.verifyCaptureBorrowed(run_arena.allocator(), self.cfg, self.parts, &.{}, p, &c) catch |e| {
+                if (e == error.OutOfMemory) return e;
+                return false;
+            };
+            return true;
+        }
+        fn circuit(self: @This(), p: *const system.Proof) !bool {
+            var run_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+            defer run_arena.deinit();
+            const ra = run_arena.allocator();
+            const v = pv.fromCapture(ra, prove_rec.Hasher, &p.stark, self.capture, self.config, p.claimed_sums) catch return false;
+            var ctx = try Context(QM31).init(ra, 0);
+            defer ctx.deinit();
+            const g = try pv.guess(QM31, &ctx, &v);
+            const st = pv.PlainStatement{ .preprocessed_root = self.pre_root, .parts = &.{
+                .{ .air = &self.airs[0], .digest = try self.airs[0].digest(ra), .pubs = &.{} },
+                .{ .air = &self.airs[1], .digest = try self.airs[1].digest(ra), .pubs = &.{} },
+            } };
+            pv.verifyPlain(QM31, &ctx, &g, self.config, &st) catch |e| {
+                if (e == error.OutOfMemory) return e;
+                return false;
+            };
+            ctx.finalizeGuessedVars() catch return false;
+            return ctx.isCircuitValid();
+        }
+    };
+    const runner = Runner{ .airs = &airs, .parts = &parts, .cfg = cfg, .config = config, .pre_root = pre_root, .capture = &capture };
+    return oracleCampaign(a, &proof, runner, "logup-system", budget, skip_fri);
+}
+
+/// The oracle on a production-shape header-tree segment proof, the circuit side through the leaf
+/// circuit; returns the number of disagreements.
+pub fn oracleSegment(gpa: std.mem.Allocator, budget: usize, skip_fri: bool) !usize {
+    const H = @import("../btc/header_chain.zig");
+    const HT = @import("../btc/header_tree.zig");
+    const system = @import("../air/system.zig");
+    const leaf = @import("leaf.zig");
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const log_size: u32 = 12;
+    const headers = try H.loadHeaders(a, @embedFile("testdata:mainnet_headers_0_16"));
+    const hair = (try ir.Air.parseJson(a, HT.header_json)).value;
+    const tair = (try ir.Air.parseJson(a, HT.tree_json)).value;
+    const hw = try H.generateFrom(a, log_size, headers, H.genesis_start);
+    const tw = try HT.generate(a, log_size, hw);
+    const k: u32 = log_size - 8;
+    const parts = [_]system.Part{ .{ .air = &hair, .log_size = log_size, .pubs = &hw.pubs }, .{ .air = &tair, .log_size = log_size } };
+    const mains = [_][]const []const M31{ @ptrCast(tw.header_main), @ptrCast(tw.tree_main) };
+    const ext = [_]system.PubEntry{try HT.rootEntry(a, k, tw.root)};
+    const cfg = try prove_rec.config(log_size);
+    const E = prove_rec.Engine(@import("stwo_cpu_backend").CpuBackend);
+    var proof = try system.prove(E, a, cfg, &parts, &mains);
+    var capture: core.verifier.ProofCapture(prove_rec.Hasher) = undefined;
+    try system.verifyCaptureBorrowed(a, cfg, &parts, &ext, &proof, &capture);
+    const config = pv.PlainConfig{ .log_trace_size = log_size, .fri = cfg.fri_config, .system = true, .parts = &.{
+        .{ .n_preprocessed = hair.n_preprocessed, .main_offsets = try pv.mainOffsets(a, hair), .n_inter = 4 },
+        .{ .n_preprocessed = tair.n_preprocessed, .main_offsets = try pv.mainOffsets(a, tair), .n_inter = 8 },
+    } };
+    const pre_root: [32]u8 = std.mem.toBytes(try system.preprocessedRoot(a, cfg, &parts));
+    var pubs: [leaf.N_PUB]M31 = undefined;
+    @memcpy(pubs[0..leaf.T_BASE], &hw.pubs);
+    @memcpy(pubs[leaf.T_BASE..], &HT.limbs(tw.root));
+
+    const Runner = struct {
+        gpa: std.mem.Allocator,
+        parts: []const system.Part,
+        ext: []const system.PubEntry,
+        cfg: prove_rec.Config,
+        config: pv.PlainConfig,
+        airs: [2]*const ir.Air,
+        digests: [2][32]u8,
+        pre_root: [32]u8,
+        k: u32,
+        pubs: []const M31,
+        capture: *const core.verifier.ProofCapture(prove_rec.Hasher),
+        fn native(self: @This(), p: *const system.Proof) !bool {
+            var run_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+            defer run_arena.deinit();
+            var c: core.verifier.ProofCapture(prove_rec.Hasher) = undefined;
+            system.verifyCaptureBorrowed(run_arena.allocator(), self.cfg, self.parts, self.ext, p, &c) catch |e| {
+                if (e == error.OutOfMemory) return e;
+                return false;
+            };
+            return true;
+        }
+        fn circuit(self: @This(), p: *const system.Proof) !bool {
+            var run_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+            defer run_arena.deinit();
+            const v = pv.fromCapture(run_arena.allocator(), prove_rec.Hasher, &p.stark, self.capture, self.config, p.claimed_sums) catch return false;
+            var ctx = leaf.buildLeafCircuit(self.gpa, &v, self.config, self.airs, self.digests, self.pre_root, self.k, self.pubs) catch |e| {
+                if (e == error.OutOfMemory) return e;
+                return false;
+            };
+            defer ctx.deinit();
+            return ctx.isCircuitValid();
+        }
+    };
+    const runner = Runner{ .gpa = gpa, .parts = &parts, .ext = &ext, .cfg = cfg, .config = config, .airs = .{ &hair, &tair }, .digests = .{ try hair.digest(a), try tair.digest(a) }, .pre_root = pre_root, .k = k, .pubs = &pubs, .capture = &capture };
+    return oracleCampaign(a, &proof, runner, "header-tree segment (leaf circuit)", budget, skip_fri);
+}
+
+// No test runs these: stwo-zig's native verifier logs an error on every rejection (Merkle, FRI), which
+// fails a Zig test. `zig build oracle` (src/bin/oracle.zig) runs them.

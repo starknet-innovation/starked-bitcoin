@@ -198,6 +198,20 @@ pub fn build(b: *std.Build) void {
         chainproof.linkLibC();
         b.installArtifact(chainproof);
     }
+    // `oracle`: VL-ORACLE, the native verifier as oracle for the in-circuit verifier (FRI included).
+    {
+        const oracle = b.addExecutable(.{
+            .name = "oracle",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/bin/oracle.zig"),
+                .target = target,
+                .optimize = optimize,
+                .imports = &.{.{ .name = "starked_bitcoin", .module = lib }},
+            }),
+        });
+        oracle.linkLibC();
+        b.step("oracle", "VL-ORACLE: native verifier vs circuit on mutated proofs").dependOn(&b.addRunArtifact(oracle).step);
+    }
     const test_step = b.step("test", "Run starked-bitcoin tests");
     test_step.dependOn(&b.addRunArtifact(tests).step);
 }
