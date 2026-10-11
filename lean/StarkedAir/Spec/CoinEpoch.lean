@@ -27,12 +27,13 @@ structure Claim where
   ctx : ℕ
   deriving DecidableEq, Inhabited
 
-/-- A block's coin data: height, transactions, the BIP30-lost bit, one claim per non-coinbase input. -/
+/-- A block's coin data: height, transactions, the BIP30-lost bit, and the claim of each non-coinbase
+input (by transaction and input index). -/
 structure BlockC where
   h : ℕ
   txs : List Tx
   lost : Bool
-  claims : List Claim
+  claim : ℕ → ℕ → Claim
 
 def codeOf (h t : ℕ) : ℕ := 2 * h + if t = 0 then 1 else 0
 
@@ -50,7 +51,7 @@ def txOuts (B : BlockC) (t : ℕ) (tx : Tx) : List (OutPoint × Val) :=
 def txIns (N : ℕ → ℕ) (B : BlockC) (t : ℕ) (tx : Tx) : List CEv :=
   if t = 0 then [] else
   (tx.vin.zipIdx).map fun p =>
-    let c := B.claims.getD (insBefore B.txs t + p.2) default
+    let c := B.claim t p.2
     (p.1.prevout, (c.code, c.ser), N (c.code / 2) + c.ctx)
 
 /-- A block's transactions as multiset-argument transactions. -/
@@ -154,9 +155,10 @@ coin's transaction, and the circuit's check `(code / 2, ctx) < (height, t)` orde
 theorem ordered_of_balance (N : ℕ → ℕ) (blocks : List BlockC) (g0 : ℕ) (init fin : List CEv)
     (hpos : ∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → N B.h = g0 + ((blocks.take i).map (·.txs.length)).sum)
     (hinc : ∀ (i i' : ℕ) (B B' : BlockC), blocks[i]? = some B → blocks[i']? = some B' → (B.h < B'.h ↔ i < i'))
+    (hbnd : ∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → B.h < 2 ^ 24 ∧ B.txs.length < 2 ^ 25)
     (hlex : ∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → ∀ (t : ℕ) (tx : Tx), B.txs[t]? = some tx → ∀ e ∈ txIns N B t tx,
       ∃ c : Claim, e = (e.1, (c.code, c.ser), N (c.code / 2) + c.ctx) ∧
-        (c.code / 2 < B.h ∨ (c.code / 2 = B.h ∧ c.ctx < t)))
+        (c.code < 2 ^ 26 → c.ctx < 2 ^ 25 → (c.code / 2 < B.h ∨ (c.code / 2 = B.h ∧ c.ctx < t))))
     (hinit : ∀ e ∈ init, e.2.2 < g0)
     (hbal : (init : Multiset CEv) + created g0 (allTxs N blocks) = spent (allTxs N blocks) + fin) :
     ∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → ∀ (t : ℕ) (tx : Tx), B.txs[t]? = some tx →
@@ -174,8 +176,12 @@ theorem ordered_of_balance (N : ℕ → ℕ) (blocks : List BlockC) (g0 : ℕ) (
     rw [hc] at hidx hcode
     simp only at hidx hcode
     have hh' : c.code / 2 = B'.h := by rw [hcode, codeOf_div]
-    rw [hh'] at hidx hl
+    obtain ⟨hb1, hb2⟩ := hbnd i' B' hB'
+    have hcode26 : c.code < 2 ^ 26 := by rw [hcode]; unfold codeOf; split_ifs <;> omega
+    rw [hh'] at hidx
     have hctx : c.ctx = t' := by omega
+    have hl := hl hcode26 (by omega)
+    rw [hh'] at hl
     rcases hl with hl | ⟨hl, hlt⟩
     · have hii : i' < i := (hinc i' i B' B hB' hB).mp hl
       -- the earlier block's transactions all come before block i
@@ -237,14 +243,15 @@ succeeds and ends holding exactly the final set. -/
 theorem epoch_run (N : ℕ → ℕ) (blocks : List BlockC) (g0 : ℕ) (init fin : List CEv)
     (hpos : ∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → N B.h = g0 + ((blocks.take i).map (·.txs.length)).sum)
     (hinc : ∀ (i i' : ℕ) (B B' : BlockC), blocks[i]? = some B → blocks[i']? = some B' → (B.h < B'.h ↔ i < i'))
+    (hbnd : ∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → B.h < 2 ^ 24 ∧ B.txs.length < 2 ^ 25)
     (hlex : ∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → ∀ (t : ℕ) (tx : Tx), B.txs[t]? = some tx → ∀ e ∈ txIns N B t tx,
       ∃ c : Claim, e = (e.1, (c.code, c.ser), N (c.code / 2) + c.ctx) ∧
-        (c.code / 2 < B.h ∨ (c.code / 2 = B.h ∧ c.ctx < t)))
+        (c.code < 2 ^ 26 → c.ctx < 2 ^ 25 → (c.code / 2 < B.h ∨ (c.code / 2 = B.h ∧ c.ctx < t))))
     (hinit : ∀ e ∈ init, e.2.2 < g0)
     (hnd : (((init : Multiset CEv) + created g0 (allTxs N blocks)).map Prod.fst).Nodup)
     (hbal : (init : Multiset CEv) + created g0 (allTxs N blocks) = spent (allTxs N blocks) + fin) :
     ∃ m, run g0 (viewOf init) (allTxs N blocks) = some m ∧ ∀ k v j, m k = some (v, j) ↔ (k, v, j) ∈ fin := by
-  have hord := ordered_of_balance N blocks g0 init fin hpos hinc hlex hinit hbal
+  have hord := ordered_of_balance N blocks g0 init fin hpos hinc hbnd hlex hinit hbal
   have hO : Ordered (g0 + 0) (allTxs N blocks) := ordered_all N g0 blocks 0 (fun i B hB t tx htx e he => by
     have := hord i B hB t tx htx e he; rw [hpos i B hB] at this; omega)
   obtain ⟨m, hm, hiff⟩ := run_from_balance init g0 hinit (allTxs N blocks) (fin : Multiset CEv) (by simpa using hO) hnd hbal
