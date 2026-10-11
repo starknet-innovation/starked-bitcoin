@@ -1,6 +1,6 @@
 # Formalizing our circuits in Lean (resumed 2026-10-10)
 
-Status: in progress · Updated: 2026-10-10
+Status: in progress · Updated: 2026-10-11
 
 Parked by the owner on 2026-10-08; resumed on the owner's request on 2026-10-10 ("the in-circuit
 plain verifier proof"). Steps 1–4 below are done (the glue, `glue-circuits.md`).
@@ -183,5 +183,36 @@ the mixed samples. Everything Lean-proven above (composition, LogUp balance, sta
 leaf hashes, Merkle paths, channel, transcript order) is what turns that into "the AIR constraints and
 the lookup balance hold on the committed traces for the stated public inputs".
 
-**Still open:** the end-to-end theorem composing the pieces (each piece is proven separately), with the
-Schwartz–Zippel and LogUp soundness steps and this assumption as explicit hypotheses.
+### Done (2026-10-11): the end-to-end theorem (VL-E2E)
+
+`Circuit/EndToEnd.lean`, standard axioms:
+- **`plain_sound`** (any system of components with lookups, one trace size): if the composition program
+  and the balance program hold, the public-input registers hold `pub`, and the composition value equals
+  the sampled composition value `C`, then under `StarkSound` there are main columns on which every
+  component's AIR holds (`Air.Satisfied`); and if `(α, z)` is good for those traces' entries
+  (`SZGood`), the system balances with the public entries: `sys.SatisfiedExt`.
+- **`plain_leaf_valid`**: for the (headers, tree) system with the root entry `node(L − 8, 0, pubT)`,
+  the leaf's public inputs are proven: `PubValidT pub`, the leaf guarantee the aggregation composes.
+- **`sz_good_bound`**: `SZGood` fails on at most `(N²·W + 2N)·|QM31|` pairs (`logup_sz`).
+
+The steps, all proven: `partTerms_eq` (the composition's terms are the components' constraint and
+batch terms, `terms`, at the OODS valuation), `evalR_row` and `row_batch` (the same terms at a row are
+the trace's values), `comp_frac_sum` (vanishing batch terms with nonzero denominators give
+`Σ fractions = claimed`: `logup_sum` plus the batch pairing), `fracSum_sites` and `fingerprint_poly`
+(the circuit's fingerprints are the entries' tuple polynomials), `fracSum_ext` and `balance_sound`
+(all fractions sum to zero), then `logup_sz`'s conclusion and `balancedExt_of_poly`.
+
+**Named hypotheses (not proven):**
+- `StarkSound`, the row form of the assumption above: if the Horner combination of `terms` at the OODS
+  samples, times `1/Z(oods)`, equals `C`, then base-field main and interaction columns exist on which
+  every term vanishes at every row. Its premises' plumbing (DEEP responses, Merkle leaves and paths,
+  channel, transcript order) is the proven part of step 5; FRI itself is VL-FRI.
+- `SZGood` at the circuit's `(α, z)`. Its probabilistic reading needs the extracted columns to be the
+  committed ones (fixed before `(α, z)`, `elements_bound`); the theorem is stated for the columns
+  `StarkSound` returns.
+- **Wiring facts** of `verifyPlain` (hand-written Zig, stated as hypotheses): the components in order
+  match the system, each has lookups; the claimed sums enter the balance check in component order; the
+  public-input registers are base-field values `pub`; the public entries' value registers are base
+  (and for the header leaf, the one entry is `node(L − 8, 0, pubT)` with multiplicity −1); hook 2 is
+  `1/2^L`; the composition value is compared with the sampled `C`; one trace size for all components
+  (true until `LIFT`).

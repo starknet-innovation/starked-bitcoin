@@ -139,3 +139,4 @@ import StarkedAir.Circuit.Deep
 import StarkedAir.Circuit.Merkle
 import StarkedAir.Circuit.Channel
 import StarkedAir.Circuit.Transcript
+import StarkedAir.Circuit.EndToEnd

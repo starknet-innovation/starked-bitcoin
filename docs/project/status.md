@@ -4,7 +4,7 @@ Rewritten at the end of every session; see [README.md](README.md#ending-a-sessio
 If `HEAD at last update` doesn't match `git log -1`, this file is stale:
 follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work).
 
-- **Updated:** 2026-10-10 (owner away 48 h; agent working through the agreed priorities)
+- **Updated:** 2026-10-11 (VL-E2E done)
 - **HEAD at last update:** see `git log -1` (this file is committed with the work)
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
 - **Current item:** BLOCK-AIR complete: M3a.5 (`block_sound`) and M3a.6 (`commit_sound`) done and
@@ -73,8 +73,8 @@ Not yet:
 
 **Also scheduled (owner, 2026-10-11):** the remaining VERIFIER-LEAN work, as the
 [VL table in the roadmap](roadmap.md#vl-the-in-circuit-plain-verifier-proven-verifier-lean):
-VL-E2E (the end-to-end theorem) first, then VL-POW, VL-OODS and VL-ORACLE. VL-FRI and VL-NODE are
-trust-boundary decisions waiting on the owner. And **D-042** (owner): the hybrid UTXO tip tree is
+VL-E2E (the end-to-end theorem) is **done** (2026-10-11: `plain_sound`, `plain_leaf_valid`); next
+VL-POW, VL-OODS and VL-ORACLE. VL-FRI and VL-NODE are trust-boundary decisions waiting on the owner. And **D-042** (owner): the hybrid UTXO tip tree is
 scheduled as `UTXO-TREE`, the aggregator as `BLOCK-REC` — design in
 [block-rec.md](../design/block-rec.md); freeze the block-proof interface before CATCHUP.
 

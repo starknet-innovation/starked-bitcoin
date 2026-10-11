@@ -21,6 +21,25 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-10-11 (session 9) — VL-E2E: the plain verifier end to end
+Who: Claude (agent, Opus 5.5), on the owner's roadmap amendments (VL table, D-042)
+Roadmap: VL-E2E done
+Done:
+- `lean/StarkedAir/Circuit/EndToEnd.lean`: `plain_sound` (composition and balance programs hold ⇒ under
+  `StarkSound` the AIRs hold on extracted columns ⇒ with `SZGood`, `sys.SatisfiedExt`), `plain_leaf_valid`
+  (header-chain leaf ⇒ `PubValidT`), `sz_good_bound`. Steps proven: `partTerms_eq`, `evalR_row`,
+  `row_batch`, `comp_frac_sum` (via `logup_sum` and batch pairing), `fingerprint_poly`, `fracSum_sites`,
+  `fracSum_ext`, `static_ext`.
+- Docs: verifier-formalization.md (the theorem and its hypotheses), verification.md, roadmap, status.
+Evidence:
+- `lake build`: 8852 jobs OK. `#print axioms` for `plain_sound`, `plain_leaf_valid`, `sz_good_bound`:
+  `propext, Classical.choice, Quot.sound`.
+Problems / lessons:
+- `SZGood` is stated for the columns `StarkSound` returns; its probability bound needs them to be the
+  committed ones (fixed before `(α, z)`). That ordering is outside the logical statement; recorded as
+  such rather than encoded.
+Next: VL-POW and VL-OODS (small, Lean-first), then VL-ORACLE; BLOCK-REC design per block-rec.md.
+
 ## 2026-10-11 (session 8) — M3b coin proof layers 4–5; challenge binding fixed (D-041)
 Who: Claude (agent, Opus 5.5), continuing the owner's "M3b and everything not blocked by compute"
 Roadmap: UTXO (M3b) in progress (coin proof layers 1–4 done, layer 5 in progress)
