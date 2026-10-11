@@ -449,7 +449,7 @@ noncomputable def epochPN (N : ℕ → ℕ) (γ : QM) (blocks : List BlockC) (g0
 /-- **The epoch balances** outside a bad set of `(α, z)` fixed by the epoch's events: with the encoding
 injective on them and fewer than `P` events, a balanced epoch sum gives
 `init + created = spent + final` as multisets of events. -/
-theorem epoch_balance [Fintype QM] (N : ℕ → ℕ) (γ : QM) (blocks : List BlockC) (g0 : ℕ) (init fin : List CEv) :
+theorem epoch_balance (N : ℕ → ℕ) (γ : QM) (blocks : List BlockC) (g0 : ℕ) (init fin : List CEv) :
     ∃ Bad : Finset (QM × QM), Bad.card ≤ ((polys (epochPN N γ blocks g0 init fin)).card ^ 2 * 27 +
         2 * (polys (epochPN N γ blocks g0 init fin)).card) * Fintype.card QM ∧
       ∀ az ∉ Bad,
@@ -469,5 +469,35 @@ theorem epoch_balance [Fintype QM] (N : ℕ → ℕ) (γ : QM) (blocks : List Bl
     (epoch_frac_zero N γ az.1 az.2 blocks g0 init fin hpos hsum)
   rw [← Multiset.coe_add, ← Multiset.coe_add, Multiset.coe_toList, Multiset.coe_toList] at h
   exact h
+
+/-- **The epoch runs to the final set.** For `γ` outside the fingerprint bad set of the epoch's byte
+strings `S`, then `(α, z)` outside a bad set fixed by the epoch's events: with the events well formed,
+the circuit's ordering checks, distinct created outpoints and fewer than `P` events, a balanced epoch sum
+means Core's sequential update from the initial set succeeds and ends holding exactly the final set. -/
+theorem epoch_coin_run (N : ℕ → ℕ) (γ : QM) (blocks : List BlockC) (g0 : ℕ) (init fin : List CEv)
+    {S : Finset (List F)} (hγ : γ ∉ fpBad (𝕂 := QM) S)
+    (hwf : ∀ e ∈ init ++ (created g0 (allTxs N blocks)).toList ++ ((spent (allTxs N blocks)).toList ++ fin),
+      WFE N e ∧ bytesF e ∈ S)
+    (hpos : ∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → N B.h = g0 + ((blocks.take i).map (·.txs.length)).sum)
+    (hinc : ∀ (i i' : ℕ) (B B' : BlockC), blocks[i]? = some B → blocks[i']? = some B' → (B.h < B'.h ↔ i < i'))
+    (hbnd : ∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → B.h < 2 ^ 24 ∧ B.txs.length < 2 ^ 25)
+    (hlex : ∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → ∀ (t : ℕ) (tx : Spec.Block.Tx), B.txs[t]? = some tx →
+      ∀ e ∈ txIns N B t tx, ∃ c : Claim, e = (e.1, (c.code, c.ser), N (c.code / 2) + c.ctx) ∧
+        (c.code < 2 ^ 26 → c.ctx < 2 ^ 25 → (c.code / 2 < B.h ∨ (c.code / 2 = B.h ∧ c.ctx < t))))
+    (hinit : ∀ e ∈ init, e.2.2 < g0)
+    (hnd : (((init : Multiset CEv) + created g0 (allTxs N blocks)).map Prod.fst).Nodup) :
+    ∃ Bad : Finset (QM × QM), Bad.card ≤ ((polys (epochPN N γ blocks g0 init fin)).card ^ 2 * 27 +
+        2 * (polys (epochPN N γ blocks g0 init fin)).card) * Fintype.card QM ∧
+      ∀ az ∉ Bad,
+        init.length + Multiset.card (created g0 (allTxs N blocks)) + Multiset.card (spent (allTxs N blocks)) +
+          fin.length < P →
+        (blocks.map (blockSum N (efrac N γ az.1 az.2))).sum + (init.map (efrac N γ az.1 az.2)).sum =
+          (fin.map (efrac N γ az.1 az.2)).sum →
+        ∃ m, run g0 (viewOf init) (allTxs N blocks) = some m ∧ ∀ k v j, m k = some (v, j) ↔ (k, v, j) ∈ fin := by
+  obtain ⟨Bad, hcard, hb⟩ := epoch_balance N γ blocks g0 init fin
+  refine ⟨Bad, hcard, fun az haz hlen hsum => ?_⟩
+  have hbal := hb az haz (fun e he e' he' h =>
+    encE_inj N hγ (hwf e he).1 (hwf e' he').1 (hwf e he).2 (hwf e' he').2 h) hlen hpos hsum
+  exact epoch_run N blocks g0 init fin hpos hinc hbnd hlex hinit hnd hbal
 
 end StarkedAir.Block

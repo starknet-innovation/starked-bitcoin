@@ -233,4 +233,12 @@ theorem toQ_coordsOf (y : QM) : toQ (coordsOf y) = y := (toQ_surj y).choose_spec
 
 theorem coordsOf_toQ (x : Circuit.Q) : coordsOf (toQ x) = x := toQ_inj (toQ_coordsOf _)
 
+/-- QM31 is finite: the image of `F⁴` under `toQ`. -/
+instance : Finite QM :=
+  Finite.of_surjective (fun p : F × F × F × F => toQ ⟨p.1, p.2.1, p.2.2.1, p.2.2.2⟩) (fun y => by
+    obtain ⟨x, rfl⟩ := toQ_surj y
+    exact ⟨(x.a, x.b, x.c, x.d), rfl⟩)
+
+noncomputable instance : Fintype QM := Fintype.ofFinite QM
+
 end StarkedAir.Spec.QM31
