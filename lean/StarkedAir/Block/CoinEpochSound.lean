@@ -185,6 +185,20 @@ theorem spent_sum (f : CEv → QM) : ∀ (ts : List (Spec.Utxo.Tx Spec.Block.Out
     rw [spent, Multiset.map_add, Multiset.sum_add, spent_sum f ts, List.map_cons, List.sum_cons]
     simp
 
+/-- Claim `c` is input row `j`'s undo record: the row is an input, its record is URec row `rj`, and the
+claim's `serTxOut`, code and creating-transaction index are that record's undo bytes. -/
+def ClaimAt (inst : ℕ → Inst) (pub : ℕ → F) (L j : ℕ) (c : Claim) : Prop :=
+  (inst 14).main Coin.KI j = 1 ∧ ∃ rj < 2 ^ L, (inst 13).main URec.ON rj = 1 ∧
+    (inst 14).main Coin.J j = (inst 13).main URec.J rj ∧
+    ∃ u0 : ℕ, (inst 13).main URec.S rj + 7 = (u0 : F) ∧ 7 ≤ u0 ∧ u0 + c.ser.length ≤ (pub 8).val ∧
+      c.ser = (List.range c.ser.length).map (fun k => (Ub inst pub).getD (u0 + k) 0) ∧
+      c.code = Spec.Block.le ((List.range 4).map fun k => (Ub inst pub).getD (u0 - 7 + k) 0) ∧
+      c.ctx = Spec.Block.le ((List.range 3).map fun k => (Ub inst pub).getD (u0 - 3 + k) 0)
+
+theorem le3_lt (f : ℕ → UInt8) : Spec.Block.le ((List.range 3).map f) < 2 ^ 24 := by
+  have := UInt8.toNat_lt (f 0); have := UInt8.toNat_lt (f 1); have := UInt8.toNat_lt (f 2)
+  simp [Spec.Block.le, List.range_succ]; omega
+
 section System
 
 variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ}
@@ -256,13 +270,15 @@ theorem block_claims (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
         rowTuple inst pub L (((parts.take t).map List.length).sum + k) =
           tupleOf (FpWalk.gQ pub) i.prevout.hash i.prevout.n (claim t k).code (claim t k).ser (claim t k).ctx ∧
         ((claim t k).code < 2 ^ 26 → (claim t k).ctx < 2 ^ 25 →
-          ((claim t k).code / 2 < h ∨ ((claim t k).code / 2 = h ∧ (claim t k).ctx < t))) ∧ (claim t k).ctx < P := by
+          ((claim t k).code / 2 < h ∨ ((claim t k).code / 2 = h ∧ (claim t k).ctx < t))) ∧ (claim t k).ctx < 2 ^ 24 ∧
+        ClaimAt inst pub L (((parts.take t).map List.length).sum + k) (claim t k) := by
   have cs := coin_sat hL hsat hL24
   have key : ∀ t k, ∃ c : Claim, ∀ (tx : Spec.Block.Tx), S.b.txs[t]? = some tx → 1 ≤ t →
       ∀ (i : Spec.Block.TxIn), tx.vin[k]? = some i →
         rowTuple inst pub L (((parts.take t).map List.length).sum + k) =
           tupleOf (FpWalk.gQ pub) i.prevout.hash i.prevout.n c.code c.ser c.ctx ∧
-        (c.code < 2 ^ 26 → c.ctx < 2 ^ 25 → (c.code / 2 < h ∨ (c.code / 2 = h ∧ c.ctx < t))) ∧ c.ctx < P := by
+        (c.code < 2 ^ 26 → c.ctx < 2 ^ 25 → (c.code / 2 < h ∨ (c.code / 2 = h ∧ c.ctx < t))) ∧ c.ctx < 2 ^ 24 ∧
+        ClaimAt inst pub L (((parts.take t).map List.length).sum + k) c := by
     intro t k
     by_cases hv : ∃ tx i, S.b.txs[t]? = some tx ∧ 1 ≤ t ∧ tx.vin[k]? = some i
     · obtain ⟨tx, i, htx, ht1, hi⟩ := hv
@@ -281,21 +297,22 @@ theorem block_claims (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
       have hj2 : j < 2 ^ L := by omega
       have hq : k < tx.vin.length + tx.vout.length := by omega
       have hki := (coin_kind_pos hL hsat hL24 S he hon hlen hst hf htg hj htx hjdef hq).2.1.mpr ⟨hk, ht1⟩
-      obtain ⟨-, -, -, -, code, ser, ctx, htu, hcode, hctx, -⟩ :=
+      obtain ⟨rj, hrj, honj, hJ, code, ser, ctx, htu, hcode, hctx, u0, hu0, hu07, hu0l, hser, hcodeb, hctxb⟩ :=
         coin_in_tuple hL hsat hL24 S he hon hlen hst hf htg hj hki htx hjdef hq hi
       obtain ⟨t0, q0, tx0, htx0, htxi, hjq0, hq0, -, -⟩ := coin_row_tx hL hsat hL24 S he hon hlen hst hf htg hj
       obtain ⟨hpl0, hpe0⟩ := part_len hf htx0
       obtain ⟨rfl, rfl⟩ := decomp_unique parts hpl hpl0 (by omega) (by omega) (hjdef.symm.trans hjq0)
-      refine ⟨⟨code, ser, ((inst 14).main Coin.CTX j).val⟩, fun tx' htx' _ i' hi' => ?_⟩
+      have hc24 : ctx < 2 ^ 24 := by rw [hctxb]; exact le3_lt _
+      have hcv : ((inst 14).main Coin.CTX j).val = ctx := by
+        rw [hctx, ZMod.val_natCast_of_lt (lt_of_lt_of_le hc24 (by unfold P; norm_num))]
+      refine ⟨⟨code, ser, ctx⟩, fun tx' htx' _ i' hi' => ?_⟩
       rw [htx] at htx'; obtain rfl := Option.some.inj htx'
       rw [hi] at hi'; obtain rfl := Option.some.inj hi'
       have hLb : 2 ^ L ≤ 2 ^ 23 := Nat.pow_le_pow_right (by norm_num) hL24
       have htN : t < 2 ^ 23 := by have := (List.getElem?_eq_some_iff.mp htx).1; have := S.hN25; omega
-      refine ⟨?_, fun hc26 hc25 => coin_in_lex hL hsat hL24 hj2 hki hp2 hh htxi htN hcode hc26 hc25,
-        show ((inst 14).main Coin.CTX j).val < P from ZMod.val_lt _⟩
-      rw [htu]
-      unfold tupleOf
-      simp only [Coin.cast_val, hctx]
+      refine ⟨htu, fun hc26 hc25 => ?_, hc24, hki, rj, hrj, honj, hJ, u0, hu0, hu07, hu0l, hser, hcodeb, hctxb⟩
+      have := coin_in_lex hL hsat hL24 hj2 hki hp2 hh htxi htN hcode hc26 (by rw [hcv]; exact hc25)
+      rwa [hcv] at this
     · exact ⟨default, fun tx htx ht1 i hi => absurd ⟨tx, i, htx, ht1, hi⟩ hv⟩
   choose claim hclaim using key
   exact ⟨claim, fun t tx htx ht1 k i hi => hclaim t k tx htx ht1 i hi⟩
