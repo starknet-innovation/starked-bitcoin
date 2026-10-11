@@ -394,6 +394,100 @@ theorem out_sums {j1 nout : ℕ} (hj1 : 1 ≤ j1) (hn : j1 + nout < 2 ^ L)
     · rw [o1, hpk, p4]
     · rw [o2, hpk, p5]
 
+/-- **A transaction's amounts.** For transaction `t ≥ 1` with its input rows' amounts `a` and output rows'
+amounts `v` (the outputs within `MAX_MONEY` in total), the outputs are at most the inputs and the inputs
+within `MAX_MONEY`. -/
+theorem tx_amounts (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
+    (hon : ∀ j < 2 ^ L, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
+    (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
+    {parts : List (List Spec.Block.Tok)} (hf : List.Forall₂ Spec.Block.IoTx S.b.txs parts)
+    (htg : Spec.Block.tagged 0 (Fields.toksFrom (inst 1).main (Rb inst pub) S.m 0) = Spec.Block.tagParts 0 parts)
+    (hne : ∀ (t' : ℕ) (tx' : Spec.Block.Tx), S.b.txs[t']? = some tx' → tx'.vin ≠ [] ∧ tx'.vout ≠ [])
+    {t : ℕ} {tx : Spec.Block.Tx} (htx : S.b.txs[t]? = some tx) (ht1 : 1 ≤ t)
+    (a v : ℕ → ℕ)
+    (ha : ∀ k < tx.vin.length, let r := ((parts.take t).map List.length).sum + k
+      ((inst 14).main Coin.VL r).val < 2 ^ 24 ∧ ((inst 14).main Coin.VH r).val < 2 ^ 27 ∧
+      ((inst 14).main Coin.VH r).val * 2 ^ 24 + ((inst 14).main Coin.VL r).val = a k)
+    (hv : ∀ q < tx.vout.length, let r := ((parts.take t).map List.length).sum + tx.vin.length + q
+      ((inst 14).main Coin.VL r).val < 2 ^ 24 ∧ ((inst 14).main Coin.VH r).val < 2 ^ 27 ∧
+      ((inst 14).main Coin.VH r).val * 2 ^ 24 + ((inst 14).main Coin.VL r).val = v q)
+    (htot : ∑ q ∈ Finset.range tx.vout.length, v q ≤ Fields.MAXHI * 2 ^ 24 + Fields.MAXLO) :
+    ∑ q ∈ Finset.range tx.vout.length, v q ≤ ∑ k ∈ Finset.range tx.vin.length, a k ∧
+      ∑ k ∈ Finset.range tx.vin.length, a k ≤ Fields.MAXHI * 2 ^ 24 + Fields.MAXLO := by
+  have cs := coin_sat hL hsat hL24
+  obtain ⟨hrows, hj0, hpki, hnx, hnko⟩ := tx_rows hL hsat hL24 S he hon hlen hst hf htg hne htx ht1
+  set j0 := ((parts.take t).map List.length).sum with hj0def
+  have hvi : 0 < tx.vin.length := List.length_pos_iff.mpr (hne _ _ htx).1
+  have hvo : 0 < tx.vout.length := List.length_pos_iff.mpr (hne _ _ htx).2
+  set nin := tx.vin.length with hnin
+  set nout := tx.vout.length with hnout
+  -- inputs
+  have hins := in_sums hL hsat hL24 hj0 (nin := nin) (by omega) (fun k hk => ((hrows k (by omega)).2.1).mpr hk) hpki a
+    (fun k hk => ha k hk)
+  obtain ⟨i1, i2, i3, i4⟩ := hins (nin - 1) (by omega)
+  rw [show nin - 1 + 1 = nin by omega] at i3 i4
+  -- outputs
+  have hko : ∀ q < nout, (inst 14).main Coin.KO (j0 + nin + q) = 1 := fun q hq => by
+    rw [Nat.add_assoc]; exact ((hrows (nin + q) (by omega)).2.2).mpr (by omega)
+  have hpko : (inst 14).main Coin.KO (j0 + nin - 1) = 0 := by
+    have h := (hrows (nin - 1) (by omega)).2.2
+    rw [show j0 + nin - 1 = j0 + (nin - 1) by omega]
+    rcases Coin.bool_col cs (c := Coin.KO) (by simp) (show j0 + (nin - 1) < 2 ^ L by omega) with h0 | h1
+    · exact h0
+    · exact absurd (h.mp h1) (by omega)
+  have houts := out_sums hL hsat hL24 (j1 := j0 + nin) (nout := nout) (by omega) (by omega) hko hpko v
+    (fun q hq => hv q hq) htot
+  obtain ⟨o1, o2, o3, o4, o5⟩ := houts (nout - 1) (by omega)
+  rw [show nout - 1 + 1 = nout by omega] at o3
+  set rE := j0 + nin + (nout - 1) with hrE
+  have hrE1 : rE + 1 < 2 ^ L := by omega
+  have hrE : rE < 2 ^ L := by omega
+  -- the last output row ends the transaction
+  have htend : (inst 14).main Coin.TEND rE = 1 := by
+    have ht := Coin.tend_spec cs hrE1
+    rw [hko (nout - 1) (by omega), show rE + 1 = j0 + (nin + nout) by omega, hnko] at ht
+    rw [ht]; ring
+  have hcbo : (inst 14).main Coin.CBO rE = 0 := by
+    obtain ⟨t0, q0, tx0, htx0, htxi, hjq0, hq0, -, -⟩ :=
+      coin_row_tx hL hsat hL24 S he hon hlen hst hf htg (j := rE)
+        (by have := (hrows (nin + (nout - 1)) (by omega)).1; omega)
+    obtain ⟨hpl, hpe⟩ := part_len hf htx
+    obtain ⟨hpl0, hpe0⟩ := part_len hf htx0
+    obtain ⟨rfl, rfl⟩ := decomp_unique parts hpl hpl0 (by omega) (by omega)
+      ((show j0 + (nin + (nout - 1)) = rE by omega).trans hjq0)
+    have hLb : 2 ^ L ≤ 2 ^ 23 := Nat.pow_le_pow_right (by norm_num) hL24
+    have htN : t < 2 ^ 25 := by have := (List.getElem?_eq_some_iff.mp htx).1; have := S.hN25; omega
+    obtain ⟨hc1, hcb, -, -⟩ := Coin.cbo_spec cs hrE
+    rcases hcb with h0 | h1
+    · exact h0
+    · exfalso
+      have := hc1.mp h1
+      rw [htxi] at this
+      have : t = 0 := Coin.lift (a := t) (b := 0) (by simpa using this) (by have := Coin.P_big; omega)
+        (by have := Coin.P_big; omega)
+      omega
+  have hki0 : (inst 14).main Coin.KI rE = 0 := by
+    rcases Coin.kinds cs hrE with h | h | h | h
+    · exact h.2.1
+    · rw [hko (nout - 1) (by omega)] at h; exact absurd h.1 one_ne_zero
+    · rw [hko (nout - 1) (by omega)] at h; exact absurd h.1 one_ne_zero
+    · rw [hko (nout - 1) (by omega)] at h; exact absurd h.1 one_ne_zero
+  have hmc1 : (inst 14).main Coin.MC1 rE = 1 := by
+    have e2 := Coin.sat cs (Coin.mem_amount (c := .sub (Coin.k Coin.MC1) (.add (Coin.k Coin.KI) Coin.tf))
+      (by simp [Coin.amountC])) hrE
+    simp only [Expr.eval, Coin.ev_k hrE, Coin.tf, Coin.om, Coin.one, StarkedAir.Sha256.eval_cst, Nat.cast_one] at e2
+    rw [hki0, htend, hcbo] at e2
+    linear_combination e2
+  obtain ⟨q1, h1, h1c, -, -, -⟩ := (coin_bytes hL hsat hL24 hrE).2.1 hmc1
+  have hinl : ((inst 14).main Coin.INL rE).val = ((inst 14).main Coin.INL (j0 + (nin - 1))).val := by
+    rw [o4, show j0 + nin - 1 = j0 + (nin - 1) by omega]
+  have hinh : ((inst 14).main Coin.INH rE).val = ((inst 14).main Coin.INH (j0 + (nin - 1))).val := by
+    rw [o5, show j0 + nin - 1 = j0 + (nin - 1) by omega]
+  obtain ⟨tn, -, -, -⟩ := Coin.tend_nat cs hrE htend hcbo (by rw [hinl, hinh]; exact ⟨i1, i2⟩) ⟨o1, o2⟩ q1 h1 h1c
+  refine ⟨?_, i4⟩
+  rw [← o3, ← i3, ← hinl, ← hinh]
+  exact tn
+
 end System
 
 end StarkedAir.Block
