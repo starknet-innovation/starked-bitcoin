@@ -73,6 +73,23 @@ theorem limbs_of_bytes {lo hi : F} {n : ℕ} (hlo : lo.val < 65536) (hhi : hi.va
   · rw [← Coin.cast_val lo]; congr 1; omega
   · rw [← Coin.cast_val hi]; congr 1; omega
 
+/-- **Summing by transactions.** The rows `[0, Σ lengths)` are, transaction by transaction, the
+positions `pre t + q`. -/
+theorem sum_by_parts {β : Type} [AddCommMonoid β] (g : ℕ → β) (lens : List ℕ) :
+    ∑ r ∈ Finset.range lens.sum, g r =
+      ∑ t ∈ Finset.range lens.length, ∑ q ∈ Finset.range (lens.getD t 0), g ((lens.take t).sum + q) := by
+  induction lens using List.reverseRecOn with
+  | nil => simp
+  | append_singleton l a ih =>
+    rw [List.sum_append, List.sum_singleton, Finset.sum_range_add, ih, List.length_append, List.length_singleton,
+      Finset.sum_range_succ]
+    congr 1
+    · apply Finset.sum_congr rfl
+      intro t ht
+      have ht' := Finset.mem_range.mp ht
+      rw [List.getD_append _ _ _ _ ht', List.take_append_of_le_length (by omega)]
+    · simp [List.getD_eq_getElem?_getD, List.take_append_of_le_length (le_refl _)]
+
 section System
 
 variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ}
@@ -577,6 +594,135 @@ theorem coin_out_mm (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
   · have hn : (o.scriptPubKey.head? == some 0x6a || decide (10000 < o.scriptPubKey.length)) = true := hU.mp rfl
     rw [hn]
     simp
+
+/-! ### The block's partial sum -/
+
+/-- A tuple's fingerprint `Σₖ αₖ tₖ` against the public weights. -/
+noncomputable def phiOf (pub : ℕ → F) (tu : List F) : QM :=
+  ((List.range Coin.W).map fun k => RunSum.pQ pub (Coin.PUB_ALPHA k) * emb (tu.getD k 0)).sum
+
+omit hL hsat hL24 in
+theorem phiQ_eq {j : ℕ} : Coin.phiQ pub (inst 14).main (2 ^ L) j = phiOf pub (rowTuple inst pub L j) := by
+  unfold Coin.phiQ phiOf rowTuple
+  congr 1
+
+/-- A position's term in the block's partial sum: a created output's fraction, a spend's (negated, with
+the row's claimed tuple), or nothing. -/
+noncomputable def blockTerm (inst : ℕ → Inst) (pub : ℕ → F) (L : ℕ) (txs : List Spec.Block.Tx)
+    (parts : List (List Spec.Block.Tok)) (h : ℕ) (lost : Bool) (t q : ℕ) : QM :=
+  let z := RunSum.pQ pub Coin.PUB_Z
+  match txs[t]? with
+  | none => 0
+  | some tx =>
+    if tx.vin.length ≤ q then
+      match tx.vout[q - tx.vin.length]? with
+      | some o => if (!Spec.Coins.unspendable o && !(t == 0 && lost)) then
+          (z - phiOf pub (tupleOf (FpWalk.gQ pub) (Spec.Block.txid tx) (q - tx.vin.length)
+            (2 * h + if t = 0 then 1 else 0) (Spec.Block.serTxOut o) t))⁻¹ else 0
+      | none => 0
+    else if 1 ≤ t then -(z - phiOf pub (rowTuple inst pub L (((parts.take t).map List.length).sum + q)))⁻¹ else 0
+
+/-- **The block's partial sum, by its coin events.** The public partial sum is, over the block's
+transactions and their input/output positions: each created output's `1/(z − φ)` (with its coin's
+tuple), minus each non-coinbase input's `1/(z − φ)` (with its row's claimed tuple). -/
+theorem coin_block_sum (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
+    (hon : ∀ j < 2 ^ L, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
+    (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
+    {parts : List (List Spec.Block.Tok)} (hf : List.Forall₂ Spec.Block.IoTx S.b.txs parts)
+    (htg : Spec.Block.tagged 0 (Fields.toksFrom (inst 1).main (Rb inst pub) S.m 0) = Spec.Block.tagParts 0 parts)
+    {h : ℕ} (hp2 : pub 2 = (h : F)) (hh : h < 2 ^ 23) {lost : Bool} (hlost : pub Coin.PUB_LOST = if lost then 1 else 0) :
+    RunSum.pQ pub Coin.PUB_S = ∑ t ∈ Finset.range S.b.txs.length, ∑ q ∈ Finset.range ((parts.getD t []).length),
+      blockTerm inst pub L S.b.txs parts h lost t q := by
+  have cs := coin_sat hL hsat hL24
+  obtain ⟨hS, hrow⟩ := Coin.coin_runsum cs (n := 2 ^ L) (by positivity)
+  rw [hS]
+  -- e is the total length
+  have hft := fields_tagged hL hsat hL24 S
+  rw [htg] at hft
+  have he' : e = (parts.map List.length).sum := by
+    rw [hlen, ← Spec.Block.tagParts_length 0, hft, List.length_map]
+  -- rows from e on contribute nothing
+  have hoff : ∀ r ∈ Finset.range (2 ^ L), e ≤ r → RunSum.cQ (inst 14).main Coin.FC r = 0 := by
+    intro r hr her
+    have hr' := Finset.mem_range.mp hr
+    apply (hrow r hr').2
+    have hoff : Coin.onV (inst 14).main r = 0 := by
+      rcases Coin.on_bool cs hr' with z | z
+      · exact z
+      · exact absurd ((hon r hr').mp z) (by omega)
+    rw [Coin.mm_spec cs hr']
+    rcases Coin.kinds cs hr' with k | k | k | k
+    · rw [k.2.2.2] at hoff; exact absurd hoff one_ne_zero
+    · rw [k.2.2.2] at hoff; exact absurd hoff one_ne_zero
+    · rw [k.2.2.2] at hoff; exact absurd hoff one_ne_zero
+    · rw [k.1, k.2.1]; ring
+  rw [← Finset.sum_range_add_sum_Ico _ (show e ≤ 2 ^ L by omega),
+    Finset.sum_eq_zero (fun r hr => hoff r (Finset.mem_range.mpr (Finset.mem_Ico.mp hr).2) (Finset.mem_Ico.mp hr).1),
+    add_zero, he', sum_by_parts, List.length_map, ← hf.length_eq]
+  apply Finset.sum_congr rfl
+  intro t ht
+  have htl := Finset.mem_range.mp ht
+  obtain ⟨tx, htx⟩ := exists_get htl
+  obtain ⟨hpl, hpe⟩ := part_len hf htx
+  have hlens : (parts.map List.length).getD t 0 = (parts.getD t []).length := by
+    rw [List.getD_eq_getElem _ _ (by simpa using hpl), List.getElem_map, List.getD_eq_getElem _ _ hpl]
+  have htake : ((parts.map List.length).take t).sum = ((parts.take t).map List.length).sum := by
+    rw [List.map_take]
+  rw [hlens]
+  apply Finset.sum_congr rfl
+  intro q hq
+  have hq' := Finset.mem_range.mp hq
+  rw [htake]
+  set j := ((parts.take t).map List.length).sum + q with hjdef
+  have hj : j < e := by
+    have := pre_succ parts hpl
+    have := pre_mono parts (t := t + 1) (t' := parts.length) (by omega) le_rfl
+    rw [he', ← List.take_length (l := parts), ← List.take_length (l := parts)] at *
+    simp only [List.take_length] at *; omega
+  have hj2 : j < 2 ^ L := by omega
+  have hqt : q < tx.vin.length + tx.vout.length := by omega
+  obtain ⟨hko, hki, hcbi⟩ := coin_kind_pos hL hsat hL24 S he hon hlen hst hf htg hj htx hjdef hqt
+  obtain ⟨hfrac, hzero⟩ := hrow j hj2
+  rw [phiQ_eq] at hfrac
+  simp only [blockTerm, htx]
+  by_cases hout : tx.vin.length ≤ q
+  · rw [if_pos hout]
+    obtain ⟨o, ho⟩ := exists_get (show q - tx.vin.length < tx.vout.length by omega)
+    simp only [ho]
+    have hko1 := hko.mpr hout
+    have hmm := coin_out_mm hL hsat hL24 S he hon hlen hst hf htg hlost hj hko1 htx hjdef hqt ho
+    have htu := coin_out_tuple hL hsat hL24 S he hon hlen hst hf htg hp2 hh hj hko1 htx hjdef hqt ho
+    rw [hmm] at hfrac hzero
+    by_cases hlive : (!Spec.Coins.unspendable o && !(t == 0 && lost)) = true
+    · rw [if_pos hlive] at hfrac ⊢
+      rw [htu, Spec.QM31.emb_one] at hfrac
+      exact eq_inv_of_mul_eq_one_right hfrac
+    · rw [if_neg hlive] at hzero ⊢
+      exact hzero rfl
+  · rw [if_neg hout]
+    split_ifs with ht1
+    · have hki1 := hki.mpr ⟨by omega, ht1⟩
+      have hmm := Coin.mm_spec cs hj2
+      have hko0 : (inst 14).main Coin.KO j = 0 := by
+        rcases Coin.kinds cs hj2 with k | k | k | k
+        · rw [k.2.1] at hki1; exact absurd hki1 zero_ne_one
+        · exact k.1
+        · rw [k.2.1] at hki1; exact absurd hki1 zero_ne_one
+        · rw [k.2.1] at hki1; exact absurd hki1 zero_ne_one
+      rw [hko0, hki1, zero_mul, zero_sub] at hmm
+      have hneg : emb (-1 : F) = -1 := by simp [Spec.QM31.emb]
+      rw [hmm, hneg] at hfrac
+      have : (RunSum.pQ pub Coin.PUB_Z - phiOf pub (rowTuple inst pub L j)) * -RunSum.cQ (inst 14).main Coin.FC j = 1 := by
+        rw [mul_neg, hfrac, neg_neg]
+      rw [← neg_neg (RunSum.cQ (inst 14).main Coin.FC j), eq_inv_of_mul_eq_one_right this]
+    · have hcbi1 := hcbi.mpr ⟨by omega, by omega⟩
+      apply hzero
+      rw [Coin.mm_spec cs hj2]
+      rcases Coin.kinds cs hj2 with k | k | k | k
+      · rw [k.2.2.1] at hcbi1; exact absurd hcbi1 zero_ne_one
+      · rw [k.2.2.1] at hcbi1; exact absurd hcbi1 zero_ne_one
+      · rw [k.1, k.2.1]; ring
+      · rw [k.2.2.1] at hcbi1; exact absurd hcbi1 zero_ne_one
 
 end System
 
