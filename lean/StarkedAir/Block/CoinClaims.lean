@@ -328,6 +328,72 @@ theorem in_sums {j0 nin : ℕ} (hj0 : 1 ≤ j0) (hn : j0 + nin < 2 ^ L)
     · rw [i3, p3, vs, Finset.sum_range_succ _ (k + 1)]
     · rw [Finset.sum_range_succ _ (k + 1), ← vs, ← p3, ← i3]; exact i4
 
+/-- An output row's normalized output sum is range-checked. -/
+theorem out_row_bytes {r : ℕ} (hr : r < 2 ^ L) (hko : (inst 14).main Coin.KO r = 1) :
+    ∀ i < 3, ((inst 14).main (Coin.NB i) r).val < 256 := by
+  have cs := coin_sat hL hsat hL24
+  have hki : (inst 14).main Coin.KI r = 0 := by
+    rcases Coin.kinds cs hr with h | h | h | h <;> simp_all
+  have e1 := Coin.sat cs (Coin.mem_amount (c := .sub (Coin.k Coin.MNB) (.add (Coin.k Coin.KI) (Coin.k Coin.KO)))
+    (by simp [Coin.amountC])) hr
+  simp only [Expr.eval, Coin.ev_k hr] at e1
+  rw [hki, hko] at e1
+  exact (coin_bytes hL hsat hL24 hr).1 (by linear_combination e1)
+
+omit hL hsat hL24 in
+theorem hi_le_of {hi lo : ℕ} (h : hi * 2 ^ 24 + lo ≤ Fields.MAXHI * 2 ^ 24 + Fields.MAXLO) : hi ≤ Fields.MAXHI := by
+  have hm : Fields.MAXLO < 2 ^ 24 := by unfold Fields.MAXLO; norm_num
+  by_contra hc
+  have : (Fields.MAXHI + 1) * 2 ^ 24 ≤ hi * 2 ^ 24 := Nat.mul_le_mul_right _ (by omega)
+  rw [add_mul, one_mul] at this
+  omega
+
+/-- **A transaction's output sums.** Over its output rows `j1 + q` (the row before not an output), the
+input sum is carried, and the running output sum is the outputs' prefix sum, normalized. -/
+theorem out_sums {j1 nout : ℕ} (hj1 : 1 ≤ j1) (hn : j1 + nout < 2 ^ L)
+    (hko : ∀ q < nout, (inst 14).main Coin.KO (j1 + q) = 1) (hprev : (inst 14).main Coin.KO (j1 - 1) = 0)
+    (v : ℕ → ℕ) (hv : ∀ q < nout, ((inst 14).main Coin.VL (j1 + q)).val < 2 ^ 24 ∧
+      ((inst 14).main Coin.VH (j1 + q)).val < 2 ^ 27 ∧
+      ((inst 14).main Coin.VH (j1 + q)).val * 2 ^ 24 + ((inst 14).main Coin.VL (j1 + q)).val = v q)
+    (htot : ∑ q ∈ Finset.range nout, v q ≤ Fields.MAXHI * 2 ^ 24 + Fields.MAXLO) :
+    ∀ q < nout, ((inst 14).main Coin.OUL (j1 + q)).val < 2 ^ 24 ∧ ((inst 14).main Coin.OUH (j1 + q)).val ≤ Fields.MAXHI ∧
+      ((inst 14).main Coin.OUH (j1 + q)).val * 2 ^ 24 + ((inst 14).main Coin.OUL (j1 + q)).val =
+        ∑ q' ∈ Finset.range (q + 1), v q' ∧
+      ((inst 14).main Coin.INL (j1 + q)).val = ((inst 14).main Coin.INL (j1 - 1)).val ∧
+      ((inst 14).main Coin.INH (j1 + q)).val = ((inst 14).main Coin.INH (j1 - 1)).val := by
+  have cs := coin_sat hL hsat hL24
+  have hpart : ∀ q < nout, ∑ q' ∈ Finset.range (q + 1), v q' ≤ Fields.MAXHI * 2 ^ 24 + Fields.MAXLO := fun q hq =>
+    le_trans (Finset.sum_le_sum_of_subset (Finset.range_subset_range.mpr (show q + 1 ≤ nout by omega))) htot
+  intro q
+  induction q with
+  | zero =>
+    intro hq
+    obtain ⟨vl, vh, vs⟩ := hv 0 hq
+    have hpk : ∀ c, Coin.prevV (inst 14).main (2 ^ L) c (j1 + 0) = (inst 14).main c (j1 - 1) := by
+      intro c; unfold Coin.prevV; rw [if_neg (by omega)]; rfl
+    have hpv : Coin.prevV (inst 14).main (2 ^ L) Coin.KO (j1 + 0) = 0 := by rw [hpk]; exact hprev
+    obtain ⟨o1, o2, o3, o4⟩ := Coin.out_nat cs (by omega) (hko 0 hq) (by rw [hpv]; simp)
+      (out_row_bytes hL hsat hL24 (by omega) (hko 0 hq)) vl vh
+    rw [hpv, if_neg (by simp), zero_add] at o4
+    have hs : ((inst 14).main Coin.OUH (j1 + 0)).val * 2 ^ 24 + ((inst 14).main Coin.OUL (j1 + 0)).val =
+        ∑ q' ∈ Finset.range (0 + 1), v q' := by rw [o4, vs]; simp
+    refine ⟨o3, hi_le_of (by rw [hs]; exact hpart 0 hq), hs, by rw [o1, hpk], by rw [o2, hpk]⟩
+  | succ q ih =>
+    intro hq
+    obtain ⟨p1, p2, p3, p4, p5⟩ := ih (by omega)
+    obtain ⟨vl, vh, vs⟩ := hv (q + 1) hq
+    have hpk : ∀ c, Coin.prevV (inst 14).main (2 ^ L) c (j1 + (q + 1)) = (inst 14).main c (j1 + q) := by
+      intro c; unfold Coin.prevV; rw [if_neg (by omega)]; rfl
+    have hpv : Coin.prevV (inst 14).main (2 ^ L) Coin.KO (j1 + (q + 1)) = 1 := by rw [hpk]; exact hko q (by omega)
+    obtain ⟨o1, o2, o3, o4⟩ := Coin.out_nat cs (by omega) (hko (q + 1) hq) (fun _ => by rw [hpk, hpk]; exact ⟨p1, p2⟩)
+      (out_row_bytes hL hsat hL24 (by omega) (hko (q + 1) hq)) vl vh
+    rw [if_pos hpv, hpk, hpk] at o4
+    have hs : ((inst 14).main Coin.OUH (j1 + (q + 1))).val * 2 ^ 24 + ((inst 14).main Coin.OUL (j1 + (q + 1))).val =
+        ∑ q' ∈ Finset.range (q + 1 + 1), v q' := by rw [o4, p3, vs, Finset.sum_range_succ _ (q + 1)]
+    refine ⟨o3, hi_le_of (by rw [hs]; exact hpart (q + 1) hq), hs, ?_, ?_⟩
+    · rw [o1, hpk, p4]
+    · rw [o2, hpk, p5]
+
 end System
 
 end StarkedAir.Block
