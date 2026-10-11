@@ -56,7 +56,13 @@ in the block system; interacts with `LIFT`.
 **VK.** The epoch tree gets its own pinned VK. D-036's frozen chain VK is untouched; the two roots
 meet in the outer verifier.
 
-**Lean.** Mostly done in spirit: `epoch_systems_core` is already stated over "block systems at
+**Lean (2026-10-11, `Block/AggregateBlocks.lean`):** the public-input statement of the tree is proven:
+`rng_leaf` (a proven block whose leaf checks its BIP30 flag and `αₖ = α₁ᵏ` is a proven one-block
+range), `rng_node` (two proven ranges, linked by height, with one challenge, give their union; the sums
+add), `epoch_hyps_of_rng` (a proven range gives exactly the block hypotheses of `epoch_systems_core`,
+with its summed partial sum). Not yet covered: the seed and the hash binding (D-043).
+
+**Lean (earlier note).** Mostly done in spirit: `epoch_systems_core` is already stated over "block systems at
 consecutive heights sharing the challenge with a balanced public sum" — the exact shape the
 aggregator delivers — and the glue machinery (Lean-first circuit programs, proven, replayed
 gate-identically, D-025) exists. BLOCK-REC is engineering-heavy, not proof-heavy.
