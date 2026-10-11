@@ -100,6 +100,56 @@ pub fn leafChecks(ctx: *Context(QM31), pub_vars: []const Var) !void {
     _ = try glue.run(QM31, ctx, &prog, &.{}, Hooks{ .inputs = ins });
 }
 
+/// The block's seed leaf `Blake2s(hash ‖ C_h)` (`Circuit/BlockLeaf.lean`, `seedLeaf_sound`): 16 limbs,
+/// from the block hash's public limbs (25–40) and the commitment's (9–24).
+pub fn seedLeafVars(ctx: *Context(QM31), pub_vars: []const Var) ![16]Var {
+    const prog = try glue.parse(ctx.scratch(), @embedFile("air:seed_leaf"));
+    const ins = try ctx.scratch().alloc(Var, 32);
+    @memcpy(ins[0..16], pub_vars[bs.PUB_HASH .. bs.PUB_HASH + 16]);
+    @memcpy(ins[16..32], pub_vars[9..25]);
+    const Hooks = struct {
+        inputs: []const Var,
+        pub fn call(self: @This(), id: u32, _: []const Var) ![]const Var {
+            return if (id == 0) self.inputs else error.UnknownHook;
+        }
+    };
+    const res = try glue.run(QM31, ctx, &prog, &.{}, Hooks{ .inputs = ins });
+    var out: [16]Var = undefined;
+    @memcpy(&out, res);
+    return out;
+}
+
+test "block seed leaf: the circuit's limbs are the native epoch.seedLeaf's" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const epoch = @import("../block/epoch.zig");
+    const HT = @import("../btc/header_tree.zig");
+    var prng = std.Random.DefaultPrng.init(31);
+    const r = prng.random();
+    for (0..4) |_| {
+        var hash: [32]u8 = undefined;
+        var c: [32]u8 = undefined;
+        r.bytes(&hash);
+        r.bytes(&c);
+        var pubs: [bs.N_PUB]M31 = @splat(M31.zero());
+        @memcpy(pubs[bs.PUB_HASH..][0..16], &bs.hashLimbsOf(hash));
+        for (0..8) |w| {
+            const word = std.mem.readInt(u32, c[4 * w ..][0..4], .little);
+            pubs[9 + 2 * w] = M31.fromCanonical(word & 0xffff);
+            pubs[10 + 2 * w] = M31.fromCanonical(word >> 16);
+        }
+        var ctx = try Context(QM31).init(a, 0);
+        defer ctx.deinit();
+        const vars = try a.alloc(Var, bs.N_PUB);
+        for (vars, pubs) |*v, x| v.* = try ctx.guessM31(QM31.fromBase(x));
+        const out = try seedLeafVars(&ctx, vars);
+        const want = HT.limbs(epoch.seedLeaf(hash, c));
+        for (out, want) |v, w| try std.testing.expect(ctx.get(v).eql(QM31.fromBase(w)));
+        try std.testing.expect(try ctx.isCircuitValid());
+    }
+}
+
 test "block leaf checks: honest public inputs pass, a wrong BIP30 flag or weight fails" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

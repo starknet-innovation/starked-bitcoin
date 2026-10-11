@@ -57,6 +57,7 @@ def main (args : List String) : IO Unit := do
       (StarkedAir.Circuit.Oods.leafOffsets
         [StarkedAir.Circuit.Composition.compShape StarkedAir.HeaderTree.headers 108,
          StarkedAir.Circuit.Composition.compShape StarkedAir.HeaderTree.tree 0]))
+  | ["seed_leaf"] => IO.println StarkedAir.Circuit.BlockLeaf.seedLeafJson
   | ["block_leaf_checks"] => IO.println StarkedAir.Circuit.BlockLeaf.checksJson
   | ["pow_check", k] => IO.println (StarkedAir.Circuit.Pow.powJson k.toNat!)
   | ["transcript", "lookups"] => IO.println (StarkedAir.Circuit.Transcript.json true)

@@ -16,18 +16,48 @@ const coin = @import("coin.zig");
 const fields = @import("fields.zig");
 
 const Blake2s = std.crypto.hash.blake2.Blake2s256;
-pub const TAG = "starked-bitcoin M3b epoch v2";
+pub const TAG = "starked-bitcoin M3b epoch v3";
+const HT = @import("../btc/header_tree.zig");
 
-/// The seed: Blake2s of the tag, the range, the final set's digest, and per height the block hash and
-/// commitment.
+/// The seed: Blake2s of the tag, the range, the final set's digest, and the blocks' tree (`seedFrom`).
 pub fn seed(from: u32, to: u32, fin: [32]u8, hashes: []const [32]u8, commits: []const [32]u8) [32]u8 {
     return seedFrom(from, to, null, fin, hashes, commits);
 }
 
-/// The seed of an epoch from a previous set: the previous set's digest follows the range, then the final
-/// set's, so both are fixed before the challenge (`Spec/UtxoEpochFrom.lean`). Without one, it is `seed`.
-/// The digests are of the full encodings (`setDigest`): `hash_serialized` omits the transaction index,
-/// which the tuple holds.
+/// A block's leaf in the seed tree: `Blake2s(hash ‖ C_h)` as one compression (`HT.node`), the hash's
+/// words as its public limbs hold them (big-endian words of the internal byte order) and the
+/// commitment's as its limbs hold them (little-endian words).
+pub fn seedLeaf(hash: [32]u8, commitment: [32]u8) HT.Words {
+    var hw: HT.Words = undefined;
+    var cw: HT.Words = undefined;
+    for (0..8) |i| {
+        hw[i] = std.mem.readInt(u32, hash[4 * i ..][0..4], .big);
+        cw[i] = std.mem.readInt(u32, commitment[4 * i ..][0..4], .little);
+    }
+    return HT.node(hw, cw);
+}
+
+/// The aligned perfect subtrees of the range starting at height `from` with `n` blocks: greedily from
+/// the left, each as large as its start height's alignment and the remaining count allow. A recursion
+/// node merges two adjacent subtrees of one size into the next (D-043).
+pub fn alignedSizes(from: u32, n: usize, out: *[64]u8) []const u8 {
+    var x: u64 = from;
+    var left: u64 = n;
+    var len: usize = 0;
+    while (left > 0) : (len += 1) {
+        var k: u6 = 0;
+        while (k < 40 and (x >> (k + 1)) << (k + 1) == x and (@as(u64, 1) << (k + 1)) <= left) k += 1;
+        out[len] = k;
+        x += @as(u64, 1) << k;
+        left -= @as(u64, 1) << k;
+    }
+    return out[0..len];
+}
+
+/// The seed of an epoch, optionally from a previous set (v3, D-043): Blake2s of the tag, the range,
+/// the previous set's digest if any, the final set's, then per aligned subtree of the blocks' leaves
+/// (`seedLeaf`) its start height, its log size and its root. Both sets are fixed before the challenge
+/// (`Spec/UtxoEpochFrom.lean`); the digests are of the full encodings (`setDigest`).
 pub fn seedFrom(from: u32, to: u32, prev: ?[32]u8, fin: [32]u8, hashes: []const [32]u8, commits: []const [32]u8) [32]u8 {
     var h = Blake2s.init(.{});
     h.update(TAG);
@@ -37,13 +67,36 @@ pub fn seedFrom(from: u32, to: u32, prev: ?[32]u8, fin: [32]u8, hashes: []const 
     h.update(&buf);
     if (prev) |p| h.update(&p);
     h.update(&fin);
-    for (hashes, commits) |bh, c| {
-        h.update(&bh);
-        h.update(&c);
+    var sizes_buf: [64]u8 = undefined;
+    const sizes = alignedSizes(from, hashes.len, &sizes_buf);
+    var leaves: [1 << 12]HT.Words = undefined;
+    var at: usize = 0;
+    var x: u32 = from;
+    for (sizes) |k| {
+        const w = @as(usize, 1) << @intCast(k);
+        const r = subtreeRoot(hashes[at .. at + w], commits[at .. at + w], &leaves);
+        std.mem.writeInt(u32, buf[0..4], x, .little);
+        std.mem.writeInt(u32, buf[4..8], k, .little);
+        h.update(&buf);
+        var rb: [32]u8 = undefined;
+        for (0..8) |i| std.mem.writeInt(u32, rb[4 * i ..][0..4], r[i], .little);
+        h.update(&rb);
+        at += w;
+        x += @intCast(w);
     }
     var out: [32]u8 = undefined;
     h.final(&out);
     return out;
+}
+
+/// The root of a perfect subtree of leaves, folding in chunks (no allocation).
+fn subtreeRoot(hashes: []const [32]u8, commits: []const [32]u8, scratch: *[1 << 12]HT.Words) HT.Words {
+    if (hashes.len <= scratch.len) {
+        for (hashes, commits, 0..) |hh, c, i| scratch[i] = seedLeaf(hh, c);
+        return HT.root(scratch[0..hashes.len]);
+    }
+    const half = hashes.len / 2;
+    return HT.node(subtreeRoot(hashes[0..half], commits[0..half], scratch), subtreeRoot(hashes[half..], commits[half..], scratch));
 }
 
 /// Field elements from the seed (counter mode, rejecting 2^31 − 1).
@@ -324,4 +377,27 @@ pub fn decodeSet(a: std.mem.Allocator, bytes: []const u8) ![]Coin {
     }
     if (fbs.pos != bytes.len) return error.TrailingBytes;
     return out;
+}
+
+test "epoch seed v3: aligned subtrees, and the seed binds every leaf" {
+    var buf: [64]u8 = undefined;
+    try std.testing.expectEqualSlices(u8, &.{ 7, 5, 3, 1, 0 }, alignedSizes(0, 171, &buf));
+    try std.testing.expectEqualSlices(u8, &.{ 0, 2, 4, 6, 8, 8, 7, 6, 5, 3, 0 }, alignedSizes(171, 830, &buf));
+    // Each block's hash and commitment are bound: changing any one changes the seed.
+    var hashes: [5][32]u8 = undefined;
+    var commits: [5][32]u8 = undefined;
+    for (&hashes, &commits, 0..) |*h, *c, i| {
+        h.* = @splat(@intCast(i));
+        c.* = @splat(@intCast(100 + i));
+    }
+    const s0 = seedFrom(3, 7, null, @splat(0), &hashes, &commits);
+    for (0..5) |i| {
+        commits[i][17] ^= 1;
+        try std.testing.expect(!std.mem.eql(u8, &s0, &seedFrom(3, 7, null, @splat(0), &hashes, &commits)));
+        commits[i][17] ^= 1;
+        hashes[i][3] ^= 1;
+        try std.testing.expect(!std.mem.eql(u8, &s0, &seedFrom(3, 7, null, @splat(0), &hashes, &commits)));
+        hashes[i][3] ^= 1;
+    }
+    try std.testing.expect(std.mem.eql(u8, &s0, &seedFrom(3, 7, null, @splat(0), &hashes, &commits)));
 }

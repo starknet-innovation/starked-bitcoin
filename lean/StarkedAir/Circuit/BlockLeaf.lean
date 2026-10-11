@@ -10,6 +10,7 @@ plain verifier, then checks what `rng_leaf` (Block/AggregateBlocks.lean) needs o
 import StarkedAir.Circuit.CompositionLogUp
 import StarkedAir.Spec.Coins
 import StarkedAir.Block.AggregateBlocks
+import StarkedAir.Circuit.NodeSound
 
 namespace StarkedAir.Circuit.BlockLeaf
 
@@ -214,5 +215,22 @@ theorem checks_pub (h : Holds ρ checksOps) {p : ℕ → F} (hreg : ∀ j < N_IN
 /-- The exported program. -/
 def checksJson : String :=
   s!"\{\"schema\":\"starked-glue-v1\",\"ops\":[{",".intercalate (checksP.map Op.toJson)}],\"results\":[]}"
+
+/-! ### The block's seed leaf (D-043 seed v3) -/
+
+/-- The seed leaf `Blake2s(hash ‖ C_h)` from the block hash's 16 limbs (registers 0–15) and the
+commitment's (16–31): the header tree's node gadget (`treeNode`), reading its children at `TB …`. -/
+def seedLeafProg : Out (List ℕ) := treeNode 32 (fun k => k - TB) (fun k => 16 + (k - TB))
+
+/-- **The seed leaf is sound**: its limbs are those of `hnode` of the two inputs' words. -/
+theorem seedLeaf_sound {ρ : ℕ → Q} (h : Holds ρ seedLeafProg.ops) {a b : Spec.Sha256.State}
+    (ha : HeaderTree.pubT (fun k => (ρ (k - TB)).a) = HeaderTree.limbsOf a)
+    (hb : HeaderTree.pubT (fun k => (ρ (16 + (k - TB))).a) = HeaderTree.limbsOf b) :
+    ∀ j < 16, (ρ (seedLeafProg.res.getD j 0)).a = (HeaderTree.limbsOf (Spec.HeaderTree.hnode a b)).getD j 0 :=
+  treeNode_sound h ha hb
+
+def seedLeafJson : String :=
+  let ops := [Op.hook 0 [] (List.range 32)] ++ seedLeafProg.ops
+  s!"\{\"schema\":\"starked-glue-v1\",\"ops\":[{",".intercalate (ops.map Op.toJson)}],\"results\":[{",".intercalate (seedLeafProg.res.map toString)}]}"
 
 end StarkedAir.Circuit.BlockLeaf

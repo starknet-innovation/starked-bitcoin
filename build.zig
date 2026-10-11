@@ -117,6 +117,7 @@ pub fn build(b: *std.Build) void {
     lib.addAnonymousImport("air:transcript_plain", .{ .root_source_file = b.path("airs/transcript_plain.json") });
     lib.addAnonymousImport("air:merkle_node", .{ .root_source_file = b.path("airs/merkle_node.json") });
     lib.addAnonymousImport("air:deep_leaf", .{ .root_source_file = b.path("airs/deep_leaf.json") });
+    lib.addAnonymousImport("air:seed_leaf", .{ .root_source_file = b.path("airs/seed_leaf.json") });
     lib.addAnonymousImport("air:block_leaf_checks", .{ .root_source_file = b.path("airs/block_leaf_checks.json") });
     lib.addAnonymousImport("air:oods_shift_leaf", .{ .root_source_file = b.path("airs/oods_shift_leaf.json") });
     lib.addAnonymousImport("vk:mainnet_test", .{ .root_source_file = b.path("vk/mainnet-q70-p26-l20.vk") });
