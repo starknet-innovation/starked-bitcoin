@@ -292,6 +292,15 @@ Layers (Lean):
    committed data (D-041; `ClaimAt` and `tl_bytes` pin each claim to the undo bytes, the record
    positions follow from `rows_sound`), which the bad-set reading needs.
 
+**Plan for `WFE` (2026-10-12).** Created events: the txid is `sha256d` (32 bytes: a lemma on the digest's
+byte encoding), the output index and the transaction index are below the parsed list lengths, which are
+at most the raw block length (`< 2^25` under `L ≤ 23`: needs "a parsed list's length is at most its
+bytes" lemmas for `parseBlock`'s CompactSize-counted lists, none exist yet), the code is `2h + cb`
+with `h < 2^23`, and the script length is likewise bounded. Spent events: the claim's fields are
+decoded from fixed-width undo-record bytes (code 4, ctx 3, `TL` 2: already bounded in `ClaimAt`), the
+txid is 32 bytes by the record layout. Initial and final events: the verifier's set decoder (`decodeSet`)
+reads 32-byte txids and u32 fields; the script length must be checked `< P` there (one native check).
+
 ## Recommendation (D-040, proposed)
 
 B for catch-up and for the assumeUTXO statement. Revisit A (or a hybrid) only for tip following. Lean:
