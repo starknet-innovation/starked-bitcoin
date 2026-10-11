@@ -379,9 +379,13 @@ pub fn decodeSet(a: std.mem.Allocator, bytes: []const u8) ![]Coin {
         try r.readNoEof(&c.txid);
         c.vout = try r.readInt(u32, .little);
         c.height = try r.readInt(u32, .little);
-        c.cb = (try r.readByte()) != 0;
+        const cb = try r.readByte();
+        if (cb > 1) return error.BadCoinbaseFlag;
+        c.cb = cb == 1;
         c.txi = try r.readInt(u32, .little);
         const l = try r.readInt(u32, .little);
+        // `WFE` (CoinEpochSound.lean): the code `2·height + cb` below 2^32, the script length below P.
+        if (c.height >= 1 << 31 or l >= 0x7fffffff) return error.CoinOutOfRange;
         if (l > bytes.len - fbs.pos) return error.Truncated;
         c.ser = bytes[fbs.pos .. fbs.pos + l];
         fbs.pos += l;
