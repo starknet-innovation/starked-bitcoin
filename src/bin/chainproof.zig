@@ -431,7 +431,8 @@ fn proveEpoch(gpa: std.mem.Allocator, a: std.mem.Allocator, headers_path: []cons
         var h1: [32]u8 = undefined;
         std.crypto.hash.sha2.Sha256.hash(raws[i][0..80], &h1, .{});
         std.crypto.hash.sha2.Sha256.hash(&h1, &hashes[i], .{});
-        std.crypto.hash.blake2.Blake2s256.hash(undos[i], &commits[i], .{});
+        // The commitment is of the in-circuit stream, which holds the creating transactions' indices.
+        std.crypto.hash.blake2.Blake2s256.hash(try BS.undoStreamOf(a, raws[i], undos[i], cx, hh), &commits[i], .{});
     }
     // The final set is computed first: the seed binds it.
     const set = try EP.coinSetFrom(a, init.set, from.height, raws);

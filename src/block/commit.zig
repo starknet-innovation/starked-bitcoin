@@ -205,7 +205,8 @@ test "block commitment: a 3-block undo stream satisfies and balances; a wrong pu
     const a = arena.allocator();
     const airs = try bsys.parseAirs(a);
     const s = checks.samples_small[1];
-    // One record (block 170 spends one coin): code, amount, a 137-byte script: 151 bytes, 3 blocks.
+    // One record (block 170 spends one coin): code, amount, a 137-byte script: 151 bytes; in-circuit with
+    // the 3-byte index, 154 bytes, 3 blocks.
     var undo: [151]u8 = undefined;
     undo[0] = 1;
     std.mem.writeInt(u32, undo[1..5], 2 * 9 + 1, .little);
@@ -215,7 +216,7 @@ test "block commitment: a 3-block undo stream satisfies and balances; a wrong pu
     var b = try bsys.buildU(a, s.raw, &undo, s.ctx);
     try std.testing.expect((try bsys.firstViolation(a, &airs, &b)) == null);
     try std.testing.expect((try bsys.unbalanced(a, &airs, &b)) == null);
-    try std.testing.expectEqualSlices(u32, &(try commitment(a, &undo)), &b.commitment_words);
+    try std.testing.expectEqualSlices(u32, &(try commitment(a, try bsys.undoStreamOf(a, s.raw, &undo, null, s.ctx.height))), &b.commitment_words);
     // The public limbs enter by a lookup: a wrong one leaves the digest relation unbalanced.
     b.pubs[9 + 5] = b.pubs[9 + 5].add(M31.one());
     try std.testing.expect((try bsys.unbalanced(a, &airs, &b)) != null);

@@ -37,7 +37,7 @@ def isUse : ℕ → ℕ → Bool
   | 10, k => decide (k < 4)
   | 11, k => decide (k < 3)
   | 12, k => decide (k < 3)
-  | 13, k => decide (k < 13)
+  | 13, k => decide (k < 16)
   | 14, k => k != 4
   | _, _ => false
 
@@ -52,8 +52,8 @@ def yieldTable : List (ℕ × ℕ × ℕ) :=
    (8, 0, Sha.REL_NODE), (8, 1, Msg.REL_MLEN), (8, 2, Ctx.REL_WCID), (9, 0, Undo.REL_UBYTE),
    (10, 4, B2Msg.REL_B2W), (10, 5, B2Msg.REL_B2B), (11, 3, B2s.REL_B2D), (11, 4, B2s.REL_B2D), (11, 5, B2s.REL_B2D),
    (11, 6, B2s.REL_B2D), (11, 7, B2s.REL_B2D), (11, 8, B2s.REL_B2D), (11, 9, B2s.REL_B2D), (11, 10, B2s.REL_B2D),
-   (1, 34, Coin.REL_OUTT), (1, 35, Coin.REL_INT), (12, 3, FpWalk.REL_FP), (13, 13, FpWalk.REL_SEG),
-   (13, 14, URec.REL_UREC), (14, 4, FpWalk.REL_SEG)]
+   (1, 34, Coin.REL_OUTT), (1, 35, Coin.REL_INT), (12, 3, FpWalk.REL_FP), (13, 16, FpWalk.REL_SEG),
+   (13, 17, URec.REL_UREC), (14, 4, FpWalk.REL_SEG)]
 
 def yieldOK : Bool :=
   (List.range 15).all fun i => (List.range (hashSys.comp i).lookups.length).all fun k =>
@@ -134,9 +134,9 @@ theorem mem_sites {i r k : ℕ} : ((i, r, k) : Site) ∈ sites hashSys inst ↔
     exact ⟨i, hi, r, by rw [hL i hi]; exact hr', k, hk', rfl, rfl, rfl⟩
 
 omit hsat in
-/-- 211 lookup sites per row: bytes 1, fields 36, messages 4, SHA 6, txid tree 11, tables 2, walker 5,
-context 12, witness tree 3, undo bytes 1, Blake2s words 6, Blake2s 11, fingerprints 4, undo records 15, coins 94. -/
-theorem hash_sites_len : (sites hashSys inst).length = 211 * 2 ^ L := by
+/-- 214 lookup sites per row: bytes 1, fields 36, messages 4, SHA 6, txid tree 11, tables 2, walker 5,
+context 12, witness tree 3, undo bytes 1, Blake2s words 6, Blake2s 11, fingerprints 4, undo records 18, coins 94. -/
+theorem hash_sites_len : (sites hashSys inst).length = 214 * 2 ^ L := by
   simp [sites, hashSys, hL 0 (by decide), hL 1 (by decide), hL 2 (by decide), hL 3 (by decide), hL 4 (by decide),
     hL 5 (by decide), hL 6 (by decide), hL 7 (by decide), hL 8 (by decide), hL 9 (by decide), hL 10 (by decide),
     hL 11 (by decide), hL 12 (by decide), hL 13 (by decide), hL 14 (by decide),
@@ -147,8 +147,8 @@ theorem hash_sites_len : (sites hashSys inst).length = 211 * 2 ^ L := by
   ring
 
 omit hL hsat in
-theorem hash_rows_lt_P (hL24 : L ≤ 23) : 211 * 2 ^ L < P :=
-  lt_of_le_of_lt (Nat.mul_le_mul_left 211 (Nat.pow_le_pow_right (by norm_num) hL24)) (by unfold P; norm_num)
+theorem hash_rows_lt_P (hL24 : L ≤ 23) : 214 * 2 ^ L < P :=
+  lt_of_le_of_lt (Nat.mul_le_mul_left 214 (Nat.pow_le_pow_right (by norm_num) hL24)) (by unfold P; norm_num)
 
 /-- SHA's word and length uses have multiplicity `−1` or `0`. -/
 theorem sha_use_mult {r : ℕ} (hr : r < 2 ^ L) {kk : ℕ} (hk : kk < 2) :
@@ -410,7 +410,7 @@ theorem use_mult : ∀ s ∈ sites hashSys inst, isUse s.1 s.2.2 = true →
         | exact neg01 bFST
   · -- undo records: `−[row 0]`, `−ON`
     have us := hash_urec_sat hL hsat
-    have hk13 : k < 13 := by simpa [isUse] using hu
+    have hk13 : k < 16 := by simpa [isUse] using hu
     have bON := URec.on_bool us hr
     have bF : URec.first.eval (2 ^ L) URec.preCols pub (inst 13).main r = 0 ∨
         URec.first.eval (2 ^ L) URec.preCols pub (inst 13).main r = 1 := by
@@ -533,7 +533,7 @@ theorem yt (i k R : ℕ) : (i, k, R) ∈ yieldTable ↔
     (i = 10 ∧ k = 4 ∧ R = 18) ∨ (i = 10 ∧ k = 5 ∧ R = 19) ∨ (i = 11 ∧ k = 3 ∧ R = 20) ∨ (i = 11 ∧ k = 4 ∧ R = 20) ∨
     (i = 11 ∧ k = 5 ∧ R = 20) ∨ (i = 11 ∧ k = 6 ∧ R = 20) ∨ (i = 11 ∧ k = 7 ∧ R = 20) ∨ (i = 11 ∧ k = 8 ∧ R = 20) ∨
     (i = 11 ∧ k = 9 ∧ R = 20) ∨ (i = 11 ∧ k = 10 ∧ R = 20) ∨ (i = 1 ∧ k = 34 ∧ R = 24) ∨ (i = 1 ∧ k = 35 ∧ R = 25) ∨
-    (i = 12 ∧ k = 3 ∧ R = 22) ∨ (i = 13 ∧ k = 13 ∧ R = 21) ∨ (i = 13 ∧ k = 14 ∧ R = 23) ∨ (i = 14 ∧ k = 4 ∧ R = 21) := by
+    (i = 12 ∧ k = 3 ∧ R = 22) ∨ (i = 13 ∧ k = 16 ∧ R = 21) ∨ (i = 13 ∧ k = 17 ∧ R = 23) ∨ (i = 14 ∧ k = 4 ∧ R = 21) := by
   obtain ⟨r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, r13, r14, r15, r16, r17, r18, r19, r20, r21, r22, r23⟩ := rels
   simp only [yieldTable, r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, r13, r14, r15, r16, r17, r18, r19, r20, r21,
     r22, r23, List.mem_cons,

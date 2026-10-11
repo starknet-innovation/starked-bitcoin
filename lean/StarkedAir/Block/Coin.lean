@@ -279,7 +279,7 @@ def lookups : List Lookup :=
   [ ⟨REL_OUTT, .neg (k KO), [k TXI, k START, k LEN, k SSC, k SVAL, k VL, k VH]⟩,
     ⟨REL_INT, .neg (.add (k KI) (k CBI)), [k TXI, k START]⟩,
     ⟨Sha.REL_DIGEST, .neg (k KO), (.add (.mul (cst 2) (k TXI)) one) :: (List.range 16).map (fun i => k (TLB i))⟩,
-    ⟨URec.REL_UREC, .neg (k KI), [k J, k CLO, k CHI, k VL, k VH]⟩,
+    ⟨URec.REL_UREC, .neg (k KI), [k J, k CLO, k CHI, k VL, k VH, k CTX]⟩,
     ⟨FpWalk.REL_SEG, k KO, [cst 0, k START, k START, k LEN]⟩,
     ⟨FpWalk.REL_FP, .neg (.add (k KO) (k KI)),
       [k KI, k SIDC, k SLEN, k FH, k (FH + 1), k (FH + 2), k (FH + 3)]⟩,

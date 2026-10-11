@@ -663,12 +663,12 @@ theorem seg_raw_start {s : ℕ} (hs : s < 2 ^ L) (hf : (inst 12).main FpWalk.FST
   obtain ⟨i', r', k', hr', hy, -, hsv⟩ := link hL hsat hL24 hsite rfl hm
   rw [show siteRel hashSys (12, s, 2) = 21 from rfl, yt] at hy
   rw [hv] at hsv
-  rcases (by omega : (i' = 13 ∧ k' = 13) ∨ (i' = 14 ∧ k' = 4)) with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩
+  rcases (by omega : (i' = 13 ∧ k' = 16) ∨ (i' = 14 ∧ k' = 4)) with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩
   · -- an undo segment: stream 1, not 0
     exfalso
-    have e : siteVals hashSys inst pub (13, r', 13) = [1, (inst 13).main URec.J r',
-        (inst 13).main URec.S r' + 4, (inst 13).main URec.TL r'] := by
-      simp [siteVals, siteEval, siteLookup, hashSys, hL 13 (by decide), URec.urec, URec.lookups, URec.k, Expr.eval,
+    have e : siteVals hashSys inst pub (13, r', 16) = [1, (inst 13).main URec.J r',
+        (inst 13).main URec.S r' + 7, (inst 13).main URec.TL r'] := by
+      simp [siteVals, siteEval, siteLookup, hashSys, hL 13 (by decide), URec.urec, URec.lookups, URec.k, URec.HDR, Expr.eval,
         StarkedAir.Sha256.eval_col, StarkedAir.Sha256.eval_cst, wrap_zero hr']
     rw [e, hstr] at hsv
     simp at hsv
@@ -762,8 +762,8 @@ theorem coin_fp_out (S : Setup inst pub L) {j : ℕ} (hj : j < 2 ^ L) (hko : (in
 theorem urec_sat' : ∀ r < 2 ^ L, ∀ c ∈ URec.constraints, c.eval (2 ^ L) URec.preCols pub (inst 13).main r = 0 :=
   hash_urec_sat hL hsat
 
-/-- **An input's claim is undo record `J`.** The coin's `urec(J, code, amount)` use is URec row `J` (an on
-row, its `J` the row index), with the same code and amount limbs. -/
+/-- **An input's claim is undo record `J`.** The coin's `urec(J, code, amount, index)` use is URec row `J`
+(an on row, its `J` the row index), with the same code and amount limbs and creating-transaction index. -/
 theorem coin_urec {j : ℕ} (hj : j < 2 ^ L) (hki : (inst 14).main Coin.KI j = 1) :
     ∃ rj < 2 ^ L, (inst 13).main URec.ON rj = 1 ∧ (inst 14).main Coin.J j = (inst 13).main URec.J rj ∧
       (inst 14).main Coin.CLO j = (inst 13).main (URec.C 0) rj + 256 * (inst 13).main (URec.C 1) rj ∧
@@ -771,14 +771,16 @@ theorem coin_urec {j : ℕ} (hj : j < 2 ^ L) (hki : (inst 14).main Coin.KI j = 1
       (inst 14).main Coin.VL j = (inst 13).main (URec.V 0) rj + 256 * (inst 13).main (URec.V 1) rj +
         65536 * (inst 13).main (URec.V 2) rj ∧
       (inst 14).main Coin.VH j = (inst 13).main (URec.V 3) rj + 256 * (inst 13).main (URec.V 4) rj +
-        65536 * (inst 13).main (URec.V 5) rj + 16777216 * (inst 13).main (URec.V 6) rj := by
+        65536 * (inst 13).main (URec.V 5) rj + 16777216 * (inst 13).main (URec.V 6) rj ∧
+      (inst 14).main Coin.CTX j = (inst 13).main (URec.X 0) rj + 256 * (inst 13).main (URec.X 1) rj +
+        65536 * (inst 13).main (URec.X 2) rj := by
   have hsite := site_mem hL (i := 14) (by decide) hj (k := 3) (by simp [hashSys, Coin.coin, Coin.lookups])
   have hm : siteMult hashSys inst pub (14, j, 3) = -1 := by
     simp [siteMult, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups, Expr.eval, Coin.k,
       StarkedAir.Sha256.eval_col, wrap_zero hj, hki]
   obtain ⟨i', r', k', hr', hy, hsm, hsv⟩ := link hL hsat hL24 hsite rfl hm
   rw [show siteRel hashSys (14, j, 3) = 23 from rfl, yt] at hy
-  obtain ⟨rfl, rfl⟩ : i' = 13 ∧ k' = 14 := by omega
+  obtain ⟨rfl, rfl⟩ : i' = 13 ∧ k' = 17 := by omega
   have us := urec_sat' hL hsat hL24
   refine ⟨r', hr', ?_, ?_⟩
   · have hm' : (inst 13).main URec.ON r' ≠ 0 := by
@@ -787,22 +789,23 @@ theorem coin_urec {j : ℕ} (hj : j < 2 ^ L) (hki : (inst 14).main Coin.KI j = 1
     rcases URec.on_bool us hr' with h | h
     · exact absurd h hm'
     · exact h
-  have e1 : siteVals hashSys inst pub (13, r', 14) = [(inst 13).main URec.J r',
+  have e1 : siteVals hashSys inst pub (13, r', 17) = [(inst 13).main URec.J r',
       (inst 13).main (URec.C 0) r' + 256 * (inst 13).main (URec.C 1) r',
       (inst 13).main (URec.C 2) r' + 256 * (inst 13).main (URec.C 3) r',
       (inst 13).main (URec.V 0) r' + 256 * (inst 13).main (URec.V 1) r' + 65536 * (inst 13).main (URec.V 2) r',
       (inst 13).main (URec.V 3) r' + 256 * (inst 13).main (URec.V 4) r' + 65536 * (inst 13).main (URec.V 5) r' +
-        16777216 * (inst 13).main (URec.V 6) r'] := by
+        16777216 * (inst 13).main (URec.V 6) r',
+      (inst 13).main (URec.X 0) r' + 256 * (inst 13).main (URec.X 1) r' + 65536 * (inst 13).main (URec.X 2) r'] := by
     simp [siteVals, siteEval, siteLookup, hashSys, hL 13 (by decide), URec.urec, URec.lookups, URec.k, URec.limb,
       Expr.eval, StarkedAir.Sha256.eval_col, StarkedAir.Sha256.eval_cst, wrap_zero hr']
   have e2 : siteVals hashSys inst pub (14, j, 3) = [(inst 14).main Coin.J j, (inst 14).main Coin.CLO j,
-      (inst 14).main Coin.CHI j, (inst 14).main Coin.VL j, (inst 14).main Coin.VH j] := by
+      (inst 14).main Coin.CHI j, (inst 14).main Coin.VL j, (inst 14).main Coin.VH j, (inst 14).main Coin.CTX j] := by
     simp [siteVals, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups, Coin.k,
       StarkedAir.Sha256.eval_col, wrap_zero hj]
   rw [e1, e2] at hsv
   simp only [List.cons.injEq, and_true] at hsv
-  obtain ⟨a, b, c, d, e⟩ := hsv
-  exact ⟨a.symm, b.symm, c.symm, d.symm, e.symm⟩
+  obtain ⟨a, b, c, d, e, g⟩ := hsv
+  exact ⟨a.symm, b.symm, c.symm, d.symm, e.symm, g.symm⟩
 
 /-- A URec on row's `J` is its index. -/
 theorem urec_j {r : ℕ} (hr : r < 2 ^ L) (hon : (inst 13).main URec.ON r = 1) : (inst 13).main URec.J r = (r : F) := by
@@ -818,11 +821,11 @@ theorem urec_j_inj {r r' : ℕ} (hr : r < 2 ^ L) (hr' : r' < 2 ^ L) (h1 : (inst 
 
 open StarkedAir.Spec.QM31 (QM toQ emb) in
 /-- **An input's fingerprint** is the Horner fingerprint of undo record `J`'s `serTxOut` bytes:
-the undo bytes from `S + 4`, `TL` of them, for the URec row of record `J`. -/
+the undo bytes from `S + 7`, `TL` of them, for the URec row of record `J`. -/
 theorem coin_fp_in {j : ℕ} (hj : j < 2 ^ L) (hki : (inst 14).main Coin.KI j = 1) {rj : ℕ} (hrj : rj < 2 ^ L)
     (hon : (inst 13).main URec.ON rj = 1) (hJ : (inst 14).main Coin.J j = (inst 13).main URec.J rj) :
     ∃ len : ℕ, (inst 13).main URec.TL rj = (len : F) ∧ (inst 14).main Coin.SLEN j = (len : F) ∧
-      ∃ u0 : ℕ, (inst 13).main URec.S rj + 4 = (u0 : F) ∧ u0 + len ≤ (pub 8).val ∧
+      ∃ u0 : ℕ, (inst 13).main URec.S rj + 7 = (u0 : F) ∧ u0 + len ≤ (pub 8).val ∧
       toQ ⟨(inst 14).main Coin.FH j, (inst 14).main (Coin.FH + 1) j, (inst 14).main (Coin.FH + 2) j,
         (inst 14).main (Coin.FH + 3) j⟩ =
       FpWalk.horner (FpWalk.gQ pub) ((List.range len).map fun i => emb ((((Ub inst pub).getD (u0 + i) 0).toNat : ℕ) : F)) := by
@@ -847,7 +850,7 @@ theorem coin_fp_in {j : ℕ} (hj : j < 2 ^ L) (hki : (inst 14).main Coin.KI j = 
   obtain ⟨tstr, tsid, tlen, th0, th1, th2, th3⟩ := htup
   obtain ⟨s0, hse, hfs, hrow, hrem, hlen, hh⟩ := FpWalk.seg_sound fw hr' hl
   set len := r' - s0 + 1 with hlendef
-  -- the segment's start: URec's yield `seg(1, J, S + 4, TL)` of the same record
+  -- the segment's start: URec's yield `seg(1, J, S + 7, TL)` of the same record
   have hs0 : s0 < 2 ^ L := by omega
   have hsite2 := site_mem hL (i := 12) (by decide) hs0 (k := 2) (by simp [hashSys, FpWalk.fpwalk, FpWalk.lookups])
   have hm2 : siteMult hashSys inst pub (12, s0, 2) = -1 := by
@@ -860,7 +863,7 @@ theorem coin_fp_in {j : ℕ} (hj : j < 2 ^ L) (hki : (inst 14).main Coin.KI j = 
   obtain ⟨i', r'', k', hr'', hy, hsm, hsv⟩ := link hL hsat hL24 hsite2 rfl hm2
   rw [show siteRel hashSys (12, s0, 2) = 21 from rfl, yt] at hy
   rw [hv2] at hsv
-  rcases (by omega : (i' = 13 ∧ k' = 13) ∨ (i' = 14 ∧ k' = 4)) with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩
+  rcases (by omega : (i' = 13 ∧ k' = 16) ∨ (i' = 14 ∧ k' = 4)) with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩
   swap
   · exfalso
     have e : siteVals hashSys inst pub (14, r'', 4) = [0, (inst 14).main Coin.START r'', (inst 14).main Coin.START r'',
@@ -868,9 +871,9 @@ theorem coin_fp_in {j : ℕ} (hj : j < 2 ^ L) (hki : (inst 14).main Coin.KI j = 
       simp [siteVals, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups, Coin.k, Expr.eval,
         StarkedAir.Sha256.eval_col, StarkedAir.Sha256.eval_cst, wrap_zero hr'']
     rw [e] at hsv; simp at hsv
-  have e : siteVals hashSys inst pub (13, r'', 13) = [1, (inst 13).main URec.J r'', (inst 13).main URec.S r'' + 4,
+  have e : siteVals hashSys inst pub (13, r'', 16) = [1, (inst 13).main URec.J r'', (inst 13).main URec.S r'' + 7,
       (inst 13).main URec.TL r''] := by
-    simp [siteVals, siteEval, siteLookup, hashSys, hL 13 (by decide), URec.urec, URec.lookups, URec.k, Expr.eval,
+    simp [siteVals, siteEval, siteLookup, hashSys, hL 13 (by decide), URec.urec, URec.lookups, URec.k, URec.HDR, Expr.eval,
       StarkedAir.Sha256.eval_col, StarkedAir.Sha256.eval_cst, wrap_zero hr'']
   rw [e] at hsv
   simp only [List.cons.injEq, and_true, true_and] at hsv
@@ -969,34 +972,54 @@ theorem urec_code_lookup : ∀ i < 4, URec.lookups.getD (1 + i) ⟨0, .const 0, 
 
 omit hL hsat hL24 in
 theorem urec_val_lookup : ∀ i < 8, URec.lookups.getD (5 + i) ⟨0, .const 0, []⟩ =
-    ⟨Undo.REL_UBYTE, .neg (URec.k URec.ON), [.add (URec.k URec.S) (cst (4 + i)), URec.k (URec.V i)]⟩ := by
+    ⟨Undo.REL_UBYTE, .neg (URec.k URec.ON), [.add (URec.k URec.S) (cst (URec.HDR + i)), URec.k (URec.V i)]⟩ := by
   intro i hi; interval_cases i <;> rfl
 
-/-- **An undo record's bytes.** On URec row `r`, code byte `i` is the undo byte at `S + i` and amount byte
-`i` the undo byte at `S + 4 + i` (positions inside the undo stream). -/
-theorem urec_bytes {r : ℕ} (hr : r < 2 ^ L) (hon : (inst 13).main URec.ON r = 1) {c : ℕ} (hc : c < 12) :
+omit hL hsat hL24 in
+theorem urec_idx_lookup : ∀ i < 3, URec.lookups.getD (13 + i) ⟨0, .const 0, []⟩ =
+    ⟨Undo.REL_UBYTE, .neg (URec.k URec.ON), [.add (URec.k URec.S) (cst (4 + i)), URec.k (URec.X i)]⟩ := by
+  intro i hi; interval_cases i <;> rfl
+
+omit hL hsat hL24 in
+theorem urec_byte_lookup : ∀ c < 15, URec.lookups.getD (URec.uidx c) ⟨0, .const 0, []⟩ =
+    ⟨Undo.REL_UBYTE, .neg (URec.k URec.ON), [.add (URec.k URec.S) (cst c), URec.k (URec.ucol c)]⟩ := by
+  intro c hc
+  unfold URec.uidx URec.ucol
+  by_cases h4 : c < 4
+  · simp only [if_pos h4]; exact urec_code_lookup c h4
+  by_cases h7 : c < 7
+  · simp only [if_neg h4, if_pos h7]
+    have := urec_idx_lookup (c - 4) (by omega)
+    rwa [show 4 + (c - 4) = c by omega] at this
+  · simp only [if_neg h4, if_neg h7]
+    have := urec_val_lookup (c - 7) (by omega)
+    rwa [show URec.HDR + (c - 7) = c by unfold URec.HDR; omega] at this
+
+omit hL hsat hL24 in
+theorem urec_uidx_lt : ∀ c < 15, URec.uidx c < URec.lookups.length := by
+  intro c hc; unfold URec.uidx; simp [URec.lookups]; split_ifs <;> omega
+
+/-- **An undo record's bytes.** On URec row `r`, header and amount byte `c` (code `0–3`, creating
+transaction index `4–6`, amount `7–14`) is the undo byte at `S + c` (positions inside the undo stream). -/
+theorem urec_bytes {r : ℕ} (hr : r < 2 ^ L) (hon : (inst 13).main URec.ON r = 1) {c : ℕ} (hc : c < 15) :
     ∃ u, u < (pub 8).val ∧ (inst 13).main URec.S r + (c : F) = (u : F) ∧
-      ((inst 13).main (4 + c) r).val = ((Ub inst pub).getD u 0).toNat := by
+      ((inst 13).main (URec.ucol c) r).val = ((Ub inst pub).getD u 0).toNat := by
   have hpre : (hashSys.comp 13).air.pre = URec.preCols := rfl
-  have hlen : 1 + c < (hashSys.comp 13).lookups.length := by
-    show 1 + c < URec.lookups.length; simp [URec.lookups]; omega
+  have hlen : URec.uidx c < (hashSys.comp 13).lookups.length := urec_uidx_lt c hc
   have hsite := site_mem hL (i := 13) (by decide) hr hlen
-  have hsl : siteLookup hashSys ((13, r, 1 + c) : Site) =
-      ⟨Undo.REL_UBYTE, .neg (URec.k URec.ON), [.add (URec.k URec.S) (cst c), URec.k (4 + c)]⟩ := by
-    show URec.lookups.getD (1 + c) _ = _
-    by_cases h4 : c < 4
-    · rw [urec_code_lookup c h4]; rfl
-    · have := urec_val_lookup (c - 4) (by omega)
-      rw [show 5 + (c - 4) = 1 + c by omega, show 4 + (c - 4) = c by omega] at this
-      rw [this]; simp [URec.V, show 8 + (c - 4) = 4 + c by omega]
-  obtain ⟨u, hu, hp, hb⟩ := undo_read hL hsat hL24 hsite (by simp [isUse]; omega) (by simp [siteRel, hsl])
-    (p := (inst 13).main URec.S r + (c : F)) (b := (inst 13).main (4 + c) r)
+  have hsl : siteLookup hashSys ((13, r, URec.uidx c) : Site) =
+      ⟨Undo.REL_UBYTE, .neg (URec.k URec.ON), [.add (URec.k URec.S) (cst c), URec.k (URec.ucol c)]⟩ :=
+    urec_byte_lookup c hc
+  have huse : isUse 13 (URec.uidx c) = true := by
+    unfold URec.uidx; simp only [isUse]; split_ifs <;> simp <;> omega
+  obtain ⟨u, hu, hp, hb⟩ := undo_read hL hsat hL24 hsite huse (by simp [siteRel, hsl])
+    (p := (inst 13).main URec.S r + (c : F)) (b := (inst 13).main (URec.ucol c) r)
     (by
-      show siteEval hashSys inst pub (13, r, 1 + c) (siteLookup hashSys (13, r, 1 + c)).mult = -1
+      show siteEval hashSys inst pub (13, r, URec.uidx c) (siteLookup hashSys (13, r, URec.uidx c)).mult = -1
       rw [hsl]
       simp [siteEval, hpre, hL 13 (by decide), Expr.eval, URec.k, StarkedAir.Sha256.eval_col, wrap_zero hr, hon])
     (by
-      show (siteLookup hashSys (13, r, 1 + c)).vals.map (siteEval hashSys inst pub (13, r, 1 + c)) = _
+      show (siteLookup hashSys (13, r, URec.uidx c)).vals.map (siteEval hashSys inst pub (13, r, URec.uidx c)) = _
       rw [hsl]
       simp [siteEval, hpre, hL 13 (by decide), Expr.eval, URec.k, StarkedAir.Sha256.eval_col,
         StarkedAir.Sha256.eval_cst, wrap_zero hr])

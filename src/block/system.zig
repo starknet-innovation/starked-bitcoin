@@ -106,12 +106,36 @@ pub fn buildU(a: std.mem.Allocator, raw: []const u8, undo: []const u8, ctx: chec
     return buildFull(a, raw, undo, ctx, .{});
 }
 
-pub fn buildFull(a: std.mem.Allocator, raw: []const u8, undo: []const u8, ctx: checks.Ctx, opts: Opts) !Built {
+/// The txids (SHA digests of the txid messages, internal byte order).
+fn txidsOf(a: std.mem.Allocator, ntx: u32, msgs: []const msg.Message, digests: anytype) ![][32]u8 {
+    const txids = try a.alloc([32]u8, ntx);
+    for (msgs, digests[0..msgs.len]) |m, d| if (!m.hdr and !m.wtx) {
+        txids[(m.id - 1) / 2] = bsha.digestBytes(d);
+    };
+    return txids;
+}
+
+/// The in-circuit undo stream of a block (`coin.undoStream`): the fetched records with their creating
+/// transactions' indices. Its Blake2s is the block's public commitment.
+pub fn undoStreamOf(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctxs: ?[]const u32, height: u32) ![]u8 {
+    const rows = try fields.tokenize(a, raw);
+    const ntx: u32 = @intCast(rows[0].val);
+    const msgs = try msg.messages(a, try msg.txRanges(a, rows));
+    const pl = try bsha.plan(a, raw, msgs);
+    return coin.undoStream(a, fetched, ctxs, raw, rows, try txidsOf(a, ntx, msgs, pl.digests), height);
+}
+
+/// `fetched`: the fetched undo stream (`coin.undoStream`), with the creating transactions' indices in
+/// `opts.ctx`.
+pub fn buildFull(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctx: checks.Ctx, opts: Opts) !Built {
     const rows = try fields.tokenize(a, raw);
     const ntx: u32 = @intCast(rows[0].val);
     const txs = try msg.txRanges(a, rows);
     const msgs = try msg.messages(a, txs);
     var pl = try bsha.plan(a, raw, msgs);
+    // M3b: the txids, and the in-circuit undo stream.
+    const txids = try txidsOf(a, ntx, msgs, pl.digests);
+    const undo = try coin.undoStream(a, fetched, opts.ctx, raw, rows, txids, ctx.height);
     const nodes = try merkle.tree(a, ntx);
     const root = try merkle.extendPlan(a, &pl, nodes);
     if (!std.mem.eql(u8, raw[36..68], &bsha.digestBytes(root)) and !ctx.force) return error.BadMerkleRoot;
@@ -148,15 +172,11 @@ pub fn buildFull(a: std.mem.Allocator, raw: []const u8, undo: []const u8, ctx: c
         if (!std.mem.eql(u8, raw[c[0] + 6 ..][0..32], &bsha.digestBytes(cdig)) and !ctx.force) return error.BadWitnessCommitment;
     } else if (chk.nseg != 0 and !ctx.force) return error.UnexpectedWitness;
 
-    // M3b: the txids (SHA digests of the txid messages) and the coin events.
-    const txids = try a.alloc([32]u8, ntx);
-    for (msgs, pl.digests) |m, d| if (!m.hdr and !m.wtx) {
-        txids[(m.id - 1) / 2] = bsha.digestBytes(d);
-    };
+    // M3b: the coin events.
     var coin_raw_reads = std.ArrayList(u32).empty;
     var coin_ranges = std.ArrayList(u32).empty;
     const lost = lostHeight(ctx.height);
-    const co = try coin.coinColumns(a, log_size, .{ .raw = raw, .undo = undo, .rows = rows, .height = ctx.height, .txids = txids, .recs = recs, .ctx = opts.ctx, .lost = lost, .chal = opts.chal }, &coin_raw_reads, &coin_ranges);
+    const co = try coin.coinColumns(a, log_size, .{ .raw = raw, .undo = undo, .rows = rows, .height = ctx.height, .txids = txids, .recs = recs, .lost = lost, .chal = opts.chal }, &coin_raw_reads, &coin_ranges);
     var fp_raw_reads = std.ArrayList(u32).empty;
     var fp_undo_reads = std.ArrayList(u32).empty;
     const allsegs = try std.mem.concat(a, coin.Seg, &.{ osegs, usegs });
