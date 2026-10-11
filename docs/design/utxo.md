@@ -254,9 +254,23 @@ Layers (Lean):
    claimed index)`), the claims being some split of the undo bytes into records (the undo component
    parses no CompactSize; the epoch balance fixes each claim to a created coin). The coin partial sum
    is the events' fractions (`coin_runsum` + the links), and the encoding satisfies `Separates`.
-5. **Epoch** (next): `epoch_sound_fp` / `epoch_from_sound` on the events, then `connect_of_run` with
-   `ClaimsOK` from the amounts (layer 1), and `block_sound`'s no-repeated-prevout hypothesis from the
-   run (D-031).
+5. **Epoch** (in progress, `Block/CoinEpochSound.lean`, `Spec/CoinEpoch.lean`, `Spec/UtxoMap.lean`,
+   `Spec/CoinDecode.lean`). Done:
+   - `encE` (the tuple with `ctx = index − N(code/2)`) is injective on well-formed events for `γ`
+     outside the fingerprint bad set (`encE_inj`); `φ` is the tuple polynomial at `α` (`phiOf_poly`);
+   - per block: each input's claim, with the circuit's lexicographic order (`block_claims`), and the
+     public partial sum as the block's created minus spent events' fractions (`block_event_sum`);
+   - per epoch: the blocks' sums are the epoch's (`epoch_sums`), a balanced sum is a zero LogUp sum
+     (`epoch_frac_zero`), the multiset balance (`epoch_balance`), and the run from the initial set to
+     the final set (`epoch_coin_run`, via `ordered_of_balance` and `run_from_balance`);
+   - to Core: a run maps through any value map (`run_map`); `serTxOut` decodes to its output
+     (`decSer_ser`); the decoded events are Core's `TxC` events (`tmap_txEvents`, `allTxs_map`); so the
+     epoch connects as Core does, given each transaction's `ClaimsOK` (`epoch_connect`).
+   Open: `ClaimsOK` from the circuit's amounts and maturity (system level: each transaction's input
+   and output rows, `in_nat`/`out_nat`/`tend_nat`, the claims' amount bytes); the assembly over the
+   epoch's block systems (positions, bounds, well-formed events, the lost flag, output amounts);
+   distinct created outpoints (txid uniqueness, an assumption); `block_sound`'s no-repeated-prevout
+   hypothesis from the run (D-031).
 
 ## Recommendation (D-040, proposed)
 
