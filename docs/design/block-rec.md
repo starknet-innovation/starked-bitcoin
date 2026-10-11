@@ -160,9 +160,19 @@ estimated: per-leaf cost is seconds, not the header leaf's 31 s.
   leaves 17 s each, node 24 s, peak 16.1 GB.
 - **Epochs under seed v3:** 0–170 and 171–1000 re-proved and verified (171 coins `7105b60f…`, 998 coins
   `29a42ec2…`, unchanged).
-- **Still to build:** the outer verifier (the aligned forest of root summaries against the seed v3,
-  the challenge, the final set's balance and the chain's `T`), the epoch driver over all blocks, the
-  MTP (D-043 part 3).
+- **The epoch forest and its outer verifier** (`block_forest.zig`; `chainproof prove-epoch-tree` /
+  `verify-epoch-tree`): setup (shared shape, the block leaf's identity per block trace size, the node's;
+  `<dir>/blockvk.bin`), one recursion tree per aligned subtree of the seed v3 decomposition, each root
+  with its block-hash subtree's path in the chain's header tree (`<dir>/forest-<to>.bin`). The verifier
+  checks per root the pinned identity, the key expected from the blocks' trace sizes, the proof, the
+  range; one challenge, equal to `challenge(seedOfRoots(…))` over the roots' seed subtrees and both
+  sets' digests; each block-hash subtree against `T`; then the balance against the final set.
+  Epoch 0–3: one tree, proved in 115 s, verified in 0.1 s after the chain (2.1 s); tampers rejected
+  (a summary limb: `WrongDigest`; a path bit: `HashesNotTheChain`; a set missing a coin:
+  `ChallengeMismatch`).
+- **Still to build:** the MTP (D-043 part 3, needs the owner's choice); a persisted, pinned block VK
+  shipped like the chain VK (today `blockvk.bin` is written by the prover's setup); the Lean statement
+  of the outer verifier (the forest checks above, against `SumOk`).
 - **Lean, the tree's semantics** (`Circuit/BlockTree.lean`, standard axioms): `SumOk v` (the 51 limbs
   describe a proven range of `2^ℓ` blocks whose hash and seed roots are the perfect trees over its
   blocks' hashes and seed leaves); `sumOk_leaf` (a proven block whose leaf checks hold, with 16-bit

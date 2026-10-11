@@ -59,6 +59,26 @@ pub fn alignedSizes(from: u32, n: usize, out: *[64]u8) []const u8 {
 /// (`seedLeaf`) its start height, its log size and its root. Both sets are fixed before the challenge
 /// (`Spec/UtxoEpochFrom.lean`); the digests are of the full encodings (`setDigest`).
 pub fn seedFrom(from: u32, to: u32, prev: ?[32]u8, fin: [32]u8, hashes: []const [32]u8, commits: []const [32]u8) [32]u8 {
+    var sizes_buf: [64]u8 = undefined;
+    const sizes = alignedSizes(from, hashes.len, &sizes_buf);
+    var roots: [64]SubRoot = undefined;
+    var leaves: [1 << 12]HT.Words = undefined;
+    var at: usize = 0;
+    var x: u32 = from;
+    for (sizes, 0..) |k, i| {
+        const w = @as(usize, 1) << @intCast(k);
+        roots[i] = .{ .x = x, .k = k, .root = subtreeRoot(hashes[at .. at + w], commits[at .. at + w], &leaves) };
+        at += w;
+        x += @intCast(w);
+    }
+    return seedOfRoots(from, to, prev, fin, roots[0..sizes.len]);
+}
+
+/// An aligned subtree of the seed tree: start height, log size, root.
+pub const SubRoot = struct { x: u32, k: u8, root: HT.Words };
+
+/// The seed from the aligned subtrees' roots (what a recursion forest proves).
+pub fn seedOfRoots(from: u32, to: u32, prev: ?[32]u8, fin: [32]u8, roots: []const SubRoot) [32]u8 {
     var h = Blake2s.init(.{});
     h.update(TAG);
     var buf: [8]u8 = undefined;
@@ -67,22 +87,13 @@ pub fn seedFrom(from: u32, to: u32, prev: ?[32]u8, fin: [32]u8, hashes: []const 
     h.update(&buf);
     if (prev) |p| h.update(&p);
     h.update(&fin);
-    var sizes_buf: [64]u8 = undefined;
-    const sizes = alignedSizes(from, hashes.len, &sizes_buf);
-    var leaves: [1 << 12]HT.Words = undefined;
-    var at: usize = 0;
-    var x: u32 = from;
-    for (sizes) |k| {
-        const w = @as(usize, 1) << @intCast(k);
-        const r = subtreeRoot(hashes[at .. at + w], commits[at .. at + w], &leaves);
-        std.mem.writeInt(u32, buf[0..4], x, .little);
-        std.mem.writeInt(u32, buf[4..8], k, .little);
+    for (roots) |r| {
+        std.mem.writeInt(u32, buf[0..4], r.x, .little);
+        std.mem.writeInt(u32, buf[4..8], r.k, .little);
         h.update(&buf);
         var rb: [32]u8 = undefined;
-        for (0..8) |i| std.mem.writeInt(u32, rb[4 * i ..][0..4], r[i], .little);
+        for (0..8) |i| std.mem.writeInt(u32, rb[4 * i ..][0..4], r.root[i], .little);
         h.update(&rb);
-        at += w;
-        x += @intCast(w);
     }
     var out: [32]u8 = undefined;
     h.final(&out);

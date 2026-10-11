@@ -185,7 +185,7 @@ pub const Shape = struct {
         while (true) {
             var shared = try multiverifier.foldSharedConfig(gpa, target, fri);
             errdefer shared.deinit(gpa);
-            var ctx = try buildTopology(gpa, table, &shared);
+            var ctx = try topology(gpa, table, &shared);
             defer ctx.deinit();
             const grown = target.elementwiseMax(finalize.computePaddedSizes(.fromBuilder(&ctx.circuit)));
             if (std.meta.eql(grown, target)) return .{ .target = target, .shared = shared, .fri = fri };
@@ -199,7 +199,7 @@ pub const Shape = struct {
     }
 };
 
-fn buildTopology(gpa: std.mem.Allocator, table: *const circuit.air_eval.component_table.Table, shared: *const multiverifier.SharedConfig) !Context(NoValue) {
+pub fn topology(gpa: std.mem.Allocator, table: *const circuit.air_eval.component_table.Table, shared: *const multiverifier.SharedConfig) !Context(NoValue) {
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
     const empty = try stark_proof.emptyProof(arena.allocator(), shared.proof_config);

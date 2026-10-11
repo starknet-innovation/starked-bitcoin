@@ -38,56 +38,56 @@ pub const GENESIS_HASH: HT.Words = .{ 0x6fe28c0a, 0xb6f1b372, 0xc1a6a246, 0xae63
 // ---------------------------------------------------------------------------------------------
 // Binary encoding: little-endian integers, length-prefixed blobs.
 
-const Enc = struct {
+pub const Enc = struct {
     a: std.mem.Allocator,
     buf: std.ArrayList(u8) = .empty,
 
-    fn int(self: *Enc, comptime T: type, v: T) !void {
+    pub fn int(self: *Enc, comptime T: type, v: T) !void {
         var b: [@sizeOf(T)]u8 = undefined;
         std.mem.writeInt(T, &b, v, .little);
         try self.buf.appendSlice(self.a, &b);
     }
-    fn blob(self: *Enc, b: []const u8) !void {
+    pub fn blob(self: *Enc, b: []const u8) !void {
         try self.int(u64, b.len);
         try self.buf.appendSlice(self.a, b);
     }
-    fn words(self: *Enc, ws: []const u32) !void {
+    pub fn words(self: *Enc, ws: []const u32) !void {
         for (ws) |w| try self.int(u32, w);
     }
-    fn fri(self: *Enc, f: FriConfigV2) !void {
+    pub fn fri(self: *Enc, f: FriConfigV2) !void {
         inline for (.{ "pow_bits", "log_blowup_factor", "log_last_layer_degree_bound", "n_queries", "fold_step" }) |name|
             try self.int(u32, @field(f, name));
     }
 };
 
-const Dec = struct {
+pub const Dec = struct {
     bytes: []const u8,
     pos: usize = 0,
 
-    fn take(self: *Dec, n: u64) ![]const u8 {
+    pub fn take(self: *Dec, n: u64) ![]const u8 {
         if (n > self.bytes.len - self.pos) return error.Truncated;
         const s = self.bytes[self.pos..][0..@intCast(n)];
         self.pos += @intCast(n);
         return s;
     }
-    fn int(self: *Dec, comptime T: type) !T {
+    pub fn int(self: *Dec, comptime T: type) !T {
         return std.mem.readInt(T, (try self.take(@sizeOf(T)))[0..@sizeOf(T)], .little);
     }
-    fn blob(self: *Dec) ![]const u8 {
+    pub fn blob(self: *Dec) ![]const u8 {
         return self.take(try self.int(u64));
     }
-    fn words(self: *Dec, comptime n: usize) ![n]u32 {
+    pub fn words(self: *Dec, comptime n: usize) ![n]u32 {
         var out: [n]u32 = undefined;
         for (&out) |*w| w.* = try self.int(u32);
         return out;
     }
-    fn fri(self: *Dec) !FriConfigV2 {
+    pub fn fri(self: *Dec) !FriConfigV2 {
         var f: FriConfigV2 = undefined;
         inline for (.{ "pow_bits", "log_blowup_factor", "log_last_layer_degree_bound", "n_queries", "fold_step" }) |name|
             @field(f, name) = try self.int(u32);
         return f;
     }
-    fn magic(self: *Dec, comptime m: []const u8) !void {
+    pub fn magic(self: *Dec, comptime m: []const u8) !void {
         if (!std.mem.eql(u8, try self.take(m.len), m)) return error.BadMagic;
         if (try self.int(u32) != VERSION) return error.UnsupportedVersion;
     }
@@ -100,14 +100,14 @@ fn sha256(bytes: []const u8) [32]u8 {
 }
 
 /// Appends the SHA-256 trailer and returns the file bytes.
-fn seal(e: *Enc) ![]u8 {
+pub fn seal(e: *Enc) ![]u8 {
     const d = sha256(e.buf.items);
     try e.buf.appendSlice(e.a, &d);
     return e.buf.items;
 }
 
 /// Checks and strips the SHA-256 trailer.
-fn unseal(bytes: []const u8) ![]const u8 {
+pub fn unseal(bytes: []const u8) ![]const u8 {
     if (bytes.len < 32) return error.Truncated;
     const body = bytes[0 .. bytes.len - 32];
     if (!std.mem.eql(u8, &sha256(body), bytes[body.len..])) return error.ChecksumMismatch;
@@ -262,20 +262,25 @@ pub fn shapeFromVk(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const 
 // ---------------------------------------------------------------------------------------------
 // Proofs.
 
-fn encodeProved(e: *Enc, p: *const Proved) !void {
+/// A circuit proof with its key and public inputs (any count).
+pub fn encodeCircuit(e: *Enc, cp: *const leaf.CircuitProof, key: leaf.Key, pubs: []const M31) !void {
     var text: std.Io.Writer.Allocating = .init(e.a);
     defer text.deinit();
-    try wire.verify_request.writeVerifyRequest(&text.writer, p.proof.request);
+    try wire.verify_request.writeVerifyRequest(&text.writer, cp.request);
     try e.blob(text.written());
-    try e.words(&p.proof.circuit_hash);
-    try e.words(&p.key);
-    for (p.pubs) |x| try e.int(u32, x.toU32());
-    try e.blob(p.proof.bytes);
+    try e.words(&cp.circuit_hash);
+    try e.words(&key);
+    for (pubs) |x| try e.int(u32, x.toU32());
+    try e.blob(cp.bytes);
 }
 
-/// Decodes a proof; its request strings and bytes live in `a`, its in-circuit view in its own
-/// arena (`deinit`). All proof bytes must be consumed.
-fn decodeProved(gpa: std.mem.Allocator, a: std.mem.Allocator, d: *Dec) !Proved {
+fn encodeProved(e: *Enc, p: *const Proved) !void {
+    try encodeCircuit(e, &p.proof, p.key, &p.pubs);
+}
+
+/// Decodes `encodeCircuit` output with `pubs.len` public inputs; the request strings and bytes live
+/// in `a`, the in-circuit view in its own arena (`deinit`). All proof bytes must be consumed.
+pub fn decodeCircuit(gpa: std.mem.Allocator, a: std.mem.Allocator, d: *Dec, pubs: []M31) !struct { proof: leaf.CircuitProof, key: leaf.Key } {
     var owned = try wire.verify_request.parseVerifyRequest(gpa, try d.blob());
     defer owned.deinit();
     var request = owned.request;
@@ -284,8 +289,7 @@ fn decodeProved(gpa: std.mem.Allocator, a: std.mem.Allocator, d: *Dec) !Proved {
     request.preprocessed_column_log_sizes = columns;
     const circuit_hash = try d.words(8);
     const key = try d.words(8);
-    var pubs: [leaf.N_PUB]M31 = undefined;
-    for (&pubs) |*x| {
+    for (pubs) |*x| {
         const v = try d.int(u32);
         if (v >= 0x7fffffff) return error.NonCanonicalPublicInput;
         x.* = M31.fromCanonical(v);
@@ -303,8 +307,14 @@ fn decodeProved(gpa: std.mem.Allocator, a: std.mem.Allocator, d: *Dec) !Proved {
             .circuit_hash = circuit_hash,
         },
         .key = key,
-        .pubs = pubs,
     };
+}
+
+/// Decodes a proof (`decodeCircuit` with the chain's public inputs).
+fn decodeProved(gpa: std.mem.Allocator, a: std.mem.Allocator, d: *Dec) !Proved {
+    var pubs: [leaf.N_PUB]M31 = undefined;
+    const r = try decodeCircuit(gpa, a, d, &pubs);
+    return .{ .proof = r.proof, .key = r.key, .pubs = pubs };
 }
 
 // ---------------------------------------------------------------------------------------------
