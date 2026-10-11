@@ -66,6 +66,67 @@ changed interface. Before CATCHUP starts, freeze the block proof's public inputs
 the design here fixes what the aggregator needs public, and it is already public (partial sum,
 input count, `C_h`, height, block hash, `z`).
 
+## The block-proof interface for aggregation (proposed, D-043)
+
+Found 2026-10-11 while specifying BLOCK-REC against what `verify-epoch` checks natively. Everything the
+native epoch verifier checks per block must become a leaf or node obligation; three things in the
+current interface do not compose in a tree.
+
+**What `verify-epoch` checks per block today** (public inputs of the block system, `N_PUB = 161`):
+- 0–1 block length, tx count; 8 undo length (informational);
+- 2 height; 3, 7 the previous-block MTP (two 16-bit limbs); 4–6 the BIP34/CSV/segwit flags;
+  158–160 the BIP30 "lost" flag and the subsidy (all functions of the height except the MTP);
+- 9–24 the commitment `C_h`; 25–40 the block hash (bound to the chain's `T` by an inclusion path,
+  with the 11 predecessor headers for the MTP);
+- 41–152 the challenge `(γ, z, αᵏ)`; 153–156 the partial sum; 157 the input count.
+
+**1. The seed must be tree-shaped.** The D-041 v2 seed is one Blake2s over `from ‖ to ‖ digests ‖
+(hash_h ‖ C_h)` for every block: a linear stream no node can fold. Proposal (seed v3): the blocks
+enter as a binary Merkle tree of leaves `Blake2s(hash_h ‖ C_h)` with the header tree's aligned shape
+(absolute heights, so a range `[a, b]` is a list of aligned perfect subtrees); the seed hashes the
+range, the two set digests and that list of subtree roots. Each node folds its children's roots; the
+root circuit (or the outer verifier) computes the seed and checks `(γ, z, α) = challenge(seed)`.
+Changing the seed re-proves epochs (0–1000: about 20 minutes).
+
+**2. The block hashes bind to the chain per aligned subtree.** A range's block-hash tree equals the
+chain's `T` only for a range from genesis. With the aligned shape above, each of the range's O(log n)
+perfect subtrees is a node of the header tree; the outer verifier checks each against `T` with an
+inclusion path (`Spec/Mmr.lean`), as `checkWindow` does per block today.
+
+**3. The previous-block MTP has no aggregator obligation.** It is a function of the 11 preceding
+headers' times, which a block leaf does not see. Options:
+- **(A) The block proof carries its window (recommended).** The block system takes the 11
+  predecessor headers, links them by prev-hash up to its own header (already hashed in-circuit), and
+  computes the MTP (the header chain's MTP gadget and `mtp_core` exist). The MTP leaves the
+  interface: context becomes a function of the height and the block's own hash. About 33 extra
+  SHA-256 compressions per block, a block-system AIR change (large-block test, re-prove epochs), and
+  Lean: the window linkage and `mtp_core` reuse.
+- **(B) Nodes carry a sliding window.** Leaves expose their own header time; a range summary carries
+  its last 11 times and its first 11 blocks' unresolved MTP claims; a node resolves the right child's
+  claims against the left child's times (a median of 11 in-circuit). No block AIR change, but the
+  node logic is the most intricate part of the aggregator, and the epoch's first 11 blocks still need
+  the times before the range (inclusion paths at the root).
+- (C) Per-height MTP in the header tree: re-proves the frozen chain VK (D-036). Not recommended.
+
+**4. Height-derived context in the leaf.** The flags, the lost flag and the subsidy are fixed
+functions of the height (`checks.pubs`, `lostHeight`, `coin.pubs`); the block leaf recomputes them in
+the circuit from the height (a small Lean-first program) instead of exposing them.
+
+**5. The leaf's summary.** The challenge's 112 limbs reduce to `(γ, z, α)` (12 limbs) once the leaf
+checks `αₖ = αᵏ`. A block leaf's public summary: height, block hash, `C_h`, partial sum, input count,
+`(γ, z, α)`; with (A), nothing else. A node: the range, the aligned subtree roots (hash‖C leaves), the
+summed partial sum and input count (checked below `2^30` at the root, as `verify-epoch` does), the
+shared `(γ, z, α)`.
+
+**Measured (2026-10-11):** the plain verifier accepts a block-170 proof in-circuit (`zig build
+blockleaf`): at test strength 0.88 M variables, at production strength (70 queries, 26 PoW bits)
+8.27 M variables (add 185 k, sub 423 k, mul 480 k, pointwise 160 k, Blake2s updates 20.5 k), built in
+under 2 s, circuit satisfied; proved with stwo-zig's circuit prover (70 queries, 26 PoW bits) in 5.2 s,
+peak RSS 5.1 GB, proof 858 KB (M4 Pro, CPU). The verifier circuit grows with the logarithm of the
+block trace (Merkle depths, FRI layers), not with the block, so a block leaf should stay near this
+cost for large blocks too (*est.*; to measure at 2^22). Leaf packing (above) matters less than
+estimated: per-leaf cost is seconds, not the header leaf's 31 s.
+
 ## Following the tip
 
 Three layers at three cadences:

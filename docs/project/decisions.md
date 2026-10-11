@@ -384,3 +384,14 @@ Why:
 - RAM is not the constraint: no step needs chain-proportional memory (per-worker traces are bounded
   by the 4M-weight consensus constant; the final-set pass and catch-up are segmentable and
   parallel). The constraint is cadence, which the tree fixes.
+
+### D-043 — The block-proof interface for aggregation (proposed)
+Date: 2026-10-11 · By: Claude (agent) · Status: **proposed, needs owner review**
+Proposal: before CATCHUP freezes the block interface, (1) the epoch seed becomes tree-shaped (seed v3:
+aligned binary tree of `Blake2s(hash_h ‖ C_h)` leaves), (2) block hashes bind to the chain's `T` per
+aligned subtree, (3) the previous-block MTP is proven inside the block proof from its 11 predecessor
+headers linked by prev-hash (option A), (4) the leaf recomputes height-derived context, (5) leaves and
+nodes expose the compact summary listed in block-rec.md.
+Design and the alternatives for (3): [block-rec.md § The block-proof interface](../design/block-rec.md#the-block-proof-interface-for-aggregation-proposed-d-043).
+Why: the v2 seed is a linear stream no recursion node can fold, and the MTP context has no
+aggregator obligation; both change the block proof, which must not change after CATCHUP.

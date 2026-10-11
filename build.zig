@@ -198,6 +198,22 @@ pub fn build(b: *std.Build) void {
         chainproof.linkLibC();
         b.installArtifact(chainproof);
     }
+    // `blockleaf`: BLOCK-REC measurement (a block proof verified in-circuit).
+    {
+        const bl = b.addExecutable(.{
+            .name = "blockleaf",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/bin/blockleaf.zig"),
+                .target = target,
+                .optimize = optimize,
+                .imports = &.{.{ .name = "starked_bitcoin", .module = lib }},
+            }),
+        });
+        bl.linkLibC();
+        const run = b.addRunArtifact(bl);
+        if (b.args) |args| run.addArgs(args);
+        b.step("blockleaf", "BLOCK-REC: measure a block proof verified in-circuit").dependOn(&run.step);
+    }
     // `oracle`: VL-ORACLE, the native verifier as oracle for the in-circuit verifier (FRI included).
     {
         const oracle = b.addExecutable(.{
