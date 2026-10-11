@@ -119,6 +119,7 @@ import StarkedAir.Spec.UtxoEpoch
 import StarkedAir.Spec.UtxoFingerprint
 import StarkedAir.Spec.UtxoEpochFrom
 import StarkedAir.Spec.UtxoBalance
+import StarkedAir.Spec.CoinEpoch
 import StarkedAir.Block.ExtSum
 import StarkedAir.Block.FpWalk
 import StarkedAir.Block.URec
