@@ -60,7 +60,10 @@ meet in the outer verifier.
 `rng_leaf` (a proven block whose leaf checks its BIP30 flag and `αₖ = α₁ᵏ` is a proven one-block
 range), `rng_node` (two proven ranges, linked by height, with one challenge, give their union; the sums
 add), `epoch_hyps_of_rng` (a proven range gives exactly the block hypotheses of `epoch_systems_core`,
-with its summed partial sum). Not yet covered: the seed and the hash binding (D-043).
+with its summed partial sum). Not yet covered: the seed and the hash binding (D-043). The leaf's own checks are Lean-first: `Circuit/BlockLeaf.lean`
+(`checksP`, `checks_sound`, `checks_pub`: `αₖ = α₁ᵏ` and the BIP30 flag from the height, exactly
+`rng_leaf`'s hypotheses), replayed in `block_leaf.zig` (`airs/block_leaf_checks.json`; tested: honest
+inputs pass, a flipped flag or a wrong weight fails).
 
 **Lean (earlier note).** Mostly done in spirit: `epoch_systems_core` is already stated over "block systems at
 consecutive heights sharing the challenge with a balanced public sum" — the exact shape the

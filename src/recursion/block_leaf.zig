@@ -16,6 +16,8 @@ const rec = @import("../air/prove_rec.zig");
 const bs = @import("../block/system.zig");
 const PF = @import("../block/proof_file.zig");
 const checks = @import("../block/checks.zig");
+const coin = @import("../block/coin.zig");
+const glue = @import("glue.zig");
 
 const builder = circuit.builder;
 const Context = builder.Context;
@@ -68,6 +70,7 @@ pub fn measure(gpa: std.mem.Allocator, weak: bool, prove: bool) !void {
     for (st_parts, &airs, 0..) |*p, *air, i| p.* = .{ .air = air, .digest = try air.digest(a), .pubs = pub_vars[0..bs.n_pubs[i]] };
     const st = pv.PlainStatement{ .parts = st_parts, .preprocessed_root = pre_root };
     try pv.verifyPlain(QM31, &ctx, &g, pc, &st);
+    try leafChecks(&ctx, pub_vars);
     try leaf.finish(QM31, &ctx, try leaf.pubsDigestVars(QM31, &ctx, try zeroKey(&ctx), pub_vars));
     const valid = try ctx.isCircuitValid();
     const st_ = ctx.stats;
@@ -78,6 +81,44 @@ pub fn measure(gpa: std.mem.Allocator, weak: bool, prove: bool) !void {
     if (!prove) return;
     const cp = try leaf.proveCircuit(gpa, a, &ctx, null, try FriConfigV2.init(26, 0, 1, 70, 1));
     std.debug.print("circuit proved in {d:.1}s: proof {d} bytes\n", .{ secs(timer.lap()), cp.bytes.len });
+}
+
+/// The block leaf's own checks (`Circuit/BlockLeaf.lean`, `checks_pub`): `αₖ = α₁ᵏ` and the BIP30 flag
+/// from the height. Hook 0 binds the height, the flag, and the 104 weight limbs.
+pub fn leafChecks(ctx: *Context(QM31), pub_vars: []const Var) !void {
+    const prog = try glue.parse(ctx.scratch(), @embedFile("air:block_leaf_checks"));
+    const ins = try ctx.scratch().alloc(Var, 106);
+    ins[0] = pub_vars[2];
+    ins[1] = pub_vars[coin.PUB_LOST];
+    @memcpy(ins[2..], pub_vars[coin.PUB_ALPHA .. coin.PUB_ALPHA + 104]);
+    const Hooks = struct {
+        inputs: []const Var,
+        pub fn call(self: @This(), id: u32, _: []const Var) ![]const Var {
+            return if (id == 0) self.inputs else error.UnknownHook;
+        }
+    };
+    _ = try glue.run(QM31, ctx, &prog, &.{}, Hooks{ .inputs = ins });
+}
+
+test "block leaf checks: honest public inputs pass, a wrong BIP30 flag or weight fails" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const ch = @import("../block/epoch.zig").challenge(@splat(7));
+    for ([_]u32{ 170, 91722 }) |height| for (0..3) |tamper| {
+        var pubs: [bs.N_PUB]M31 = @splat(M31.zero());
+        pubs[2] = M31.fromCanonical(height);
+        const want = coin.pubs(ch, QM31.zero(), 0, bs.lostHeight(height), height);
+        @memcpy(pubs[41..], &want);
+        if (tamper == 1) pubs[coin.PUB_LOST] = M31.one().sub(pubs[coin.PUB_LOST]);
+        if (tamper == 2) pubs[coin.PUB_ALPHA + 4 * 7] = pubs[coin.PUB_ALPHA + 4 * 7].add(M31.one());
+        var ctx = try Context(QM31).init(a, 0);
+        defer ctx.deinit();
+        const vars = try a.alloc(Var, bs.N_PUB);
+        for (vars, pubs) |*v, x| v.* = try ctx.guessM31(QM31.fromBase(x));
+        try leafChecks(&ctx, vars);
+        try std.testing.expectEqual(tamper == 0, try ctx.isCircuitValid());
+    };
 }
 
 fn zeroKey(ctx: *Context(QM31)) ![8]builder.wrappers.U32Wrapper(Var) {
