@@ -94,6 +94,7 @@ import StarkedAir.Block.CoinLink
 import StarkedAir.Block.CoinEvents
 import StarkedAir.Block.CoinEpochSound
 import StarkedAir.Block.CoinClaims
+import StarkedAir.Block.CoinEpochCore
 import StarkedAir.Block.BlockSetup
 import StarkedAir.Block.BlockTxs
 import StarkedAir.Block.BlockSums
