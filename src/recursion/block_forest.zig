@@ -2,7 +2,9 @@
 //! subtree of the seed v3 decomposition (`epoch.alignedSizes`), and its outer verifier.
 //!
 //! **Setup** (`setup`): the shared shape of block leaves and nodes, the block leaf's identity per
-//! block trace size (its topology does not depend on the block: tested), the block node's
+//! block trace size (built from the epoch's first block of that size: a leaf of another block whose
+//! topology differed would carry another circuit hash, and the keys, which commit to every child's,
+//! would not verify, so a difference shows as a rejection, never an acceptance), the block node's
 //! identity; written as a VK file. **Prove** (`proveForest`): per aligned subtree, the leaves then
 //! the nodes, bottom up; the roots with each one's inclusion path in the chain's header tree, as a
 //! forest file. **Verify** (`verifyForest`): per root, the pinned identity and the expected key
