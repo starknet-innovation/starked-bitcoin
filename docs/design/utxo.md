@@ -224,7 +224,8 @@ Layers (Lean):
    `coin_row_tok` (coin row `j` is the block's `j`-th input or output token, same tuple), `coin_bytes`
    (every coin range check is a byte), `coin_txid` (an output's txid limbs are its transaction's
    txid).
-3. **Fingerprints and claims** (next), existence links only, each pinned by its tuple:
+3. **Fingerprints and claims** (done: `coin_fp_out`, `coin_urec`, `coin_fp_in`, `coin_prevout`,
+   `coin_script_byte`, `urec_bytes`), existence links only, each pinned by its tuple:
    - an output's `FP(0, START, LEN, FH)` is a walker segment `(0, START)`, whose `SEG` use can only be
      the coin's own `SEG(0, START, START, LEN)` yield (undo segments have stream 1), so the walk reads
      the block bytes `[START, START + LEN)`: `FH` is their Horner fingerprint (`seg_sound`);
@@ -233,12 +234,16 @@ Layers (Lean):
      started by URec's `SEG(1, J, S_J + 4, TL_J)`: `FH` is the fingerprint of undo bytes
      `[S_J + 4, S_J + 4 + TL_J)`;
    - the prevout bytes and an output script's first byte are block bytes (`REL_BYTE`).
-4. **Events**: per block, the spec events (created outputs with txid, vout, `2h + cb`, `serTxOut`,
+4. **Events** (done 2026-10-11, `Block/CoinEvents.lean`, `Spec/BlockIo.lean`): each coin row is its
+   transaction's input or output (`coin_row_tx`, `coin_kind_pos`), with its output index (`coin_vout`)
+   and record index (`coin_J`); its tuple is its event's encoding (`coin_out_tuple`, `coin_in_tuple`);
+   an output's multiplicity is Core's (`coin_out_mm`, `coin_unsp`); and **`coin_block_sum`**: the
+   block's public partial sum is its created outputs' `1/(z − φ)` minus its spends'. Per block, the spec events (created outputs with txid, vout, `2h + cb`, `serTxOut`,
    creation index `h·2^24 + tx`; spends with the prevout and the claimed record `(code, serTxOut,
    claimed index)`), the claims being some split of the undo bytes into records (the undo component
    parses no CompactSize; the epoch balance fixes each claim to a created coin). The coin partial sum
    is the events' fractions (`coin_runsum` + the links), and the encoding satisfies `Separates`.
-5. **Epoch**: `epoch_sound_fp` / `epoch_from_sound` on the events, then `connect_of_run` with
+5. **Epoch** (next): `epoch_sound_fp` / `epoch_from_sound` on the events, then `connect_of_run` with
    `ClaimsOK` from the amounts (layer 1), and `block_sound`'s no-repeated-prevout hypothesis from the
    run (D-031).
 
