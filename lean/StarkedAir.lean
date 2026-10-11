@@ -144,3 +144,4 @@ import StarkedAir.Circuit.EndToEnd
 import StarkedAir.Circuit.Pow
 import StarkedAir.Circuit.Oods
 import StarkedAir.Circuit.BlockLeaf
+import StarkedAir.Circuit.BlockNode

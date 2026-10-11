@@ -136,6 +136,26 @@ block trace (Merkle depths, FRI layers), not with the block, so a block leaf sho
 cost for large blocks too (*est.*; to measure at 2^22). Leaf packing (above) matters less than
 estimated: per-leaf cost is seconds, not the header leaf's 31 s.
 
+## Built so far (2026-10-11, night)
+
+- **Seed v3** (D-043 part 1, the forced part): `epoch.zig` `seedFrom` over aligned perfect subtrees of
+  `seedLeaf = Blake2s(hash ‖ C_h)` leaves (tag v3). Epochs re-proved: 0–170 verifies to the same set
+  (171 coins, `hash_serialized 7105b60f…`).
+- **Block leaf** (`block_rec.zig` `buildLeafCircuit`): the plain verifier over the block system, the
+  Lean leaf checks (`Circuit/BlockLeaf.lean`: `αₖ = α₁ᵏ`, BIP30 flag, the seed leaf by the header
+  tree's proven node gadget), `lt30` on the height and input count (`block_leaf_sum`), and the digest of
+  the 51-limb summary.
+- **Block node** (`block_rec.zig` `buildNodeCircuit`): two children verified in-circuit (stwo-zig's
+  recursive verifier, as the header node) and the Lean glue `blockNodeProgram`
+  (`Circuit/BlockNode.lean`, `node_sound`): equal sizes, linked heights, equal challenges, summed `s`
+  and `nin` (`lt30` against wrap), both roots folded.
+- **Measured** (`zig build blockrec -- data/epoch 0`, M4 Pro CPU): blocks 0 and 1 of the v3 epoch as two
+  leaves (15.5 s each, padded to the shared shape) and one node (15.9 s); every proof verified
+  natively, the node's digest equal to the native `joinSummary`; peak RSS 15.1 GB; proofs 981 KB.
+- **Still to build:** the outer verifier (the aligned forest of root summaries against the seed v3,
+  the challenge, the final set's balance and the chain's `T`), the epoch driver over all blocks, the
+  MTP (D-043 part 3), the Lean link `sumOk_node` / `sumOk_leaf`.
+
 ## Following the tip
 
 Three layers at three cadences:

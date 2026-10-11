@@ -117,6 +117,8 @@ pub fn build(b: *std.Build) void {
     lib.addAnonymousImport("air:transcript_plain", .{ .root_source_file = b.path("airs/transcript_plain.json") });
     lib.addAnonymousImport("air:merkle_node", .{ .root_source_file = b.path("airs/merkle_node.json") });
     lib.addAnonymousImport("air:deep_leaf", .{ .root_source_file = b.path("airs/deep_leaf.json") });
+    lib.addAnonymousImport("air:block_node_glue", .{ .root_source_file = b.path("airs/block_node_glue.json") });
+    lib.addAnonymousImport("air:block_leaf_sum", .{ .root_source_file = b.path("airs/block_leaf_sum.json") });
     lib.addAnonymousImport("air:seed_leaf", .{ .root_source_file = b.path("airs/seed_leaf.json") });
     lib.addAnonymousImport("air:block_leaf_checks", .{ .root_source_file = b.path("airs/block_leaf_checks.json") });
     lib.addAnonymousImport("air:oods_shift_leaf", .{ .root_source_file = b.path("airs/oods_shift_leaf.json") });
@@ -214,6 +216,19 @@ pub fn build(b: *std.Build) void {
         bl.linkLibC();
         const run = b.addRunArtifact(bl);
         if (b.args) |args| run.addArgs(args);
+        const demo = b.addExecutable(.{
+            .name = "blockrec",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/bin/blockrec.zig"),
+                .target = target,
+                .optimize = optimize,
+                .imports = &.{.{ .name = "starked_bitcoin", .module = lib }},
+            }),
+        });
+        demo.linkLibC();
+        const drun = b.addRunArtifact(demo);
+        if (b.args) |args| drun.addArgs(args);
+        b.step("blockrec", "BLOCK-REC: two block leaves and a node from epoch proofs").dependOn(&drun.step);
         b.step("blockleaf", "BLOCK-REC: measure a block proof verified in-circuit").dependOn(&run.step);
     }
     // `oracle`: VL-ORACLE, the native verifier as oracle for the in-circuit verifier (FRI included).
