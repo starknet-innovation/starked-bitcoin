@@ -44,8 +44,11 @@ Problems / lessons:
 - A replacement range in `store.zig` swallowed code (restored from git, redone narrowly); an export name
   `block_ctx` collided with the block context AIR's JSON (restored, renamed `block_leaf_ctx`).
 - Found while specifying: the previous-block MTP has no aggregator obligation (D-043 part 3).
-Next: owner review of D-043 (MTP option); epoch 0–170 through the forest (running); the exhaustive
-oracle run (running).
+- Epoch 0–170 through the recursion forest (5b23099): 5 trees, proved in 90 min (peak 17.7 GB), verified in
+  0.6 s after the chain, same set `7105b60f…`. Exhaustive VL-ORACLE (8934134): 46,068 sites, 0
+  disagreements. Full `zig build test` after the night's changes: 93/93 passed (29m50s, peak 13 GB).
+Next: owner review of D-043 (MTP option A or B); then the MTP, a shipped block VK, epoch 171–1000
+through the forest (~9 h on the laptop).
 
 ## 2026-10-11 (session 9) — VL-E2E: the plain verifier end to end
 Who: Claude (agent, Opus 5.5), on the owner's roadmap amendments (VL table, D-042)
