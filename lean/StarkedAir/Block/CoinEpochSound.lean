@@ -192,6 +192,63 @@ theorem coin_in_lex {j : ℕ} (hj : j < 2 ^ L) (hki : (inst 14).main Coin.KI j =
       (by push_cast; rw [hob']; ring) (by omega) (by omega)
     left; omega
 
+/-- **The block's claims.** A claim per (transaction, input) whose tuple is that input row's, earlier when
+small, with `ctx` below `P`. -/
+theorem block_claims (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
+    (hon : ∀ j < 2 ^ L, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
+    (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
+    {parts : List (List Spec.Block.Tok)} (hf : List.Forall₂ Spec.Block.IoTx S.b.txs parts)
+    (htg : Spec.Block.tagged 0 (Fields.toksFrom (inst 1).main (Rb inst pub) S.m 0) = Spec.Block.tagParts 0 parts)
+    {h : ℕ} (hp2 : pub 2 = (h : F)) (hh : h < 2 ^ 23) :
+    ∃ claim : ℕ → ℕ → Claim, ∀ (t : ℕ) (tx : Spec.Block.Tx), S.b.txs[t]? = some tx → 1 ≤ t →
+      ∀ (k : ℕ) (i : Spec.Block.TxIn), tx.vin[k]? = some i →
+        rowTuple inst pub L (((parts.take t).map List.length).sum + k) =
+          tupleOf (FpWalk.gQ pub) i.prevout.hash i.prevout.n (claim t k).code (claim t k).ser (claim t k).ctx ∧
+        ((claim t k).code < 2 ^ 26 → (claim t k).ctx < 2 ^ 25 →
+          ((claim t k).code / 2 < h ∨ ((claim t k).code / 2 = h ∧ (claim t k).ctx < t))) ∧ (claim t k).ctx < P := by
+  have cs := coin_sat hL hsat hL24
+  have key : ∀ t k, ∃ c : Claim, ∀ (tx : Spec.Block.Tx), S.b.txs[t]? = some tx → 1 ≤ t →
+      ∀ (i : Spec.Block.TxIn), tx.vin[k]? = some i →
+        rowTuple inst pub L (((parts.take t).map List.length).sum + k) =
+          tupleOf (FpWalk.gQ pub) i.prevout.hash i.prevout.n c.code c.ser c.ctx ∧
+        (c.code < 2 ^ 26 → c.ctx < 2 ^ 25 → (c.code / 2 < h ∨ (c.code / 2 = h ∧ c.ctx < t))) ∧ c.ctx < P := by
+    intro t k
+    by_cases hv : ∃ tx i, S.b.txs[t]? = some tx ∧ 1 ≤ t ∧ tx.vin[k]? = some i
+    · obtain ⟨tx, i, htx, ht1, hi⟩ := hv
+      obtain ⟨hpl, hpe⟩ := part_len hf htx
+      have hk : k < tx.vin.length := (List.getElem?_eq_some_iff.mp hi).1
+      set j := ((parts.take t).map List.length).sum + k with hjdef
+      have hj : j < e := by
+        have := pre_succ parts hpl
+        have := pre_mono parts (t := t + 1) (t' := parts.length) (by omega) le_rfl
+        have hft := fields_tagged hL hsat hL24 S
+        rw [htg] at hft
+        have he' : e = (parts.map List.length).sum := by rw [hlen, ← Spec.Block.tagParts_length 0, hft, List.length_map]
+        have htot : ((parts.take parts.length).map List.length).sum = (parts.map List.length).sum := by
+          rw [List.take_length]
+        omega
+      have hj2 : j < 2 ^ L := by omega
+      have hq : k < tx.vin.length + tx.vout.length := by omega
+      have hki := (coin_kind_pos hL hsat hL24 S he hon hlen hst hf htg hj htx hjdef hq).2.1.mpr ⟨hk, ht1⟩
+      obtain ⟨-, -, -, -, code, ser, ctx, htu, hcode, hctx, -⟩ :=
+        coin_in_tuple hL hsat hL24 S he hon hlen hst hf htg hj hki htx hjdef hq hi
+      obtain ⟨t0, q0, tx0, htx0, htxi, hjq0, hq0, -, -⟩ := coin_row_tx hL hsat hL24 S he hon hlen hst hf htg hj
+      obtain ⟨hpl0, hpe0⟩ := part_len hf htx0
+      obtain ⟨rfl, rfl⟩ := decomp_unique parts hpl hpl0 (by omega) (by omega) (hjdef.symm.trans hjq0)
+      refine ⟨⟨code, ser, ((inst 14).main Coin.CTX j).val⟩, fun tx' htx' _ i' hi' => ?_⟩
+      rw [htx] at htx'; obtain rfl := Option.some.inj htx'
+      rw [hi] at hi'; obtain rfl := Option.some.inj hi'
+      have hLb : 2 ^ L ≤ 2 ^ 23 := Nat.pow_le_pow_right (by norm_num) hL24
+      have htN : t < 2 ^ 23 := by have := (List.getElem?_eq_some_iff.mp htx).1; have := S.hN25; omega
+      refine ⟨?_, fun hc26 hc25 => coin_in_lex hL hsat hL24 hj2 hki hp2 hh htxi htN hcode hc26 hc25,
+        show ((inst 14).main Coin.CTX j).val < P from ZMod.val_lt _⟩
+      rw [htu]
+      unfold tupleOf
+      simp only [Coin.cast_val, hctx]
+    · exact ⟨default, fun tx htx ht1 i hi => absurd ⟨tx, i, htx, ht1, hi⟩ hv⟩
+  choose claim hclaim using key
+  exact ⟨claim, fun t tx htx ht1 k i hi => hclaim t k tx htx ht1 i hi⟩
+
 end System
 
 end StarkedAir.Block
