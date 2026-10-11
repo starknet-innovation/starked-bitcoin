@@ -11,6 +11,7 @@ import StarkedAir.Spec.CoinDecode
 namespace StarkedAir.Block
 
 open StarkedAir StarkedAir.Spec.CoinEpoch StarkedAir.Spec.Utxo
+open StarkedAir.Spec.QM31 (QM)
 
 theorem sumZ_zipIdx {α : Type} (g : ℕ → ℤ) : ∀ (l : List α) (c : ℕ),
     ((l.zipIdx c).map fun p => g p.2).sum = ∑ k ∈ Finset.range l.length, g (c + k)
@@ -593,6 +594,50 @@ theorem tx_claims_ok (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
     exact hm
   · rw [hclaim, ← hout']; exact_mod_cast hle
   · rw [hclaim, max_money_eq]; exact_mod_cast hmax
+
+/-- **One block's coin facts, for the epoch.** A block system at height `h` (lost-coinbase flag `lost`,
+weights `αᵏ`) has a claim function such that, for the block `⟨h, txs, lost, claim⟩` and any positions
+`N`: its public partial sum is its events' sum at `(α, z)`; each spend's claim passes the circuit's order
+check; and each non-coinbase transaction whose claims are real coins and whose outputs are within
+`MAX_MONEY` passes `ClaimsOK`. -/
+theorem block_facts (S : Setup inst pub L) {h : ℕ} (hp2 : pub 2 = (h : F)) (hh : h < 2 ^ 23) {lost : Bool}
+    (hlost : pub Coin.PUB_LOST = if lost then 1 else 0) {α : QM}
+    (hα : ∀ k < Coin.W, RunSum.pQ pub (Coin.PUB_ALPHA k) = α ^ k)
+    (hne : ∀ (t' : ℕ) (tx' : Spec.Block.Tx), S.b.txs[t']? = some tx' → tx'.vin ≠ [] ∧ tx'.vout ≠ []) :
+    ∃ claim : ℕ → ℕ → Claim,
+      (∀ N : ℕ → ℕ, RunSum.pQ pub Coin.PUB_S =
+        blockSum N (efrac N (FpWalk.gQ pub) α (RunSum.pQ pub Coin.PUB_Z)) ⟨h, S.b.txs, lost, claim⟩) ∧
+      (∀ (N : ℕ → ℕ) (t : ℕ) (tx : Spec.Block.Tx), S.b.txs[t]? = some tx →
+        ∀ ev ∈ txIns N ⟨h, S.b.txs, lost, claim⟩ t tx, ∃ c : Claim, ev = (ev.1, (c.code, c.ser), N (c.code / 2) + c.ctx) ∧
+          (c.code < 2 ^ 26 → c.ctx < 2 ^ 25 → (c.code / 2 < h ∨ (c.code / 2 = h ∧ c.ctx < t)))) ∧
+      (∀ (N : ℕ → ℕ) (t : ℕ) (tx : Spec.Block.Tx), S.b.txs[t]? = some tx → 1 ≤ t →
+        (∀ k < tx.vin.length, 8 ≤ (claim t k).ser.length ∧
+          Spec.Block.le ((claim t k).ser.take 8) ≤ Fields.MAXHI * 2 ^ 24 + Fields.MAXLO ∧ (claim t k).code < 2 ^ 30) →
+        Spec.Coins.outSum tx ≤ Spec.Block.MAX_MONEY →
+        Spec.Coins.ClaimsOK (txcOf N ⟨h, S.b.txs, lost, claim⟩ t tx)) := by
+  obtain ⟨e, he, hon, hlen, hst⟩ := coin_align hL hsat hL24 S
+  obtain ⟨parts, hf, htg⟩ := Spec.Block.io_toksBlock_tag S.htok
+  obtain ⟨claim, hcl⟩ := block_claims hL hsat hL24 S he hon hlen hst hf htg hp2 hh
+  refine ⟨claim, fun N => ?_, fun N t tx htx ev hev => ?_, fun N t tx htx ht1 hcv hout => ?_⟩
+  · have hs := block_event_sum hL hsat hL24 S he hon hlen hst hf htg hp2 hh hlost N claim
+      (fun t tx htx ht1 k i hi => (hcl t tx htx ht1 k i hi).1)
+    rw [hs]
+    unfold blockSum efrac
+    congr 1 <;> congr 1 <;> apply Multiset.map_congr rfl <;> intro ev _ <;>
+      rw [phiOf_poly pub α hα _ (by rw [encE_length]; rfl)]
+  · unfold txIns at hev
+    split_ifs at hev with ht0
+    · simp at hev
+    · obtain ⟨p, hp, rfl⟩ := List.mem_map.mp hev
+      have hk := List.mem_zipIdx' hp
+      have hi : tx.vin[p.2]? = some p.1 := by rw [hk.2]; exact List.getElem?_eq_getElem hk.1
+      obtain ⟨-, hlex, -⟩ := hcl t tx htx (by omega) p.2 p.1 hi
+      exact ⟨claim t p.2, rfl, hlex⟩
+  · exact tx_claims_ok hL hsat hL24 S he hon hlen hst hf htg hne hp2 hh N ⟨h, S.b.txs, lost, claim⟩ rfl htx ht1
+      (fun k hk => by
+        obtain ⟨i, hi⟩ : ∃ i, tx.vin[k]? = some i := ⟨_, List.getElem?_eq_getElem hk⟩
+        exact (hcl t tx htx ht1 k i hi).2.2.2)
+      hcv hout
 
 end System
 
