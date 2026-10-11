@@ -98,12 +98,17 @@ def linkOps (pl pr : ℕ → ℕ) (b : ℕ) : List Op :=
   (List.range 4).map (fun i => Op.add (b + 2 + i) (pl (SS + i)) (pr (SS + i))) ++
   [.add (b + 6) (pl NIN) (pr NIN)] ++ lt30 (b + 7) (pl LO) ++ lt30 (b + 16) (b + 1) ++ lt30 (b + 25) (b + 6)
 
+/-- The output summary's register for limb `i`. -/
+def outReg (pl pr : ℕ → ℕ) (b i : ℕ) : ℕ :=
+  if i = 0 then pl LO else if i = 1 then b + 1 else if i < 6 then b + i else if i = 6 then b + 6
+  else if i < 19 then pl i
+  else if i < 35 then (hrNode pl pr (b + 34)).res.getD (i - 19) 0
+  else (srNode pl pr (hrNode pl pr (b + 34)).next).res.getD (i - 35) 0
+
 def nodeOut (pl pr : ℕ → ℕ) (b : ℕ) : Out (List ℕ) :=
   let h := hrNode pl pr (b + 34)
   let r := srNode pl pr h.next
-  ⟨linkOps pl pr b ++ h.ops ++ r.ops,
-   [pl LO, b + 1] ++ (List.range 4).map (b + 2 + ·) ++ [b + 6] ++ (List.range 12).map (fun i => pl (CH + i)) ++
-     h.res ++ r.res, r.next⟩
+  ⟨linkOps pl pr b ++ h.ops ++ r.ops, (List.range NSUM).map (outReg pl pr b), r.next⟩
 
 variable {ρ : ℕ → Q}
 

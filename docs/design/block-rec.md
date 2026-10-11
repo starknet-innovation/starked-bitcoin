@@ -154,7 +154,14 @@ estimated: per-leaf cost is seconds, not the header leaf's 31 s.
   natively, the node's digest equal to the native `joinSummary`; peak RSS 15.1 GB; proofs 981 KB.
 - **Still to build:** the outer verifier (the aligned forest of root summaries against the seed v3,
   the challenge, the final set's balance and the chain's `T`), the epoch driver over all blocks, the
-  MTP (D-043 part 3), the Lean link `sumOk_node` / `sumOk_leaf`.
+  MTP (D-043 part 3).
+- **Lean, the tree's semantics** (`Circuit/BlockTree.lean`, standard axioms): `SumOk v` (the 51 limbs
+  describe a proven range of `2^ℓ` blocks whose hash and seed roots are the perfect trees over its
+  blocks' hashes and seed leaves); `sumOk_leaf` (a proven block whose leaf checks hold, with 16-bit
+  hash limbs, has a proven summary), `sumOk_node` (the node glue's facts, `node_sound`, take two proven
+  children to a proven output), `epoch_hyps_of_sum` (a proven root summary gives `epoch_systems_core`'s
+  block hypotheses with its partial sum). Trusted wiring: the Zig assembly of the leaf summary from
+  the block's public inputs (`block_rec.zig` `buildLeafCircuit`), as for the header leaf.
 
 ## Following the tip
 
