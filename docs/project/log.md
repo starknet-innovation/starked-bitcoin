@@ -44,8 +44,16 @@ Problems / lessons:
 - For any challenge-based argument, list every value behind a tuple and check it is fixed before the
   challenge; "the trace is committed" is not enough when the challenge is drawn before the trace.
 - All epoch proofs made before D-041 are stale (seed tag v2, undo stream format).
-Next: compile the epoch sum (`epoch_sums`, `epoch_frac_zero`, `epoch_balance`), then `epoch_run` and the
-Coin-level `connect_of_run`; re-prove epochs 0–170 and 171–1000.
+- Later in the session: the epoch sum and balance (`epoch_balance`), the run (`epoch_coin_run`), the
+  bridge to Core's coins (`run_map`, `decSer_ser`, `epoch_connect`), the per-transaction amounts and
+  `ClaimsOK` (`Block/CoinClaims.lean`), and **`epoch_core`** (standard axioms).
+- **Second D-041 gap, found while assembling the epoch and fixed:** URec's record lengths were free
+  (records only had to tile the stream), so the claims' boundaries were a trace choice; records now
+  commit a 2-byte length (`code ‖ index ‖ length ‖ serTxOut`), URec constrains `TL` to it. Large-block
+  test passes after both AIR changes (21m45s); epochs 0–170 and 171–1000 re-proved under the first fix
+  (same `hash_serialized` values) and being re-proved under the second.
+Next: the wrapper instantiating `block_facts` over an epoch's block systems, and the remaining
+hypotheses from `block_sound` (see utxo.md, layer 5, Open).
 
 ## 2026-10-10 (session 7) — VERIFIER-LEAN steps 4–5 done; M3b proofs; an amount-check soundness bug fixed
 Who: Claude (agent, Opus 5.5), on the owner's "proceed with step 5 (channel and Merkle proven, FRI

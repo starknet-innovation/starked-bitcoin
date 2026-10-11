@@ -268,11 +268,20 @@ Layers (Lean):
    - to Core: a run maps through any value map (`run_map`); `serTxOut` decodes to its output
      (`decSer_ser`); the decoded events are Core's `TxC` events (`tmap_txEvents`, `allTxs_map`); so the
      epoch connects as Core does, given each transaction's `ClaimsOK` (`epoch_connect`).
-   Open: `ClaimsOK` from the circuit's amounts and maturity (system level: each transaction's input
-   and output rows, `in_nat`/`out_nat`/`tend_nat`, the claims' amount bytes); the assembly over the
-   epoch's block systems (positions, bounds, well-formed events, the lost flag, output amounts);
-   distinct created outpoints (txid uniqueness, an assumption); `block_sound`'s no-repeated-prevout
-   hypothesis from the run (D-031).
+   - the circuit's amounts per transaction (`Block/CoinClaims.lean`): an output row's amount is its
+     output's value (`out_amount`), an input row's its claim's (`in_amount`), claims are mature
+     (`in_maturity`); a transaction's rows (`tx_rows`), input and output sums (`in_sums`, `out_sums`),
+     outputs at most inputs within `MAX_MONEY` (`tx_amounts`), hence `ClaimsOK` (`tx_claims_ok`), and one
+     block's facts for the epoch (`block_facts`);
+   - **`epoch_core`** (`Block/CoinEpochCore.lean`): from the blocks' facts, a balanced epoch sum
+     (outside the fingerprint and LogUp bad sets) means Core's connect of the epoch's transactions from
+     the initial view succeeds and ends at exactly the final set. Claims need not be assumed real: the
+     balance makes each an initial or created coin (`created_real`).
+   Open: the wrapper instantiating `block_facts` for an epoch's block systems (the blocks' public
+   partial sums, heights and positions); the remaining hypotheses from M3a's `block_sound` and the
+   verifier's public checks (nonempty inputs and outputs, output amounts and totals within
+   `MAX_MONEY`, the lost-coinbase flag, events well formed); distinct created outpoints (txid
+   uniqueness, an assumption); `block_sound`'s no-repeated-prevout hypothesis from the run (D-031).
 
 ## Recommendation (D-040, proposed)
 
