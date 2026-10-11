@@ -38,20 +38,27 @@ after block N from genesis. Measured: blocks 0–170 proved in 209 s (production
 verifies to a 171-coin set of 850,000,000,000 sat; a tampered set is rejected.
 
 Proven in Lean (standard axioms):
-- **Spec:** `run_of_balance`, `epoch_sound`, `connect_of_run` (Core's coins view), QM31 is a field;
+- **Spec:** `run_of_balance`, `epoch_sound`, `connect_of_run` (Core's coins view), QM31 is a finite field;
 - **Components:** `extsum_sound`, `seg_sound`, `rows_sound` (undo records);
 - **System:** `block_sound`, `commit_sound`, `hash_pub` still hold for the 15-component system
-  (`L ≤ 23`).
+  (`L ≤ 23`, 216 lookup sites per row);
+- **The coin component, end to end (2026-10-11):** `epoch_systems_core`: block systems at consecutive
+  heights sharing the epoch's challenge, with a balanced public sum (outside the fingerprint and LogUp
+  bad sets), connect as Core does from the initial view and end at exactly the final set; every block
+  then passes Core's block checks (`epoch_block_valid`, D-031 from the run). Plan and lemma map in
+  utxo.md, "The coin proof".
+
+**Soundness fixes from the coin proof:** amount comparators could wrap mod P (2026-10-10); and D-041
+(2026-10-11): the final set, the initial set's indices, each input's claimed creating transaction and the
+undo records' boundaries were all chosen after the epoch challenge. Now the seed binds both sets'
+encodings and the undo records commit their index and length. Epochs 0–170 and 171–1000 re-prove and
+verify under the new protocol (same `hash_serialized`).
 
 Not yet:
-1. Lean soundness of the coin component and its system links, which connects the AIR to
-   `connect_of_run`. Done: the row-level facts and the running sum (`CoinSound.lean`). The proof found
-   a soundness bug in the amount comparators (fixed 2026-10-10, see log). Open: the amounts at the
-   natural-number level, the lookups' links, the step to `connect_of_run`. Epoch proofs made before the
-   fix are stale.
-2. ~~The fingerprint's Schwartz–Zippel step~~ (done 2026-10-10: `epoch_sound_fp`,
-   `Spec/UtxoFingerprint.lean`). What remains is linking `Separates` and `hdet` to the coin
-   component's actual encoding (item 1).
+1. The coin theorem's remaining hypotheses: events well formed (`WFE`: a parse property), distinct
+   created outpoints (txid uniqueness, an assumption), and, in Lean, that the events are functions of
+   the committed data (D-041; the bad-set reading needs it, and the circuit now enforces it).
+2. ~~The fingerprint's Schwartz–Zippel step~~ (done 2026-10-10).
 3. The final sorted pass as a proof (`HASH_SERIALIZED` in-circuit). For now the verifier computes
    the final set's fractions and hash natively from an explicit, sorted coin list. Fine at height
    1,000; at a snapshot height that list is ~13 GB. Deprioritized (2026-10-11): a node using
