@@ -277,11 +277,19 @@ Layers (Lean):
      (outside the fingerprint and LogUp bad sets) means Core's connect of the epoch's transactions from
      the initial view succeeds and ends at exactly the final set. Claims need not be assumed real: the
      balance makes each an initial or created coin (`created_real`).
-   Open: the wrapper instantiating `block_facts` for an epoch's block systems (the blocks' public
-   partial sums, heights and positions); the remaining hypotheses from M3a's `block_sound` and the
-   verifier's public checks (nonempty inputs and outputs, output amounts and totals within
-   `MAX_MONEY`, the lost-coinbase flag, events well formed); distinct created outpoints (txid
-   uniqueness, an assumption); `block_sound`'s no-repeated-prevout hypothesis from the run (D-031).
+   - **`epoch_systems_core`** (the top-level statement, standard axioms): block systems at heights
+     `h0 + i` sharing the epoch's challenge, with Core's lost-coinbase flags, give the epoch's blocks
+     (`epoch_blocks`, their transactions the systems' parsed blocks, nonempty with amounts in range by
+     `txs_basic`); outside the fingerprint and LogUp bad sets, a balanced sum (the public partial sums
+     plus the initial set's fractions equal the final set's) means Core's connect of the epoch from the
+     initial view succeeds and ends at exactly the final set.
+   Remaining hypotheses of `epoch_systems_core`: positions `N` (each height's first transaction's global
+   index), an initial set of real coins created before the epoch, events well formed (`WFE`, their
+   bytes in the separated set), distinct created outpoints (txid uniqueness, an assumption), and fewer
+   than `P` events (the verifier's bound). Also open: in Lean, that the events are functions of the
+   committed data (D-041; `ClaimAt` and `tl_bytes` pin each claim to the undo bytes, the record
+   positions follow from `rows_sound`), which the bad-set reading needs; `block_sound`'s
+   no-repeated-prevout hypothesis from the run (D-031).
 
 ## Recommendation (D-040, proposed)
 
