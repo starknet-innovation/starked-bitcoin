@@ -117,6 +117,7 @@ pub fn build(b: *std.Build) void {
     lib.addAnonymousImport("air:transcript_plain", .{ .root_source_file = b.path("airs/transcript_plain.json") });
     lib.addAnonymousImport("air:merkle_node", .{ .root_source_file = b.path("airs/merkle_node.json") });
     lib.addAnonymousImport("air:deep_leaf", .{ .root_source_file = b.path("airs/deep_leaf.json") });
+    lib.addAnonymousImport("air:block_leaf_ctx", .{ .root_source_file = b.path("airs/block_leaf_ctx.json") });
     lib.addAnonymousImport("air:block_node_glue", .{ .root_source_file = b.path("airs/block_node_glue.json") });
     lib.addAnonymousImport("air:block_leaf_sum", .{ .root_source_file = b.path("airs/block_leaf_sum.json") });
     lib.addAnonymousImport("air:seed_leaf", .{ .root_source_file = b.path("airs/seed_leaf.json") });

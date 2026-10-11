@@ -152,6 +152,14 @@ estimated: per-leaf cost is seconds, not the header leaf's 31 s.
 - **Measured** (`zig build blockrec -- data/epoch 0`, M4 Pro CPU): blocks 0 and 1 of the v3 epoch as two
   leaves (15.5 s each, padded to the shared shape) and one node (15.9 s); every proof verified
   natively, the node's digest equal to the native `joinSummary`; peak RSS 15.1 GB; proofs 981 KB.
+- **Height-derived context in the leaf** (D-043 part 4, `Circuit/BlockCtx.lean`, `ctx_sound`, standard
+  axioms): the BIP34/CSV/segwit flags (`f·(H − c) + (1 − f)·(c − 1 − H) < 2^30`) and the subsidy's limbs
+  (`H = 210000·q + r`, a one-hot over 64 halvings selecting a Lean-computed table) are the height's;
+  replayed in the block leaf (`airs/block_leaf_ctx.json`; tested at activation and halving boundaries,
+  tampered flags and subsidy rejected). New hints `div`, `mod` (glue). Blocks 0–1 demo re-run with it:
+  leaves 17 s each, node 24 s, peak 16.1 GB.
+- **Epochs under seed v3:** 0–170 and 171–1000 re-proved and verified (171 coins `7105b60f…`, 998 coins
+  `29a42ec2…`, unchanged).
 - **Still to build:** the outer verifier (the aligned forest of root summaries against the seed v3,
   the challenge, the final set's balance and the chain's `T`), the epoch driver over all blocks, the
   MTP (D-043 part 3).

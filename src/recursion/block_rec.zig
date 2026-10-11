@@ -103,6 +103,7 @@ pub fn buildLeafCircuit(gpa: std.mem.Allocator, values: *const pv.PlainProof(QM3
     const st = pv.PlainStatement{ .parts = &parts, .preprocessed_root = pre_root };
     try pv.verifyPlain(QM31, &ctx, &g, config, &st);
     try bl.leafChecks(&ctx, &pub_vars);
+    try bl.leafCtx(&ctx, &pub_vars);
     const seed = try bl.seedLeafVars(&ctx, &pub_vars);
     const sum_prog = try glue.parse(ctx.scratch(), @embedFile("air:block_leaf_sum"));
     const one = (try glue.run(QM31, &ctx, &sum_prog, &.{}, InputHooks{ .inputs = &.{ pub_vars[2], pub_vars[coin.PUB_NIN] } }))[0];

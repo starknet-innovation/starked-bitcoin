@@ -84,6 +84,10 @@ inductive Hint where
   | lsb (h : Hint)
   /-- Each coordinate's inverse, or 0 (`pointwise_inv_or_zero`). -/
   | invOrZero (h : Hint)
+  /-- The base coordinate divided by `d`, floor (`(x / d, 0, 0, 0)`). -/
+  | divC (h : Hint) (d : ℕ)
+  /-- The base coordinate modulo `d`. -/
+  | modC (h : Hint) (d : ℕ)
 
 /-- One op. Registers are naturals; `o` is the defined register. -/
 inductive Op where
@@ -150,6 +154,8 @@ def Hint.toJson : Hint → String
   | .isEq h k => s!"\{\"is_eq\":[{h.toJson},{k}]}"
   | .lsb h => s!"\{\"lsb\":{h.toJson}}"
   | .invOrZero h => s!"\{\"inv_or_zero\":{h.toJson}}"
+  | .divC h d => s!"\{\"div\":[{h.toJson},{d}]}"
+  | .modC h d => s!"\{\"mod\":[{h.toJson},{d}]}"
 
 def Op.toJson : Op → String
   | .const o a b c d => s!"[\"const\",{o},{a},{b},{c},{d}]"

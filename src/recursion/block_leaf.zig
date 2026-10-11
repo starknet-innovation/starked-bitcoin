@@ -119,6 +119,43 @@ pub fn seedLeafVars(ctx: *Context(QM31), pub_vars: []const Var) ![16]Var {
     return out;
 }
 
+/// The leaf's height-derived context (`Circuit/BlockCtx.lean`, `ctx_sound`): the BIP34, CSV and segwit
+/// flags (inputs 4–6) and the subsidy's limbs (159–160) are the height's. Hook 0 binds them, height first.
+pub fn leafCtx(ctx: *Context(QM31), pub_vars: []const Var) !void {
+    const prog = try glue.parse(ctx.scratch(), @embedFile("air:block_leaf_ctx"));
+    const ins = [6]Var{ pub_vars[2], pub_vars[4], pub_vars[5], pub_vars[6], pub_vars[coin.PUB_SUBL], pub_vars[coin.PUB_SUBH] };
+    const Hooks = struct {
+        inputs: []const Var,
+        pub fn call(self: @This(), id: u32, _: []const Var) ![]const Var {
+            return if (id == 0) self.inputs else error.UnknownHook;
+        }
+    };
+    _ = try glue.run(QM31, ctx, &prog, &.{}, Hooks{ .inputs = &ins });
+}
+
+test "block leaf context: the height's flags and subsidy pass, a wrong one fails" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    for ([_]u32{ 0, 170, 227930, 227931, 419328, 481824, 629999, 630000, 840000, 8000000 }) |height| for (0..4) |tamper| {
+        var pubs: [bs.N_PUB]M31 = @splat(M31.zero());
+        const want = checks.pubs(&.{}, 0, .{ .height = height, .prev_mtp = 0 });
+        @memcpy(pubs[0..8], &want);
+        const sub = coin.subsidy(height);
+        pubs[coin.PUB_SUBL] = M31.fromCanonical(@intCast(sub & 0xffffff));
+        pubs[coin.PUB_SUBH] = M31.fromCanonical(@intCast(sub >> 24));
+        if (tamper == 1) pubs[4] = M31.one().sub(pubs[4]);
+        if (tamper == 2) pubs[6] = M31.one().sub(pubs[6]);
+        if (tamper == 3) pubs[coin.PUB_SUBL] = pubs[coin.PUB_SUBL].add(M31.one());
+        var ctx = try Context(QM31).init(a, 0);
+        defer ctx.deinit();
+        const vars = try a.alloc(Var, bs.N_PUB);
+        for (vars, pubs) |*v, x| v.* = try ctx.guessM31(QM31.fromBase(x));
+        try leafCtx(&ctx, vars);
+        try std.testing.expectEqual(tamper == 0, try ctx.isCircuitValid());
+    };
+}
+
 test "block seed leaf: the circuit's limbs are the native epoch.seedLeaf's" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

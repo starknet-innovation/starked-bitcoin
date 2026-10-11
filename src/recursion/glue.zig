@@ -23,6 +23,8 @@ const Hint = union(enum) {
     is_eq: struct { h: *const Hint, k: u32 },
     lsb: *const Hint,
     inv_or_zero: *const Hint,
+    div: struct { h: *const Hint, d: u32 },
+    mod: struct { h: *const Hint, d: u32 },
 };
 
 const Op = union(enum) {
@@ -89,6 +91,16 @@ fn parseHint(a: std.mem.Allocator, v: std.json.Value) !Hint {
         const h = try a.create(Hint);
         h.* = try parseHint(a, x);
         return .{ .lsb = h };
+    }
+    if (obj.get("div")) |x| {
+        const h = try a.create(Hint);
+        h.* = try parseHint(a, x.array.items[0]);
+        return .{ .div = .{ .h = h, .d = try num(x.array.items[1]) } };
+    }
+    if (obj.get("mod")) |x| {
+        const h = try a.create(Hint);
+        h.* = try parseHint(a, x.array.items[0]);
+        return .{ .mod = .{ .h = h, .d = try num(x.array.items[1]) } };
     }
     if (obj.get("inv_or_zero")) |x| {
         const h = try a.create(Hint);
@@ -223,6 +235,8 @@ fn hintValue(comptime V: type, ctx: anytype, rr: anytype, ext: []const V, h: *co
         .is_eq => |e| QM31.fromBase(M31.fromCanonical(if (builder.ivalue.limbs(try hintValue(V, ctx, rr, ext, e.h))[0] == e.k) 1 else 0)),
         .lsb => |x| builder.ivalue.pointwiseLsb(V, try hintValue(V, ctx, rr, ext, x)),
         .inv_or_zero => |x| builder.ivalue.pointwiseInvOrZero(V, try hintValue(V, ctx, rr, ext, x)),
+        .div => |x| QM31.fromBase(M31.fromCanonical(builder.ivalue.limbs(try hintValue(V, ctx, rr, ext, x.h))[0] / x.d)),
+        .mod => |x| QM31.fromBase(M31.fromCanonical(builder.ivalue.limbs(try hintValue(V, ctx, rr, ext, x.h))[0] % x.d)),
     };
 }
 
