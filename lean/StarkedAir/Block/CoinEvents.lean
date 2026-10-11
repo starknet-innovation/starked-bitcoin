@@ -394,6 +394,88 @@ theorem coin_in_tuple (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
   · rw [hclo, hchi, hcb 0 (by norm_num), hcb 1 (by norm_num), hcb 2 (by norm_num), hcb 3 (by norm_num), hcodev]
     simp only [hubdef]; push_cast; ring
 
+/-- **Unspendable, as Core decides it.** For an output row whose script `s` has length `SVAL` and first
+byte `SB` (when nonempty), `UNSP` is Boolean and is 1 exactly when `s` starts with `OP_RETURN` or is over
+10,000 bytes (`Spec.Coins.unspendable`). -/
+theorem coin_unsp {j : ℕ} (hj : j < 2 ^ L) (hko : (inst 14).main Coin.KO j = 1) (s : Spec.Block.Bytes)
+    (hsl : ((inst 14).main Coin.SVAL j).val = s.length) (hsb : ∀ b ∈ s.head?, ((inst 14).main Coin.SB j).val = b.toNat)
+    (hsmall : s.length < 2 ^ 20) :
+    ((inst 14).main Coin.UNSP j = 1 ↔ (s.head? == some 0x6a || decide (10000 < s.length)) = true) ∧
+      ((inst 14).main Coin.UNSP j = 0 ∨ (inst 14).main Coin.UNSP j = 1) := by
+  have cs := coin_sat hL hsat hL24
+  obtain ⟨hzs, hu6a, hbig1, hbig0, hunsp⟩ := Coin.unsp_spec cs hj hko
+  have bzs := Coin.bool_col cs (c := Coin.ZS) (by simp) hj
+  have bu6 := Coin.bool_col cs (c := Coin.U6A) (by simp) hj
+  have bbig := Coin.bool_col cs (c := Coin.BIG) (by simp) hj
+  have ek : (Coin.k Coin.KO).eval (2 ^ L) Coin.preCols pub (inst 14).main j = 1 := by rw [Coin.ev_k hj]; exact hko
+  have hgb : ∀ i < 3, ((inst 14).main (Coin.GB i) j).val < 256 := by
+    intro i hi
+    have fam : Coin.lookups.getD (61 + i) ⟨0, .const 0, []⟩ = Coin.r8 (Coin.k (Coin.GB i)) (Coin.k Coin.KO) := by
+      interval_cases i <;> rfl
+    exact coin_r8 hL hsat hL24 (k := 61 + i) (by omega) (by omega) fam hj ek
+  have hgbn := Coin.b3N_lt hgb
+  have hP := Coin.P_big
+  -- the script length's facts
+  have hsv : (inst 14).main Coin.SVAL j = ((s.length : ℕ) : F) := by rw [← hsl, Coin.cast_val]
+  have hzsv : (inst 14).main Coin.ZS j = 1 ↔ s = [] := by
+    rw [hzs, hsv]
+    constructor
+    · intro h; have := Coin.lift (a := s.length) (b := 0) (by simpa using h) (by omega) (by omega)
+      exact List.length_eq_zero_iff.mp this
+    · intro h; simp [h]
+  have hbig : (inst 14).main Coin.BIG j = 1 ↔ 10000 < s.length := by
+    constructor
+    · intro h
+      have e := hbig1 h
+      rw [Coin.b3V_eq, hsv] at e
+      have := Coin.lift (a := Coin.b3N (inst 14).main Coin.GB j + 10001) (b := s.length) (by push_cast; rw [e]; ring)
+        (by omega) (by omega)
+      omega
+    · intro h
+      rcases bbig with b | b
+      · exfalso
+        have e := hbig0 b
+        rw [Coin.b3V_eq, hsv] at e
+        have := Coin.lift (a := Coin.b3N (inst 14).main Coin.GB j + s.length) (b := 10000) (by push_cast; rw [e]; ring)
+          (by omega) (by omega)
+        omega
+      · exact b
+  have hhead : (s.head? == some 0x6a) = true ↔ s ≠ [] ∧ (inst 14).main Coin.SB j = 0x6a := by
+    cases s with
+    | nil => simp
+    | cons b s' =>
+      have hb := hsb b (by simp)
+      simp only [List.head?_cons, ne_eq, reduceCtorEq, not_false_eq_true, true_and]
+      constructor
+      · intro h
+        have hb6 : b = 0x6a := by simpa using h
+        rw [← Coin.cast_val ((inst 14).main Coin.SB j), hb, hb6]; rfl
+      · intro h
+        have : b.toNat = 106 := by
+          rw [← hb, h]; rfl
+        have hb6 : b = 0x6a := UInt8.toNat_inj.mp (by simpa using this)
+        simp [hb6]
+  have key : ∀ z u g : F, (z = 0 ∨ z = 1) → (u = 0 ∨ u = 1) → (g = 0 ∨ g = 1) →
+      ((u * (1 - z) + g - u * (1 - z) * g = 1 ↔ (u = 1 ∧ z = 0) ∨ g = 1) ∧
+        (u * (1 - z) + g - u * (1 - z) * g = 0 ∨ u * (1 - z) + g - u * (1 - z) * g = 1)) := by
+    intro z u g hz hu hg
+    rcases hz with rfl | rfl <;> rcases hu with rfl | rfl <;> rcases hg with rfl | rfl <;> decide
+  obtain ⟨k1, k2⟩ := key _ _ _ bzs bu6 bbig
+  rw [hunsp]
+  refine ⟨?_, k2⟩
+  rw [k1, Bool.or_eq_true, hhead, decide_eq_true_eq, ← hbig, hu6a]
+  constructor
+  · rintro (⟨h1, h2⟩ | h)
+    · left; exact ⟨fun e => by rw [(hzsv.mpr e)] at h2; exact one_ne_zero h2, h1⟩
+    · right; exact h
+  · rintro (⟨h1, h2⟩ | h)
+    · left
+      refine ⟨h2, ?_⟩
+      rcases bzs with z | z
+      · exact z
+      · exact absurd (hzsv.mp z) h1
+    · right; exact h
+
 end System
 
 end StarkedAir.Block
