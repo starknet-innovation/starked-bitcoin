@@ -21,6 +21,32 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-10-11/12 (session 10) — VL-ORACLE; BLOCK-REC built end to end at small scale
+Who: Claude (agent, Opus 5.5), overnight on the owner's "keep going until 9am"
+Roadmap: VL-ORACLE done; BLOCK-REC in progress; D-043 proposed
+Done:
+- VL-ORACLE (`zig build oracle`, acd5641): native-proof mutations, the native verifier and the circuit
+  agree (0 disagreements). One apparent disagreement (the preprocessed root) was the circuit pinning
+  that root as a statement constant; reclassified. An executable, not a test: stwo-zig logs an error
+  on every native rejection, which fails Zig tests.
+- BLOCK-REC: block leaf measured (aeb6f8b: 8.27 M variables, proved in 5.2 s, 858 KB); D-043 proposed
+  (seed tree-shaped, hash binding per aligned subtree, MTP in the block proof, context in the leaf);
+  Lean `rng_leaf`/`rng_node`/`epoch_hyps_of_rng` (83f2c35); leaf checks `checks_sound` (24a3743); seed
+  v3 and the seed leaf (305d8c6); block leaf and node circuits, blocks 0–1 demo (d3d9f4c); `SumOk`,
+  `sumOk_node`, `sumOk_leaf` (507d7c2); context `ctx_sound` (072b280); the epoch forest and its outer
+  verifier (95f565d); `rng_forest`.
+- Epochs 0–170 and 171–1000 re-proved and verified under seed v3 (sets unchanged).
+Evidence:
+- `lake build` 8859 jobs; `#print axioms` standard for every new theorem.
+- Tests: leaf checks, seed leaf vs native, context at boundaries with tampers, `blockrec` demo (node
+  digest = native join), epoch 0–3 through the forest verified, three tampers rejected.
+Problems / lessons:
+- A replacement range in `store.zig` swallowed code (restored from git, redone narrowly); an export name
+  `block_ctx` collided with the block context AIR's JSON (restored, renamed `block_leaf_ctx`).
+- Found while specifying: the previous-block MTP has no aggregator obligation (D-043 part 3).
+Next: owner review of D-043 (MTP option); epoch 0–170 through the forest (running); the exhaustive
+oracle run (running).
+
 ## 2026-10-11 (session 9) — VL-E2E: the plain verifier end to end
 Who: Claude (agent, Opus 5.5), on the owner's roadmap amendments (VL table, D-042)
 Roadmap: VL-E2E, VL-POW, VL-OODS done

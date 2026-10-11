@@ -172,7 +172,9 @@ estimated: per-leaf cost is seconds, not the header leaf's 31 s.
   `ChallengeMismatch`).
 - **Still to build:** the MTP (D-043 part 3, needs the owner's choice); a persisted, pinned block VK
   shipped like the chain VK (today `blockvk.bin` is written by the prover's setup); the Lean statement
-  of the outer verifier (the forest checks above, against `SumOk`).
+  of the outer verifier's composition is `rng_forest` (BlockTree.lean: linked proven ranges with one
+  challenge join into one proven range); the link from the Zig verifier's checks to its hypotheses is
+  by inspection, as for the header chain's root verifier.
 - **Lean, the tree's semantics** (`Circuit/BlockTree.lean`, standard axioms): `SumOk v` (the 51 limbs
   describe a proven range of `2^ℓ` blocks whose hash and seed roots are the perfect trees over its
   blocks' hashes and seed leaves); `sumOk_leaf` (a proven block whose leaf checks hold, with 16-bit

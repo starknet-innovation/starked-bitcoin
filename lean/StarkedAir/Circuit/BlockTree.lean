@@ -316,4 +316,37 @@ theorem epoch_hyps_of_sum {v : ℕ → F} (h : SumOk v) : ∃ ℓ, (v 1).val = 2
   obtain ⟨ℓ, hn, hr⟩ := h.rng
   exact ⟨ℓ, hn, epoch_hyps_of_rng hr (by show 0 < 2 ^ ℓ; positivity)⟩
 
+/-! ### The forest (the outer verifier) -/
+
+/-- Each range starts where the previous one ends. -/
+def Linked : Rng → List Rng → Prop
+  | _, [] => True
+  | l, r :: rs => r.lo = l.lo + l.n ∧ Linked r rs
+
+theorem linked_join {l r : Rng} {rs : List Rng} (hl : r.lo = l.lo + l.n) (h : Linked r rs) : Linked (joinRng l r) rs := by
+  cases rs with
+  | nil => trivial
+  | cons r' rs' =>
+    obtain ⟨h1, h2⟩ := h
+    exact ⟨by simp only [joinRng]; rw [h1, hl]; ring, h2⟩
+
+/-- **The forest.** A list of proven ranges, each starting where the previous one ends, with one
+challenge, joins into one proven range (`rng_node` folded from the left). -/
+theorem rng_forest : ∀ (rs : List Rng) (r0 : Rng), RngOk r0 → (∀ r ∈ rs, RngOk r) → Linked r0 rs →
+    (∀ r ∈ rs, r.γ = r0.γ ∧ r.z = r0.z ∧ r.α = r0.α) →
+    RngOk ⟨r0.lo, r0.n + (rs.map (·.n)).sum, r0.s + (rs.map (·.s)).sum, r0.nin + (rs.map (·.nin)).sum, r0.γ, r0.z, r0.α⟩
+  | [], r0, h0, _, _, _ => by simpa using h0
+  | r :: rs, r0, h0, hrs, hch, hcg => by
+    obtain ⟨hlink, htail⟩ := hch
+    obtain ⟨g, z, a⟩ := hcg r List.mem_cons_self
+    have hj := rng_node h0 (hrs r List.mem_cons_self) hlink g z a
+    have := rng_forest rs (joinRng r0 r) hj (fun x hx => hrs x (List.mem_cons_of_mem _ hx)) (linked_join hlink htail)
+      (fun x hx => hcg x (List.mem_cons_of_mem _ hx))
+    simp only [joinRng, List.map_cons, List.sum_cons] at this ⊢
+    have e1 : r0.n + r.n + (rs.map (·.n)).sum = r0.n + (r.n + (rs.map (·.n)).sum) := by ring
+    have e2 : r0.s + r.s + (rs.map (·.s)).sum = r0.s + (r.s + (rs.map (·.s)).sum) := by ring
+    have e3 : r0.nin + r.nin + (rs.map (·.nin)).sum = r0.nin + (r.nin + (rs.map (·.nin)).sum) := by ring
+    rw [e1, e2, e3] at this
+    exact this
+
 end StarkedAir.Circuit.BlockTree

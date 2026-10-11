@@ -4,7 +4,7 @@ Rewritten at the end of every session; see [README.md](README.md#ending-a-sessio
 If `HEAD at last update` doesn't match `git log -1`, this file is stale:
 follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work).
 
-- **Updated:** 2026-10-11 (VL-E2E, VL-POW, VL-OODS done)
+- **Updated:** 2026-10-12, overnight (VL table done but FRI/NODE decisions; BLOCK-REC built end to end at small scale)
 - **HEAD at last update:** see `git log -1` (this file is committed with the work)
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
 - **Current item:** BLOCK-AIR complete: M3a.5 (`block_sound`) and M3a.6 (`commit_sound`) done and
@@ -73,8 +73,16 @@ Not yet:
 
 **Also scheduled (owner, 2026-10-11):** the remaining VERIFIER-LEAN work, as the
 [VL table in the roadmap](roadmap.md#vl-the-in-circuit-plain-verifier-proven-verifier-lean):
-VL-E2E, VL-POW and VL-OODS are **done** (2026-10-11: `plain_sound`, `plain_leaf_valid`,
-`powCheck_sound`, `shift_sound`); next VL-ORACLE. VL-FRI and VL-NODE are trust-boundary decisions waiting on the owner. And **D-042** (owner): the hybrid UTXO tip tree is
+VL-E2E, VL-POW, VL-OODS and VL-ORACLE are **done** (2026-10-11: `plain_sound`, `plain_leaf_valid`,
+`powCheck_sound`, `shift_sound`, `zig build oracle`).
+
+**BLOCK-REC (2026-10-12, overnight):** the block-proof aggregation runs end to end at small scale — block
+leaves (the plain verifier over the 15-component block system, 8.3 M variables, 5 s to prove), block
+nodes, an epoch as a forest of trees over the seed v3 decomposition, and an outer verifier
+(`chainproof prove-epoch-tree` / `verify-epoch-tree`; epoch 0–3 verified, tampers rejected; 0–170 in
+progress). Lean: `SumOk`, `sumOk_leaf`, `sumOk_node`, `rng_forest`, the leaf's checks and context. Needs
+the owner: **D-043** (proposed) — the seed v3 is implemented (forced by recursion), the previous-block
+MTP (part 3) is not bound until the owner picks option A or B. VL-FRI and VL-NODE are trust-boundary decisions waiting on the owner. And **D-042** (owner): the hybrid UTXO tip tree is
 scheduled as `UTXO-TREE`, the aggregator as `BLOCK-REC` — design in
 [block-rec.md](../design/block-rec.md); freeze the block-proof interface before CATCHUP.
 
