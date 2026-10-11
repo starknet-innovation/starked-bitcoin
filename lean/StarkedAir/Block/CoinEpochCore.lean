@@ -10,6 +10,7 @@ and those are real (`created_real`), so each transaction's `ClaimsOK` follows fr
 -/
 import StarkedAir.Block.CoinClaims
 import StarkedAir.Block.BlockTxs
+import StarkedAir.Block.BlockSound
 
 namespace StarkedAir.Block
 
@@ -133,9 +134,11 @@ theorem epoch_core (N : ℕ → ℕ) (γ : QM) (blocks : List BlockC) (g0 : ℕ)
           fin.length < P →
         (blocks.map (blockSum N (efrac N γ az.1 az.2))).sum + (init.map (efrac N γ az.1 az.2)).sum =
           (fin.map (efrac N γ az.1 az.2)).sum →
-        ∃ m, Spec.Coins.connectTxs (Spec.Coins.untag (vmap coinOfVal (viewOf init))) (allTxC N blocks) =
+        (∃ m, Spec.Coins.connectTxs (Spec.Coins.untag (vmap coinOfVal (viewOf init))) (allTxC N blocks) =
             some (Spec.Coins.untag (vmap coinOfVal m), (allTxC N blocks).map Spec.Coins.claimFee) ∧
-          ∀ k v j, m k = some (v, j) ↔ (k, v, j) ∈ fin := by
+          ∀ k v j, m k = some (v, j) ↔ (k, v, j) ∈ fin) ∧
+        ∀ B ∈ blocks, ∀ (t : ℕ) (tx : Spec.Block.Tx), B.txs[t]? = some tx → 1 ≤ t →
+          Spec.Block.nodupBy (tx.vin.map (·.prevout)) = true := by
   obtain ⟨Bad, hcard, hb⟩ := epoch_balance N γ blocks g0 init fin
   refine ⟨Bad, hcard, fun az haz hlen hsum => ?_⟩
   have hbal := hb az haz (fun e he e' he' h =>
@@ -153,9 +156,10 @@ theorem epoch_core (N : ℕ → ℕ) (γ : QM) (blocks : List BlockC) (g0 : ℕ)
     rcases Multiset.mem_add.mp this with h | h
     · exact hinitR e (by simpa using h)
     · exact created_real N blocks g0 hval hhB e h
-  refine ⟨m, epoch_connect N blocks g0 init hlost
+  refine ⟨⟨m, epoch_connect N blocks g0 init hlost
     (fun B hB tx htx o ho => ⟨(hval B hB tx htx o ho).1,
-      lt_of_le_of_lt (hval B hB tx htx o ho).2 (by unfold Spec.Block.MAX_MONEY; norm_num)⟩) hm ?_, hiff⟩
+      lt_of_le_of_lt (hval B hB tx htx o ho).2 (by unfold Spec.Block.MAX_MONEY; norm_num)⟩) hm ?_, hiff⟩,
+    epoch_nodup_prevouts N blocks g0 hm⟩
   intro x hx
   unfold allTxC at hx
   obtain ⟨B, hB, hx⟩ := List.mem_flatMap.mp hx
@@ -270,9 +274,11 @@ theorem epoch_systems_core (nb : ℕ) (inst : ℕ → ℕ → Inst) (pub : ℕ �
               fin.length < P →
             ∑ i ∈ Finset.range nb, RunSum.pQ (pub i) Coin.PUB_S + (init.map (efrac N γ α z)).sum =
               (fin.map (efrac N γ α z)).sum →
-            ∃ m, Spec.Coins.connectTxs (Spec.Coins.untag (vmap coinOfVal (viewOf init))) (allTxC N blocks) =
+            (∃ m, Spec.Coins.connectTxs (Spec.Coins.untag (vmap coinOfVal (viewOf init))) (allTxC N blocks) =
                 some (Spec.Coins.untag (vmap coinOfVal m), (allTxC N blocks).map Spec.Coins.claimFee) ∧
-              ∀ k v j, m k = some (v, j) ↔ (k, v, j) ∈ fin) := by
+              ∀ k v j, m k = some (v, j) ↔ (k, v, j) ∈ fin) ∧
+            ∀ i < nb, ∀ (t : ℕ) (tx : Spec.Block.Tx), (S i).b.txs[t]? = some tx → 1 ≤ t →
+              Spec.Block.nodupBy (tx.vin.map (·.prevout)) = true) := by
   obtain ⟨blocks, hlen, hat, hvo, hfacts⟩ := epoch_blocks nb inst pub L hL hsat hL24 S h0 hh hp2
     (fun i => Spec.Coins.bip30Lost (h0 + i)) hlost γ α z hγ hz hα
   refine ⟨blocks, hlen, fun i hi => by obtain ⟨B, h1, h2, h3, -⟩ := hat i hi; exact ⟨B, h1, h2, h3⟩,
@@ -314,7 +320,39 @@ theorem epoch_systems_core (nb : ℕ) (inst : ℕ → ℕ → Inst) (pub : ℕ �
     (fun B hBm tx htx => (hvo B hBm tx htx).1)
     (fun B hBm => by obtain ⟨i, hi⟩ := hmem B hBm; rw [(hB i B hi).2.1]; exact (hB i B hi).2.2.2)
     (fun B hBm tx htx => (hvo B hBm tx htx).2) hlexB hokB
-  refine ⟨Bad, hcard, fun haz hcnt hbal => hcore (α, z) haz hcnt ?_⟩
-  rw [← hsum]; exact hbal
+  refine ⟨Bad, hcard, fun haz hcnt hbal => ?_⟩
+  obtain ⟨hc, hnd'⟩ := hcore (α, z) haz hcnt (by rw [← hsum]; exact hbal)
+  refine ⟨hc, fun i hi t tx htx ht1 => ?_⟩
+  obtain ⟨B, h1, -, h3, -⟩ := hat i hi
+  exact hnd' B (List.mem_of_getElem? h1) t tx (by rw [h3]; exact htx) ht1
+
+section System
+
+variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ}
+  (hL : ∀ i < 15, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : L ≤ 23)
+include hL hsat hL24
+
+/-- **An epoch block passes Core's checks.** A block system whose non-coinbase transactions spend
+distinct outpoints (as `epoch_systems_core` gives for every block of a balanced epoch) passes Core's
+`CheckBlock` and `ContextualCheckBlock` (`block_sound`). -/
+theorem epoch_block_valid (hL8 : 8 ≤ L) (S : Setup inst pub L) {c : Spec.Block.Ctx} (hh : c.height < 2 ^ 23)
+    (hmtp : c.prevMtp < 2 ^ 32) (hpub : BlockPubs c pub)
+    (hnd : ∀ (t : ℕ) (tx : Spec.Block.Tx), S.b.txs[t]? = some tx → 1 ≤ t →
+      Spec.Block.nodupBy (tx.vin.map (·.prevout)) = true) :
+    Spec.Block.checkBlock c (Rb inst pub) = none := by
+  obtain ⟨b, hp, himp⟩ := block_sound hL hsat hL24 hL8 hh hmtp hpub
+  have hb : b = S.b := by rw [S.hparse] at hp; exact (Option.some.inj hp).symm
+  subst hb
+  apply himp
+  intro tx htx
+  obtain ⟨j, hj, rfl⟩ := List.getElem_of_mem htx
+  rcases Nat.eq_zero_or_pos j with h0 | hpos
+  · subst h0
+    obtain ⟨-, t0, inp, -, -, -, hget0, -, -, -, -, -, hv0, -⟩ := cb_facts hL hsat hL24 hL8 S
+    rw [List.getElem?_eq_getElem hj, Option.some.injEq] at hget0
+    rw [hget0, hv0]; rfl
+  · exact hnd j _ (List.getElem?_eq_getElem hj) hpos
+
+end System
 
 end StarkedAir.Block
