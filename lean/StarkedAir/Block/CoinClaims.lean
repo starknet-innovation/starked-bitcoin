@@ -610,7 +610,8 @@ theorem block_facts (S : Setup inst pub L) {h : ℕ} (hp2 : pub 2 = (h : F)) (hh
         blockSum N (efrac N (FpWalk.gQ pub) α (RunSum.pQ pub Coin.PUB_Z)) ⟨h, S.b.txs, lost, claim⟩) ∧
       (∀ (N : ℕ → ℕ) (t : ℕ) (tx : Spec.Block.Tx), S.b.txs[t]? = some tx →
         ∀ ev ∈ txIns N ⟨h, S.b.txs, lost, claim⟩ t tx, ∃ c : Claim, ev = (ev.1, (c.code, c.ser), N (c.code / 2) + c.ctx) ∧
-          (c.code < 2 ^ 26 → c.ctx < 2 ^ 25 → (c.code / 2 < h ∨ (c.code / 2 = h ∧ c.ctx < t)))) ∧
+          (c.code < 2 ^ 26 → c.ctx < 2 ^ 25 → (c.code / 2 < h ∨ (c.code / 2 = h ∧ c.ctx < t))) ∧
+          c.code < 2 ^ 32 ∧ c.ctx < 2 ^ 24 ∧ c.ser.length < P) ∧
       (∀ (N : ℕ → ℕ) (t : ℕ) (tx : Spec.Block.Tx), S.b.txs[t]? = some tx → 1 ≤ t →
         (∀ k < tx.vin.length, 8 ≤ (claim t k).ser.length ∧
           Spec.Block.le ((claim t k).ser.take 8) ≤ Fields.MAXHI * 2 ^ 24 + Fields.MAXLO ∧ (claim t k).code < 2 ^ 30) →
@@ -632,8 +633,12 @@ theorem block_facts (S : Setup inst pub L) {h : ℕ} (hp2 : pub 2 = (h : F)) (hh
     · obtain ⟨p, hp, rfl⟩ := List.mem_map.mp hev
       have hk := List.mem_zipIdx' hp
       have hi : tx.vin[p.2]? = some p.1 := by rw [hk.2]; exact List.getElem?_eq_getElem hk.1
-      obtain ⟨-, hlex, -⟩ := hcl t tx htx (by omega) p.2 p.1 hi
-      exact ⟨claim t p.2, rfl, hlex⟩
+      obtain ⟨-, hlex, hctx, hat⟩ := hcl t tx htx (by omega) p.2 p.1 hi
+      obtain ⟨-, -, rj, -, -, -, u0, -, h9, hlen8, -, hcode, -⟩ := hat
+      refine ⟨claim t p.2, rfl, hlex, ?_, hctx, ?_⟩
+      · rw [hcode]; exact le4_lt' _
+      · have hv : (pub 8).val < P := ZMod.val_lt _
+        omega
   · exact tx_claims_ok hL hsat hL24 S he hon hlen hst hf htg hne hp2 hh N ⟨h, S.b.txs, lost, claim⟩ rfl htx ht1
       (fun k hk => by
         obtain ⟨i, hi⟩ : ∃ i, tx.vin[k]? = some i := ⟨_, List.getElem?_eq_getElem hk⟩

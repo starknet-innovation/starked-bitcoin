@@ -292,8 +292,9 @@ Layers (Lean):
    committed data (D-041; `ClaimAt` and `tl_bytes` pin each claim to the undo bytes, the record
    positions follow from `rows_sound`), which the bad-set reading needs.
 
-**Plan for `WFE` (2026-10-12).** Created events — **done** (`Block/CoinWFE.lean`, `created_wfe`,
-`created_wfe_systems`: from the systems' `Blk.WF`, the heights and the offsets): the txid is `sha256d` (32 bytes: a lemma on the digest's
+**`WFE` (2026-10-12).** **Created and spent events are proven well formed** (`Block/CoinWFE.lean`:
+`created_wfe_systems`, `spent_wfe`; `epoch_systems_wf` is `epoch_systems_core` with `WFE` assumed for the
+initial and final sets only). Created events — from the systems' `Blk.WF`, the heights and the offsets: the txid is `sha256d` (32 bytes: a lemma on the digest's
 byte encoding), the output index and the transaction index are below the parsed list lengths, which are
 at most the raw block length (`< 2^25` under `L ≤ 23`: needs "a parsed list's length is at most its
 bytes" lemmas for `parseBlock`'s CompactSize-counted lists, none exist yet), the code is `2h + cb`

@@ -198,7 +198,8 @@ theorem epoch_blocks (nb : ℕ) (inst : ℕ → ℕ → Inst) (pub : ℕ → ℕ
         ∑ i ∈ Finset.range nb, RunSum.pQ (pub i) Coin.PUB_S = (blocks.map (blockSum N (efrac N γ α z))).sum ∧
         (∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → ∀ (t : ℕ) (tx : Spec.Block.Tx), B.txs[t]? = some tx →
           ∀ ev ∈ txIns N B t tx, ∃ c : Claim, ev = (ev.1, (c.code, c.ser), N (c.code / 2) + c.ctx) ∧
-            (c.code < 2 ^ 26 → c.ctx < 2 ^ 25 → (c.code / 2 < B.h ∨ (c.code / 2 = B.h ∧ c.ctx < t)))) ∧
+            (c.code < 2 ^ 26 → c.ctx < 2 ^ 25 → (c.code / 2 < B.h ∨ (c.code / 2 = B.h ∧ c.ctx < t))) ∧
+            c.code < 2 ^ 32 ∧ c.ctx < 2 ^ 24 ∧ c.ser.length < P) ∧
         (∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → ∀ (t : ℕ) (tx : Spec.Block.Tx), B.txs[t]? = some tx →
           1 ≤ t → (∀ k < tx.vin.length, RealVal ((B.claim t k).code, (B.claim t k).ser)) →
           Spec.Coins.outSum tx ≤ Spec.Block.MAX_MONEY → Spec.Coins.ClaimsOK (txcOf N B t tx)) := by
@@ -212,7 +213,8 @@ theorem epoch_blocks (nb : ℕ) (inst : ℕ → ℕ → Inst) (pub : ℕ → ℕ
       (∀ (N : ℕ → ℕ) (t : ℕ) (tx : Spec.Block.Tx), (S i).b.txs[t]? = some tx →
         ∀ ev ∈ txIns N ⟨h0 + i, (S i).b.txs, lost i, claim⟩ t tx, ∃ c : Claim,
           ev = (ev.1, (c.code, c.ser), N (c.code / 2) + c.ctx) ∧
-          (c.code < 2 ^ 26 → c.ctx < 2 ^ 25 → (c.code / 2 < h0 + i ∨ (c.code / 2 = h0 + i ∧ c.ctx < t)))) ∧
+          (c.code < 2 ^ 26 → c.ctx < 2 ^ 25 → (c.code / 2 < h0 + i ∨ (c.code / 2 = h0 + i ∧ c.ctx < t))) ∧
+          c.code < 2 ^ 32 ∧ c.ctx < 2 ^ 24 ∧ c.ser.length < P) ∧
       (∀ (N : ℕ → ℕ) (t : ℕ) (tx : Spec.Block.Tx), (S i).b.txs[t]? = some tx → 1 ≤ t →
         (∀ k < tx.vin.length, 8 ≤ (claim t k).ser.length ∧
           Spec.Block.le ((claim t k).ser.take 8) ≤ Fields.MAXHI * 2 ^ 24 + Fields.MAXLO ∧ (claim t k).code < 2 ^ 30) →
@@ -261,6 +263,9 @@ theorem epoch_systems_core (nb : ℕ) (inst : ℕ → ℕ → Inst) (pub : ℕ �
     (hα : ∀ i < nb, ∀ k < Coin.W, RunSum.pQ (pub i) (Coin.PUB_ALPHA k) = α ^ k) :
     ∃ blocks : List BlockC, blocks.length = nb ∧
       (∀ i < nb, ∃ B, blocks[i]? = some B ∧ B.h = h0 + i ∧ B.txs = (S i).b.txs) ∧
+      (∀ (N : ℕ → ℕ) (i : ℕ) (B : BlockC), blocks[i]? = some B → ∀ (t : ℕ) (tx : Spec.Block.Tx), B.txs[t]? = some tx →
+        ∀ ev ∈ txIns N B t tx, ∃ c : Claim, ev = (ev.1, (c.code, c.ser), N (c.code / 2) + c.ctx) ∧
+          c.code < 2 ^ 32 ∧ c.ctx < 2 ^ 24 ∧ c.ser.length < P) ∧
       ∀ (N : ℕ → ℕ) (g0 : ℕ) (init fin : List CEv) (Sb : Finset (List F)), γ ∉ fpBad (𝕂 := QM) Sb →
         (∀ e ∈ init ++ (created g0 (allTxs N blocks)).toList ++ ((spent (allTxs N blocks)).toList ++ fin),
           WFE N e ∧ bytesF e ∈ Sb) →
@@ -282,6 +287,8 @@ theorem epoch_systems_core (nb : ℕ) (inst : ℕ → ℕ → Inst) (pub : ℕ �
   obtain ⟨blocks, hlen, hat, hvo, hfacts⟩ := epoch_blocks nb inst pub L hL hsat hL24 S h0 hh hp2
     (fun i => Spec.Coins.bip30Lost (h0 + i)) hlost γ α z hγ hz hα
   refine ⟨blocks, hlen, fun i hi => by obtain ⟨B, h1, h2, h3, -⟩ := hat i hi; exact ⟨B, h1, h2, h3⟩,
+    fun N i B hB t tx htx ev hev => by
+      obtain ⟨c, h1, -, h2⟩ := (hfacts N).2.1 i B hB t tx htx ev hev; exact ⟨c, h1, h2⟩,
     fun N g0 init fin Sb hγS hwf hN hinit hinitR hnd => ?_⟩
   obtain ⟨hsum, hlexB, hokB⟩ := hfacts N
   -- the blocks' heights, positions and bounds
@@ -319,7 +326,8 @@ theorem epoch_systems_core (nb : ℕ) (inst : ℕ → ℕ → Inst) (pub : ℕ �
   obtain ⟨Bad, hcard, hcore⟩ := epoch_core N γ blocks g0 init fin hγS hwf hpos hinc hbnd hinit hinitR hnd
     (fun B hBm tx htx => (hvo B hBm tx htx).1)
     (fun B hBm => by obtain ⟨i, hi⟩ := hmem B hBm; rw [(hB i B hi).2.1]; exact (hB i B hi).2.2.2)
-    (fun B hBm tx htx => (hvo B hBm tx htx).2) hlexB hokB
+    (fun B hBm tx htx => (hvo B hBm tx htx).2)
+    (fun i B hB t tx htx ev hev => by obtain ⟨c, h1, h2, -⟩ := hlexB i B hB t tx htx ev hev; exact ⟨c, h1, h2⟩) hokB
   refine ⟨Bad, hcard, fun haz hcnt hbal => ?_⟩
   obtain ⟨hc, hnd'⟩ := hcore (α, z) haz hcnt (by rw [← hsum]; exact hbal)
   refine ⟨hc, fun i hi t tx htx ht1 => ?_⟩

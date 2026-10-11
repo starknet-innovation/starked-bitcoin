@@ -11,6 +11,8 @@ import StarkedAir.Block.CoinEpochCore
 namespace StarkedAir.Block
 
 open StarkedAir StarkedAir.Spec.CoinEpoch StarkedAir.Spec.Utxo StarkedAir.Spec.Block
+open StarkedAir.Spec.QM31 (QM)
+open StarkedAir.LogUpSZ
 
 theorem txid_length (t : Tx) : (txid t).length = 32 := by
   simp [txid, sha256d, sha256, stateBytes, beBytes]
@@ -112,7 +114,7 @@ theorem created_wfe_systems {nb : ℕ} {inst : ℕ → ℕ → Inst} {pub : ℕ 
     | succ i ih =>
       intro hi
       obtain ⟨B, h1, -, h3⟩ := hat i (by omega)
-      rw [List.take_succ, List.map_append, List.sum_append, ih (by omega), Finset.sum_range_succ, h1]
+      rw [List.take_add_one, List.map_append, List.sum_append, ih (by omega), Finset.sum_range_succ, h1]
       simp [h3]
   refine created_wfe N blocks g0 (fun i B hBi => ?_) (fun i B hBi => ?_)
   · obtain ⟨hi, h2, h3⟩ := hB i B hBi
@@ -120,5 +122,103 @@ theorem created_wfe_systems {nb : ℕ} {inst : ℕ → ℕ → Inst} {pub : ℕ 
     exact ⟨by omega, by rw [h3]; exact hn, by rw [h3]; exact hw⟩
   · obtain ⟨hi, h2, -⟩ := hB i B hBi
     rw [h2, hN i hi, hpre i hi.le]
+
+/-! ### Spent events -/
+
+theorem mem_spent_txs (N : ℕ → ℕ) (B : BlockC) : ∀ (l : List (Tx × ℕ)) {e : CEv},
+    e ∈ spent (l.map fun p => (⟨txIns N B p.2 p.1, txOuts B p.2 p.1⟩ : Spec.Utxo.Tx OutPoint Val)) →
+    ∃ p ∈ l, e ∈ txIns N B p.2 p.1
+  | [], e, h => by simp [spent] at h
+  | p :: l, e, h => by
+    simp only [List.map_cons, spent, Multiset.mem_add, Multiset.mem_coe] at h
+    rcases h with h | h
+    · exact ⟨p, List.mem_cons_self, h⟩
+    · obtain ⟨q, hq, h'⟩ := mem_spent_txs N B l h
+      exact ⟨q, List.mem_cons_of_mem _ hq, h'⟩
+
+/-- A spent event of a list of blocks: an input of block `i`'s transaction `t`. -/
+theorem mem_spent_blocks (N : ℕ → ℕ) : ∀ (blocks : List BlockC) {e : CEv}, e ∈ spent (allTxs N blocks) →
+    ∃ (i : ℕ) (B : BlockC), blocks[i]? = some B ∧ ∃ (t : ℕ) (tx : Tx), B.txs[t]? = some tx ∧ e ∈ txIns N B t tx
+  | [], e, h => by simp [allTxs, spent] at h
+  | B :: bs, e, h => by
+    simp only [allTxs, List.flatMap_cons] at h
+    rw [mem_spent_append, Multiset.mem_add] at h
+    rcases h with h | h
+    · obtain ⟨p, hp, h'⟩ := mem_spent_txs N B B.txs.zipIdx h
+      have hk := List.mem_zipIdx' hp
+      exact ⟨0, B, rfl, p.2, p.1, by rw [hk.2]; exact List.getElem?_eq_getElem hk.1, h'⟩
+    · obtain ⟨i, B', hB', rest⟩ := mem_spent_blocks N bs h
+      exact ⟨i + 1, B', by simpa using hB', rest⟩
+
+/-- **Spent events are well formed**, for well-formed blocks whose input claims have bounded fields
+(`epoch_blocks` gives the claim bounds). -/
+theorem spent_wfe (N : ℕ → ℕ) (blocks : List BlockC)
+    (hB : ∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → ∀ tx ∈ B.txs, Tx.WF tx)
+    (hc : ∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → ∀ (t : ℕ) (tx : Tx), B.txs[t]? = some tx →
+      ∀ ev ∈ txIns N B t tx, ∃ c : Claim, ev = (ev.1, (c.code, c.ser), N (c.code / 2) + c.ctx) ∧
+        c.code < 2 ^ 32 ∧ c.ctx < 2 ^ 24 ∧ c.ser.length < P) :
+    ∀ e ∈ spent (allTxs N blocks), WFE N e := by
+  intro e he
+  obtain ⟨i, B, hBi, t, tx, htx, hin⟩ := mem_spent_blocks N blocks he
+  obtain ⟨c, hce, hcode, hctx, hser⟩ := hc i B hBi t tx htx e hin
+  have hwt : Tx.WF tx := hB i B hBi tx (List.mem_of_getElem? htx)
+  obtain ⟨-, -, -, -, -, hwi, -⟩ := hwt
+  -- the outpoint is an input's prevout
+  have hpv : ∃ inp ∈ tx.vin, e.1 = inp.prevout := by
+    unfold txIns at hin
+    split_ifs at hin
+    · simp at hin
+    · obtain ⟨p, hp, rfl⟩ := List.mem_map.mp hin
+      exact ⟨p.1, (List.mem_zipIdx' hp).2 ▸ List.getElem_mem _, rfl⟩
+  obtain ⟨inp, hinp, hpo⟩ := hpv
+  obtain ⟨hh32, hn32, -⟩ := hwi inp hinp
+  rw [hce]
+  refine ⟨by rw [hpo]; exact hh32, by rw [hpo]; exact hn32, hcode, by simp, by simp; unfold P; omega, hser⟩
+
+/-- **`epoch_systems_core` with `WFE` assumed for the initial and final sets only**: the created and spent
+events' well-formedness is proven (`created_wfe_systems`, `spent_wfe`). -/
+theorem epoch_systems_wf (nb : ℕ) (inst : ℕ → ℕ → Inst) (pub : ℕ → ℕ → F) (L : ℕ → ℕ)
+    (hL : ∀ i < nb, ∀ c < 15, (inst i c).logSize = L i) (hsat : ∀ i < nb, hashSys.SatisfiedExt (inst i) (pub i) [])
+    (hL24 : ∀ i < nb, L i ≤ 23) (S : ∀ i, Setup (inst i) (pub i) (L i)) (h0 : ℕ) (hh : h0 + nb ≤ 2 ^ 23)
+    (hp2 : ∀ i < nb, pub i 2 = ((h0 + i : ℕ) : F))
+    (hlost : ∀ i < nb, pub i Coin.PUB_LOST = if Spec.Coins.bip30Lost (h0 + i) then 1 else 0)
+    (γ α z : QM) (hγ : ∀ i < nb, FpWalk.gQ (pub i) = γ) (hz : ∀ i < nb, RunSum.pQ (pub i) Coin.PUB_Z = z)
+    (hα : ∀ i < nb, ∀ k < Coin.W, RunSum.pQ (pub i) (Coin.PUB_ALPHA k) = α ^ k) :
+    ∃ blocks : List BlockC, blocks.length = nb ∧
+      (∀ i < nb, ∃ B, blocks[i]? = some B ∧ B.h = h0 + i ∧ B.txs = (S i).b.txs) ∧
+      ∀ (N : ℕ → ℕ) (g0 : ℕ) (init fin : List CEv) (Sb : Finset (List F)), γ ∉ fpBad (𝕂 := QM) Sb →
+        (∀ e ∈ init ++ fin, WFE N e) →
+        (∀ e ∈ init ++ (created g0 (allTxs N blocks)).toList ++ ((spent (allTxs N blocks)).toList ++ fin),
+          bytesF e ∈ Sb) →
+        (∀ i < nb, N (h0 + i) = g0 + ∑ i' ∈ Finset.range i, (S i').b.txs.length) →
+        (∀ e ∈ init, e.2.2 < g0) → (∀ e ∈ init, RealVal e.2.1) →
+        (((init : Multiset CEv) + created g0 (allTxs N blocks)).map Prod.fst).Nodup →
+        ∃ Bad : Finset (QM × QM), Bad.card ≤ ((polys (epochPN N γ blocks g0 init fin)).card ^ 2 * 27 +
+            2 * (polys (epochPN N γ blocks g0 init fin)).card) * Fintype.card QM ∧
+          ((α, z) ∉ Bad →
+            init.length + Multiset.card (created g0 (allTxs N blocks)) + Multiset.card (spent (allTxs N blocks)) +
+              fin.length < P →
+            ∑ i ∈ Finset.range nb, RunSum.pQ (pub i) Coin.PUB_S + (init.map (efrac N γ α z)).sum =
+              (fin.map (efrac N γ α z)).sum →
+            (∃ m, Spec.Coins.connectTxs (Spec.Coins.untag (vmap coinOfVal (viewOf init))) (allTxC N blocks) =
+                some (Spec.Coins.untag (vmap coinOfVal m), (allTxC N blocks).map Spec.Coins.claimFee) ∧
+              ∀ k v j, m k = some (v, j) ↔ (k, v, j) ∈ fin) ∧
+            ∀ i < nb, ∀ (t : ℕ) (tx : Spec.Block.Tx), (S i).b.txs[t]? = some tx → 1 ≤ t →
+              Spec.Block.nodupBy (tx.vin.map (·.prevout)) = true)  := by
+  obtain ⟨blocks, hlen, hat, hcl, hmain⟩ := epoch_systems_core nb inst pub L hL hsat hL24 S h0 hh hp2 hlost γ α z hγ hz hα
+  have hwfB : ∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → ∀ tx ∈ B.txs, Tx.WF tx := by
+    intro i B hBi tx htx
+    have hi : i < nb := by have := (List.getElem?_eq_some_iff.mp hBi).1; omega
+    obtain ⟨B', h1, -, h3⟩ := hat i hi
+    rw [hBi] at h1; obtain rfl := Option.some.inj h1
+    rw [h3] at htx
+    exact (Spec.Block.toksBlock_sound (S i).htok).1.2.2 tx htx
+  refine ⟨blocks, hlen, hat, fun N g0 init fin Sb hγS hwfIF hby hN => hmain N g0 init fin Sb hγS (fun e he => ⟨?_, hby e he⟩) hN⟩
+  simp only [List.mem_append, Multiset.mem_toList] at he
+  rcases he with (h | h) | (h | h)
+  · exact hwfIF e (List.mem_append_left _ h)
+  · exact created_wfe_systems S hh hlen hat N g0 hN e h
+  · exact spent_wfe N blocks hwfB (hcl N) e h
+  · exact hwfIF e (List.mem_append_right _ h)
 
 end StarkedAir.Block

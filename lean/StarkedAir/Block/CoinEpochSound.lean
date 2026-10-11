@@ -197,6 +197,10 @@ def ClaimAt (inst : ℕ → Inst) (pub : ℕ → F) (L j : ℕ) (c : Claim) : Pr
       c.code = Spec.Block.le ((List.range 4).map fun k => (Ub inst pub).getD (u0 - 9 + k) 0) ∧
       c.ctx = Spec.Block.le ((List.range 3).map fun k => (Ub inst pub).getD (u0 - 5 + k) 0)
 
+theorem le4_lt' (f : ℕ → UInt8) : Spec.Block.le ((List.range 4).map f) < 2 ^ 32 := by
+  have := UInt8.toNat_lt (f 0); have := UInt8.toNat_lt (f 1); have := UInt8.toNat_lt (f 2); have := UInt8.toNat_lt (f 3)
+  simp [Spec.Block.le, List.range_succ]; omega
+
 theorem le3_lt (f : ℕ → UInt8) : Spec.Block.le ((List.range 3).map f) < 2 ^ 24 := by
   have := UInt8.toNat_lt (f 0); have := UInt8.toNat_lt (f 1); have := UInt8.toNat_lt (f 2)
   simp [Spec.Block.le, List.range_succ]; omega
