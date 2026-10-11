@@ -117,6 +117,26 @@ headers' times, which a block leaf does not see. Options:
   the times before the range (inclusion paths at the root).
 - (C) Per-height MTP in the header tree: re-proves the frozen chain VK (D-036). Not recommended.
 
+**Costing A and B (2026-10-12, for the owner's choice).**
+- **A, in the block system.** The block system already hashes its header as one of `block_sha`'s
+  message streams (`sha256d(header)`, public 25–40) and reads `time` from header bytes 68–71 through
+  the byte table. A adds an *ancestry* segment to the byte stream: the 11 predecessor headers (880
+  bytes), each hashed as a further header message (3 compressions each, ~33 × 72 rows ≈ 2.4 k rows), a
+  link constraint per header (its digest = the next header's prev-hash field, bytes 4–35, through the
+  message words as the Merkle-root check already reads them), and a median-of-11 over their times
+  (the header chain's MTP window gadget, `mtp_core`; a sorting network of ~50 comparators). The
+  context then loses `prevMtp` (public 3 and 7 become derived). Lean: the linkage (the existing
+  `msgw` lemmas) and a block-side copy of `mtp_core`'s proof, roughly a session. Re-proves epochs (an
+  hour at 0–1000); the large-block test after the AIR change. Nothing changes in the tree.
+- **B, in the nodes.** No AIR change; leaves expose their own header time (bytes 68–71, already read
+  in-circuit) and their claimed `prevMtp`. A range summary grows by its last 11 times and its first 11
+  blocks' claims (44 limbs); a node resolves the right child's first claims against the left child's
+  times and its own (a median of 11 per resolved claim, up to 11 per node); the epoch's first 11
+  claims need the 11 times before the range, as inclusion paths at the outer verifier. Lean: the
+  window's composition (new, intricate), roughly two sessions. Node circuits grow by ~11 medians.
+- **Recommendation stays A:** the obligation stays local to one proof, the tree stays simple, and
+  every node pays nothing; the cost is one AIR change made once, before CATCHUP.
+
 **4. Height-derived context in the leaf.** The flags, the lost flag and the subsidy are fixed
 functions of the height (`checks.pubs`, `lostHeight`, `coin.pubs`); the block leaf recomputes them in
 the circuit from the height (a small Lean-first program) instead of exposing them.
