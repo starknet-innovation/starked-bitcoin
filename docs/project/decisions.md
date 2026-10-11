@@ -350,11 +350,15 @@ Owner decisions on D-040 (2026-10-10):
 Date: 2026-10-11 · By: Claude (agent) · Status: active (soundness fix within D-040; owner to review)
 Decision: the epoch seed hashes the initial and final coin sets' full encodings (`setDigest`, Blake2s of
 `encodeSet`), and each undo record carries the spent coin's creating-transaction index (3 bytes after
-the code) inside the Blake2s-committed undo stream, read by URec and equal to the coin row's `CTX`.
+the code) and its `serTxOut` length (2 bytes) inside the Blake2s-committed undo stream, read by URec: the
+index equals the coin row's `CTX`, the length is the record's `TL`, so the records' boundaries follow from
+the committed bytes.
 Why: the LogUp and fingerprint bounds (`balance_of_sum`, `fp_separates`) hold for events chosen before
 the challenge. Before this fix, three inputs to the fractions were chosen after it: the final set (read
 at verification, not in the seed), the initial set's transaction indices (`hash_serialized` omits
-them), and every input's claimed `CTX` (a free trace column). With hundreds of free choices, a
+them), every input's claimed `CTX` (a free trace column), and the records' lengths `TL` (constrained
+only to tile the stream, so the boundaries, and with them every claim, were a trace choice; found
+2026-10-11 while assembling the epoch proof). With hundreds of free choices, a
 generalized-birthday (Wagner) search over QM31 sums can make a false epoch balance at feasible cost
-(*est.*: practical with 2^4 lists of 2^31 candidates). Cost: 3 columns and 3 byte lookups in URec,
-3 bytes per spend in the commitment; epoch proofs made before the fix must be re-proved.
+(*est.*: practical with 2^4 lists of 2^31 candidates). Cost: 5 columns, 5 byte lookups and 1 constraint
+in URec, 5 bytes per spend in the commitment; epoch proofs made before the fix must be re-proved.

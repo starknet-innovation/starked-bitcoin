@@ -216,13 +216,14 @@ commitments, which bind the raw blocks and undo data. QM31 (`|K| ≈ 2^124`), `N
 
 **Challenge binding (D-041, 2026-10-11).** Both bounds hold only for events fixed before `(γ, z, α)`. So
 every value behind a tuple is: block bytes (block hash), undo records with their codes, amounts,
-scripts **and creating-transaction indices** (the undo commitment), and the initial and final sets
+scripts, **creating-transaction indices and lengths** (the undo commitment), and the initial and final sets
 (their full encodings' Blake2s in the seed). Before D-041 the final set, the initial set's indices and
-each input's `CTX` were chosen after the challenge; with hundreds of free choices a generalized-birthday
-search can balance a false epoch (*est.*: practical). The in-circuit undo record is now
-`code (4) ‖ index (3) ‖ serTxOut`; URec reads the index bytes and yields them in `urec`, and the coin
-row's `CTX` must equal them (`coin_urec`, `coin_in_tuple`). The index is below `2^24`, so it never
-wraps.
+each input's `CTX` were chosen after the challenge, and so were the records' boundaries (URec's `TL`
+was only constrained to tile the stream); with hundreds of free choices a generalized-birthday search
+can balance a false epoch (*est.*: practical). The in-circuit undo record is now
+`code (4) ‖ index (3) ‖ length (2) ‖ serTxOut`; URec reads the index and length bytes, yields the index
+in `urec` (the coin row's `CTX` must equal it: `coin_urec`, `coin_in_tuple`) and constrains `TL` to the
+length (`tl_bytes`). The index is below `2^24`, so it never wraps.
 
 ## The coin proof, plan and progress (2026-10-11)
 
@@ -241,9 +242,10 @@ Layers (Lean):
      the coin's own `SEG(0, START, START, LEN)` yield (undo segments have stream 1), so the walk reads
      the block bytes `[START, START + LEN)`: `FH` is their Horner fingerprint (`seg_sound`);
    - an input's `UREC(J, …)` is URec row `J` (its `J` is the row index): the code and amount bytes
-     are undo bytes at `S_J`, `S_J + 7` and the creating-transaction index the bytes at `S_J + 4`
-     (D-041); its `FP(1, J, SLEN, FH)` is the walker segment `(1, J)` started by URec's
-     `SEG(1, J, S_J + 7, TL_J)`: `FH` is the fingerprint of undo bytes `[S_J + 7, S_J + 7 + TL_J)`;
+     are undo bytes at `S_J`, `S_J + 9`, the creating-transaction index the bytes at `S_J + 4` and the
+     length `TL_J` the bytes at `S_J + 7` (D-041); its `FP(1, J, SLEN, FH)` is the walker segment
+     `(1, J)` started by URec's `SEG(1, J, S_J + 9, TL_J)`: `FH` is the fingerprint of undo bytes
+     `[S_J + 9, S_J + 9 + TL_J)`;
    - the prevout bytes and an output script's first byte are block bytes (`REL_BYTE`).
 4. **Events** (done 2026-10-11, `Block/CoinEvents.lean`, `Spec/BlockIo.lean`): each coin row is its
    transaction's input or output (`coin_row_tx`, `coin_kind_pos`), with its output index (`coin_vout`)
