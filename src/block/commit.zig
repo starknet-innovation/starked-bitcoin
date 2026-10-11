@@ -206,7 +206,7 @@ test "block commitment: a 3-block undo stream satisfies and balances; a wrong pu
     const airs = try bsys.parseAirs(a);
     const s = checks.samples_small[1];
     // One record (block 170 spends one coin): code, amount, a 137-byte script: 151 bytes; in-circuit with
-    // the 3-byte index, 154 bytes, 3 blocks.
+    // the 3-byte index and the 2-byte length, 156 bytes, 3 blocks.
     var undo: [151]u8 = undefined;
     undo[0] = 1;
     std.mem.writeInt(u32, undo[1..5], 2 * 9 + 1, .little);

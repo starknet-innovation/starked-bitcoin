@@ -1,15 +1,15 @@
 /-
 **Undo records (M3b, D-038/D-040).** The undo stream is `0x01`, then per input after the coinbase a record:
-a 4-byte code (`2·height + coinbase`), the creating transaction's index in its block (3 bytes), then the
-spent output's `serTxOut` (amount and script). The index is a claim like the code, so the block
-commitment (the stream's Blake2s) fixes it before the epoch challenge. One row per record:
+a 4-byte code (`2·height + coinbase`), the creating transaction's index in its block (3 bytes), the
+`serTxOut` length `TL` (2 bytes), then the spent output's `serTxOut` (amount and script). The index and
+the length are claims like the code, so the block commitment (the stream's Blake2s) fixes them before
+the epoch challenge, and with them the records' boundaries (D-041). One row per record:
 - record `J` starts at `S`, with `S = 1` at row 0 (after the version byte, read as `(0, 1)`) and the next
-  record starting at `S + 7 + TL`;
+  record starting at `S + 9 + TL`, `TL` the record's length bytes;
 - the last record ends at the undo length (`pub 8`); with no records, the length is 1;
-- the code bytes `S … S + 3`, the index bytes `S + 4 … S + 6` and the amount bytes `S + 7 … S + 14` are
-  read from the undo table;
-- the `serTxOut` part is the fingerprint segment `(1, J, S + 7, TL)` (`block_fpwalk`), whose length the
-  walker fixes;
+- the code bytes `S … S + 3`, the index bytes `S + 4 … S + 6`, the length bytes `S + 7`, `S + 8` and
+  the amount bytes `S + 9 … S + 16` are read from the undo table;
+- the `serTxOut` part is the fingerprint segment `(1, J, S + 9, TL)` (`block_fpwalk`);
 - each row yields `urec(J, code lo, code hi, amount lo, amount hi, index)`: the amount as 24 low bits
   (bytes 0–2) and the next 32 (bytes 3–6), as the fields split an output's value.
 
@@ -17,7 +17,7 @@ The coin tuple fixes the bytes behind the fingerprint, so this component parses 
 record whose `serTxOut` part matches a created output is that output's serialization.
 
 **`rows_sound`**: on rows are a prefix `[0, e)`, `J` is the row index, `S_0 = 1`,
-`S_{j+1} = S_j + 7 + TL_j`, and `S + 7 + TL` at the last on row is the undo length (or `e = 0` and the
+`S_{j+1} = S_j + 9 + TL_j`, and `S + 9 + TL` at the last on row is the undo length (or `e = 0` and the
 length is 1).
 -/
 import StarkedAir.Block.FpWalk
@@ -34,16 +34,18 @@ def ON : ℕ := 0
 def J : ℕ := 1
 def S : ℕ := 2
 def TL : ℕ := 3
-/-- Code bytes `C 0 … C 3`, amount bytes `V 0 … V 7`, index bytes `X 0 … X 2`. -/
+/-- Code bytes `C 0 … C 3`, amount bytes `V 0 … V 7`, index bytes `X 0 … X 2`, length bytes `T 0`, `T 1`. -/
 def C (i : ℕ) : ℕ := 4 + i
 def V (i : ℕ) : ℕ := 8 + i
 def X (i : ℕ) : ℕ := 16 + i
-/-- The record header: code and index. -/
-def HDR : ℕ := 7
-def N_MAIN : ℕ := 19
-/-- Header and amount byte `c` (`c < 15`, at `S + c`): its column and its lookup. -/
-def ucol (c : ℕ) : ℕ := if c < 4 then C c else if c < 7 then X (c - 4) else V (c - 7)
-def uidx (c : ℕ) : ℕ := if c < 4 then 1 + c else if c < 7 then 13 + (c - 4) else 5 + (c - 7)
+def T (i : ℕ) : ℕ := 19 + i
+/-- The record header: code, index and length. -/
+def HDR : ℕ := 9
+def N_MAIN : ℕ := 21
+/-- Header and amount byte `c` (`c < 17`, at `S + c`): its column and its lookup. -/
+def ucol (c : ℕ) : ℕ := if c < 4 then C c else if c < 7 then X (c - 4) else if c < 9 then T (c - 7) else V (c - 9)
+def uidx (c : ℕ) : ℕ :=
+  if c < 4 then 1 + c else if c < 7 then 13 + (c - 4) else if c < 9 then 16 + (c - 7) else 5 + (c - 9)
 
 def preCols : List PreCol := [.isFirst, .notLast]
 def k (c : ℕ) : Expr := col c
@@ -68,7 +70,8 @@ def constraints : List Expr :=
     .mul first (.sub (k S) one),
     .mul notFirst (.mul (k ON) (.sub (k S) (.add (.add (kp S) (cst HDR)) (kp TL)))),
     .mul lastOn (.sub endE (.pub Undo.PUB_LEN)),
-    .mul first (.mul (om (k ON)) (.sub (.pub Undo.PUB_LEN) one)) ]
+    .mul first (.mul (om (k ON)) (.sub (.pub Undo.PUB_LEN) one)),
+    .mul (k ON) (.sub (k TL) (.add (k (T 0)) (.mul (cst 256) (k (T 1))))) ]
 
 def limb (a b : ℕ) : Expr := .add (k a) (.mul (cst 256) (k b))
 
@@ -77,6 +80,7 @@ def lookups : List Lookup :=
   (List.range 4).map (fun i => ⟨Undo.REL_UBYTE, .neg (k ON), [.add (k S) (cst i), k (C i)]⟩) ++
   (List.range 8).map (fun i => ⟨Undo.REL_UBYTE, .neg (k ON), [.add (k S) (cst (HDR + i)), k (V i)]⟩) ++
   (List.range 3).map (fun i => ⟨Undo.REL_UBYTE, .neg (k ON), [.add (k S) (cst (4 + i)), k (X i)]⟩) ++
+  (List.range 2).map (fun i => ⟨Undo.REL_UBYTE, .neg (k ON), [.add (k S) (cst (7 + i)), k (T i)]⟩) ++
   [ ⟨FpWalk.REL_SEG, k ON, [cst 1, k J, .add (k S) (cst HDR), k TL]⟩,
     ⟨REL_UREC, k ON, [k J, limb (C 0) (C 1), limb (C 2) (C 3),
       .add (.add (k (V 0)) (.mul (cst 256) (k (V 1)))) (.mul (cst 65536) (k (V 2))),
@@ -161,8 +165,8 @@ theorem on_prefix (hn : 0 < n) : ∃ e, e < n ∧ ∀ r < n, (M ON r = 1 ↔ r <
 /-- **The records tile the stream.** -/
 theorem rows_sound (hn : 0 < n) : ∃ e, e < n ∧ (∀ r < n, (M ON r = 1 ↔ r < e)) ∧
     (∀ r < e, M J r = (r : F)) ∧ M S 0 = 1 ∧
-    (∀ r, r + 1 < e → M S (r + 1) = M S r + 7 + M TL r) ∧
-    (e = 0 → pub Undo.PUB_LEN = 1) ∧ (0 < e → M S (e - 1) + 7 + M TL (e - 1) = pub Undo.PUB_LEN) := by
+    (∀ r, r + 1 < e → M S (r + 1) = M S r + 9 + M TL r) ∧
+    (e = 0 → pub Undo.PUB_LEN = 1) ∧ (0 < e → M S (e - 1) + 9 + M TL (e - 1) = pub Undo.PUB_LEN) := by
   obtain ⟨e, hen, hon⟩ := on_prefix hsat hn
   have onv : ∀ r < n, M ON r = if r < e then 1 else 0 := by
     intro r hr; split_ifs with h
@@ -201,6 +205,12 @@ theorem rows_sound (hn : 0 < n) : ∃ e, e < n ∧ (∀ r < n, (M ON r = 1 ↔ r
       ev_kn (show e - 1 + 1 < n by omega), onv (e - 1) hr, onv (e - 1 + 1) (by omega), if_pos (show e - 1 < e by omega),
       show ¬ (e - 1 + 1 < e) by omega, if_false, sub_zero, eval_cst, HDR] at this
     push_cast at this; linear_combination this
+
+/-- **A record's length is its length bytes.** -/
+theorem tl_bytes {r : ℕ} (hr : r < n) (hon : M ON r = 1) : M TL r = M (T 0) r + 256 * M (T 1) r := by
+  have := sat hsat (c := .mul (k ON) (.sub (k TL) (.add (k (T 0)) (.mul (cst 256) (k (T 1)))))) (by simp [constraints]) hr
+  simp only [Expr.eval, ev_k hr, eval_cst, hon, one_mul] at this
+  push_cast at this; linear_combination this
 
 end Rows
 

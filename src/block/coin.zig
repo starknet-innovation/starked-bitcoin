@@ -130,10 +130,11 @@ pub fn fpwalkColumns(a: std.mem.Allocator, log_size: u32, raw: []const u8, undo:
 /// An undo record's parts.
 pub const Rec = struct { start: u32, tl: u32, code: u32, value: u64, ctx: u32 };
 
-/// A record's header in the in-circuit stream: the 4-byte code, then the creating transaction's index
-/// (3 bytes). The index is a claim like the code, so it is committed with it: the epoch challenge is drawn
-/// after the commitment, and the LogUp bound holds only for claims fixed before it.
-pub const UHDR = 7;
+/// A record's header in the in-circuit stream: the 4-byte code, the creating transaction's index (3
+/// bytes), and the `serTxOut` length (2 bytes). The index and the length are committed with the code: the
+/// epoch challenge is drawn after the commitment, and the LogUp bound holds only for claims fixed before
+/// it, so neither a claim's index nor the records' boundaries may be trace choices (D-041).
+pub const UHDR = 9;
 
 fn parseRecs(a: std.mem.Allocator, undo: []const u8, hdr: usize) ![]Rec {
     if (undo.len == 0 or undo[0] != 1) return error.BadUndoStream;
@@ -143,6 +144,7 @@ fn parseRecs(a: std.mem.Allocator, undo: []const u8, hdr: usize) ![]Rec {
         if (p + hdr + 9 > undo.len) return error.BadUndoStream;
         const code = std.mem.readInt(u32, undo[p..][0..4], .little);
         const cx: u32 = if (hdr == UHDR) std.mem.readInt(u24, undo[p + 4 ..][0..3], .little) else 0;
+        const tl_hdr: ?u16 = if (hdr == UHDR) std.mem.readInt(u16, undo[p + 7 ..][0..2], .little) else null;
         const value = std.mem.readInt(u64, undo[p + hdr ..][0..8], .little);
         const c = undo[p + hdr + 8];
         const sl: struct { v: usize, h: usize } = switch (c) {
@@ -155,6 +157,7 @@ fn parseRecs(a: std.mem.Allocator, undo: []const u8, hdr: usize) ![]Rec {
         };
         const tl = 8 + sl.h + sl.v;
         if (p + hdr + tl > undo.len) return error.BadUndoStream;
+        if (tl_hdr) |x| if (x != tl) return error.BadUndoStream;
         try out.append(a, .{ .start = @intCast(p), .tl = @intCast(tl), .code = code, .value = value, .ctx = cx });
         p += hdr + tl;
     }
@@ -192,9 +195,11 @@ pub fn undoStream(a: std.mem.Allocator, fetched: []const u8, ctx: ?[]const u32, 
             } else return error.SameBlockCreatorNotFound;
         }
         if (cv >= 1 << 24) return error.RangeOverflow;
+        if (rc.tl >= 1 << 16) return error.RangeOverflow;
         var hdr: [UHDR]u8 = undefined;
         std.mem.writeInt(u32, hdr[0..4], rc.code, .little);
         std.mem.writeInt(u24, hdr[4..7], @intCast(cv), .little);
+        std.mem.writeInt(u16, hdr[7..9], @intCast(rc.tl), .little);
         try out.appendSlice(a, &hdr);
         try out.appendSlice(a, fetched[rc.start + 4 ..][0..rc.tl]);
         j += 1;
@@ -211,7 +216,7 @@ pub fn urecColumns(a: std.mem.Allocator, log_size: u32, undo: []const u8, recs: 
     const TL = 3;
     const n = @as(usize, 1) << @intCast(log_size);
     if (recs.len + 1 > n) return error.RecordsDoNotFit;
-    const cols = try zeros(a, 19, n);
+    const cols = try zeros(a, 21, n);
     cols[S][0] = M31.one();
     try undo_reads.append(a, 0);
     for (recs, 0..) |rc, r| {
@@ -227,7 +232,7 @@ pub fn urecColumns(a: std.mem.Allocator, log_size: u32, undo: []const u8, recs: 
             cols[8 + i][r] = f(undo[rc.start + UHDR + i]);
             try undo_reads.append(a, @intCast(rc.start + UHDR + i));
         }
-        for (0..3) |i| {
+        for (0..5) |i| {
             cols[16 + i][r] = f(undo[rc.start + 4 + i]);
             try undo_reads.append(a, @intCast(rc.start + 4 + i));
         }
@@ -720,7 +725,7 @@ pub fn coinFrac(ch: Challenge, txid: [32]u8, vout: u32, height: u32, cb: bool, s
     return ch.z.sub(phi).inv();
 }
 
-test "coin events: blocks 9 and 170 balance (block 170 spends block 9's coinbase); a tampered undo record or index does not" {
+test "coin events: blocks 9 and 170 balance (block 170 spends block 9's coinbase); a tampered undo record, index or length does not" {
     const bsys = @import("system.zig");
     const checks = @import("checks.zig");
     const pf = @import("proof_file.zig");
@@ -791,6 +796,10 @@ test "coin events: blocks 9 and 170 balance (block 170 spends block 9's coinbase
     try std.testing.expect(try bsys.firstViolation(a, &airs, &b170d) == null);
     try std.testing.expect(try bsys.unbalanced(a, &airs, &b170d) == null);
     try std.testing.expect(!std.mem.eql(u32, &b170d.commitment_words, &b170.commitment_words));
+    // The record boundaries are committed too: a record length other than its length bytes is rejected.
+    const b170t = try bsys.buildU(a, s170.raw, s170.undo, s170.ctx);
+    b170t.mains[13][3][0] = b170t.mains[13][3][0].add(M31.one());
+    try std.testing.expect(try bsys.firstViolation(a, &airs, &b170t) != null);
 }
 
 test "amounts: a coinbase above subsidy plus fees is rejected (block 170, subsidy one satoshi lower)" {

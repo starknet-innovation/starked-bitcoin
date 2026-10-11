@@ -302,11 +302,11 @@ test "block 170 with its undo stream from the node: the commitment is blake2s of
     var c: [32]u8 = undefined;
     for (0..8) |w| std.mem.writeInt(u32, c[4 * w ..][0..4], b.commitment_words[w], .little);
     // Computed independently (Python hashlib.blake2s over the fetched stream with the record's 3-byte
-    // creating-transaction index, 0, after its code).
+    // creating-transaction index, 0, and its 2-byte serTxOut length, 76, after its code).
     var want: [32]u8 = undefined;
-    _ = try std.fmt.hexToBytes(&want, "141dae155368e560bf08cb52787c3185d289a552c1f30f5bbdd1cc495249f3a9");
+    _ = try std.fmt.hexToBytes(&want, "d36ebac0076bd797bb6a9cb46a43319f48603a5c065c34e12c6df84a5c152480");
     try std.testing.expectEqualSlices(u8, &want, &c);
-    try std.testing.expectEqual(@as(u32, 84), b.pubs[8].toU32());
+    try std.testing.expectEqual(@as(u32, 86), b.pubs[8].toU32());
 }
 
 test "block proof file: a self-contained window binds block 170 to a 1024-header MMR (test strength)" {

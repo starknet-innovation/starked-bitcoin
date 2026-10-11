@@ -192,10 +192,10 @@ def ClaimAt (inst : ℕ → Inst) (pub : ℕ → F) (L j : ℕ) (c : Claim) : Pr
   (inst 14).main Coin.CLO j + 65536 * (inst 14).main Coin.CHI j = (c.code : F) ∧
   ∃ rj < 2 ^ L, (inst 13).main URec.ON rj = 1 ∧
     (inst 14).main Coin.J j = (inst 13).main URec.J rj ∧
-    ∃ u0 : ℕ, (inst 13).main URec.S rj + 7 = (u0 : F) ∧ 7 ≤ u0 ∧ u0 + c.ser.length ≤ (pub 8).val ∧
+    ∃ u0 : ℕ, (inst 13).main URec.S rj + 9 = (u0 : F) ∧ 9 ≤ u0 ∧ u0 + c.ser.length ≤ (pub 8).val ∧
       c.ser = (List.range c.ser.length).map (fun k => (Ub inst pub).getD (u0 + k) 0) ∧
-      c.code = Spec.Block.le ((List.range 4).map fun k => (Ub inst pub).getD (u0 - 7 + k) 0) ∧
-      c.ctx = Spec.Block.le ((List.range 3).map fun k => (Ub inst pub).getD (u0 - 3 + k) 0)
+      c.code = Spec.Block.le ((List.range 4).map fun k => (Ub inst pub).getD (u0 - 9 + k) 0) ∧
+      c.ctx = Spec.Block.le ((List.range 3).map fun k => (Ub inst pub).getD (u0 - 5 + k) 0)
 
 theorem le3_lt (f : ℕ → UInt8) : Spec.Block.le ((List.range 3).map f) < 2 ^ 24 := by
   have := UInt8.toNat_lt (f 0); have := UInt8.toNat_lt (f 1); have := UInt8.toNat_lt (f 2)

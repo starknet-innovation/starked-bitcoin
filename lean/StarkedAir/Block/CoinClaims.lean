@@ -126,12 +126,13 @@ theorem in_amount {j : ℕ} (hj : j < 2 ^ L) {c : Claim} (hc : ClaimAt inst pub 
   -- the amount bytes
   have hb : ∀ i < 8, ((inst 13).main (URec.V i) rj).val = (c.ser.getD i 0).toNat := by
     intro i hi
-    obtain ⟨u, hu, hpu, hbu⟩ := urec_bytes hL hsat hL24 hrj honj (c := 7 + i) (by omega)
-    have hcol : URec.ucol (7 + i) = URec.V i := by simp [URec.ucol]; omega
+    obtain ⟨u, hu, hpu, hbu⟩ := urec_bytes hL hsat hL24 hrj honj (c := 9 + i) (by omega)
+    have hcol : URec.ucol (9 + i) = URec.V i := by
+      unfold URec.ucol; rw [if_neg (by omega), if_neg (by omega), if_neg (by omega), show 9 + i - 9 = i by omega]
     rw [hcol] at hbu
     have hue : u = u0 + i := by
       apply Coin.lift _ (lt_of_lt_of_le hu (le_of_lt hPv)) (by omega)
-      push_cast; rw [← hpu, show ((7 + i : ℕ) : F) = 7 + (i : F) by push_cast; ring, ← add_assoc, hu0]
+      push_cast; rw [← hpu, show ((9 + i : ℕ) : F) = 9 + (i : F) by push_cast; ring, ← add_assoc, hu0]
     have hgi : c.ser.getD i 0 = (Ub inst pub).getD (u0 + i) 0 := by
       conv_lhs => rw [hser]
       rw [List.getD_eq_getElem _ _ (by simp; omega)]; simp
