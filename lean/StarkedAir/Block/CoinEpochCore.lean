@@ -9,6 +9,7 @@ Every claim is a real coin's value (`RealVal`): the balance makes each claim an 
 and those are real (`created_real`), so each transaction's `ClaimsOK` follows from its block's facts.
 -/
 import StarkedAir.Block.CoinClaims
+import StarkedAir.Block.BlockTxs
 
 namespace StarkedAir.Block
 
@@ -157,10 +158,11 @@ theorem epoch_blocks (nb : ℕ) (inst : ℕ → ℕ → Inst) (pub : ℕ → ℕ
     (hp2 : ∀ i < nb, pub i 2 = ((h0 + i : ℕ) : F)) (lost : ℕ → Bool)
     (hlost : ∀ i < nb, pub i Coin.PUB_LOST = if lost i then 1 else 0)
     (γ α z : QM) (hγ : ∀ i < nb, FpWalk.gQ (pub i) = γ) (hz : ∀ i < nb, RunSum.pQ (pub i) Coin.PUB_Z = z)
-    (hα : ∀ i < nb, ∀ k < Coin.W, RunSum.pQ (pub i) (Coin.PUB_ALPHA k) = α ^ k)
-    (hne : ∀ i < nb, ∀ (t : ℕ) (tx : Spec.Block.Tx), (S i).b.txs[t]? = some tx → tx.vin ≠ [] ∧ tx.vout ≠ []) :
+    (hα : ∀ i < nb, ∀ k < Coin.W, RunSum.pQ (pub i) (Coin.PUB_ALPHA k) = α ^ k) :
     ∃ blocks : List BlockC, blocks.length = nb ∧
       (∀ i < nb, ∃ B, blocks[i]? = some B ∧ B.h = h0 + i ∧ B.txs = (S i).b.txs ∧ B.lost = lost i) ∧
+      (∀ B ∈ blocks, ∀ tx ∈ B.txs, (∀ o ∈ tx.vout, 0 ≤ o.value ∧ o.value ≤ Spec.Block.MAX_MONEY) ∧
+        Spec.Coins.outSum tx ≤ Spec.Block.MAX_MONEY) ∧
       ∀ N : ℕ → ℕ,
         ∑ i ∈ Finset.range nb, RunSum.pQ (pub i) Coin.PUB_S = (blocks.map (blockSum N (efrac N γ α z))).sum ∧
         (∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → ∀ (t : ℕ) (tx : Spec.Block.Tx), B.txs[t]? = some tx →
@@ -169,6 +171,10 @@ theorem epoch_blocks (nb : ℕ) (inst : ℕ → ℕ → Inst) (pub : ℕ → ℕ
         (∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → ∀ (t : ℕ) (tx : Spec.Block.Tx), B.txs[t]? = some tx →
           1 ≤ t → (∀ k < tx.vin.length, RealVal ((B.claim t k).code, (B.claim t k).ser)) →
           Spec.Coins.outSum tx ≤ Spec.Block.MAX_MONEY → Spec.Coins.ClaimsOK (txcOf N B t tx)) := by
+  have hne : ∀ i < nb, ∀ (t : ℕ) (tx : Spec.Block.Tx), (S i).b.txs[t]? = some tx → tx.vin ≠ [] ∧ tx.vout ≠ [] :=
+    fun i hi t tx htx => by
+      obtain ⟨h1, h2, -, -⟩ := txs_basic (hL i hi) (hsat i hi) (hL24 i hi) (S i) tx (List.mem_of_getElem? htx)
+      exact ⟨h1, h2⟩
   have key : ∀ i, ∃ claim : ℕ → ℕ → Claim, i < nb →
       (∀ N : ℕ → ℕ, RunSum.pQ (pub i) Coin.PUB_S =
         blockSum N (efrac N γ α z) ⟨h0 + i, (S i).b.txs, lost i, claim⟩) ∧
@@ -191,7 +197,14 @@ theorem epoch_blocks (nb : ℕ) (inst : ℕ → ℕ → Inst) (pub : ℕ → ℕ
   choose claim hclaim using key
   refine ⟨(List.range nb).map fun i => ⟨h0 + i, (S i).b.txs, lost i, claim i⟩, by simp,
     fun i hi => ⟨⟨h0 + i, (S i).b.txs, lost i, claim i⟩, by rw [List.getElem?_map, List.getElem?_range hi]; rfl,
-      rfl, rfl, rfl⟩, fun N => ⟨?_, ?_, ?_⟩⟩
+      rfl, rfl, rfl⟩, ?_, fun N => ⟨?_, ?_, ?_⟩⟩
+  · intro B hB tx htx
+    obtain ⟨i, hi, rfl⟩ := List.mem_map.mp hB
+    have hi' := List.mem_range.mp hi
+    obtain ⟨-, -, hpos, hsum⟩ := txs_basic (hL i hi') (hsat i hi') (hL24 i hi') (S i) tx htx
+    refine ⟨fun o ho => ⟨hpos o ho, le_trans ?_ hsum⟩, hsum⟩
+    exact List.single_le_sum (fun x hx => by
+      obtain ⟨o', ho', rfl⟩ := List.mem_map.mp hx; exact hpos o' ho') _ (List.mem_map_of_mem ho)
   · rw [List.map_map, list_sum_range_qm]
     exact Finset.sum_congr rfl fun i hi => (hclaim i (Finset.mem_range.mp hi)).1 N
   · intro i B hB t tx htx ev hev
@@ -200,5 +213,81 @@ theorem epoch_blocks (nb : ℕ) (inst : ℕ → ℕ → Inst) (pub : ℕ → ℕ
   · intro i B hB t tx htx ht1 hcv hout
     obtain ⟨j, hj, rfl⟩ := List.mem_map.mp (List.mem_of_getElem? hB)
     exact (hclaim j (List.mem_range.mp hj)).2.2 N t tx htx ht1 hcv hout
+
+/-- **An epoch from its block systems, as Core connects it.** Block systems `i < nb` at heights `h0 + i`,
+sharing the epoch's challenge, with Core's lost-coinbase flags, give the epoch's blocks (their
+transactions the systems' parsed blocks). For positions `N` from `g0`, an initial set of real coins
+created before the epoch, well-formed events whose bytes `γ` separates and distinct created outpoints:
+outside a bad set of `(α, z)` fixed by the events, if the blocks' public partial sums plus the initial
+set's fractions equal the final set's, Core's connect of the epoch's transactions from the initial view
+succeeds and ends at exactly the final set. -/
+theorem epoch_systems_core (nb : ℕ) (inst : ℕ → ℕ → Inst) (pub : ℕ → ℕ → F) (L : ℕ → ℕ)
+    (hL : ∀ i < nb, ∀ c < 15, (inst i c).logSize = L i) (hsat : ∀ i < nb, hashSys.SatisfiedExt (inst i) (pub i) [])
+    (hL24 : ∀ i < nb, L i ≤ 23) (S : ∀ i, Setup (inst i) (pub i) (L i)) (h0 : ℕ) (hh : h0 + nb ≤ 2 ^ 23)
+    (hp2 : ∀ i < nb, pub i 2 = ((h0 + i : ℕ) : F))
+    (hlost : ∀ i < nb, pub i Coin.PUB_LOST = if Spec.Coins.bip30Lost (h0 + i) then 1 else 0)
+    (γ α z : QM) (hγ : ∀ i < nb, FpWalk.gQ (pub i) = γ) (hz : ∀ i < nb, RunSum.pQ (pub i) Coin.PUB_Z = z)
+    (hα : ∀ i < nb, ∀ k < Coin.W, RunSum.pQ (pub i) (Coin.PUB_ALPHA k) = α ^ k) :
+    ∃ blocks : List BlockC, blocks.length = nb ∧
+      (∀ i < nb, ∃ B, blocks[i]? = some B ∧ B.h = h0 + i ∧ B.txs = (S i).b.txs) ∧
+      ∀ (N : ℕ → ℕ) (g0 : ℕ) (init fin : List CEv) (Sb : Finset (List F)), γ ∉ fpBad (𝕂 := QM) Sb →
+        (∀ e ∈ init ++ (created g0 (allTxs N blocks)).toList ++ ((spent (allTxs N blocks)).toList ++ fin),
+          WFE N e ∧ bytesF e ∈ Sb) →
+        (∀ i < nb, N (h0 + i) = g0 + ∑ i' ∈ Finset.range i, (S i').b.txs.length) →
+        (∀ e ∈ init, e.2.2 < g0) → (∀ e ∈ init, RealVal e.2.1) →
+        (((init : Multiset CEv) + created g0 (allTxs N blocks)).map Prod.fst).Nodup →
+        ∃ Bad : Finset (QM × QM), Bad.card ≤ ((polys (epochPN N γ blocks g0 init fin)).card ^ 2 * 27 +
+            2 * (polys (epochPN N γ blocks g0 init fin)).card) * Fintype.card QM ∧
+          ((α, z) ∉ Bad →
+            init.length + Multiset.card (created g0 (allTxs N blocks)) + Multiset.card (spent (allTxs N blocks)) +
+              fin.length < P →
+            ∑ i ∈ Finset.range nb, RunSum.pQ (pub i) Coin.PUB_S + (init.map (efrac N γ α z)).sum =
+              (fin.map (efrac N γ α z)).sum →
+            ∃ m, Spec.Coins.connectTxs (Spec.Coins.untag (vmap coinOfVal (viewOf init))) (allTxC N blocks) =
+                some (Spec.Coins.untag (vmap coinOfVal m), (allTxC N blocks).map Spec.Coins.claimFee) ∧
+              ∀ k v j, m k = some (v, j) ↔ (k, v, j) ∈ fin) := by
+  obtain ⟨blocks, hlen, hat, hvo, hfacts⟩ := epoch_blocks nb inst pub L hL hsat hL24 S h0 hh hp2
+    (fun i => Spec.Coins.bip30Lost (h0 + i)) hlost γ α z hγ hz hα
+  refine ⟨blocks, hlen, fun i hi => by obtain ⟨B, h1, h2, h3, -⟩ := hat i hi; exact ⟨B, h1, h2, h3⟩,
+    fun N g0 init fin Sb hγS hwf hN hinit hinitR hnd => ?_⟩
+  obtain ⟨hsum, hlexB, hokB⟩ := hfacts N
+  -- the blocks' heights, positions and bounds
+  have hB : ∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → i < nb ∧ B.h = h0 + i ∧ B.txs = (S i).b.txs ∧
+      B.lost = Spec.Coins.bip30Lost (h0 + i) := by
+    intro i B hBi
+    have hi : i < nb := by have := (List.getElem?_eq_some_iff.mp hBi).1; omega
+    obtain ⟨B', h1, h2, h3, h4⟩ := hat i hi
+    rw [hBi] at h1; obtain rfl := Option.some.inj h1
+    exact ⟨hi, h2, h3, h4⟩
+  have hpre : ∀ i ≤ nb, ((blocks.take i).map (·.txs.length)).sum = ∑ i' ∈ Finset.range i, (S i').b.txs.length := by
+    intro i
+    induction i with
+    | zero => intro _; simp
+    | succ i ih =>
+      intro hi
+      obtain ⟨B, h1, -, h3, -⟩ := hat i (by omega)
+      rw [List.take_succ, h1, List.map_append, List.sum_append, ih (by omega), Finset.sum_range_succ]
+      simp [h3]
+  have hpos : ∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → N B.h = g0 + ((blocks.take i).map (·.txs.length)).sum := by
+    intro i B hBi
+    obtain ⟨hi, h2, -, -⟩ := hB i B hBi
+    rw [h2, hN i hi, hpre i (by omega)]
+  have hinc : ∀ (i i' : ℕ) (B B' : BlockC), blocks[i]? = some B → blocks[i']? = some B' → (B.h < B'.h ↔ i < i') := by
+    intro i i' B B' h1 h2
+    rw [(hB i B h1).2.1, (hB i' B' h2).2.1]; omega
+  have hbnd : ∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → B.h < 2 ^ 24 ∧ B.txs.length < 2 ^ 25 := by
+    intro i B hBi
+    obtain ⟨hi, h2, h3, -⟩ := hB i B hBi
+    have hLb : 2 ^ L i ≤ 2 ^ 23 := Nat.pow_le_pow_right (by norm_num) (hL24 i hi)
+    have := (S i).hN25
+    refine ⟨by rw [h2]; omega, by rw [h3]; omega⟩
+  have hmem : ∀ B ∈ blocks, ∃ i, blocks[i]? = some B := fun B hBm => by
+    obtain ⟨i, hi, rfl⟩ := List.getElem_of_mem hBm; exact ⟨i, List.getElem?_eq_getElem hi⟩
+  obtain ⟨Bad, hcard, hcore⟩ := epoch_core N γ blocks g0 init fin hγS hwf hpos hinc hbnd hinit hinitR hnd
+    (fun B hBm tx htx => (hvo B hBm tx htx).1)
+    (fun B hBm => by obtain ⟨i, hi⟩ := hmem B hBm; rw [(hB i B hi).2.1]; exact (hB i B hi).2.2.2)
+    (fun B hBm tx htx => (hvo B hBm tx htx).2) hlexB hokB
+  refine ⟨Bad, hcard, fun haz hcnt hbal => hcore (α, z) haz hcnt ?_⟩
+  rw [← hsum]; exact hbal
 
 end StarkedAir.Block
