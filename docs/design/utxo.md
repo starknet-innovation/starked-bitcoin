@@ -282,14 +282,15 @@ Layers (Lean):
      (`epoch_blocks`, their transactions the systems' parsed blocks, nonempty with amounts in range by
      `txs_basic`); outside the fingerprint and LogUp bad sets, a balanced sum (the public partial sums
      plus the initial set's fractions equal the final set's) means Core's connect of the epoch from the
-     initial view succeeds and ends at exactly the final set.
+     initial view succeeds and ends at exactly the final set; and no transaction spends an outpoint
+     twice (`run_ins_nodup`), so each block passes Core's `CheckBlock` and `ContextualCheckBlock`
+     (`epoch_block_valid`, with `block_sound`): D-031 closed.
    Remaining hypotheses of `epoch_systems_core`: positions `N` (each height's first transaction's global
    index), an initial set of real coins created before the epoch, events well formed (`WFE`, their
    bytes in the separated set), distinct created outpoints (txid uniqueness, an assumption), and fewer
    than `P` events (the verifier's bound). Also open: in Lean, that the events are functions of the
    committed data (D-041; `ClaimAt` and `tl_bytes` pin each claim to the undo bytes, the record
-   positions follow from `rows_sound`), which the bad-set reading needs; `block_sound`'s
-   no-repeated-prevout hypothesis from the run (D-031).
+   positions follow from `rows_sound`), which the bad-set reading needs.
 
 ## Recommendation (D-040, proposed)
 
