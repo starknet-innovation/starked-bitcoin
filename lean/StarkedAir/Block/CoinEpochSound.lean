@@ -134,4 +134,64 @@ theorem encE_inj (N : ℕ → ℕ) {S : Finset (List F)} {γ : QM} (hγ : γ ∉
   simp only at hh hnn hcode hser hidx
   subst hh hnn hcode hser hidx; rfl
 
+section System
+
+variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ}
+  (hL : ∀ i < 15, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : L ≤ 23)
+include hL hsat hL24
+
+/-- **An input's claim is earlier**: with the claim's code below `2^26` and its `ctx` below `2^25`,
+`(code / 2, ctx) < (height, t)` lexicographically (the circuit's `ORD`/`OB` check). -/
+theorem coin_in_lex {j : ℕ} (hj : j < 2 ^ L) (hki : (inst 14).main Coin.KI j = 1) {h t code : ℕ}
+    (hp2 : pub 2 = (h : F)) (hh : h < 2 ^ 23) (htxi : (inst 14).main Coin.TXI j = (t : F)) (ht : t < 2 ^ 23)
+    (hcode : (inst 14).main Coin.CLO j + 65536 * (inst 14).main Coin.CHI j = (code : F)) (hc26 : code < 2 ^ 26)
+    (hctx : ((inst 14).main Coin.CTX j).val < 2 ^ 25) :
+    code / 2 < h ∨ (code / 2 = h ∧ ((inst 14).main Coin.CTX j).val < t) := by
+  have cs := coin_sat hL hsat hL24
+  obtain ⟨hc1, hhc, hord0, hord1, -, -, -, -⟩ := Coin.in_spec cs hj hki
+  have ek : (Coin.k Coin.KI).eval (2 ^ L) Coin.preCols pub (inst 14).main j = 1 := by rw [Coin.ev_k hj]; exact hki
+  have hhb : ∀ i < 3, ((inst 14).main (Coin.HB i) j).val < 256 := by
+    intro i hi
+    have fam : Coin.lookups.getD (52 + i) ⟨0, .const 0, []⟩ = Coin.r8 (Coin.k (Coin.HB i)) (Coin.k Coin.KI) := by
+      interval_cases i <;> rfl
+    exact coin_r8 hL hsat hL24 (k := 52 + i) (by omega) (by omega) fam hj ek
+  have hob : ∀ i < 3, ((inst 14).main (Coin.OB i) j).val < 256 := by
+    intro i hi
+    have fam : Coin.lookups.getD (55 + i) ⟨0, .const 0, []⟩ = Coin.r8 (Coin.k (Coin.OB i)) (Coin.k Coin.KI) := by
+      interval_cases i <;> rfl
+    exact coin_r8 hL hsat hL24 (k := 55 + i) (by omega) (by omega) fam hj ek
+  have hb3h := Coin.b3N_lt hhb
+  have hb3o := Coin.b3N_lt hob
+  have hP := Coin.P_big
+  have hHC : (inst 14).main Coin.HC j = ((Coin.b3N (inst 14).main Coin.HB j : ℕ) : F) := by rw [hhc, Coin.b3V_eq]
+  set hc := Coin.b3N (inst 14).main Coin.HB j with hcdef
+  have cbc := Coin.bool_col cs (c := Coin.CBC) (by simp) hj
+  have ord := Coin.bool_col cs (c := Coin.ORD) (by simp) hj
+  -- the code is 2·HC + CBC
+  have hcodeN : code = 2 * hc + ((inst 14).main Coin.CBC j).val := by
+    have hcv : ((inst 14).main Coin.CBC j).val ≤ 1 := by rcases cbc with e | e <;> rw [e] <;> decide
+    apply Coin.lift _ (by omega) (by omega)
+    push_cast; rw [Coin.cast_val, ← hHC, ← hcode, hc1]
+  have hdiv : code / 2 = hc := by
+    have hcv : ((inst 14).main Coin.CBC j).val ≤ 1 := by rcases cbc with e | e <;> rw [e] <;> decide
+    omega
+  rw [hdiv]
+  rcases ord with o | o
+  · -- same height: an earlier transaction
+    obtain ⟨hhe, hob'⟩ := hord0 o
+    rw [hHC, hp2] at hhe
+    have hhv : hc = h := Coin.lift hhe (by omega) (by omega)
+    rw [Coin.b3V_eq, htxi] at hob'
+    have := Coin.lift (a := Coin.b3N (inst 14).main Coin.OB j + ((inst 14).main Coin.CTX j).val + 1) (b := t)
+      (by push_cast; rw [Coin.cast_val, hob']; ring) (by omega) (by omega)
+    right; exact ⟨hhv, by omega⟩
+  · -- an earlier height
+    have hob' := hord1 o
+    rw [Coin.b3V_eq, hHC, hp2] at hob'
+    have := Coin.lift (a := Coin.b3N (inst 14).main Coin.OB j + hc + 1) (b := h)
+      (by push_cast; rw [hob']; ring) (by omega) (by omega)
+    left; omega
+
+end System
+
 end StarkedAir.Block
