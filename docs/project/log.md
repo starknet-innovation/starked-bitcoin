@@ -21,6 +21,32 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-10-11 (session 8) — M3b coin proof layers 4–5; challenge binding fixed (D-041)
+Who: Claude (agent, Opus 5.5), continuing the owner's "M3b and everything not blocked by compute"
+Roadmap: UTXO (M3b) in progress (coin proof layers 1–4 done, layer 5 in progress)
+Done:
+- Lean layer 4 (events): each coin row is its transaction's input or output, with its tuple the event's
+  encoding; `coin_block_sum` (the public partial sum, by coin events).
+- Lean layer 5 so far: `encE` and its injectivity (`encE_inj`), `phiOf_poly` (with `αₖ = αᵏ`; the
+  implementation now uses powers), `coin_in_lex`, `block_claims`, `block_event_sum` (a block's partial
+  sum as epoch events).
+- **Soundness gap, found while stating the epoch theorem and fixed (D-041):** the LogUp and fingerprint
+  bounds need every event fixed before the epoch challenge, but the final set was not in the seed, the
+  initial set was bound by `hash_serialized` (no transaction index), and each input's claimed `CTX` was
+  a free trace column. Fixes: the seed binds both sets' full encodings (c2c859d); undo records carry the
+  creating-transaction index inside the committed stream, URec yields it and the coin row's `CTX` must
+  equal it (013dc7e; Lean: `coin_urec`, `urec_bytes`, `coin_in_tuple`; 214 sites per row).
+Evidence:
+- `zig build test` filters: coin events (with new index-tamper and commitment checks), amounts, block
+  commitment, epoch, block 170, block proof file, block system small and block-hash, block negative:
+  pass. `lake build` clean, no `sorry`.
+Problems / lessons:
+- For any challenge-based argument, list every value behind a tuple and check it is fixed before the
+  challenge; "the trace is committed" is not enough when the challenge is drawn before the trace.
+- All epoch proofs made before D-041 are stale (seed tag v2, undo stream format).
+Next: compile the epoch sum (`epoch_sums`, `epoch_frac_zero`, `epoch_balance`), then `epoch_run` and the
+Coin-level `connect_of_run`; re-prove epochs 0–170 and 171–1000.
+
 ## 2026-10-10 (session 7) — VERIFIER-LEAN steps 4–5 done; M3b proofs; an amount-check soundness bug fixed
 Who: Claude (agent, Opus 5.5), on the owner's "proceed with step 5 (channel and Merkle proven, FRI
 soundness stated), then M3b and everything not blocked by compute"

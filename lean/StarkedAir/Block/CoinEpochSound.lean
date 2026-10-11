@@ -379,4 +379,95 @@ theorem block_event_sum (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
 
 end System
 
+/-! ### The epoch sum -/
+
+/-- An event's fraction at `(α, z)`: `1/(z − φ)`, `φ` its encoding's polynomial at `α`. -/
+noncomputable def efrac (N : ℕ → ℕ) (γ α z : QM) (e : CEv) : QM := (z - (tuplePoly (K := QM) (encE N γ e)).eval α)⁻¹
+
+theorem toList_map_sum {β : Type} (m : Multiset β) (f : β → QM) : (m.toList.map f).sum = (m.map f).sum := by
+  conv_rhs => rw [← Multiset.coe_toList m]
+  rw [Multiset.map_coe, Multiset.sum_coe]
+
+theorem list_sum_map_neg {β : Type} (l : List β) (f : β → QM) : (l.map fun x => -f x).sum = -(l.map f).sum := by
+  induction l with
+  | nil => simp
+  | cons a l ih => simp only [List.map_cons, List.sum_cons, ih]; ring
+
+theorem msum_map_neg {β : Type} (m : Multiset β) (f : β → QM) : (m.map fun x => -f x).sum = -(m.map f).sum := by
+  induction m using Multiset.induction_on with
+  | empty => simp
+  | cons a m ih => simp only [Multiset.map_cons, Multiset.sum_cons, ih]; ring
+
+theorem spent_append : ∀ (l1 l2 : List (Spec.Utxo.Tx Spec.Block.OutPoint Val)), spent (l1 ++ l2) = spent l1 + spent l2
+  | [], l2 => by simp [spent]
+  | t :: l1, l2 => by simp only [List.cons_append, spent, spent_append l1 l2, add_assoc]
+
+/-- The block's term in the epoch sum: its created events' fractions minus its spent events'. -/
+noncomputable def blockSum (N : ℕ → ℕ) (f : CEv → QM) (B : BlockC) : QM :=
+  ((created (N B.h) (blockTxs N B)).map f).sum - ((spent (blockTxs N B)).map f).sum
+
+/-- **The epoch's sums are the blocks' sums**, with each block's creation indices starting at its first
+transaction's global position. -/
+theorem epoch_sums (N : ℕ → ℕ) (f : CEv → QM) : ∀ (blocks : List BlockC) (g : ℕ),
+    (∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → N B.h = g + ((blocks.take i).map (·.txs.length)).sum) →
+    ((created g (allTxs N blocks)).map f).sum - ((spent (allTxs N blocks)).map f).sum =
+      (blocks.map (blockSum N f)).sum
+  | [], g, _ => by simp [allTxs, created, spent]
+  | B :: bs, g, hpos => by
+    have h0 : N B.h = g := by simpa using hpos 0 B rfl
+    have ha : allTxs N (B :: bs) = blockTxs N B ++ allTxs N bs := by simp [allTxs]
+    have ih := epoch_sums N f bs (g + B.txs.length) (fun i B' hB' => by
+      have := hpos (i + 1) B' (by simpa using hB')
+      simp only [List.take_succ_cons, List.map_cons, List.sum_cons] at this; omega)
+    rw [ha, created_append, spent_append, List.map_cons, List.sum_cons, blockTxs_length, ← ih]
+    simp only [Multiset.map_add, Multiset.sum_add, blockSum, h0]
+    ring
+
+/-- **A balanced epoch sum is a zero LogUp sum.** If the blocks' sums plus the initial set's fractions
+equal the final set's, the epoch's LogUp sum (initial and created `+1`, spent and final `−1`) is zero. -/
+theorem epoch_frac_zero (N : ℕ → ℕ) (γ α z : QM) (blocks : List BlockC) (g0 : ℕ) (init fin : List CEv)
+    (hpos : ∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → N B.h = g0 + ((blocks.take i).map (·.txs.length)).sum)
+    (hsum : (blocks.map (blockSum N (efrac N γ α z))).sum + (init.map (efrac N γ α z)).sum =
+      (fin.map (efrac N γ α z)).sum) :
+    fracSum (pnEntries (𝕂 := QM) (encE N γ) (init ++ (created g0 (allTxs N blocks)).toList)
+      ((spent (allTxs N blocks)).toList ++ fin)) α z = 0 := by
+  have hp : ∀ e : CEv, (1 : QM) / ((tuplePoly (K := QM) (encE N γ e)).eval α - z) = -efrac N γ α z e := by
+    intro e; unfold efrac; rw [one_div, ← inv_neg, neg_sub]
+  have hn : ∀ e : CEv, (-1 : QM) / ((tuplePoly (K := QM) (encE N γ e)).eval α - z) = efrac N γ α z e := by
+    intro e; rw [neg_div, hp, neg_neg]
+  have hs := epoch_sums N (efrac N γ α z) blocks g0 hpos
+  unfold fracSum pnEntries
+  simp only [List.map_append, List.map_map, Function.comp_def, List.sum_append, hp, hn, list_sum_map_neg,
+    toList_map_sum, msum_map_neg]
+  linear_combination -hs - hsum
+
+/-- The epoch's LogUp entries: initial and created `+1`, spent and final `−1`. -/
+noncomputable def epochPN (N : ℕ → ℕ) (γ : QM) (blocks : List BlockC) (g0 : ℕ) (init fin : List CEv) :
+    List (Entry QM) :=
+  pnEntries (𝕂 := QM) (encE N γ) (init ++ (created g0 (allTxs N blocks)).toList) ((spent (allTxs N blocks)).toList ++ fin)
+
+/-- **The epoch balances** outside a bad set of `(α, z)` fixed by the epoch's events: with the encoding
+injective on them and fewer than `P` events, a balanced epoch sum gives
+`init + created = spent + final` as multisets of events. -/
+theorem epoch_balance [Fintype QM] (N : ℕ → ℕ) (γ : QM) (blocks : List BlockC) (g0 : ℕ) (init fin : List CEv) :
+    ∃ Bad : Finset (QM × QM), Bad.card ≤ ((polys (epochPN N γ blocks g0 init fin)).card ^ 2 * 27 +
+        2 * (polys (epochPN N γ blocks g0 init fin)).card) * Fintype.card QM ∧
+      ∀ az ∉ Bad,
+        (∀ e ∈ init ++ (created g0 (allTxs N blocks)).toList ++ ((spent (allTxs N blocks)).toList ++ fin),
+          ∀ e' ∈ init ++ (created g0 (allTxs N blocks)).toList ++ ((spent (allTxs N blocks)).toList ++ fin),
+            encE N γ e = encE N γ e' → e = e') →
+        init.length + Multiset.card (created g0 (allTxs N blocks)) + Multiset.card (spent (allTxs N blocks)) +
+          fin.length < P →
+        (∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → N B.h = g0 + ((blocks.take i).map (·.txs.length)).sum) →
+        (blocks.map (blockSum N (efrac N γ az.1 az.2))).sum + (init.map (efrac N γ az.1 az.2)).sum =
+          (fin.map (efrac N γ az.1 az.2)).sum →
+        (init : Multiset CEv) + created g0 (allTxs N blocks) = spent (allTxs N blocks) + fin := by
+  obtain ⟨Bad, hcard, hb⟩ := balance_of_sum (𝕂 := QM) (encE N γ) 26 (encE_length N γ)
+    (init ++ (created g0 (allTxs N blocks)).toList) ((spent (allTxs N blocks)).toList ++ fin)
+  refine ⟨Bad, hcard, fun az haz hinj hlen hpos hsum => ?_⟩
+  have h := hb az haz hinj (by simp only [List.length_append, Multiset.length_toList]; omega)
+    (epoch_frac_zero N γ az.1 az.2 blocks g0 init fin hpos hsum)
+  rw [← Multiset.coe_add, ← Multiset.coe_add, Multiset.coe_toList, Multiset.coe_toList] at h
+  exact h
+
 end StarkedAir.Block

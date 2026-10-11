@@ -345,3 +345,16 @@ Owner decisions on D-040 (2026-10-10):
 - Tip following: start by matching Core's snapshots, compute them, then assess.
 - Cost estimate corrected: script fingerprints cost about one row per script byte, so M3b adds roughly
   10–30% to the block proofs (*est.*), not 10¹⁰ rows in total.
+
+### D-041 — Every value behind an epoch event's tuple is fixed before the epoch challenge
+Date: 2026-10-11 · By: Claude (agent) · Status: active (soundness fix within D-040; owner to review)
+Decision: the epoch seed hashes the initial and final coin sets' full encodings (`setDigest`, Blake2s of
+`encodeSet`), and each undo record carries the spent coin's creating-transaction index (3 bytes after
+the code) inside the Blake2s-committed undo stream, read by URec and equal to the coin row's `CTX`.
+Why: the LogUp and fingerprint bounds (`balance_of_sum`, `fp_separates`) hold for events chosen before
+the challenge. Before this fix, three inputs to the fractions were chosen after it: the final set (read
+at verification, not in the seed), the initial set's transaction indices (`hash_serialized` omits
+them), and every input's claimed `CTX` (a free trace column). With hundreds of free choices, a
+generalized-birthday (Wagner) search over QM31 sums can make a false epoch balance at feasible cost
+(*est.*: practical with 2^4 lists of 2^31 candidates). Cost: 3 columns and 3 byte lookups in URec,
+3 bytes per spend in the commitment; epoch proofs made before the fix must be re-proved.
