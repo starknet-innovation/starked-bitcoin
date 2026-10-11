@@ -134,6 +134,57 @@ theorem encE_inj (N : ℕ → ℕ) {S : Finset (List F)} {γ : QM} (hγ : γ ∉
   simp only at hh hnn hcode hser hidx
   subst hh hnn hcode hser hidx; rfl
 
+/-! ### Sums over lists, as range sums -/
+
+theorem zipIdx_sum {α : Type} (l : List α) (g : α → ℕ → QM) (c : ℕ) :
+    ((l.zipIdx c).map fun p => g p.1 p.2).sum = ∑ k ∈ Finset.range l.length, (match l[k]? with
+      | some a => g a (c + k) | none => 0) := by
+  induction l generalizing c with
+  | nil => simp
+  | cons a l ih =>
+    rw [List.zipIdx_cons, List.map_cons, List.sum_cons, ih, List.length_cons, Finset.sum_range_succ']
+    simp only [List.getElem?_cons_succ, List.getElem?_cons_zero, Nat.add_zero, add_comm]
+    congr 1
+    refine Finset.sum_congr rfl fun x _ => ?_
+    rw [show x + (c + 1) = c + (x + 1) by omega]
+
+theorem zipIdx_filter_sum {α : Type} (l : List α) (P : α → Bool) (g : α → ℕ → QM) (c : ℕ) :
+    (((l.zipIdx c).filter fun p => P p.1).map fun p => g p.1 p.2).sum = ∑ k ∈ Finset.range l.length, (match l[k]? with
+      | some a => if P a then g a (c + k) else 0 | none => 0) := by
+  induction l generalizing c with
+  | nil => simp
+  | cons a l ih =>
+    rw [List.zipIdx_cons, List.filter_cons, List.length_cons, Finset.sum_range_succ']
+    have hs : ∑ x ∈ Finset.range l.length, (match (a :: l)[x + 1]? with
+        | some a => if P a then g a (c + (x + 1)) else 0 | none => 0) =
+        (((l.zipIdx (c + 1)).filter fun p => P p.1).map fun p => g p.1 p.2).sum := by
+      rw [ih]
+      refine Finset.sum_congr rfl fun x _ => ?_
+      rw [List.getElem?_cons_succ, show c + 1 + x = c + (x + 1) by omega]
+    rw [hs]
+    by_cases hp : P a <;> simp [hp, add_comm]
+
+/-- A sum over created coins, transaction by transaction. -/
+theorem created_sum (f : CEv → QM) : ∀ (g : ℕ) (ts : List (Spec.Utxo.Tx Spec.Block.OutPoint Val)),
+    ((created g ts).map f).sum = ∑ k ∈ Finset.range ts.length, (match ts[k]? with
+      | some t => (t.outs.map fun kv => f (kv.1, kv.2, g + k)).sum | none => 0)
+  | g, [] => by simp [created]
+  | g, t :: ts => by
+    rw [created, Multiset.map_add, Multiset.sum_add, created_sum f (g + 1) ts, List.length_cons,
+      Finset.sum_range_succ', add_comm]
+    simp only [outsT, Multiset.map_coe, Multiset.sum_coe, List.map_map, List.getElem?_cons_succ,
+      List.getElem?_cons_zero, Nat.add_zero]
+    congr 1
+    refine Finset.sum_congr rfl fun x _ => ?_
+    rw [show g + 1 + x = g + (x + 1) by omega]
+
+theorem spent_sum (f : CEv → QM) : ∀ (ts : List (Spec.Utxo.Tx Spec.Block.OutPoint Val)),
+    ((spent ts).map f).sum = (ts.map fun t => (t.ins.map f).sum).sum
+  | [] => by simp [spent]
+  | t :: ts => by
+    rw [spent, Multiset.map_add, Multiset.sum_add, spent_sum f ts, List.map_cons, List.sum_cons]
+    simp
+
 section System
 
 variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ}
@@ -248,6 +299,83 @@ theorem block_claims (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
     · exact ⟨default, fun tx htx ht1 i hi => absurd ⟨tx, i, htx, ht1, hi⟩ hv⟩
   choose claim hclaim using key
   exact ⟨claim, fun t tx htx ht1 k i hi => hclaim t k tx htx ht1 i hi⟩
+
+/-- **The block's partial sum, as epoch events.** With a claim function giving each input row's tuple,
+the public partial sum is the block's created events' `1/(z − φ(encE))` minus its spent events'. -/
+theorem block_event_sum (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
+    (hon : ∀ j < 2 ^ L, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
+    (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
+    {parts : List (List Spec.Block.Tok)} (hf : List.Forall₂ Spec.Block.IoTx S.b.txs parts)
+    (htg : Spec.Block.tagged 0 (Fields.toksFrom (inst 1).main (Rb inst pub) S.m 0) = Spec.Block.tagParts 0 parts)
+    {h : ℕ} (hp2 : pub 2 = (h : F)) (hh : h < 2 ^ 23) {lost : Bool} (hlost : pub Coin.PUB_LOST = if lost then 1 else 0)
+    (N : ℕ → ℕ) (claim : ℕ → ℕ → Claim)
+    (hcl : ∀ (t : ℕ) (tx : Spec.Block.Tx), S.b.txs[t]? = some tx → 1 ≤ t →
+      ∀ (k : ℕ) (i : Spec.Block.TxIn), tx.vin[k]? = some i →
+        rowTuple inst pub L (((parts.take t).map List.length).sum + k) =
+          tupleOf (FpWalk.gQ pub) i.prevout.hash i.prevout.n (claim t k).code (claim t k).ser (claim t k).ctx) :
+    let F' := fun ev : CEv => (RunSum.pQ pub Coin.PUB_Z - phiOf pub (encE N (FpWalk.gQ pub) ev))⁻¹
+    let B : BlockC := ⟨h, S.b.txs, lost, claim⟩
+    RunSum.pQ pub Coin.PUB_S = ((created (N h) (blockTxs N B)).map F').sum - ((spent (blockTxs N B)).map F').sum := by
+  intro F' B
+  rw [coin_block_sum hL hsat hL24 S he hon hlen hst hf htg hp2 hh hlost, created_sum, spent_sum,
+    blockTxs_length]
+  have hsp : ((blockTxs N B).map fun t => (t.ins.map F').sum).sum = ∑ t ∈ Finset.range S.b.txs.length,
+      (match S.b.txs[t]? with | some tx => ((txIns N B t tx).map F').sum | none => 0) := by
+    unfold blockTxs
+    rw [List.map_map]
+    exact zipIdx_sum S.b.txs (fun tx t => ((txIns N B t tx).map F').sum) 0 |>.trans (Finset.sum_congr rfl fun x _ => by cases S.b.txs[x]? <;> simp)
+  rw [hsp, ← Finset.sum_sub_distrib]
+  refine Finset.sum_congr rfl fun t ht => ?_
+  have hbt : (blockTxs N B)[t]? = (S.b.txs[t]?).map fun tx => (⟨txIns N B t tx, txOuts B t tx⟩ : Spec.Utxo.Tx _ _) := by
+    simp [blockTxs, List.getElem?_zipIdx]
+    cases S.b.txs[t]? <;> rfl
+  rw [hbt]
+  cases htx : S.b.txs[t]? with
+  | none => simp [blockTerm, htx]
+  | some tx =>
+    simp only [Option.map_some]
+    rw [(part_len hf htx).2, Finset.sum_range_add, sub_eq_add_neg, add_comm]
+    congr 1
+    · -- the outputs
+      have hr : ((txOuts B t tx).map fun kv => F' (kv.1, kv.2, N h + t)).sum = ∑ k ∈ Finset.range tx.vout.length,
+          (match tx.vout[k]? with
+            | some o => if live lost t o then F' (⟨Spec.Block.txid tx, k⟩, (codeOf h t, Spec.Block.serTxOut o), N h + t) else 0
+            | none => 0) := by
+        simp only [txOuts, List.map_map]
+        exact (zipIdx_filter_sum tx.vout (live lost t) (fun o k =>
+          F' (⟨Spec.Block.txid tx, k⟩, (codeOf h t, Spec.Block.serTxOut o), N h + t)) 0).trans
+          (Finset.sum_congr rfl fun x _ => by cases tx.vout[x]? <;> simp)
+      rw [hr]
+      refine Finset.sum_congr rfl fun k hk => ?_
+      have hk' := Finset.mem_range.mp hk
+      rw [List.getElem?_eq_getElem hk']
+      simp only [blockTerm, htx, if_pos (Nat.le_add_right _ _), Nat.add_sub_cancel_left, List.getElem?_eq_getElem hk']
+      have hF : F' (⟨Spec.Block.txid tx, k⟩, (codeOf h t, Spec.Block.serTxOut tx.vout[k]), N h + t) =
+          (RunSum.pQ pub Coin.PUB_Z - phiOf pub (tupleOf (FpWalk.gQ pub) (Spec.Block.txid tx) k (codeOf h t)
+            (Spec.Block.serTxOut tx.vout[k]) t))⁻¹ := by
+        simp only [F', encE, codeOf_div, Nat.add_sub_cancel_left]
+      rw [hF, show live lost t tx.vout[k] = (!Spec.Coins.unspendable tx.vout[k] && !(t == 0 && lost)) from rfl]
+      rfl
+    · -- the inputs
+      by_cases ht0 : t = 0
+      · subst ht0
+        rw [Finset.sum_eq_zero (fun q hq => by simp [blockTerm, htx, not_le.mpr (Finset.mem_range.mp hq)])]
+        simp [txIns]
+      · have ht1 : 1 ≤ t := by omega
+        have hr : ((txIns N B t tx).map F').sum = ∑ k ∈ Finset.range tx.vin.length, (match tx.vin[k]? with
+            | some i => F' (i.prevout, ((claim t k).code, (claim t k).ser), N ((claim t k).code / 2) + (claim t k).ctx)
+            | none => 0) := by
+          simp only [txIns, if_neg ht0, List.map_map]
+          exact (zipIdx_sum tx.vin (fun i k => F' (i.prevout, ((claim t k).code, (claim t k).ser),
+            N ((claim t k).code / 2) + (claim t k).ctx)) 0).trans
+            (Finset.sum_congr rfl fun x _ => by cases tx.vin[x]? <;> simp)
+        rw [hr, ← Finset.sum_neg_distrib]
+        refine Finset.sum_congr rfl fun q hq => ?_
+        have hq' := Finset.mem_range.mp hq
+        rw [List.getElem?_eq_getElem hq']
+        simp only [blockTerm, htx, if_neg (not_le.mpr hq'), if_pos ht1]
+        rw [hcl t tx htx ht1 q _ (List.getElem?_eq_getElem hq')]
+        simp only [F', encE, Nat.add_sub_cancel_left]
 
 end System
 
