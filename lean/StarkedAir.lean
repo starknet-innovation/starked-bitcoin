@@ -96,6 +96,7 @@ import StarkedAir.Block.CoinEpochSound
 import StarkedAir.Block.CoinClaims
 import StarkedAir.Block.CoinEpochCore
 import StarkedAir.Block.AggregateBlocks
+import StarkedAir.Block.CoinWFE
 import StarkedAir.Block.BlockSetup
 import StarkedAir.Block.BlockTxs
 import StarkedAir.Block.BlockSums
