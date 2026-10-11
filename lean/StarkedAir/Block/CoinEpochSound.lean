@@ -188,7 +188,9 @@ theorem spent_sum (f : CEv → QM) : ∀ (ts : List (Spec.Utxo.Tx Spec.Block.Out
 /-- Claim `c` is input row `j`'s undo record: the row is an input, its record is URec row `rj`, and the
 claim's `serTxOut`, code and creating-transaction index are that record's undo bytes. -/
 def ClaimAt (inst : ℕ → Inst) (pub : ℕ → F) (L j : ℕ) (c : Claim) : Prop :=
-  (inst 14).main Coin.KI j = 1 ∧ ∃ rj < 2 ^ L, (inst 13).main URec.ON rj = 1 ∧
+  (inst 14).main Coin.KI j = 1 ∧
+  (inst 14).main Coin.CLO j + 65536 * (inst 14).main Coin.CHI j = (c.code : F) ∧
+  ∃ rj < 2 ^ L, (inst 13).main URec.ON rj = 1 ∧
     (inst 14).main Coin.J j = (inst 13).main URec.J rj ∧
     ∃ u0 : ℕ, (inst 13).main URec.S rj + 7 = (u0 : F) ∧ 7 ≤ u0 ∧ u0 + c.ser.length ≤ (pub 8).val ∧
       c.ser = (List.range c.ser.length).map (fun k => (Ub inst pub).getD (u0 + k) 0) ∧
@@ -310,7 +312,7 @@ theorem block_claims (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
       rw [hi] at hi'; obtain rfl := Option.some.inj hi'
       have hLb : 2 ^ L ≤ 2 ^ 23 := Nat.pow_le_pow_right (by norm_num) hL24
       have htN : t < 2 ^ 23 := by have := (List.getElem?_eq_some_iff.mp htx).1; have := S.hN25; omega
-      refine ⟨htu, fun hc26 hc25 => ?_, hc24, hki, rj, hrj, honj, hJ, u0, hu0, hu07, hu0l, hser, hcodeb, hctxb⟩
+      refine ⟨htu, fun hc26 hc25 => ?_, hc24, hki, hcode, rj, hrj, honj, hJ, u0, hu0, hu07, hu0l, hser, hcodeb, hctxb⟩
       have := coin_in_lex hL hsat hL24 hj2 hki hp2 hh htxi htN hcode hc26 (by rw [hcv]; exact hc25)
       rwa [hcv] at this
     · exact ⟨default, fun tx htx ht1 i hi => absurd ⟨tx, i, htx, ht1, hi⟩ hv⟩

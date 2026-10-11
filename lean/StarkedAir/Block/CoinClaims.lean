@@ -6,10 +6,32 @@ transaction's rows (`in_nat`, `out_nat`, `tend_nat`), they give `ClaimsOK`'s amo
 -/
 import StarkedAir.Block.CoinEpochSound
 import StarkedAir.Block.ValueSound
+import StarkedAir.Spec.CoinDecode
 
 namespace StarkedAir.Block
 
 open StarkedAir StarkedAir.Spec.CoinEpoch StarkedAir.Spec.Utxo
+
+theorem sumZ_zipIdx {α : Type} (g : ℕ → ℤ) : ∀ (l : List α) (c : ℕ),
+    ((l.zipIdx c).map fun p => g p.2).sum = ∑ k ∈ Finset.range l.length, g (c + k)
+  | [], c => by simp
+  | a :: l, c => by
+    rw [List.zipIdx_cons, List.map_cons, List.sum_cons, sumZ_zipIdx g l (c + 1), List.length_cons,
+      Finset.sum_range_succ']
+    simp only [Nat.add_zero, add_comm]
+    congr 1
+    refine Finset.sum_congr rfl fun k _ => ?_
+    rw [show k + (c + 1) = c + (k + 1) by omega]
+
+theorem sumZ_list {α : Type} (f : α → ℤ) : ∀ (l : List α),
+    (l.map f).sum = ∑ i ∈ Finset.range l.length, ((l[i]?).map f).getD 0
+  | [] => by simp
+  | a :: l => by
+    rw [List.map_cons, List.sum_cons, sumZ_list f l, List.length_cons, Finset.sum_range_succ']
+    simp [add_comm]
+
+theorem max_money_eq : (Spec.Block.MAX_MONEY : ℤ) = ((Fields.MAXHI * 2 ^ 24 + Fields.MAXLO : ℕ) : ℤ) := by
+  unfold Spec.Block.MAX_MONEY Fields.MAXHI Fields.MAXLO; norm_num
 
 section System
 
@@ -94,7 +116,7 @@ theorem in_amount {j : ℕ} (hj : j < 2 ^ L) {c : Claim} (hc : ClaimAt inst pub 
     (hmax : Spec.Block.le (c.ser.take 8) ≤ Fields.MAXHI * 2 ^ 24 + Fields.MAXLO) :
     ((inst 14).main Coin.VL j).val < 2 ^ 24 ∧ ((inst 14).main Coin.VH j).val < 2 ^ 27 ∧
       ((inst 14).main Coin.VH j).val * 2 ^ 24 + ((inst 14).main Coin.VL j).val = Spec.Block.le (c.ser.take 8) := by
-  obtain ⟨hki, rj, hrj, honj, hJ, u0, hu0, -, hu0l, hser, -, -⟩ := hc
+  obtain ⟨hki, -, rj, hrj, honj, hJ, u0, hu0, -, hu0l, hser, -, -⟩ := hc
   obtain ⟨rj', hrj', hon', hJ', -, -, hvl, hvh, -⟩ := coin_urec hL hsat hL24 hj hki
   have hrr : rj' = rj := urec_j_inj hL hsat hL24 hrj' hrj hon' honj (by rw [← hJ', hJ])
   rw [hrr] at hvl hvh
@@ -487,6 +509,90 @@ theorem tx_amounts (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
   refine ⟨?_, i4⟩
   rw [← o3, ← i3, ← hinl, ← hinh]
   exact tn
+
+/-- **A transaction's claim checks** (`ClaimsOK`). For transaction `t ≥ 1` of a block whose claims are its
+input rows' undo records (each a real coin's: at least 8 bytes, its amount within `MAX_MONEY`, its code
+below `2^30`), with every transaction's inputs and outputs nonempty and this one's outputs within
+`MAX_MONEY`: every claim is mature, the outputs are at most the claimed inputs, and those are within
+`MAX_MONEY`. -/
+theorem tx_claims_ok (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
+    (hon : ∀ j < 2 ^ L, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
+    (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
+    {parts : List (List Spec.Block.Tok)} (hf : List.Forall₂ Spec.Block.IoTx S.b.txs parts)
+    (htg : Spec.Block.tagged 0 (Fields.toksFrom (inst 1).main (Rb inst pub) S.m 0) = Spec.Block.tagParts 0 parts)
+    (hne : ∀ (t' : ℕ) (tx' : Spec.Block.Tx), S.b.txs[t']? = some tx' → tx'.vin ≠ [] ∧ tx'.vout ≠ [])
+    {h : ℕ} (hp2 : pub 2 = (h : F)) (hh : h < 2 ^ 23) (N : ℕ → ℕ) (B : BlockC) (hBh : B.h = h)
+    {t : ℕ} {tx : Spec.Block.Tx} (htx : S.b.txs[t]? = some tx) (ht1 : 1 ≤ t)
+    (hcl : ∀ k < tx.vin.length, ClaimAt inst pub L (((parts.take t).map List.length).sum + k) (B.claim t k))
+    (hcv : ∀ k < tx.vin.length, 8 ≤ (B.claim t k).ser.length ∧
+      Spec.Block.le ((B.claim t k).ser.take 8) ≤ Fields.MAXHI * 2 ^ 24 + Fields.MAXLO ∧ (B.claim t k).code < 2 ^ 30)
+    (hout : Spec.Coins.outSum tx ≤ Spec.Block.MAX_MONEY) :
+    Spec.Coins.ClaimsOK (txcOf N B t tx) := by
+  have cs := coin_sat hL hsat hL24
+  obtain ⟨hrows, -, -, -, -⟩ := tx_rows hL hsat hL24 S he hon hlen hst hf htg hne htx ht1
+  set j0 := ((parts.take t).map List.length).sum with hj0def
+  have ht0 : t ≠ 0 := by omega
+  unfold Spec.Coins.ClaimsOK txcOf
+  right
+  simp only [if_neg ht0]
+  -- the claimed amounts and the outputs' amounts
+  set a : ℕ → ℕ := fun k => Spec.Block.le ((B.claim t k).ser.take 8) with hadef
+  set v : ℕ → ℕ := fun q => ((tx.vout[q]?.map (fun o : Spec.Block.TxOut => o.value)).getD 0).toNat with hvdef
+  have hov : ∀ q (hq : q < tx.vout.length), ((inst 14).main Coin.VL (j0 + tx.vin.length + q)).val < 2 ^ 24 ∧
+      ((inst 14).main Coin.VH (j0 + tx.vin.length + q)).val < 2 ^ 27 ∧
+      0 ≤ tx.vout[q].value ∧
+      ((((inst 14).main Coin.VH (j0 + tx.vin.length + q)).val * 2 ^ 24 +
+        ((inst 14).main Coin.VL (j0 + tx.vin.length + q)).val : ℕ) : ℤ) = tx.vout[q].value := by
+    intro q hq
+    have hr := hrows (tx.vin.length + q) (by omega)
+    obtain ⟨o1, o2, o3, -, o5⟩ := out_amount hL hsat hL24 S he hon hlen hst hf htg (j := j0 + tx.vin.length + q)
+      (q := tx.vin.length + q) (o := tx.vout[q]) (by rw [Nat.add_assoc]; exact hr.1)
+      (by rw [Nat.add_assoc]; exact hr.2.2.mpr (by omega)) htx (by rw [Nat.add_assoc]) (by omega)
+      (by rw [show tx.vin.length + q - tx.vin.length = q by omega, List.getElem?_eq_getElem hq])
+    exact ⟨o1, o2, o3, o5⟩
+  have hvq : ∀ q (hq : q < tx.vout.length), ((v q : ℕ) : ℤ) = tx.vout[q].value := by
+    intro q hq
+    simp only [hvdef, List.getElem?_eq_getElem hq, Option.map_some, Option.getD_some]
+    exact Int.toNat_of_nonneg (hov q hq).2.2.1
+  have hout' : ∑ q ∈ Finset.range tx.vout.length, ((v q : ℕ) : ℤ) = Spec.Coins.outSum tx := by
+    unfold Spec.Coins.outSum
+    rw [sumZ_list]
+    refine Finset.sum_congr rfl fun q hq => ?_
+    have hq' := Finset.mem_range.mp hq
+    rw [hvq q hq', List.getElem?_eq_getElem hq']; rfl
+  have htot : ∑ q ∈ Finset.range tx.vout.length, v q ≤ Fields.MAXHI * 2 ^ 24 + Fields.MAXLO := by
+    have := hout; rw [← hout', max_money_eq] at this; exact_mod_cast this
+  obtain ⟨hle, hmax⟩ := tx_amounts hL hsat hL24 S he hon hlen hst hf htg hne htx ht1 a v
+    (fun k hk => by
+      obtain ⟨h8, hm, -⟩ := hcv k hk
+      exact in_amount hL hsat hL24 (by have := (hrows k (by omega)).1; omega) (hcl k hk) h8 hm)
+    (fun q hq => by
+      obtain ⟨o1, o2, -, o5⟩ := hov q hq
+      refine ⟨o1, o2, ?_⟩
+      have := o5.trans (hvq q hq).symm
+      exact_mod_cast this)
+    htot
+  have hclaim : Spec.Coins.claimSum ⟨B.h, t == 0, Spec.Block.txid tx, tx, (tx.vin.zipIdx).map fun p =>
+      (coinOfVal ((B.claim t p.2).code, (B.claim t p.2).ser), N ((B.claim t p.2).code / 2) + (B.claim t p.2).ctx)⟩ =
+      ∑ k ∈ Finset.range tx.vin.length, ((a k : ℕ) : ℤ) := by
+    unfold Spec.Coins.claimSum
+    simp only [List.map_map]
+    rw [show ((fun x : Spec.Coins.Coin × ℕ => x.1.value) ∘ fun p : Spec.Block.TxIn × ℕ =>
+        (coinOfVal ((B.claim t p.2).code, (B.claim t p.2).ser), N ((B.claim t p.2).code / 2) + (B.claim t p.2).ctx)) =
+        fun p => ((a p.2 : ℕ) : ℤ) from rfl, sumZ_zipIdx (fun k => ((a k : ℕ) : ℤ)) tx.vin 0]
+    simp
+  refine ⟨by simp, ?_, ?_, ?_⟩
+  · intro c hc
+    simp only [List.mem_map] at hc
+    obtain ⟨p, hp, rfl⟩ := hc
+    have hk : p.2 < tx.vin.length := (List.mem_zipIdx' hp).1
+    obtain ⟨hki, hcode, -⟩ := hcl p.2 hk
+    have hm := in_maturity hL hsat hL24 (by have := (hrows p.2 (by omega)).1; omega) hki hp2 hh hcode
+      (hcv p.2 hk).2.2
+    simp only [coinOfVal, beq_iff_eq, hBh]
+    exact hm
+  · rw [hclaim, ← hout']; exact_mod_cast hle
+  · rw [hclaim, max_money_eq]; exact_mod_cast hmax
 
 end System
 
