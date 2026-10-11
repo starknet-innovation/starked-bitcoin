@@ -73,6 +73,33 @@ theorem created_real (N : ℕ → ℕ) (blocks : List BlockC) (g : ℕ)
   show codeOf B.h p.2 < 2 ^ 30
   unfold codeOf; split_ifs <;> omega
 
+theorem nodupBy_of_nodup {α : Type} [DecidableEq α] : ∀ l : List α, l.Nodup → Spec.Block.nodupBy l = true
+  | [], _ => rfl
+  | a :: r, h => by
+    rw [List.nodup_cons] at h
+    simp [Spec.Block.nodupBy, h.1, nodupBy_of_nodup r h.2]
+
+/-- **No repeated prevouts (D-031).** In a successful run of the epoch, each block's non-coinbase
+transactions spend distinct outpoints (`block_sound`'s hypothesis for them). -/
+theorem epoch_nodup_prevouts (N : ℕ → ℕ) (blocks : List BlockC) (g0 : ℕ) {m0 m : View Spec.Block.OutPoint Val}
+    (hrun : run g0 m0 (allTxs N blocks) = some m) :
+    ∀ B ∈ blocks, ∀ (t : ℕ) (tx : Spec.Block.Tx), B.txs[t]? = some tx → 1 ≤ t →
+      Spec.Block.nodupBy (tx.vin.map (·.prevout)) = true := by
+  intro B hB t tx htx ht1
+  have hT : (⟨txIns N B t tx, txOuts B t tx⟩ : Spec.Utxo.Tx Spec.Block.OutPoint Val) ∈ allTxs N blocks := by
+    unfold allTxs blockTxs
+    refine List.mem_flatMap.mpr ⟨B, hB, List.mem_map.mpr ⟨(tx, t), ?_, rfl⟩⟩
+    exact List.mem_zipIdx_iff_getElem?.mpr (by simpa using htx)
+  have hnd := run_ins_nodup g0 m0 m _ hrun _ hT
+  have he : (txIns N B t tx).map Prod.fst = tx.vin.map (·.prevout) := by
+    unfold txIns
+    rw [if_neg (by omega), List.map_map]
+    apply List.ext_getElem (by simp)
+    intro i h1 h2
+    simp
+  rw [he] at hnd
+  exact nodupBy_of_nodup _ hnd
+
 /-- **The epoch connects as Core does.** Given the blocks' coin facts (each block's spends pass the
 circuit's order check, and its non-coinbase transactions with real claims and outputs within
 `MAX_MONEY` pass `ClaimsOK`), well-formed events whose bytes `γ` separates, the blocks' positions,
@@ -266,7 +293,7 @@ theorem epoch_systems_core (nb : ℕ) (inst : ℕ → ℕ → Inst) (pub : ℕ �
     | succ i ih =>
       intro hi
       obtain ⟨B, h1, -, h3, -⟩ := hat i (by omega)
-      rw [List.take_succ, h1, List.map_append, List.sum_append, ih (by omega), Finset.sum_range_succ]
+      rw [List.take_add_one, h1, List.map_append, List.sum_append, ih (by omega), Finset.sum_range_succ]
       simp [h3]
   have hpos : ∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → N B.h = g0 + ((blocks.take i).map (·.txs.length)).sum := by
     intro i B hBi

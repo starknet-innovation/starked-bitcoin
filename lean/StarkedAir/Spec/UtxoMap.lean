@@ -74,4 +74,49 @@ theorem run_map : ∀ (i : ℕ) (m m' : View K V) (ts : List (Tx K V)), run i m 
     simp only [List.map_cons, run, ha]
     exact run_map (i + 1) m1 m' ts h2
 
+/-! ### No outpoint is spent twice in a transaction (D-031) -/
+
+theorem spends_absent : ∀ (es : List (Ev K V)) (m m' : View K V) (k : K), es.foldlM spendOne m = some m' →
+    m k = none → k ∉ es.map Prod.fst
+  | [], _, _, _, _, _ => by simp
+  | e :: es, m, m', k, h, hk => by
+    simp only [List.foldlM_cons] at h
+    obtain ⟨m1, h1, h2⟩ := Option.bind_eq_some_iff.mp h
+    unfold spendOne at h1
+    split_ifs at h1 with he
+    obtain rfl := Option.some.inj h1.symm
+    have hne : e.1 ≠ k := fun h => by rw [h, hk] at he; simp at he
+    have hk1 : Function.update m e.1 none k = none := by rw [Function.update_of_ne (Ne.symm hne)]; exact hk
+    simp only [List.map_cons, List.mem_cons, not_or]
+    exact ⟨Ne.symm hne, spends_absent es _ m' k h2 hk1⟩
+
+/-- **Successful spends have distinct outpoints.** -/
+theorem spends_nodup : ∀ (es : List (Ev K V)) (m m' : View K V), es.foldlM spendOne m = some m' →
+    (es.map Prod.fst).Nodup
+  | [], _, _, _ => by simp
+  | e :: es, m, m', h => by
+    simp only [List.foldlM_cons] at h
+    obtain ⟨m1, h1, h2⟩ := Option.bind_eq_some_iff.mp h
+    have hm1 : m1 e.1 = none := by
+      unfold spendOne at h1
+      split_ifs at h1
+      obtain rfl := Option.some.inj h1.symm
+      simp
+    rw [List.map_cons, List.nodup_cons]
+    exact ⟨spends_absent es m1 m' e.1 h2 hm1, spends_nodup es m1 m' h2⟩
+
+/-- **In a successful run, no transaction spends an outpoint twice.** -/
+theorem run_ins_nodup : ∀ (i : ℕ) (m m' : View K V) (ts : List (Tx K V)), run i m ts = some m' →
+    ∀ T ∈ ts, (T.ins.map Prod.fst).Nodup
+  | _, _, _, [], _ => by simp
+  | i, m, m', t :: ts, h => by
+    simp only [run] at h
+    obtain ⟨m1, h1, h2⟩ := Option.bind_eq_some_iff.mp h
+    unfold applyTx at h1
+    obtain ⟨m0, h0, -⟩ := Option.bind_eq_some_iff.mp h1
+    intro T hT
+    rcases List.mem_cons.mp hT with rfl | hT
+    · exact spends_nodup _ _ _ h0
+    · exact run_ins_nodup (i + 1) m1 m' ts h2 T hT
+
 end StarkedAir.Spec.Utxo
