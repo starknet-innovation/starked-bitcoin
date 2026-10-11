@@ -264,6 +264,70 @@ theorem tx_rows (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
       · exact absurd h hoff
       · exact h
 
+/-- An input row's range-checked bytes: the normalized sum's and the `MAX_MONEY` comparator's. -/
+theorem in_row_bytes {r : ℕ} (hr : r + 1 < 2 ^ L) (hki : (inst 14).main Coin.KI r = 1) :
+    (∀ i < 3, ((inst 14).main (Coin.NB i) r).val < 256) ∧ (∀ i < 3, ((inst 14).main (Coin.Q1 i) r).val < 256) ∧
+      (∀ i < 4, ((inst 14).main (Coin.H1 i) r).val < 256) ∧ ((inst 14).main Coin.H1C r).val < 256 := by
+  have cs := coin_sat hL hsat hL24
+  have hr' : r < 2 ^ L := by omega
+  have hko : (inst 14).main Coin.KO r = 0 := by
+    rcases Coin.kinds cs hr' with h | h | h | h <;> simp_all
+  have e1 := Coin.sat cs (Coin.mem_amount (c := .sub (Coin.k Coin.MNB) (.add (Coin.k Coin.KI) (Coin.k Coin.KO)))
+    (by simp [Coin.amountC])) hr'
+  have e2 := Coin.sat cs (Coin.mem_amount (c := .sub (Coin.k Coin.MC1) (.add (Coin.k Coin.KI) Coin.tf))
+    (by simp [Coin.amountC])) hr'
+  have ht := Coin.tend_spec cs hr
+  simp only [Expr.eval, Coin.ev_k hr', Coin.tf, Coin.om, Coin.one, StarkedAir.Sha256.eval_cst, Nat.cast_one] at e1 e2
+  rw [hko, zero_mul] at ht
+  rw [hki, hko] at e1
+  rw [hki, ht] at e2
+  have hmnb : (inst 14).main Coin.MNB r = 1 := by linear_combination e1
+  have hmc1 : (inst 14).main Coin.MC1 r = 1 := by linear_combination e2
+  have bb := coin_bytes hL hsat hL24 hr'
+  obtain ⟨q1, h1, h1c, -, -, -⟩ := bb.2.1 hmc1
+  exact ⟨bb.1 hmnb, q1, h1, h1c⟩
+
+/-- **A transaction's input sums.** Over its input rows `j0 + k` (the row before not an input), the running
+input sum is the claimed amounts' prefix sum, normalized and within `MAX_MONEY`. -/
+theorem in_sums {j0 nin : ℕ} (hj0 : 1 ≤ j0) (hn : j0 + nin < 2 ^ L)
+    (hki : ∀ k < nin, (inst 14).main Coin.KI (j0 + k) = 1) (hprev : (inst 14).main Coin.KI (j0 - 1) = 0)
+    (a : ℕ → ℕ) (ha : ∀ k < nin, ((inst 14).main Coin.VL (j0 + k)).val < 2 ^ 24 ∧
+      ((inst 14).main Coin.VH (j0 + k)).val < 2 ^ 27 ∧
+      ((inst 14).main Coin.VH (j0 + k)).val * 2 ^ 24 + ((inst 14).main Coin.VL (j0 + k)).val = a k) :
+    ∀ k < nin, ((inst 14).main Coin.INL (j0 + k)).val < 2 ^ 24 ∧ ((inst 14).main Coin.INH (j0 + k)).val ≤ Fields.MAXHI ∧
+      ((inst 14).main Coin.INH (j0 + k)).val * 2 ^ 24 + ((inst 14).main Coin.INL (j0 + k)).val =
+        ∑ k' ∈ Finset.range (k + 1), a k' ∧
+      ∑ k' ∈ Finset.range (k + 1), a k' ≤ Fields.MAXHI * 2 ^ 24 + Fields.MAXLO := by
+  have cs := coin_sat hL hsat hL24
+  intro k
+  induction k with
+  | zero =>
+    intro hk
+    obtain ⟨nb, q1, h1, h1c⟩ := in_row_bytes hL hsat hL24 (r := j0 + 0) (by omega) (hki 0 hk)
+    obtain ⟨vl, vh, vs⟩ := ha 0 hk
+    have hpv : Coin.prevV (inst 14).main (2 ^ L) Coin.KI (j0 + 0) = 0 := by
+      unfold Coin.prevV; rw [if_neg (by omega)]; simpa using hprev
+    obtain ⟨i1, i2, i3, i4⟩ := Coin.in_nat cs (by omega) (hki 0 hk) (by rw [hpv]; simp) nb q1 h1 h1c vl vh
+    rw [hpv, if_neg (by simp)] at i3
+    refine ⟨i1, i2, ?_, ?_⟩
+    · rw [i3, vs]; simp
+    · rw [Finset.sum_range_one, ← vs]
+      rw [i3, zero_add] at i4; exact i4
+  | succ k ih =>
+    intro hk
+    obtain ⟨p1, p2, p3, -⟩ := ih (by omega)
+    obtain ⟨nb, q1, h1, h1c⟩ := in_row_bytes hL hsat hL24 (r := j0 + (k + 1)) (by omega) (hki (k + 1) hk)
+    obtain ⟨vl, vh, vs⟩ := ha (k + 1) hk
+    have hpk : ∀ c, Coin.prevV (inst 14).main (2 ^ L) c (j0 + (k + 1)) = (inst 14).main c (j0 + k) := by
+      intro c; unfold Coin.prevV; rw [if_neg (by omega)]; rfl
+    have hpv : Coin.prevV (inst 14).main (2 ^ L) Coin.KI (j0 + (k + 1)) = 1 := by rw [hpk]; exact hki k (by omega)
+    obtain ⟨i1, i2, i3, i4⟩ := Coin.in_nat cs (by omega) (hki (k + 1) hk)
+      (fun _ => by rw [hpk, hpk]; exact ⟨p1, p2⟩) nb q1 h1 h1c vl vh
+    rw [if_pos hpv, hpk, hpk] at i3
+    refine ⟨i1, i2, ?_, ?_⟩
+    · rw [i3, p3, vs, Finset.sum_range_succ _ (k + 1)]
+    · rw [Finset.sum_range_succ _ (k + 1), ← vs, ← p3, ← i3]; exact i4
+
 end System
 
 end StarkedAir.Block
