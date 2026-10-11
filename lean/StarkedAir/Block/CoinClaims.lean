@@ -132,6 +132,55 @@ theorem in_amount {j : ℕ} (hj : j < 2 ^ L) {c : Claim} (hc : ClaimAt inst pub 
   simp only [Finset.sum_range_succ, Finset.sum_range_zero]
   rw [h7]; ring
 
+/-- **An input's claim is mature.** With the claimed code `code` (below `2^30`, as for any real coin),
+a coinbase claim (`code` odd) was created at least 100 blocks before height `h`. -/
+theorem in_maturity {j : ℕ} (hj : j < 2 ^ L) (hki : (inst 14).main Coin.KI j = 1) {h code : ℕ}
+    (hp2 : pub 2 = (h : F)) (hh : h < 2 ^ 23)
+    (hcode : (inst 14).main Coin.CLO j + 65536 * (inst 14).main Coin.CHI j = (code : F)) (hc : code < 2 ^ 30) :
+    ¬ (code % 2 = 1 ∧ h < code / 2 + Spec.Coins.COINBASE_MATURITY) := by
+  have cs := coin_sat hL hsat hL24
+  obtain ⟨e1, e2, -, -, e5, -⟩ := Coin.in_spec cs hj hki
+  have ek : (Coin.k Coin.KI).eval (2 ^ L) Coin.preCols pub (inst 14).main j = 1 := by rw [Coin.ev_k hj]; exact hki
+  have hb : ∀ i < 3, ((inst 14).main (Coin.HB i) j).val < 256 := by
+    intro i hi
+    interval_cases i
+    · exact coin_r8 hL hsat hL24 (k := 52) (by omega) (by omega) rfl hj ek
+    · exact coin_r8 hL hsat hL24 (k := 53) (by omega) (by omega) rfl hj ek
+    · exact coin_r8 hL hsat hL24 (k := 54) (by omega) (by omega) rfl hj ek
+  have hbn := Coin.b3N_lt hb
+  have hP := Coin.P_big
+  rw [Coin.b3V_eq] at e2
+  have cbc := Coin.bool_col cs (c := Coin.CBC) (by simp) hj
+  -- the code splits exactly
+  have hsplit : code = 2 * Coin.b3N (inst 14).main Coin.HB j + (if (inst 14).main Coin.CBC j = 1 then 1 else 0) := by
+    apply Coin.lift _ (by omega) (by split_ifs <;> omega)
+    rw [← hcode, e1, e2]
+    rcases cbc with h0 | h1
+    · rw [h0]; simp
+    · rw [h1]; simp
+  rintro ⟨hodd, hlt⟩
+  have hc1 : (inst 14).main Coin.CBC j = 1 := by
+    rcases cbc with h0 | h1
+    · rw [hsplit, h0] at hodd; simp at hodd
+    · exact h1
+  rw [hsplit, if_pos hc1] at hlt
+  have ek2 : (Expr.mul (Coin.k Coin.KI) (Coin.k Coin.CBC)).eval (2 ^ L) Coin.preCols pub (inst 14).main j = 1 := by
+    simp [Expr.eval, Coin.ev_k hj, hki, hc1]
+  have hm : ∀ i < 3, ((inst 14).main (Coin.MB i) j).val < 256 := by
+    intro i hi
+    interval_cases i
+    · exact coin_r8 hL hsat hL24 (k := 58) (by omega) (by omega) rfl hj ek2
+    · exact coin_r8 hL hsat hL24 (k := 59) (by omega) (by omega) rfl hj ek2
+    · exact coin_r8 hL hsat hL24 (k := 60) (by omega) (by omega) rfl hj ek2
+  have hmn := Coin.b3N_lt hm
+  have e5' := e5 hc1
+  rw [Coin.b3V_eq, e2, hp2] at e5'
+  have : Coin.b3N (inst 14).main Coin.MB j + Coin.b3N (inst 14).main Coin.HB j + 100 = h := by
+    apply Coin.lift _ (by omega) (by omega)
+    push_cast; rw [e5']; ring
+  simp only [Spec.Coins.COINBASE_MATURITY] at hlt
+  omega
+
 end System
 
 end StarkedAir.Block
