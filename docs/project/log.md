@@ -21,6 +21,30 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-10-12 (session 11, continued) — GPU steps 1–2, memory, VL-NODE, block_coin columns
+Who: Claude (agent, Opus 5.5) with three sub-agents, on the owner's decisions of the day
+Roadmap: VL-NODE done (D-044: our wiring proven here; stwo-zig's verifier upstream, briefed in
+~/Workshop/stwo-zig/VERIFIER_FORMALIZATION_BRIEF.md); GPU steps 1–2 done; memory (a1) in progress
+Done:
+- GPU step 1 (3896f2e…7b467e1): IR → STWZEVA lowering; CPU proofs byte-identical. Step 2 (cee213e,
+  a9d737e): block-system proofs on `Engine(MetalCommitBackend)` with GPU composition, byte-identical;
+  block 170 3.7 s CPU → 0.14 s Metal. Memory (8fbfe3c, 7245652): freeing allocator, per-component
+  LogUp, `discard_mains`, storage modes; 2^23 projected 289 → 188 GB (default), 92 GB (compact).
+- block_coin's 4 unread `VAMT` columns removed (6414a09; vestigial since 185d30a).
+- D-044 (58ff68f). VL-NODE (e51bc30, 60c5f70): node wiring Lean-first; `tree_sound`, `forest_epoch`,
+  `htree_sound`, `header_root_sound` modulo the `Trust` structure's named hypotheses.
+- Merged into m3a5: 427900c, 0c4fa18.
+Evidence:
+- Large-block test alone after the merges: 4 samples hold and balance (peak 11 GB). Full suite
+  103/103 (37 min, peak 9.1 GB). `lake build` 8866 jobs; standard axioms for the node theorems.
+- `zig build metal-prove`: all six small samples byte-identical CPU vs Metal, verified.
+Problems / lessons:
+- The `blockrec` and `block forest` test filters match no tests (a filter matching nothing still
+  reports a pass); the end-to-end evidence is the epoch 0–3 forest run and the blockrec demo.
+- The working branch is m3a5; `main` is the last push (147 commits behind).
+Next: memory (a1) and compact-by-default (agent); then the per-component trace sizes plan (c1), owner
+review first, acceptance: everything proven today stays proven.
+
 ## 2026-10-12 (session 11) — D-043 accepted; the previous MTP inside the block proof (option A)
 Who: Claude (agent, Opus 5.5), on the owner's "D-043 part 3: Option A. No need to export the timestamps."
 Roadmap: D-043 accepted and fully implemented; BLOCK-REC open item left: a shipped block VK
