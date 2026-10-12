@@ -162,6 +162,12 @@ pub const PubMode = union(enum) {
     /// dispatch. stwo-zig's CPU evaluators reject base params; its Metal code generator reads
     /// them from `args.base_params`.
     param,
+    /// As base `constant` literals, but one instruction per public input, never shared with an
+    /// AIR literal or another input of equal value. The program's shape (and so its CUDA
+    /// parametric normal form, `cairo_cuda/parametric_eval.normalize`) is then the same for every
+    /// statement and log size: one AOT kernel per AIR, the values bound as session constants
+    /// (src/gpu/cuda/catalog.zig).
+    slots: []const M31,
 };
 
 /// The program with public inputs as base parameters (see `PubMode.param`).
@@ -254,6 +260,11 @@ fn lowerProgramMode(allocator: std.mem.Allocator, air: ir.Air, mode: PubMode, lo
                 .literal => |pubs| try b.constant(pubs[p].toU32()),
                 .param => pub_regs[p] orelse blk: {
                     const r = try b.baseInst(.param, 0, p, 0, 0);
+                    pub_regs[p] = r;
+                    break :blk r;
+                },
+                .slots => |pubs| pub_regs[p] orelse blk: {
+                    const r = try b.baseInst(.constant, 0, pubs[p].toU32(), 0, 0);
                     pub_regs[p] = r;
                     break :blk r;
                 },
@@ -413,7 +424,12 @@ pub fn encodeProgram(
 /// The bundle component of one AIR at `geometry`, its program parsed (and so validated) by
 /// stwo-zig. Free with `composition.deinitComponent`.
 pub fn lowerComponent(allocator: std.mem.Allocator, air: ir.Air, pubs: []const M31, geometry: Geometry) !composition.Component {
-    const bytes = try lowerProgram(allocator, air, pubs, geometry.log_size);
+    return lowerComponentMode(allocator, air, .{ .literal = pubs }, geometry);
+}
+
+/// `lowerComponent` with a choice of how public inputs enter (`PubMode`).
+pub fn lowerComponentMode(allocator: std.mem.Allocator, air: ir.Air, mode: PubMode, geometry: Geometry) !composition.Component {
+    const bytes = try lowerProgramMode(allocator, air, mode, geometry.log_size);
     defer allocator.free(bytes);
     var program = try eval.Program.parse(allocator, bytes);
     errdefer program.deinit();

@@ -533,6 +533,40 @@ pub fn proveOpts(comptime E: type, caller_allocator: std.mem.Allocator, cfg: rec
     return .{ .stark = stark, .claimed_sums = try caller_allocator.dupe(QM31, sums.items) };
 }
 
+/// The interaction trace of `parts` for lookup elements `el`: its columns in storage order, as
+/// `proveOpts` commits them, and the claimed sums of the components with lookups. The host half of
+/// the resident CUDA prover (src/gpu/cuda/prover.zig), which commits the columns on the device.
+pub const InteractionTrace = struct {
+    columns: []prover_pcs.ColumnEvaluation,
+    sums: []QM31,
+};
+
+pub fn interactionTrace(a: std.mem.Allocator, parts: []const Part, mains: []const []const []const M31, el: lookup_transcript.LookupElements) !InteractionTrace {
+    var cols = std.ArrayList(prover_pcs.ColumnEvaluation).empty;
+    errdefer cols.deinit(a);
+    var sums = std.ArrayList(QM31).empty;
+    errdefer sums.deinit(a);
+    for (parts, mains) |p, m| {
+        if (p.air.lookups.len == 0) continue;
+        var fr = try fractions(a, p, m, el);
+        defer fr.deinit(a);
+        const built = try logup_columns.build(a, p.log_size, fr.batches, &fr, struct {
+            fn f(ctx: *const Fractions, row: usize, out: []logup_columns.Fraction) anyerror!void {
+                return ctx.fill(row, out);
+            }
+        }.f);
+        defer a.free(built.columns);
+        try cols.appendSlice(a, built.columns);
+        try sums.append(a, built.claimed_sum);
+    }
+    return .{ .columns = try cols.toOwnedSlice(a), .sums = try sums.toOwnedSlice(a) };
+}
+
+/// The preprocessed columns of `parts` in storage order (as committed).
+pub fn preprocessedColumns(a: std.mem.Allocator, parts: []const Part) ![]prover_pcs.ColumnEvaluation {
+    return preprocessedStorage(a, parts);
+}
+
 /// Returns `column`'s whole pages to the OS; their contents become undefined. For witness columns
 /// the caller will not read again (`Options.discard_mains`), possibly inside an arena.
 fn discardPages(column: []const M31) void {
