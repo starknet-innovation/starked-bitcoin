@@ -21,6 +21,32 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-10-12 (session 11, later) — Per-component trace sizes (D-045) merged; license; lean-consensus; S31
+Who: Claude (agent, Opus 5.5) with sub-agents (prover track, Lean track, s31 evaluation)
+Roadmap: D-045 implemented (uniform + tiered profiles); LICENSE done (Apache-2.0); memory (a1, a2) done
+Done:
+- Memory (a1, a2): witness released early, LogUp fractions per row, compact + discard as the block default
+  (dca6dc6). 2^23 projected ≈ 97 GB uniform.
+- D-045 prover (dd42720, 7f8fb95, 31855ee, 04cc5ee): mixed sizes via lifting; profiles uniform
+  (byte-identical, golden hashes) and tiered (L ≥ 12); proof file v3; leaf and VKs per (L, profile).
+  Tiered block 170 padded: 2.8x less memory, ~3x faster; tiered epoch 0–3 forest verified.
+- D-045 Lean (cb123ee, fbfdfa0, cd30a5e, a73e13f): `Compat.lean` keeps 100 statements verbatim (2218
+  definition pins); Block layer, circuit layer (`StarkSoundV`, `plain_soundV`, `starkSoundV_const`) and
+  recursion layer (`tree_soundP`, `forest_epochV`) generalized. Interface docs on both sides; hook 2 keeps
+  the counter convention (k-th call = k-th part), so composition exports stay byte-identical.
+- LICENSE Apache-2.0 (1baf1f4); `lean-consensus/` standalone package + generator (370ecfa); main pushed
+  (866ccc9..370ecfa); S31 issue https://github.com/teddyjfpender/s31/issues/9.
+Evidence:
+- After merging both tracks: `lake build` 8867 jobs, Compat 8856 jobs; exports block_coin, block_anc,
+  composition_leaf, deep_leaf, statement_leaf byte-identical. Large-block test alone: 4 samples hold
+  (peak 11 GB). Full suite: 110 passed, 1 skipped (the opt-in tiered real-block check), 35 min.
+Problems / lessons:
+- Proving recursion nodes peaked at 20.5 GB (two 70-query child proofs): the next memory bottleneck.
+- The tiered leaf's mixed-size logic is Zig matched by inspection (as the uniform leaf's wiring is);
+  `StarkSoundV` needs review against Stwo's lifting argument before external claims.
+Next: prove a real L=22 block tiered (~17 GB est.); measure a production-strength node; decide tiered
+as default for L ≥ 12; sha at 2^24 (Lean: < 1 day).
+
 ## 2026-10-12 (session 11, continued) — GPU steps 1–2, memory, VL-NODE, block_coin columns
 Who: Claude (agent, Opus 5.5) with three sub-agents, on the owner's decisions of the day
 Roadmap: VL-NODE done (D-044: our wiring proven here; stwo-zig's verifier upstream, briefed in
