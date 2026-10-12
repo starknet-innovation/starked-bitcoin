@@ -52,6 +52,8 @@ pub const Built = struct {
 pub const Opts = struct {
     chal: coin.Challenge = coin.Challenge.testing(),
     ctx: ?[]const u32 = null,
+    /// Pad the trace to at least 2^min_log rows (benchmarks: a small block at a real block's size).
+    min_log: u32 = 0,
 };
 
 pub fn parseAirs(a: std.mem.Allocator) ![N_COMP]ir.Air {
@@ -164,7 +166,7 @@ pub fn buildFull(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctx
         tok_rows += 1;
     };
     const need = @max(@max(msg.rowsNeeded(msgs), raw.len + 1, rows.len + 1, (comps_est + 1) * shaw.PERIOD), @max(nodes.len + 2, wnodes.len + 2, scripts_len + 1, 256), @max(undo.len + 1, commit.rowsNeeded(undo.len)), @max(fp_rows + 1, tok_rows + 1, recs.len + 1), if (ctx.csv()) ancw.MIN_ROWS_CSV else 256);
-    const log_size: u32 = std.math.log2_int_ceil(usize, need);
+    const log_size: u32 = @max(std.math.log2_int_ceil(usize, need), opts.min_log);
 
     const fm = try fields.generate(a, log_size, raw, rows);
     const chk = try checks.fill(a, fm, raw, rows, ctx);
