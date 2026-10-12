@@ -200,3 +200,116 @@ Per-mode runs (`METAL_PROVE_ONLY=cpu|metal`) are separate processes, so peak RSS
   - device-side witness ingress;
   - memory: log 22 needs streaming or partial residency even on an H200.
 - **Estimate:** unchanged, 4–6 weeks plus H100/H200 time.
+
+## Memory (2026-10-12)
+
+**Question:** where does a block proof's peak memory go, and what does it take to prove real blocks (traces of 2^21–2^24 rows)?
+
+**How it was measured:**
+- **Input:** block 170, padded with `Opts.min_log`; production profile; `zig build metal-prove` with `METAL_PROVE_ONLY`, so each prover runs in its own process.
+- **Metric:** peak physical footprint, sampled every 5 ms. Phase markers come from `STWO_HOST_MEMORY_PROFILE=1`: ours in `system.proveOpts`, plus stwo-zig's own `core.*` and `pcs.*` stages.
+- **Metal device memory:** Metal allocations are read from `MTLDevice.currentAllocatedSize`. A 1 GiB shared buffer that the CPU touches counts in both the footprint and the device allocations (tested). The true Metal total therefore lies between max(footprint, device) and their sum.
+- **`maxrss` is not the metric.** Pages released with `MADV_FREE_REUSABLE` stay in `maxrss` until reclaimed, so `maxrss` overstates.
+
+### Where it goes (measured)
+
+Unit: one column at trace size, c = 4 B × 2^L. The block system has P = 225 preprocessed, M = 1,210 main and I = 444 interaction columns, 1,879 in total. Before the fixes, CPU at log 17 (c = 0.52 MB):
+
+| Phase | Δ footprint | What it is |
+|---|---|---|
+| Witness built | 693 MB | M natural-order columns (634 MB) plus about 60 MB of generator intermediates |
+| Preprocessed commit | +527 MB | Natural plus storage-order copies, coefficients plus 2× blown-up evaluations, Merkle tree (≈4.5 P) |
+| Main storage order | +600 MB | A bit-reversed copy of the whole witness (M) |
+| Main commit | +1,324 MB | Blown-up evaluations (2 M); the storage copy becomes the coefficients in place; Merkle layers (~2 %) |
+| Interaction trace | +797 MB | Every component's fractions at once (32 B per batch-row = 2 c per interaction column), I columns, preprocessed regenerated |
+| Interaction commit | +515 MB | 2 I evaluations plus tree |
+| STARK | +50 MB | Composition (a QM31 at 2^(L+1)), its split, OODS/DEEP quotients, FRI layers: all small next to the trees |
+
+- **Arena retention:** everything was kept until the end, because the prover allocated from the caller's arena.
+- **CPU total:** ≈ 8.6 k c.
+- **Metal before the fixes:** 7.3 GB footprint at log 17. Composition grew it by 3 GB, because every component's evaluations were copied into the arena and its shared pages were touched; that arena also kept all of stwo-zig's scratch.
+
+### Fixes (in our code, byte-identical; `8fbfe3c`, `7245652`)
+
+1. **`system.proveOpts` frees as it goes.** It works with a freeing thread-safe allocator (`smp_allocator`) and frees every intermediate when it dies. stwo-zig's composition, quotient and FRI scratch is released too. The proof is deep-copied into the caller's allocator.
+2. **Fractions one component at a time,** evaluating only the expressions the lookups read.
+3. **`Options.discard_mains`** (madvise) frees the witness in two steps: the 697 columns no lookup reads after storage conversion, the rest after each component's fractions.
+4. **`Options.storage`** selects stwo-zig's existing commitment storage: `default` (coefficients + evaluations), `evaluations_only`, or `compact` (coefficients only, streaming commit, re-extended on demand). `component.zig` now reads coefficient-only columns.
+5. **Metal:** the composition arena is freed when the stage closes.
+
+Tests assert that every storage × composition mode gives identical bytes. All runs below had the same proof hash in every mode.
+
+### Peak footprint after the fixes (measured, MB; Metal shows footprint / device)
+
+| log | CPU default | CPU evals-only | CPU compact | Metal default | Metal compact |
+|---|---|---|---|---|---|
+| 15 | 785 (was 1,177) | 560 | 413 | 1,344 / 808 (was 2,576 footprint) | 1,171 / 320 |
+| 16 | 1,517 (was 2,289) | 1,065 | 770 | 1,934 / 1,379 | 1,595 / 403 |
+| 17 | 2,976 (was 4,507) | 2,072 | 1,482 | 3,174 / 2,679 (was 7,343) | 2,439 / 549 |
+| 18 | 5,903 | 4,090 | 2,907 | 5,479 / 5,341 | 4,129 / 834 |
+
+**Time at log 18:**
+- CPU: compact 20.4 s vs default 19.8 s (similar).
+- Metal: compact 8.9 s vs default 6.4 s. Under compact, the device stage re-extends columns on the host; a device-side expansion executor would remove that.
+
+### Model, and projection to the real 16-component system
+
+Peak ≈ k × 4 B × 2^L, where k counts column-copies alive at the peak. The fitted k matches the structure:
+
+| Mode | k | Structure |
+|---|---|---|
+| Original | ≈ 8.6 k | (M witness + 3 M + 4.5 P + 2 I fractions + 3 I) |
+| Default | ≈ 5.6 k | 3(P+M+I) |
+| Evaluations-only | ≈ 3.9 k | 2(P+M+I) + witness overlap |
+| Compact | ≈ 2.75 k | Witness M + storage M + P, at main commit |
+| Metal default | ≈ 5.2 k footprint + 5.1 k device | Upper bound, double-counting shared pages |
+
+Projected peak (modelled, dense data):
+
+| L | Original | Default | Evals-only | Compact | Compact + (a1) | + lifting (c1, rough) |
+|---|---|---|---|---|---|---|
+| 21 | 72 GB | 47 GB | 33 GB | 23 GB | 18 GB | ~6–9 GB |
+| 22 | 144 GB | 94 GB | 65 GB | 46 GB | 35 GB | ~12–18 GB |
+| 23 | 289 GB | 188 GB | 131 GB | 92 GB | 70 GB | ~25–35 GB |
+| 24 | 577 GB | 376 GB | 262 GB | 185 GB | 141 GB | ~50–70 GB |
+
+**Comparison with the constraint check:** the large-block check (no proving) peaked at 8.5 GB at logs 22–23, below even one dense witness copy at 2^22 (1,210 × 4 B × 2^22 = 20 GB).
+- Padded rows are left untouched or zero, and macOS compresses them.
+- Proving cannot rely on that: blown-up evaluations are dense, and Linux has no compressor.
+- The projections are therefore dense upper bounds.
+
+### Reductions, ranked (estimated saving at 2^23)
+
+**(a) Our code**
+- Done: the five fixes above (default 289 → 188 GB; with `storage=compact` 92 GB).
+- **(a1) Don't keep the witness and its storage copy together** (≈ −22 GB, medium):
+  - generate witness columns in storage order with the prover's allocator and hand them to the commit, which consumes them;
+  - recompute the 513 lookup-read columns per component from the committed coefficients when building fractions.
+- **(a2) Make `compact` + `discard_mains` the block prover's default** (`proof_file.prove`). Same bytes, similar CPU time; owner's call.
+- **(a3) Metal: zero-copy device composition** (stored-domain ABI on the committed buffers, `backendResidencyHandles`). This removes the arena (the largest component, ≈ 406 c ≈ 14 GB) and the touched shared pages. It is also what makes compact fast on Metal. Medium-high effort.
+
+**(b) stwo-zig (described, not edited)**
+- Device-side re-extension for compact storage. `Session.expansion` exists; Metal needs a host-free executor, and CUDA already has LDE kernels.
+- Witness streaming into the commitment: `tiled_commit` exists; it needs a producer interface so the witness is never fully materialised (≈ −M, 40 GB at 2^23).
+- Merkle layer retention is only ~3 % (all layers of 3 trees ≈ 96 c), so it is not worth pursuing.
+
+**(c) Structural (owner review)**
+- **(c1) Per-component sizes (lifting/mixed sizes).** Only sha, bytes, msg and b2s need the full height of a large block. fields (190 columns), coin (164), anc (125) and the others need far fewer rows. Rough estimate: 3× fewer cells.
+  - stwo-zig supports lifted components (STWZEVA too).
+  - Our system, mask geometry, in-circuit verifier and Lean statement do not yet.
+  - Effort: large. Biggest lever.
+- **(c2) Split large blocks across proofs** (tx ranges, with partial LogUp sums as the epoch does). Bounds L per proof, at the cost of more leaves. Large effort.
+- **(c3) Streaming/partial residency on the GPU:** a CUDA concern, sized by the k above.
+- **(c4) Config changes don't help:** blowup is already 1, and queries/PoW/fold don't affect memory. The profile is pinned anyway.
+
+### Recommendation
+
+- **H200 (141 GB), 2^23:**
+  - compact residency (coefficients on device, re-extended per component and per quotient batch, ≈ 92 GB);
+  - plus (a1) (≈ 70 GB);
+  - witness generation streamed per component from the host.
+  - Evaluations-only (131 GB) is too tight. 2^24 needs (c1) or (c2).
+- **24–64 GB machine:**
+  - with `compact` + `discard_mains` today: 2^21 (23 GB) fits a 32 GB machine and 2^22 (46 GB) a 64 GB one;
+  - 24 GB needs (a1) for 2^21;
+  - 2^23 needs (c1) per-component sizes (~25–35 GB), or (c2) splitting.
