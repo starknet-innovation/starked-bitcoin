@@ -55,11 +55,11 @@ encodings and the undo records commit their index and length. Epochs 0–170 and
 verify under the new protocol (same `hash_serialized`).
 
 Not yet:
-1. The coin theorem's remaining hypotheses: events well formed (`WFE`: now only for the initial and final
-   sets, the verifier's decoded data — created and spent events proven, `epoch_systems_wf`); the events as
-   functions of the committed data is **proven** (`claim_at_input`, 2026-10-12); distinct
-   created outpoints (txid uniqueness, an assumption), and, in Lean, that the events are functions of
-   the committed data (D-041; the bad-set reading needs it, and the circuit now enforces it).
+1. The coin theorem's hypotheses (updated 2026-10-12): `WFE` remains only for the initial and final sets
+   (the verifier's decoded data; `decodeSet` checks the ranges) — created and spent events are proven
+   (`epoch_systems_wf`); the events are **proven** functions of the committed data (`claim_at_input`, D-041
+   in Lean); distinct created outpoints reduce to distinct txids (`created_nodup_of_txids`), which is the
+   stated assumption (SHA256d collision resistance, BIP34/BIP30; utxo.md).
 2. ~~The fingerprint's Schwartz–Zippel step~~ (done 2026-10-10).
 3. The final sorted pass as a proof (`HASH_SERIALIZED` in-circuit). For now the verifier computes
    the final set's fractions and hash natively from an explicit, sorted coin list. Fine at height

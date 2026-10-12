@@ -47,8 +47,13 @@ Problems / lessons:
 - Epoch 0–170 through the recursion forest (5b23099): 5 trees, proved in 90 min (peak 17.7 GB), verified in
   0.6 s after the chain, same set `7105b60f…`. Exhaustive VL-ORACLE (8934134): 46,068 sites, 0
   disagreements. Full `zig build test` after the night's changes: 93/93 passed (29m50s, peak 13 GB).
-Next: owner review of D-043 (MTP option A or B); then the MTP, a shipped block VK, epoch 171–1000
-through the forest (~9 h on the laptop).
+- Lean, the coin theorem's hypotheses: `created_wfe_systems`, `spent_wfe`, `epoch_systems_wf` (WFE only for
+  the sets; f108574, 4dbe410); `rec_starts`, `claim_is_record_at`, `ki_count`, **`claim_at_input`** (the
+  events are functions of the committed data, D-041 in Lean; 8e6af52, 7181bf6); `created_nodup_of_txids`
+  (fa86d67). `decodeSet` range checks (2086bb8). `forest_rng` (ea15018). Epoch 171–1000 through the forest
+  started 01:55 (~10 h).
+Next: owner review of D-043 (MTP option A or B); then the MTP, a shipped block VK; read
+data/epoch/tree1000.log / verifytree1000.log when the 171–1000 run ends.
 
 ## 2026-10-11 (session 9) — VL-E2E: the plain verifier end to end
 Who: Claude (agent, Opus 5.5), on the owner's roadmap amendments (VL table, D-042)
