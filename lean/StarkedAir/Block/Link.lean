@@ -72,60 +72,60 @@ theorem yield_table : ∀ i < 15, ∀ k < (hashSys.comp i).lookups.length, isUse
 
 section System
 
-variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ}
-  (hL : ∀ i < 15, (inst i).logSize = L) (hL24 : L ≤ 23)
+variable {inst : ℕ → Inst} {pub : ℕ → F} {Ls : ℕ → ℕ}
+  (hL : ∀ i < 15, (inst i).logSize = Ls i) (hL24 : ∀ i < 15, Ls i ≤ 23)
   (hsat : hashSys.SatisfiedExt inst pub [])
 include hL hsat
 
-theorem hash_bytes_sat : bytes.air.Satisfied L pub (inst 0).main := by
+theorem hash_bytes_sat : bytes.air.Satisfied (Ls 0) pub (inst 0).main := by
   have := hsat.1 0 (by decide); rw [hL 0 (by decide)] at this; exact this
 
-theorem hash_fields_sat : Fields.fields.air.Satisfied L pub (inst 1).main := by
+theorem hash_fields_sat : Fields.fields.air.Satisfied (Ls 1) pub (inst 1).main := by
   have := hsat.1 1 (by decide); rw [hL 1 (by decide)] at this; exact this
 
-theorem hash_msg_sat : ∀ r < 2 ^ L, ∀ c ∈ Msg.constraints, c.eval (2 ^ L) Msg.preCols pub (inst 2).main r = 0 := by
+theorem hash_msg_sat : ∀ r < 2 ^ Ls 2, ∀ c ∈ Msg.constraints, c.eval (2 ^ Ls 2) Msg.preCols pub (inst 2).main r = 0 := by
   have := hsat.1 2 (by decide); rw [hL 2 (by decide)] at this; exact this
 
-theorem hash_sha_sat : ∀ r < 2 ^ L, ∀ c ∈ Sha.constraints, c.eval (2 ^ L) Sha.preCols pub (inst 3).main r = 0 := by
+theorem hash_sha_sat : ∀ r < 2 ^ Ls 3, ∀ c ∈ Sha.constraints, c.eval (2 ^ Ls 3) Sha.preCols pub (inst 3).main r = 0 := by
   have := hsat.1 3 (by decide); rw [hL 3 (by decide)] at this; exact this
 
 theorem hash_merkle_sat :
-    ∀ r < 2 ^ L, ∀ c ∈ Merkle.constraints, c.eval (2 ^ L) Merkle.preCols pub (inst 4).main r = 0 := by
+    ∀ r < 2 ^ Ls 4, ∀ c ∈ Merkle.constraints, c.eval (2 ^ Ls 4) Merkle.preCols pub (inst 4).main r = 0 := by
   have := hsat.1 4 (by decide); rw [hL 4 (by decide)] at this; exact this
 
-theorem hash_tables_sat : Tables.tables.air.Satisfied L pub (inst 5).main := by
+theorem hash_tables_sat : Tables.tables.air.Satisfied (Ls 5) pub (inst 5).main := by
   have := hsat.1 5 (by decide); rw [hL 5 (by decide)] at this; exact this
 
-theorem hash_walk_sat : Walk.walk.air.Satisfied L pub (inst 6).main := by
+theorem hash_walk_sat : Walk.walk.air.Satisfied (Ls 6) pub (inst 6).main := by
   have := hsat.1 6 (by decide); rw [hL 6 (by decide)] at this; exact this
 
-theorem hash_ctx_sat : Ctx.ctx.air.Satisfied L pub (inst 7).main := by
+theorem hash_ctx_sat : Ctx.ctx.air.Satisfied (Ls 7) pub (inst 7).main := by
   have := hsat.1 7 (by decide); rw [hL 7 (by decide)] at this; exact this
 
-theorem hash_wmerkle_sat : WMerkle.wmerkle.air.Satisfied L pub (inst 8).main := by
+theorem hash_wmerkle_sat : WMerkle.wmerkle.air.Satisfied (Ls 8) pub (inst 8).main := by
   have := hsat.1 8 (by decide); rw [hL 8 (by decide)] at this; exact this
 
-theorem hash_undo_sat : ∀ r < 2 ^ L, ∀ c ∈ Undo.constraints, c.eval (2 ^ L) preCols pub (inst 9).main r = 0 := by
+theorem hash_undo_sat : ∀ r < 2 ^ Ls 9, ∀ c ∈ Undo.constraints, c.eval (2 ^ Ls 9) preCols pub (inst 9).main r = 0 := by
   have := hsat.1 9 (by decide); rw [hL 9 (by decide)] at this; exact this
 
-theorem hash_b2msg_sat : ∀ r < 2 ^ L, ∀ c ∈ B2Msg.constraints, c.eval (2 ^ L) B2Msg.preCols pub (inst 10).main r = 0 := by
+theorem hash_b2msg_sat : ∀ r < 2 ^ Ls 10, ∀ c ∈ B2Msg.constraints, c.eval (2 ^ Ls 10) B2Msg.preCols pub (inst 10).main r = 0 := by
   have := hsat.1 10 (by decide); rw [hL 10 (by decide)] at this; exact this
 
-theorem hash_b2s_sat : ∀ r < 2 ^ L, ∀ c ∈ B2s.constraints, c.eval (2 ^ L) B2s.preCols pub (inst 11).main r = 0 := by
+theorem hash_b2s_sat : ∀ r < 2 ^ Ls 11, ∀ c ∈ B2s.constraints, c.eval (2 ^ Ls 11) B2s.preCols pub (inst 11).main r = 0 := by
   have := hsat.1 11 (by decide); rw [hL 11 (by decide)] at this; exact this
 
-theorem hash_fpwalk_sat : ∀ r < 2 ^ L, ∀ c ∈ FpWalk.constraints, c.eval (2 ^ L) FpWalk.preCols pub (inst 12).main r = 0 := by
+theorem hash_fpwalk_sat : ∀ r < 2 ^ Ls 12, ∀ c ∈ FpWalk.constraints, c.eval (2 ^ Ls 12) FpWalk.preCols pub (inst 12).main r = 0 := by
   have := hsat.1 12 (by decide); rw [hL 12 (by decide)] at this; exact this
 
-theorem hash_urec_sat : ∀ r < 2 ^ L, ∀ c ∈ URec.constraints, c.eval (2 ^ L) URec.preCols pub (inst 13).main r = 0 := by
+theorem hash_urec_sat : ∀ r < 2 ^ Ls 13, ∀ c ∈ URec.constraints, c.eval (2 ^ Ls 13) URec.preCols pub (inst 13).main r = 0 := by
   have := hsat.1 13 (by decide); rw [hL 13 (by decide)] at this; exact this
 
-theorem hash_coin_sat : ∀ r < 2 ^ L, ∀ c ∈ Coin.constraints, c.eval (2 ^ L) Coin.preCols pub (inst 14).main r = 0 := by
+theorem hash_coin_sat : ∀ r < 2 ^ Ls 14, ∀ c ∈ Coin.constraints, c.eval (2 ^ Ls 14) Coin.preCols pub (inst 14).main r = 0 := by
   have := hsat.1 14 (by decide); rw [hL 14 (by decide)] at this; exact this
 
 omit hsat in
 theorem mem_sites {i r k : ℕ} : ((i, r, k) : Site) ∈ sites hashSys inst ↔
-    i < 15 ∧ r < 2 ^ L ∧ k < (hashSys.comp i).lookups.length := by
+    i < 15 ∧ r < 2 ^ Ls i ∧ k < (hashSys.comp i).lookups.length := by
   simp only [sites, List.mem_flatMap, List.mem_range, List.mem_map, Prod.mk.injEq]
   constructor
   · rintro ⟨i', hi, r', hr', k', hk', rfl, rfl, rfl⟩
@@ -133,11 +133,18 @@ theorem mem_sites {i r k : ℕ} : ((i, r, k) : Site) ∈ sites hashSys inst ↔
   · rintro ⟨hi, hr', hk'⟩
     exact ⟨i, hi, r, by rw [hL i hi]; exact hr', k, hk', rfl, rfl, rfl⟩
 
+omit hL hsat in
+/-- The block system's lookup sites over all rows (per-component sizes, D-045): `Σᵢ kᵢ · 2^(Ls i)` with
+`kᵢ` the lookups per row — bytes 1, fields 36, messages 4, SHA 6, txid tree 11, tables 2, walker 5, context 12,
+witness tree 3, undo bytes 1, Blake2s words 6, Blake2s 11, fingerprints 4, undo records 20, coins 94 (216). -/
+def hashRows (Ls : ℕ → ℕ) : ℕ :=
+  2 ^ Ls 0 + 36 * 2 ^ Ls 1 + 4 * 2 ^ Ls 2 + 6 * 2 ^ Ls 3 + 11 * 2 ^ Ls 4 + 2 * 2 ^ Ls 5 + 5 * 2 ^ Ls 6 +
+    12 * 2 ^ Ls 7 + 3 * 2 ^ Ls 8 + 2 ^ Ls 9 + 6 * 2 ^ Ls 10 + 11 * 2 ^ Ls 11 + 4 * 2 ^ Ls 12 + 20 * 2 ^ Ls 13 +
+    94 * 2 ^ Ls 14
+
 omit hsat in
-/-- 216 lookup sites per row: bytes 1, fields 36, messages 4, SHA 6, txid tree 11, tables 2, walker 5,
-context 12, witness tree 3, undo bytes 1, Blake2s words 6, Blake2s 11, fingerprints 4, undo records 20, coins 94. -/
-theorem hash_sites_len : (sites hashSys inst).length = 216 * 2 ^ L := by
-  simp [sites, hashSys, hL 0 (by decide), hL 1 (by decide), hL 2 (by decide), hL 3 (by decide), hL 4 (by decide),
+theorem hash_sites_len : (sites hashSys inst).length = hashRows Ls := by
+  simp [sites, hashSys, hashRows, hL 0 (by decide), hL 1 (by decide), hL 2 (by decide), hL 3 (by decide), hL 4 (by decide),
     hL 5 (by decide), hL 6 (by decide), hL 7 (by decide), hL 8 (by decide), hL 9 (by decide), hL 10 (by decide),
     hL 11 (by decide), hL 12 (by decide), hL 13 (by decide), hL 14 (by decide),
     List.length_flatMap, bytes, Fields.fields, Fields.lookups, Fields.chkLookups, Msg.msg, Msg.lookups, Sha.sha,
@@ -147,13 +154,45 @@ theorem hash_sites_len : (sites hashSys inst).length = 216 * 2 ^ L := by
   ring
 
 omit hL hsat in
-theorem hash_rows_lt_P (hL24 : L ≤ 23) : 216 * 2 ^ L < P :=
-  lt_of_le_of_lt (Nat.mul_le_mul_left 216 (Nat.pow_le_pow_right (by norm_num) hL24)) (by unfold P; norm_num)
+/-- At constant sizes the site count is the old `216 · 2^L`. -/
+theorem hashRows_const (L : ℕ) : hashRows (fun _ => L) = 216 * 2 ^ L := by unfold hashRows; ring
+
+omit hL hsat in
+/-- **The site count is below `P`** when every component has at most `2^23` rows (`Σᵢ kᵢ·2^(Ls i) ≤ 216·2^23`). -/
+theorem hash_rows_lt_P (hL24 : ∀ i < 15, Ls i ≤ 23) : hashRows Ls < P := by
+  have h : ∀ i < 15, 2 ^ Ls i ≤ 2 ^ 23 := fun i hi => Nat.pow_le_pow_right (by norm_num) (hL24 i hi)
+  have := h 0 (by decide); have := h 1 (by decide); have := h 2 (by decide); have := h 3 (by decide)
+  have := h 4 (by decide); have := h 5 (by decide); have := h 6 (by decide); have := h 7 (by decide)
+  have := h 8 (by decide); have := h 9 (by decide); have := h 10 (by decide); have := h 11 (by decide)
+  have := h 12 (by decide); have := h 13 (by decide); have := h 14 (by decide)
+  unfold hashRows P; omega
+
+omit hL hsat in
+/-- Each component has at most `2^23` rows. -/
+theorem rows_le (hL24 : ∀ i < 15, Ls i ≤ 23) {i : ℕ} (hi : i < 15) : 2 ^ Ls i ≤ 8388608 :=
+  le_trans (Nat.pow_le_pow_right (by norm_num) (hL24 i hi)) (by norm_num)
+
+omit hL hsat in
+/-- All fifteen row bounds at once (for `omega`). -/
+theorem rows_le_all (hL24 : ∀ i < 15, Ls i ≤ 23) :
+    2 ^ Ls 0 ≤ 8388608 ∧ 2 ^ Ls 1 ≤ 8388608 ∧ 2 ^ Ls 2 ≤ 8388608 ∧ 2 ^ Ls 3 ≤ 8388608 ∧ 2 ^ Ls 4 ≤ 8388608 ∧
+      2 ^ Ls 5 ≤ 8388608 ∧ 2 ^ Ls 6 ≤ 8388608 ∧ 2 ^ Ls 7 ≤ 8388608 ∧ 2 ^ Ls 8 ≤ 8388608 ∧ 2 ^ Ls 9 ≤ 8388608 ∧
+      2 ^ Ls 10 ≤ 8388608 ∧ 2 ^ Ls 11 ≤ 8388608 ∧ 2 ^ Ls 12 ≤ 8388608 ∧ 2 ^ Ls 13 ≤ 8388608 ∧
+      2 ^ Ls 14 ≤ 8388608 :=
+  ⟨rows_le hL24 (by decide), rows_le hL24 (by decide), rows_le hL24 (by decide), rows_le hL24 (by decide),
+    rows_le hL24 (by decide), rows_le hL24 (by decide), rows_le hL24 (by decide), rows_le hL24 (by decide),
+    rows_le hL24 (by decide), rows_le hL24 (by decide), rows_le hL24 (by decide), rows_le hL24 (by decide),
+    rows_le hL24 (by decide), rows_le hL24 (by decide), rows_le hL24 (by decide)⟩
+
+omit hL hsat in
+/-- Each component's rows are below `P` (`2^(Ls i) ≤ 2^23`). -/
+theorem rows_lt_P (hL24 : ∀ i < 15, Ls i ≤ 23) {i : ℕ} (hi : i < 15) : 2 ^ Ls i < P :=
+  lt_of_le_of_lt (Nat.pow_le_pow_right (by norm_num) (hL24 i hi)) (by unfold P; norm_num)
 
 /-- SHA's word and length uses have multiplicity `−1` or `0`. -/
-theorem sha_use_mult {r : ℕ} (hr : r < 2 ^ L) {kk : ℕ} (hk : kk < 2) :
-    ((Sha.lookups.getD kk ⟨0, .const 0, []⟩).mult.eval (2 ^ L) Sha.preCols pub (inst 3).main r = -1 ∨
-     (Sha.lookups.getD kk ⟨0, .const 0, []⟩).mult.eval (2 ^ L) Sha.preCols pub (inst 3).main r = 0) := by
+theorem sha_use_mult {r : ℕ} (hr : r < 2 ^ Ls 3) {kk : ℕ} (hk : kk < 2) :
+    ((Sha.lookups.getD kk ⟨0, .const 0, []⟩).mult.eval (2 ^ Ls 3) Sha.preCols pub (inst 3).main r = -1 ∨
+     (Sha.lookups.getD kk ⟨0, .const 0, []⟩).mult.eval (2 ^ Ls 3) Sha.preCols pub (inst 3).main r = 0) := by
   have hs := hash_sha_sat hL hsat
   have hd := Sha.fbool hs (c := Sha.DBL) (by simp) hr
   have hn := Sha.fbool hs (c := Sha.NILS) (by simp) hr
@@ -161,7 +200,7 @@ theorem sha_use_mult {r : ℕ} (hr : r < 2 ^ L) {kk : ℕ} (hk : kk < 2) :
   have hu := Sha.usew_eq hs hr
   have hb : ∀ {x : F}, x = 0 ∨ x = 1 → -x = -1 ∨ -x = 0 := fun h => by rcases h with h | h <;> simp [h]
   have hpre : ∀ {f : ℕ → ℕ} {i : ℕ}, Sha.preCols.getD i (.periodic [0]) = Sha.per72 f → (∀ q, f q ≤ 1) →
-      (pre i).eval (2 ^ L) Sha.preCols pub (inst 3).main r = 0 ∨ (pre i).eval (2 ^ L) Sha.preCols pub (inst 3).main r = 1 :=
+      (pre i).eval (2 ^ Ls 3) Sha.preCols pub (inst 3).main r = 0 ∨ (pre i).eval (2 ^ Ls 3) Sha.preCols pub (inst 3).main r = 1 :=
     fun hi hf => by
       rw [Sha.eval_per72 hs hi hr]
       rcases Nat.le_one_iff_eq_zero_or_eq_one.mp (hf (r % 72)) with h | h <;> simp [h]
@@ -214,16 +253,16 @@ theorem use_mult : ∀ s ∈ sites hashSys inst, isUse s.1 s.2.2 = true →
   rintro ⟨i, r, k⟩ hs hu
   obtain ⟨hi, hr, hk⟩ := (mem_sites hL).mp hs
   simp only at hu
-  have fs : ∀ r < 2 ^ L, ∀ c ∈ Fields.constraints, c.eval (2 ^ L) Fields.preCols pub (inst 1).main r = 0 :=
+  have fs : ∀ r < 2 ^ Ls 1, ∀ c ∈ Fields.constraints, c.eval (2 ^ Ls 1) Fields.preCols pub (inst 1).main r = 0 :=
     hash_fields_sat hL hsat
   have ms := hash_msg_sat hL hsat
   have ss := hash_sha_sat hL hsat
   have ks := hash_merkle_sat hL hsat
   have ws := hash_walk_sat hL hsat
   have cs := hash_ctx_sat hL hsat
-  have pre01 : ∀ {f : ℕ → ℕ} {ii r'}, r' < 2 ^ L → Sha.preCols.getD ii (.periodic [0]) = Sha.per72 f → (∀ q, f q ≤ 1) →
-      (pre ii).eval (2 ^ L) Sha.preCols pub (inst 3).main r' = 0 ∨
-      (pre ii).eval (2 ^ L) Sha.preCols pub (inst 3).main r' = 1 := by
+  have pre01 : ∀ {f : ℕ → ℕ} {ii r'}, r' < 2 ^ Ls 3 → Sha.preCols.getD ii (.periodic [0]) = Sha.per72 f → (∀ q, f q ≤ 1) →
+      (pre ii).eval (2 ^ Ls 3) Sha.preCols pub (inst 3).main r' = 0 ∨
+      (pre ii).eval (2 ^ Ls 3) Sha.preCols pub (inst 3).main r' = 1 := by
     intro f ii r' hr' hi hf
     rw [Sha.eval_per72 ss hi hr']
     rcases Nat.le_one_iff_eq_zero_or_eq_one.mp (hf (r' % 72)) with h | h <;> simp [h]
@@ -232,7 +271,7 @@ theorem use_mult : ∀ s ∈ sites hashSys inst, isUse s.1 s.2.2 = true →
   · -- fields
     have hk34 : k < 36 := by simpa [hashSys, Fields.fields, Fields.lookups, Fields.chkLookups] using hk
     have e : siteMult hashSys inst pub (1, r, k) =
-        ((Fields.lookups ++ Fields.chkLookups).getD k ⟨0, .const 0, []⟩).mult.eval (2 ^ L) Fields.preCols pub
+        ((Fields.lookups ++ Fields.chkLookups).getD k ⟨0, .const 0, []⟩).mult.eval (2 ^ Ls 1) Fields.preCols pub
           (inst 1).main r := by
       simp [siteMult, siteEval, siteLookup, hashSys, hL 1 (by decide), Fields.fields]
     rw [e]
@@ -316,11 +355,11 @@ theorem use_mult : ∀ s ∈ sites hashSys inst, isUse s.1 s.2.2 = true →
       · simp [h1, show r < 118 by omega]
       · by_cases h2 : r < 118 <;> simp [h1, h2]
     have ev : ∀ kk, siteMult hashSys inst pub (7, r, kk) =
-        ((Ctx.lookups.getD kk ⟨0, .const 0, []⟩).mult.eval (2 ^ L) Ctx.preCols pub (inst 7).main r) := by
+        ((Ctx.lookups.getD kk ⟨0, .const 0, []⟩).mult.eval (2 ^ Ls 7) Ctx.preCols pub (inst 7).main r) := by
       intro kk; simp only [siteMult, siteEval, siteLookup, hashSys, hL 7 (by decide)]; rfl
     rw [ev]
-    have pe : ∀ i, (pre i).eval (2 ^ L) Ctx.preCols pub (inst 7).main r = (Ctx.preCols.getD i (.periodic [0])).eval
-        (2 ^ L) r := fun i => by simp [pre, Expr.eval, wrap_zero hr]
+    have pe : ∀ i, (pre i).eval (2 ^ Ls 7) Ctx.preCols pub (inst 7).main r = (Ctx.preCols.getD i (.periodic [0])).eval
+        (2 ^ Ls 7) r := fun i => by simp [pre, Expr.eval, wrap_zero hr]
     interval_cases k <;> (try simp [isUse] at hu) <;>
       simp only [Ctx.lookups, List.getD_cons_zero, List.getD_cons_succ, Expr.eval, Ctx.k, Ctx.p, Ctx.one,
         StarkedAir.Sha256.eval_col, StarkedAir.Sha256.eval_cst, wrap_zero hr, pe, Nat.cast_one] <;>
@@ -347,7 +386,7 @@ theorem use_mult : ∀ s ∈ sites hashSys inst, isUse s.1 s.2.2 = true →
         tauto
       exact air_bool (hash_b2msg_sat hL hsat) hm hr
     have ev : ∀ kk, siteMult hashSys inst pub (10, r, kk) =
-        ((B2Msg.lookups.getD kk ⟨0, .const 0, []⟩).mult.eval (2 ^ L) B2Msg.preCols pub (inst 10).main r) := by
+        ((B2Msg.lookups.getD kk ⟨0, .const 0, []⟩).mult.eval (2 ^ Ls 10) B2Msg.preCols pub (inst 10).main r) := by
       intro kk; simp only [siteMult, siteEval, siteLookup, hashSys, hL 10 (by decide)]; rfl
     rw [ev]
     interval_cases k <;>
@@ -367,7 +406,7 @@ theorem use_mult : ∀ s ∈ sites hashSys inst, isUse s.1 s.2.2 = true →
         simp only [B2s.b2s, B2s.constraints, List.mem_append]
         tauto
       exact air_bool (hash_b2s_sat hL hsat) hm hr
-    have hout : (B2s.p B2s.P_OUT8).eval (2 ^ L) B2s.preCols pub (inst 11).main r = if r < 8 then 1 else 0 := by
+    have hout : (B2s.p B2s.P_OUT8).eval (2 ^ Ls 11) B2s.preCols pub (inst 11).main r = if r < 8 then 1 else 0 := by
       simp [B2s.p, pre, Expr.eval, wrap_zero hr, B2s.preCols, B2s.P_OUT8, PreCol.eval, List.getD_append, Blake2s.preCols]
     have h01 : (if r < 8 then (1 : F) else 0) = 0 ∨ (if r < 8 then (1 : F) else 0) = 1 := by split_ifs <;> simp
     interval_cases k
@@ -385,7 +424,7 @@ theorem use_mult : ∀ s ∈ sites hashSys inst, isUse s.1 s.2.2 = true →
         List.getD_cons_zero, List.getD_cons_succ, List.cons_append, Expr.eval, B2s.k, StarkedAir.Sha256.eval_col,
         wrap_zero hr]
       exact neg01 (bs _ (by simp))
-    · have e : siteMult hashSys inst pub (11, r, 2) = -((B2s.p B2s.P_OUT8).eval (2 ^ L) B2s.preCols pub (inst 11).main r) := by
+    · have e : siteMult hashSys inst pub (11, r, 2) = -((B2s.p B2s.P_OUT8).eval (2 ^ Ls 11) B2s.preCols pub (inst 11).main r) := by
         simp only [siteMult, siteEval, siteLookup, hashSys, hL 11 (by decide)]; rfl
       rw [e, hout]; exact neg01 h01
 
@@ -396,7 +435,7 @@ theorem use_mult : ∀ s ∈ sites hashSys inst, isUse s.1 s.2.2 = true →
     have bSTR := FpWalk.bool fw (c := FpWalk.STR) (by simp) hr
     have bFST := FpWalk.bool fw (c := FpWalk.FST) (by simp) hr
     have ev : ∀ kk, siteMult hashSys inst pub (12, r, kk) =
-        ((FpWalk.lookups.getD kk ⟨0, .const 0, []⟩).mult.eval (2 ^ L) FpWalk.preCols pub (inst 12).main r) := by
+        ((FpWalk.lookups.getD kk ⟨0, .const 0, []⟩).mult.eval (2 ^ Ls 12) FpWalk.preCols pub (inst 12).main r) := by
       intro kk; simp only [siteMult, siteEval, siteLookup, hashSys, hL 12 (by decide)]; rfl
     rw [ev]
     have om01 : ∀ {x : F}, (x = 0 ∨ x = 1) → (1 - x = 0 ∨ 1 - x = 1) := by
@@ -412,11 +451,11 @@ theorem use_mult : ∀ s ∈ sites hashSys inst, isUse s.1 s.2.2 = true →
     have us := hash_urec_sat hL hsat
     have hk13 : k < 18 := by simpa [isUse] using hu
     have bON := URec.on_bool us hr
-    have bF : URec.first.eval (2 ^ L) URec.preCols pub (inst 13).main r = 0 ∨
-        URec.first.eval (2 ^ L) URec.preCols pub (inst 13).main r = 1 := by
+    have bF : URec.first.eval (2 ^ Ls 13) URec.preCols pub (inst 13).main r = 0 ∨
+        URec.first.eval (2 ^ Ls 13) URec.preCols pub (inst 13).main r = 1 := by
       rw [URec.ev_first hr]; split_ifs <;> simp
     have ev : ∀ kk, siteMult hashSys inst pub (13, r, kk) =
-        ((URec.lookups.getD kk ⟨0, .const 0, []⟩).mult.eval (2 ^ L) URec.preCols pub (inst 13).main r) := by
+        ((URec.lookups.getD kk ⟨0, .const 0, []⟩).mult.eval (2 ^ Ls 13) URec.preCols pub (inst 13).main r) := by
       intro kk; simp only [siteMult, siteEval, siteLookup, hashSys, hL 13 (by decide)]; rfl
     rw [ev]
     interval_cases k
@@ -458,20 +497,20 @@ theorem use_mult : ∀ s ∈ sites hashSys inst, isUse s.1 s.2.2 = true →
       rcases hx with rfl | rfl <;> rcases hy with rfl | rfl <;> rcases hz with rfl | rfl <;> norm_num at hs ⊢ <;>
         simp_all
     obtain ⟨bKICBI, bKOKI⟩ := sum01 bKO bKI bCBI bon
-    have bNF : (Coin.notFirst).eval (2 ^ L) Coin.preCols pub (inst 14).main r = 0 ∨
-        (Coin.notFirst).eval (2 ^ L) Coin.preCols pub (inst 14).main r = 1 := by
+    have bNF : (Coin.notFirst).eval (2 ^ Ls 14) Coin.preCols pub (inst 14).main r = 0 ∨
+        (Coin.notFirst).eval (2 ^ Ls 14) Coin.preCols pub (inst 14).main r = 1 := by
       simp only [Coin.notFirst, Coin.om, Coin.one, Coin.first, pre, Expr.eval, StarkedAir.Sha256.eval_cst, Coin.preCols,
         PreCol.eval, wrap_zero hr, List.getD_cons_zero, Nat.cast_one]
       split_ifs <;> simp
     have om01 : ∀ {x : F}, (x = 0 ∨ x = 1) → (1 - x = 0 ∨ 1 - x = 1) := by
       intro x h; rcases h with h | h <;> simp [h]
     have ev : ∀ kk, siteMult hashSys inst pub (14, r, kk) =
-        ((Coin.lookups.getD kk ⟨0, .const 0, []⟩).mult.eval (2 ^ L) Coin.preCols pub (inst 14).main r) := by
+        ((Coin.lookups.getD kk ⟨0, .const 0, []⟩).mult.eval (2 ^ Ls 14) Coin.preCols pub (inst 14).main r) := by
       intro kk; simp only [siteMult, siteEval, siteLookup, hashSys, hL 14 (by decide)]; rfl
     rw [ev]
-    have bNFon : ((Coin.notFirst).eval (2 ^ L) Coin.preCols pub (inst 14).main r) *
+    have bNFon : ((Coin.notFirst).eval (2 ^ Ls 14) Coin.preCols pub (inst 14).main r) *
         ((inst 14).main Coin.KO r + (inst 14).main Coin.KI r + (inst 14).main Coin.CBI r) = 0 ∨
-        ((Coin.notFirst).eval (2 ^ L) Coin.preCols pub (inst 14).main r) *
+        ((Coin.notFirst).eval (2 ^ Ls 14) Coin.preCols pub (inst 14).main r) *
         ((inst 14).main Coin.KO r + (inst 14).main Coin.KI r + (inst 14).main Coin.CBI r) = 1 := mul01 bNF bon
     have hk64 : k < 94 := by rw [← Coin.lookups_len]; simpa [hashSys, Coin.coin] using hk
     have hm := Coin.mult_cases k hk64 hk4
@@ -493,7 +532,7 @@ theorem use_mult : ∀ s ∈ sites hashSys inst, isUse s.1 s.2.2 = true →
 
 /-- **A use is matched by a yield.** A use site with multiplicity `−1` has a yield site (not a use) with
 nonzero multiplicity, the same relation and the same tuple. -/
-theorem linked (hL24 : L ≤ 23) {s0 : Site} (hs0 : s0 ∈ sites hashSys inst) (hu : isUse s0.1 s0.2.2 = true)
+theorem linked (hL24 : ∀ i < 15, Ls i ≤ 23) {s0 : Site} (hs0 : s0 ∈ sites hashSys inst) (hu : isUse s0.1 s0.2.2 = true)
     (hm : siteMult hashSys inst pub s0 = -1) :
     ∃ s ∈ sites hashSys inst, isUse s.1 s.2.2 = false ∧ siteMult hashSys inst pub s ≠ 0 ∧
       siteRel hashSys s = siteRel hashSys s0 ∧ siteVals hashSys inst pub s = siteVals hashSys inst pub s0 := by
@@ -541,9 +580,9 @@ theorem yt (i k R : ℕ) : (i, k, R) ∈ yieldTable ↔
 
 /-- **Linking a use to its yield, by relation.** For a use site `s0` with multiplicity `−1` and relation
 `R`, a yield site `(i, r', k)` with nonzero multiplicity and the same tuple, listed under `R`. -/
-theorem link (hL24 : L ≤ 23) {i0 r0 k0 : ℕ} (hs0 : ((i0, r0, k0) : Site) ∈ sites hashSys inst)
+theorem link (hL24 : ∀ i < 15, Ls i ≤ 23) {i0 r0 k0 : ℕ} (hs0 : ((i0, r0, k0) : Site) ∈ sites hashSys inst)
     (hu : isUse i0 k0 = true) (hm : siteMult hashSys inst pub (i0, r0, k0) = -1) :
-    ∃ i r' k, r' < 2 ^ L ∧ (i, k, siteRel hashSys (i0, r0, k0)) ∈ yieldTable ∧
+    ∃ i r' k, r' < 2 ^ Ls i ∧ (i, k, siteRel hashSys (i0, r0, k0)) ∈ yieldTable ∧
       siteMult hashSys inst pub (i, r', k) ≠ 0 ∧
       siteVals hashSys inst pub (i, r', k) = siteVals hashSys inst pub (i0, r0, k0) := by
   obtain ⟨⟨i, r', k⟩, hs, hnu, hsm, hsr, hsv⟩ := linked hL hsat hL24 hs0 hu hm
@@ -551,44 +590,44 @@ theorem link (hL24 : L ≤ 23) {i0 r0 k0 : ℕ} (hs0 : ((i0, r0, k0) : Site) ∈
   rw [← hsr]; exact yield_of hL hs hnu
 
 omit hsat in
-theorem site_mem {i r k : ℕ} (hi : i < 15) (hr : r < 2 ^ L) (hk : k < (hashSys.comp i).lookups.length) :
+theorem site_mem {i r k : ℕ} (hi : i < 15) (hr : r < 2 ^ Ls i) (hk : k < (hashSys.comp i).lookups.length) :
     ((i, r, k) : Site) ∈ sites hashSys inst := (mem_sites hL).mpr ⟨hi, hr, hk⟩
 
 /-- **SHA's uses are message (or tree) yields.** A SHA word use (`kk = 0`) or length use (`kk = 1`) with
 multiplicity `−1` is matched by a message row yielding the same tuple (message lookup `kk + 2`) or, for a
 length, by a txid-tree node row (lookup 1) or a witness-tree row (lookup 1). -/
-theorem sha_use_linked (hL24 : L ≤ 23) {r : ℕ} (hr : r < 2 ^ L) {kk : ℕ} (hk : kk < 2)
+theorem sha_use_linked (hL24 : ∀ i < 15, Ls i ≤ 23) {r : ℕ} (hr : r < 2 ^ Ls 3) {kk : ℕ} (hk : kk < 2)
     (hm : siteMult hashSys inst pub (3, r, kk) = -1) :
-    ∃ r' < 2 ^ L, (siteMult hashSys inst pub (2, r', kk + 2) ≠ 0 ∧
+    ∃ r', (r' < 2 ^ Ls 2 ∧ siteMult hashSys inst pub (2, r', kk + 2) ≠ 0 ∧
       siteVals hashSys inst pub (2, r', kk + 2) = siteVals hashSys inst pub (3, r, kk)) ∨
-      (kk = 1 ∧ siteMult hashSys inst pub (4, r', 1) ≠ 0 ∧
+      (kk = 1 ∧ r' < 2 ^ Ls 4 ∧ siteMult hashSys inst pub (4, r', 1) ≠ 0 ∧
         siteVals hashSys inst pub (4, r', 1) = siteVals hashSys inst pub (3, r, kk)) ∨
-      (kk = 1 ∧ siteMult hashSys inst pub (8, r', 1) ≠ 0 ∧
+      (kk = 1 ∧ r' < 2 ^ Ls 8 ∧ siteMult hashSys inst pub (8, r', 1) ≠ 0 ∧
         siteVals hashSys inst pub (8, r', 1) = siteVals hashSys inst pub (3, r, kk)) := by
   have hs1 := site_mem hL (i := 3) (by decide) hr (k := kk) (by simp [hashSys, Sha.sha, Sha.lookups]; omega)
   obtain ⟨i, r', k, hr', hy, hsm, hsv⟩ := link hL hsat hL24 hs1 (by interval_cases kk <;> rfl) hm
-  refine ⟨r', hr', ?_⟩
+  refine ⟨r', ?_⟩
   interval_cases kk
   · have e : siteRel hashSys (3, r, 0) = 5 := rfl
     rw [e, yt] at hy
     obtain ⟨rfl, rfl⟩ : i = 2 ∧ k = 2 := by omega
-    exact Or.inl ⟨hsm, hsv⟩
+    exact Or.inl ⟨hr', hsm, hsv⟩
   · have e : siteRel hashSys (3, r, 1) = 6 := rfl
     rw [e, yt] at hy
     rcases (by omega : (i = 2 ∧ k = 3) ∨ (i = 4 ∧ k = 1) ∨ (i = 8 ∧ k = 1)) with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩
-    · exact Or.inl ⟨hsm, hsv⟩
-    · exact Or.inr (Or.inl ⟨rfl, hsm, hsv⟩)
-    · exact Or.inr (Or.inr ⟨rfl, hsm, hsv⟩)
+    · exact Or.inl ⟨hr', hsm, hsv⟩
+    · exact Or.inr (Or.inl ⟨rfl, hr', hsm, hsv⟩)
+    · exact Or.inr (Or.inr ⟨rfl, hr', hsm, hsv⟩)
 
 /-- The node tuple a SHA node block reads: yielded by a txid-tree row (`MID = NB + r'`) or a witness-tree
 row (`MID = NBW + r'`), with that row's children and duplicate flag. -/
-theorem node_link (hL24 : L ≤ 23) {x : ℕ} (hx : x < 2 ^ L)
-    (hm : (Expr.mul (pre Sha.ROW0) (Sha.k Sha.NODE)).eval (2 ^ L) Sha.preCols pub (inst 3).main x = 1) :
-    ∃ r' < 2 ^ L,
-      ((inst 4).main Merkle.ACTN r' = 1 ∧
+theorem node_link (hL24 : ∀ i < 15, Ls i ≤ 23) {x : ℕ} (hx : x < 2 ^ Ls 3)
+    (hm : (Expr.mul (pre Sha.ROW0) (Sha.k Sha.NODE)).eval (2 ^ Ls 3) Sha.preCols pub (inst 3).main x = 1) :
+    ∃ r',
+      (r' < 2 ^ Ls 4 ∧ (inst 4).main Merkle.ACTN r' = 1 ∧
         (inst 3).main Sha.MID x = ((Merkle.NB + r' : ℕ) : F) ∧ (inst 3).main Sha.LID x = (inst 4).main Merkle.LEFT r' ∧
         (inst 3).main Sha.RID x = (inst 4).main Merkle.RIGHT r' ∧ (inst 3).main Sha.NDUP x = (inst 4).main Merkle.DUP r') ∨
-      ((inst 3).main Sha.MID x = ((WMerkle.NBW + r' : ℕ) : F) ∧
+      (r' < 2 ^ Ls 8 ∧ (inst 3).main Sha.MID x = ((WMerkle.NBW + r' : ℕ) : F) ∧
         (inst 3).main Sha.LID x = (inst 8).main WMerkle.LEFT r' ∧ (inst 3).main Sha.RID x = (inst 8).main WMerkle.RIGHT r' ∧
         (inst 3).main Sha.NDUP x = 1) := by
   have hs1 := site_mem hL (i := 3) (by decide) hx (k := 3) (by simp [hashSys, Sha.sha, Sha.lookups])
@@ -602,7 +641,7 @@ theorem node_link (hL24 : L ≤ 23) {x : ℕ} (hx : x < 2 ^ L)
       (inst 3).main Sha.RID x, (inst 3).main Sha.NDUP x] := by
     simp [siteVals, siteEval, siteLookup, hashSys, hL 3 (by decide), Sha.sha, Sha.lookups, Sha.k,
       StarkedAir.Sha256.eval_col, wrap_zero hx]
-  refine ⟨r', hr', ?_⟩
+  refine ⟨r', ?_⟩
   rcases (by omega : (i = 4 ∧ k = 0) ∨ (i = 8 ∧ k = 0)) with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩
   · left
     have hv4 : siteVals hashSys inst pub (4, r', 0) = [(Merkle.NB : F) + (inst 4).main Merkle.RIX r',
@@ -620,7 +659,7 @@ theorem node_link (hL24 : L ≤ 23) {x : ℕ} (hx : x < 2 ^ L)
       rcases Merkle.kbool (hash_merkle_sat hL hsat) (c := Merkle.ACTN) (by simp) hr' with h | h
       · rw [h, zero_mul] at hm4; exact absurd rfl hm4
       · exact h
-    exact ⟨hact, by rw [← e1]; push_cast; ring, e2.symm, e3.symm, e4.symm⟩
+    exact ⟨hr', hact, by rw [← e1]; push_cast; ring, e2.symm, e3.symm, e4.symm⟩
   · right
     have hv8 : siteVals hashSys inst pub (8, r', 0) = [(WMerkle.NBW : F) + (inst 8).main WMerkle.RIX r',
         (inst 8).main WMerkle.LEFT r', (inst 8).main WMerkle.RIGHT r', 1] := by
@@ -631,41 +670,42 @@ theorem node_link (hL24 : L ≤ 23) {x : ℕ} (hx : x < 2 ^ L)
     simp only [List.cons.injEq, and_true] at hsv
     obtain ⟨e1, e2, e3, e4⟩ := hsv
     rw [WMerkle.rix_eq (hash_wmerkle_sat hL hsat) r' hr'] at e1
-    exact ⟨by rw [← e1]; push_cast; ring, e2.symm, e3.symm, e4.symm⟩
+    exact ⟨hr', by rw [← e1]; push_cast; ring, e2.symm, e3.symm, e4.symm⟩
 
 /-- **A node block's id is a tree node id** (at least `NB`). -/
-theorem node_mid (hL24 : L ≤ 23) {x : ℕ} (hx : x < 2 ^ L)
-    (hm : (Expr.mul (pre Sha.ROW0) (Sha.k Sha.NODE)).eval (2 ^ L) Sha.preCols pub (inst 3).main x = 1) :
+theorem node_mid (hL24 : ∀ i < 15, Ls i ≤ 23) {x : ℕ} (hx : x < 2 ^ Ls 3)
+    (hm : (Expr.mul (pre Sha.ROW0) (Sha.k Sha.NODE)).eval (2 ^ Ls 3) Sha.preCols pub (inst 3).main x = 1) :
     Merkle.NB ≤ ((inst 3).main Sha.MID x).val := by
-  have h24 : 2 ^ L ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans hL24 (by norm_num))
-  norm_num at h24
-  obtain ⟨r', hr', h | h⟩ := node_link hL hsat hL24 hx hm
-  · rw [h.2.1, ZMod.val_natCast_of_lt (Fields.lt_P (by unfold Merkle.NB; omega))]; omega
-  · rw [h.1, ZMod.val_natCast_of_lt (Fields.lt_P (by unfold WMerkle.NBW; omega))]
+  have h24 : ∀ i < 15, 2 ^ Ls i ≤ 2 ^ 24 := fun i hi => Nat.pow_le_pow_right (by norm_num) (le_trans (hL24 i hi) (by norm_num))
+  have h4 := h24 4 (by decide); have h8 := h24 8 (by decide)
+  norm_num at h4 h8
+  obtain ⟨r', h | h⟩ := node_link hL hsat hL24 hx hm
+  · have hr' := h.1; rw [h.2.2.1, ZMod.val_natCast_of_lt (Fields.lt_P (by unfold Merkle.NB; omega))]; omega
+  · have hr' := h.1; rw [h.2.1, ZMod.val_natCast_of_lt (Fields.lt_P (by unfold WMerkle.NBW; omega))]
     unfold WMerkle.NBW Merkle.NB; omega
 
 /-- **A txid-tree node block's tuple is a txid-tree row's**: `MID = NB + r'`, children and `dup` as on row
 `r'` (for ids below the witness tree's). -/
-theorem node_row (hL24 : L ≤ 23) {x : ℕ} (hx : x < 2 ^ L)
-    (hm : (Expr.mul (pre Sha.ROW0) (Sha.k Sha.NODE)).eval (2 ^ L) Sha.preCols pub (inst 3).main x = 1)
+theorem node_row (hL24 : ∀ i < 15, Ls i ≤ 23) {x : ℕ} (hx : x < 2 ^ Ls 3)
+    (hm : (Expr.mul (pre Sha.ROW0) (Sha.k Sha.NODE)).eval (2 ^ Ls 3) Sha.preCols pub (inst 3).main x = 1)
     (hlt : ((inst 3).main Sha.MID x).val < WMerkle.NBW) :
-    ∃ r' < 2 ^ L, (inst 4).main Merkle.ACTN r' = 1 ∧
+    ∃ r' < 2 ^ Ls 4, (inst 4).main Merkle.ACTN r' = 1 ∧
       (inst 3).main Sha.MID x = ((Merkle.NB + r' : ℕ) : F) ∧ (inst 3).main Sha.LID x = (inst 4).main Merkle.LEFT r' ∧
       (inst 3).main Sha.RID x = (inst 4).main Merkle.RIGHT r' ∧ (inst 3).main Sha.NDUP x = (inst 4).main Merkle.DUP r' := by
-  have h24 : 2 ^ L ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans hL24 (by norm_num))
+  have h24 : 2 ^ Ls 8 ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans (hL24 8 (by decide)) (by norm_num))
   norm_num at h24
-  obtain ⟨r', hr', h | h⟩ := node_link hL hsat hL24 hx hm
-  · exact ⟨r', hr', h⟩
-  · rw [h.1, ZMod.val_natCast_of_lt (Fields.lt_P (by unfold WMerkle.NBW; omega))] at hlt; omega
+  obtain ⟨r', h | h⟩ := node_link hL hsat hL24 hx hm
+  · exact ⟨r', h.1, h.2⟩
+  · have hr' := h.1; rw [h.2.1, ZMod.val_natCast_of_lt (Fields.lt_P (by unfold WMerkle.NBW; omega))] at hlt; omega
 
 /-- **Digest uses are second hashes' outputs.** A digest use (a node block's child read, `SHA` lookups 4–5,
 or the root row's read, txid-tree lookup 2) with multiplicity `−1` and an id below `2^28` reads the tuple
 yielded at the last row of a second-hash period `q'`. (Ids `2^28`, `2^28 + 1` are the context's
 pseudo-digests.) -/
-theorem digest_linked (hL24 : L ≤ 23) {i r k : ℕ} (hu : (i = 3 ∧ (k = 4 ∨ k = 5)) ∨ (i = 4 ∧ k = 2) ∨ (i = 14 ∧ k = 2))
-    (hr : r < 2 ^ L) (hm : siteMult hashSys inst pub (i, r, k) = -1)
+theorem digest_linked (hL24 : ∀ i < 15, Ls i ≤ 23) {i r k : ℕ} (hu : (i = 3 ∧ (k = 4 ∨ k = 5)) ∨ (i = 4 ∧ k = 2) ∨ (i = 14 ∧ k = 2))
+    (hr : r < 2 ^ Ls i) (hm : siteMult hashSys inst pub (i, r, k) = -1)
     (hid : ∀ v ∈ (siteVals hashSys inst pub (i, r, k)).head?, v.val < 2 ^ 28) :
-    ∃ q', 72 * q' + 72 ≤ 2 ^ L ∧ (inst 3).main Sha.DBL (72 * q') = 1 ∧
+    ∃ q', 72 * q' + 72 ≤ 2 ^ Ls 3 ∧ (inst 3).main Sha.DBL (72 * q') = 1 ∧
       siteVals hashSys inst pub (3, 72 * q' + 71, 2) = siteVals hashSys inst pub (i, r, k) := by
   have ss := hash_sha_sat hL hsat
   have hs1 : ((i, r, k) : Site) ∈ sites hashSys inst := by
@@ -710,9 +750,9 @@ theorem digest_linked (hL24 : L ≤ 23) {i r k : ℕ} (hu : (i = 3 ∧ (k = 4 �
 
 /-- **The root row's header reads are message yields.** A txid-tree word use (lookups 3–10) with
 multiplicity `−1` is matched by a message row yielding the same tuple. -/
-theorem merkle_word_linked (hL24 : L ≤ 23) {r k : ℕ} (hk : 3 ≤ k) (hk11 : k < 11) (hr : r < 2 ^ L)
+theorem merkle_word_linked (hL24 : ∀ i < 15, Ls i ≤ 23) {r k : ℕ} (hk : 3 ≤ k) (hk11 : k < 11) (hr : r < 2 ^ Ls 4)
     (hm : siteMult hashSys inst pub (4, r, k) = -1) :
-    ∃ r' < 2 ^ L, siteMult hashSys inst pub (2, r', 2) ≠ 0 ∧
+    ∃ r' < 2 ^ Ls 2, siteMult hashSys inst pub (2, r', 2) ≠ 0 ∧
       siteVals hashSys inst pub (2, r', 2) = siteVals hashSys inst pub (4, r, k) := by
   have hs1 := site_mem hL (i := 4) (by decide) hr (k := k) (by simp [hashSys, Merkle.merkle, Merkle.lookups]; omega)
   obtain ⟨i, r', k', hr', hy, hsm, hsv⟩ := link hL hsat hL24 hs1 (by simp [isUse]; omega) hm
@@ -724,27 +764,27 @@ theorem merkle_word_linked (hL24 : L ≤ 23) {r k : ℕ} (hk : 3 ≤ k) (hk11 : 
 /-- **SHA message words are message bytes.** At a SHA message row `x` (rows 4..19 of a period) of a
 period that reads words, the word limbs are bytes `j − 3 .. j` (big-endian) of a message starting at
 message row `r0`, with the same id, where `j − 3 = 64 · BLKI + 4 · (row − 4)`. -/
-theorem sha_word (hL24 : L ≤ 23) {x : ℕ} (hx : x < 2 ^ L)
-    (hm : (Expr.mul (pre Sha.MSGROW) (Sha.k Sha.USEW)).eval (2 ^ L) Sha.preCols pub (inst 3).main x = 1) :
-    ∃ r0 j, r0 + j < 2 ^ L ∧ 3 ≤ j ∧ r0 % 64 = 0 ∧ (inst 2).main Msg.FIRSTM r0 = 1 ∧
+theorem sha_word (hL24 : ∀ i < 15, Ls i ≤ 23) {x : ℕ} (hx : x < 2 ^ Ls 3)
+    (hm : (Expr.mul (pre Sha.MSGROW) (Sha.k Sha.USEW)).eval (2 ^ Ls 3) Sha.preCols pub (inst 3).main x = 1) :
+    ∃ r0 j, r0 + j < 2 ^ Ls 2 ∧ 3 ≤ j ∧ r0 % 64 = 0 ∧ (inst 2).main Msg.FIRSTM r0 = 1 ∧
       (∀ i, r0 < i → i ≤ r0 + j → (inst 2).main Msg.FIRSTM i = 0 ∧ (inst 2).main Msg.NIL i = 0) ∧
       (inst 2).main Msg.MID r0 = (inst 3).main Sha.MID x ∧
       ((j - 3 : ℕ) : F) = (Expr.add (.mul (cst 64) (Sha.k Sha.BLKI)) (.sub (.mul (cst 4) (pre Sha.ROWIDX)) (cst 16))).eval
-        (2 ^ L) Sha.preCols pub (inst 3).main x ∧
-      (StarkedAir.Sha256.limb StarkedAir.Sha256.W 0).eval (2 ^ L) Sha.preCols pub (inst 3).main x =
+        (2 ^ Ls 3) Sha.preCols pub (inst 3).main x ∧
+      (StarkedAir.Sha256.limb StarkedAir.Sha256.W 0).eval (2 ^ Ls 3) Sha.preCols pub (inst 3).main x =
         256 * (inst 2).main Msg.BYTE (r0 + j - 1) + (inst 2).main Msg.BYTE (r0 + j) ∧
-      (StarkedAir.Sha256.limb StarkedAir.Sha256.W 1).eval (2 ^ L) Sha.preCols pub (inst 3).main x =
+      (StarkedAir.Sha256.limb StarkedAir.Sha256.W 1).eval (2 ^ Ls 3) Sha.preCols pub (inst 3).main x =
         256 * (inst 2).main Msg.BYTE (r0 + j - 3) + (inst 2).main Msg.BYTE (r0 + j - 2) := by
   have hm' : siteMult hashSys inst pub (3, x, 0) = -1 := by
     simp only [siteMult, siteEval, siteLookup, hashSys, hL 3 (by decide)]
     simp only [show (3 : ℕ) ≠ 0 by decide, show (3 : ℕ) ≠ 1 by decide, show (3 : ℕ) ≠ 2 by decide, if_false, ↓reduceIte]
     simp only [Sha.sha, Sha.lookups, List.getD_cons_zero, Expr.eval]
-    rw [show Expr.eval (2 ^ L) Sha.preCols pub (inst 3).main x (pre Sha.MSGROW) *
-      Expr.eval (2 ^ L) Sha.preCols pub (inst 3).main x (Sha.k Sha.USEW) = 1 from hm]
-  obtain ⟨r', hr', hlink⟩ := sha_use_linked hL hsat hL24 hx (kk := 0) (by norm_num) hm'
-  obtain ⟨hym, hyv⟩ := hlink.resolve_right (fun h => by rcases h with h | h <;> exact absurd h.1 (by norm_num))
+    rw [show Expr.eval (2 ^ Ls 3) Sha.preCols pub (inst 3).main x (pre Sha.MSGROW) *
+      Expr.eval (2 ^ Ls 3) Sha.preCols pub (inst 3).main x (Sha.k Sha.USEW) = 1 from hm]
+  obtain ⟨r', hlink⟩ := sha_use_linked hL hsat hL24 hx (kk := 0) (by norm_num) hm'
+  obtain ⟨hr', hym, hyv⟩ := hlink.resolve_right (fun h => by rcases h with h | h <;> exact absurd h.1 (by norm_num))
   have ms := hash_msg_sat hL hsat
-  have hmult : (pre Msg.IS3).eval (2 ^ L) Msg.preCols pub (inst 2).main r' * (inst 2).main Msg.WM r' ≠ 0 := by
+  have hmult : (pre Msg.IS3).eval (2 ^ Ls 2) Msg.preCols pub (inst 2).main r' * (inst 2).main Msg.WM r' ≠ 0 := by
     simpa [siteMult, siteEval, siteLookup, hashSys, hL 2 (by decide), Msg.msg, Msg.lookups, Expr.eval, Msg.k,
       StarkedAir.Sha256.eval_col, wrap_zero hr'] using hym
   obtain ⟨r0, j, rfl, hj, ha, hf, hnil, hb, hmid, hidx, hvals⟩ := Msg.word_yield ms hr' hmult
@@ -755,9 +795,9 @@ theorem sha_word (hL24 : L ≤ 23) {x : ℕ} (hx : x < 2 ^ L)
   have hv3 : siteVals hashSys inst pub (3, x, 0) =
       [(inst 3).main Sha.MID x,
        (Expr.add (.mul (cst 64) (Sha.k Sha.BLKI)) (.sub (.mul (cst 4) (pre Sha.ROWIDX)) (cst 16))).eval
-         (2 ^ L) Sha.preCols pub (inst 3).main x,
-       (StarkedAir.Sha256.limb StarkedAir.Sha256.W 0).eval (2 ^ L) Sha.preCols pub (inst 3).main x,
-       (StarkedAir.Sha256.limb StarkedAir.Sha256.W 1).eval (2 ^ L) Sha.preCols pub (inst 3).main x] := by
+         (2 ^ Ls 3) Sha.preCols pub (inst 3).main x,
+       (StarkedAir.Sha256.limb StarkedAir.Sha256.W 0).eval (2 ^ Ls 3) Sha.preCols pub (inst 3).main x,
+       (StarkedAir.Sha256.limb StarkedAir.Sha256.W 1).eval (2 ^ Ls 3) Sha.preCols pub (inst 3).main x] := by
     simp [siteVals, siteEval, siteLookup, hashSys, hL 3 (by decide), Sha.sha, Sha.lookups, Sha.k,
       StarkedAir.Sha256.eval_col, wrap_zero hx]
   rw [hv2, hv3] at hyv
@@ -768,31 +808,33 @@ theorem sha_word (hL24 : L ≤ 23) {x : ℕ} (hx : x < 2 ^ L)
 /-- **A second hash checks its message's padded length.** At a `DBL` period's first row `x`, the
 message with its id (starting at message row `r0`, data ending at index `d`) has padded length
 `64 · BLKI(x − 1) + 64`. -/
-theorem sha_len (hL24 : L ≤ 23) {x : ℕ} (hx : x < 2 ^ L)
-    (hm : (Expr.mul (pre Sha.ROW0) (Sha.k Sha.DBL)).eval (2 ^ L) Sha.preCols pub (inst 3).main x = 1)
+theorem sha_len (hL24 : ∀ i < 15, Ls i ≤ 23) {x : ℕ} (hx : x < 2 ^ Ls 3)
+    (hm : (Expr.mul (pre Sha.ROW0) (Sha.k Sha.DBL)).eval (2 ^ Ls 3) Sha.preCols pub (inst 3).main x = 1)
     (hmid : ((inst 3).main Sha.MID x).val < Merkle.NB) :
     ∃ r0 d, (inst 2).main Msg.FIRSTM r0 = 1 ∧ (inst 2).main Msg.ENDD (r0 + d) = 1 ∧
       (∀ j < d, (inst 2).main Msg.CONT (r0 + j) = 1 ∨ (inst 2).main Msg.SW (r0 + j) = 1) ∧
       (inst 2).main Msg.MID r0 = (inst 3).main Sha.MID x ∧
-      r0 + d + 1 + 1 + (119 - (r0 + d + 1) % 64) % 64 + 7 < 2 ^ L ∧
+      r0 + d + 1 + 1 + (119 - (r0 + d + 1) % 64) % 64 + 7 < 2 ^ Ls 2 ∧
       (((r0 + d + 1 + 1 + (119 - (r0 + d + 1) % 64) % 64 + 7) + 1 - r0 : ℕ) : F) =
-        (Expr.add (.mul (cst 64) (Sha.kp Sha.BLKI)) (cst 64)).eval (2 ^ L) Sha.preCols pub (inst 3).main x := by
+        (Expr.add (.mul (cst 64) (Sha.kp Sha.BLKI)) (cst 64)).eval (2 ^ Ls 3) Sha.preCols pub (inst 3).main x := by
   have hm' : siteMult hashSys inst pub (3, x, 1) = -1 := by
     simp only [siteMult, siteEval, siteLookup, hashSys, hL 3 (by decide)]
     simp only [show (3 : ℕ) ≠ 0 by decide, show (3 : ℕ) ≠ 1 by decide, show (3 : ℕ) ≠ 2 by decide, if_false, ↓reduceIte]
     simp only [Sha.sha, Sha.lookups, List.getD_cons_succ, List.getD_cons_zero, Expr.eval]
-    rw [show Expr.eval (2 ^ L) Sha.preCols pub (inst 3).main x (pre Sha.ROW0) *
-      Expr.eval (2 ^ L) Sha.preCols pub (inst 3).main x (Sha.k Sha.DBL) = 1 from hm]
-  obtain ⟨r', hr', hlink⟩ := sha_use_linked hL hsat hL24 hx (kk := 1) (by norm_num) hm'
+    rw [show Expr.eval (2 ^ Ls 3) Sha.preCols pub (inst 3).main x (pre Sha.ROW0) *
+      Expr.eval (2 ^ Ls 3) Sha.preCols pub (inst 3).main x (Sha.k Sha.DBL) = 1 from hm]
+  obtain ⟨r', hlink⟩ := sha_use_linked hL hsat hL24 hx (kk := 1) (by norm_num) hm'
   have hv3' : siteVals hashSys inst pub (3, x, 1) = [(inst 3).main Sha.MID x,
-      (Expr.add (.mul (cst 64) (Sha.kp Sha.BLKI)) (cst 64)).eval (2 ^ L) Sha.preCols pub (inst 3).main x] := by
+      (Expr.add (.mul (cst 64) (Sha.kp Sha.BLKI)) (cst 64)).eval (2 ^ Ls 3) Sha.preCols pub (inst 3).main x] := by
     simp [siteVals, siteEval, siteLookup, hashSys, hL 3 (by decide), Sha.sha, Sha.lookups, Sha.k,
       StarkedAir.Sha256.eval_col, wrap_zero hx]
   -- not a Merkle node's length: node ids are at least `NB`
-  obtain ⟨hym, hyv⟩ := hlink.resolve_right (fun hh => by
-    have h24 : 2 ^ L ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans hL24 (by norm_num))
-    norm_num at h24
-    rcases hh with ⟨-, -, hv⟩ | ⟨-, -, hv⟩
+  obtain ⟨hr', hym, hyv⟩ := hlink.resolve_right (fun hh => by
+    have h24 : ∀ i < 15, 2 ^ Ls i ≤ 2 ^ 24 :=
+      fun i hi => Nat.pow_le_pow_right (by norm_num) (le_trans (hL24 i hi) (by norm_num))
+    have h4 := h24 4 (by decide); have h8 := h24 8 (by decide)
+    norm_num at h4 h8
+    rcases hh with ⟨-, hr', -, hv⟩ | ⟨-, hr', -, hv⟩
     · have hv4 : siteVals hashSys inst pub (4, r', 1) = [(Merkle.NB : F) + (inst 4).main Merkle.RIX r', 128] := by
         simp [siteVals, siteEval, siteLookup, hashSys, hL 4 (by decide), Merkle.merkle, Merkle.lookups,
           Merkle.nodeId, Merkle.k, StarkedAir.Sha256.eval_col, StarkedAir.Sha256.eval_cst, wrap_zero hr', Expr.eval]
@@ -822,7 +864,7 @@ theorem sha_len (hL24 : L ≤ 23) {x : ℕ} (hx : x < 2 ^ L)
     simp [siteVals, siteEval, siteLookup, hashSys, hL 2 (by decide), Msg.msg, Msg.lookups, Msg.k, Msg.one,
       StarkedAir.Sha256.eval_col, wrap_zero hr', Expr.eval, StarkedAir.Sha256.eval_cst]
   have hv3 : siteVals hashSys inst pub (3, x, 1) = [(inst 3).main Sha.MID x,
-      (Expr.add (.mul (cst 64) (Sha.kp Sha.BLKI)) (cst 64)).eval (2 ^ L) Sha.preCols pub (inst 3).main x] := by
+      (Expr.add (.mul (cst 64) (Sha.kp Sha.BLKI)) (cst 64)).eval (2 ^ Ls 3) Sha.preCols pub (inst 3).main x] := by
     simp [siteVals, siteEval, siteLookup, hashSys, hL 3 (by decide), Sha.sha, Sha.lookups, Sha.k,
       StarkedAir.Sha256.eval_col, wrap_zero hx]
   rw [hv2, hv3] at hyv
@@ -831,13 +873,13 @@ theorem sha_len (hL24 : L ≤ 23) {x : ℕ} (hx : x < 2 ^ L)
   refine ⟨r0, d, hf, he, hc, hmid.symm.trans e1, heq ▸ hr', ?_⟩
   rw [← heq, ← e2, hidx]
 
-theorem hash_fields_sat' : ∀ r < 2 ^ L, ∀ c ∈ Fields.constraints,
-    c.eval (2 ^ L) Fields.preCols pub (inst 1).main r = 0 := by
+theorem hash_fields_sat' : ∀ r < 2 ^ Ls 1, ∀ c ∈ Fields.constraints,
+    c.eval (2 ^ Ls 1) Fields.preCols pub (inst 1).main r = 0 := by
   have := hsat.1 1 (by decide); rw [hL 1 (by decide)] at this; exact this
 
 /-- **Every byte read is the block's.** A byte-read site of a non-table component with multiplicity
 `−1` reads `(r0, byte r0)` with `r0 < LEN`. -/
-theorem hash_read (hL24 : L ≤ 23) {i r k : ℕ} (hs0 : ((i, r, k) : Site) ∈ sites hashSys inst) (hi : i ≠ 0)
+theorem hash_read (hL24 : ∀ i < 15, Ls i ≤ 23) {i r k : ℕ} (hs0 : ((i, r, k) : Site) ∈ sites hashSys inst) (hi : i ≠ 0)
     (hrel : siteRel hashSys (i, r, k) = REL_BYTE) (hm : siteMult hashSys inst pub (i, r, k) = -1) {p b : F}
     (hv : siteVals hashSys inst pub (i, r, k) = [p, b]) :
     ∃ r0, r0 < (pub 0).val ∧ p = (r0 : F) ∧ b = (inst 0).main BYTE r0 := by
@@ -850,8 +892,8 @@ theorem hash_read (hL24 : L ≤ 23) {i r k : ℕ} (hs0 : ((i, r, k) : Site) ∈ 
   rw [hrel, show REL_BYTE = 3 from rfl, yt] at hy
   obtain ⟨rfl, rfl⟩ : i' = 0 ∧ k' = 0 := by omega
   have hb0 := hash_bytes_sat hL hsat
-  have hP : 2 ^ L < P := by have := hash_rows_lt_P hL24; omega
-  have hm' : (Expr.mul (StarkedAir.Sha256.col ACTIVE) (StarkedAir.Sha256.col MULT)).eval (2 ^ L) preCols pub (inst 0).main r' ≠ 0 := by
+  have hP : 2 ^ Ls 0 < P := rows_lt_P hL24 (by decide)
+  have hm' : (Expr.mul (StarkedAir.Sha256.col ACTIVE) (StarkedAir.Sha256.col MULT)).eval (2 ^ Ls 0) preCols pub (inst 0).main r' ≠ 0 := by
     simpa [siteMult, siteEval, siteLookup, hashSys, hL 0 (by decide), bytes] using hsm
   obtain ⟨hlt, hvals⟩ := yield_sound hb0 hP hr' hm'
   have e : siteVals hashSys inst pub (0, r', 0) = [(r' : F), (inst 0).main BYTE r'] := by
@@ -861,10 +903,10 @@ theorem hash_read (hL24 : L ≤ 23) {i r k : ℕ} (hs0 : ((i, r, k) : Site) ∈ 
   exact ⟨r', hlt, hsv.1.symm, hsv.2.symm⟩
 
 /-- **Fields reads are the block's bytes** (the read oracle `Fields.Reads` needs, for the hashing system). -/
-theorem hash_fields_read (hL24 : L ≤ 23) : ∀ {r : ℕ}, r < 2 ^ L → ∀ {kk : ℕ}, kk < 7 →
-    (Fields.lookups.getD kk ⟨0, .const 0, []⟩).mult.eval (2 ^ L) Fields.preCols pub (inst 1).main r = -1 →
+theorem hash_fields_read (hL24 : ∀ i < 15, Ls i ≤ 23) : ∀ {r : ℕ}, r < 2 ^ Ls 1 → ∀ {kk : ℕ}, kk < 7 →
+    (Fields.lookups.getD kk ⟨0, .const 0, []⟩).mult.eval (2 ^ Ls 1) Fields.preCols pub (inst 1).main r = -1 →
     ∃ r0, r0 < (pub 0).val ∧
-      ((Fields.lookups.getD kk ⟨0, .const 0, []⟩).vals.map (Expr.eval (2 ^ L) Fields.preCols pub (inst 1).main r)) =
+      ((Fields.lookups.getD kk ⟨0, .const 0, []⟩).vals.map (Expr.eval (2 ^ Ls 1) Fields.preCols pub (inst 1).main r)) =
         [(r0 : F), (inst 0).main BYTE r0] := by
   intro r hr kk hk hm
   have hs1 := site_mem hL (i := 1) (by decide) hr (k := kk) (by
@@ -879,7 +921,7 @@ theorem hash_fields_read (hL24 : L ≤ 23) : ∀ {r : ℕ}, r < 2 ^ L → ∀ {k
   have hmult : siteMult hashSys inst pub ((1, r, kk) : Site) = -1 := by
     simp only [siteMult, hl, siteEval, hL 1 (by decide)]; exact hm
   have e : siteVals hashSys inst pub ((1, r, kk) : Site) =
-      (Fields.lookups.getD kk ⟨0, .const 0, []⟩).vals.map (Expr.eval (2 ^ L) Fields.preCols pub (inst 1).main r) := by
+      (Fields.lookups.getD kk ⟨0, .const 0, []⟩).vals.map (Expr.eval (2 ^ Ls 1) Fields.preCols pub (inst 1).main r) := by
     simp only [siteVals, hl]
     congr 1; funext e; simp only [siteEval, hL 1 (by decide)]; rfl
   obtain ⟨p, b, hpb⟩ : ∃ p b, siteVals hashSys inst pub ((1, r, kk) : Site) = [p, b] := by
@@ -888,7 +930,7 @@ theorem hash_fields_read (hL24 : L ≤ 23) : ∀ {r : ℕ}, r < 2 ^ L → ∀ {k
   exact ⟨r0, hr0, by rw [← e, hpb, hp, hb]⟩
 
 /-- **Message data bytes are the block's.** A message data row reads the block byte at its position. -/
-theorem msg_read (hL24 : L ≤ 23) {r : ℕ} (hr : r < 2 ^ L) (hd : (inst 2).main Msg.D r = 1) :
+theorem msg_read (hL24 : ∀ i < 15, Ls i ≤ 23) {r : ℕ} (hr : r < 2 ^ Ls 2) (hd : (inst 2).main Msg.D r = 1) :
     ∃ r0, r0 < (pub 0).val ∧ (inst 2).main Msg.POS r = (r0 : F) ∧
       (inst 2).main Msg.BYTE r = (inst 0).main BYTE r0 := by
   have hs0 := site_mem hL (i := 2) (by decide) hr (k := 0) (by simp [hashSys, Msg.msg, Msg.lookups])
@@ -902,9 +944,9 @@ theorem msg_read (hL24 : L ≤ 23) {r : ℕ} (hr : r < 2 ^ L) (hd : (inst 2).mai
 
 /-- **A message's transaction tuple comes from the fields.** A non-header message start reads its
 tuple `tx(i, a, seg, w, l)` from a fields row yielding it (lock-time row, multiplicity `K_LOCK · TXM`). -/
-theorem msg_tuple_linked (hL24 : L ≤ 23) {r : ℕ} (hr : r < 2 ^ L) (hf : (inst 2).main Msg.FIRSTM r = 1)
+theorem msg_tuple_linked (hL24 : ∀ i < 15, Ls i ≤ 23) {r : ℕ} (hr : r < 2 ^ Ls 2) (hf : (inst 2).main Msg.FIRSTM r = 1)
     (hh : (inst 2).main Msg.HDR r = 0) :
-    ∃ r' < 2 ^ L, siteMult hashSys inst pub (1, r', 7) ≠ 0 ∧
+    ∃ r' < 2 ^ Ls 1, siteMult hashSys inst pub (1, r', 7) ≠ 0 ∧
       siteVals hashSys inst pub (1, r', 7) = siteVals hashSys inst pub (2, r, 1) := by
   have hs1 := site_mem hL (i := 2) (by decide) hr (k := 1) (by simp [hashSys, Msg.msg, Msg.lookups])
   have hm : siteMult hashSys inst pub (2, r, 1) = -1 := by
@@ -917,9 +959,9 @@ theorem msg_tuple_linked (hL24 : L ≤ 23) {r : ℕ} (hr : r < 2 ^ L) (hf : (ins
   exact ⟨r', hr', hsm, hsv⟩
 
 /-- The tuple a non-header message start reads, from the fields' lock-time row of its transaction. -/
-theorem msg_tuple_row (hL24 : L ≤ 23) {r : ℕ} (hr : r < 2 ^ L) (hf : (inst 2).main Msg.FIRSTM r = 1)
+theorem msg_tuple_row (hL24 : ∀ i < 15, Ls i ≤ 23) {r : ℕ} (hr : r < 2 ^ Ls 2) (hf : (inst 2).main Msg.FIRSTM r = 1)
     (hh : (inst 2).main Msg.HDR r = 0) :
-    ∃ ρ < 2 ^ L, (inst 1).main Fields.K_LOCK ρ = 1 ∧
+    ∃ ρ < 2 ^ Ls 1, (inst 1).main Fields.K_LOCK ρ = 1 ∧
       (inst 1).main Fields.TXI ρ = (inst 2).main Msg.TI r ∧ (inst 1).main Fields.TXA ρ = (inst 2).main Msg.TA r ∧
       (inst 1).main Fields.SEG ρ = (inst 2).main Msg.SEG r ∧ (inst 1).main Fields.WST ρ = (inst 2).main Msg.TW r ∧
       (inst 1).main Fields.START ρ = (inst 2).main Msg.TL r := by
@@ -945,7 +987,7 @@ theorem msg_tuple_row (hL24 : L ≤ 23) {r : ℕ} (hr : r < 2 ^ L) (hf : (inst 2
   exact ⟨ρ, hρ, hlock, hv.1, hv.2.1, hv.2.2.1, hv.2.2.2.1, hv.2.2.2.2⟩
 
 /-- The header message's tuple: `TA = 0`, `TL = 76`, `WTX = 0`. -/
-theorem hdr_tuple {r : ℕ} (hr : r < 2 ^ L) (hh : (inst 2).main Msg.HDR r = 1) :
+theorem hdr_tuple {r : ℕ} (hr : r < 2 ^ Ls 2) (hh : (inst 2).main Msg.HDR r = 1) :
     (inst 2).main Msg.TA r = 0 ∧ (inst 2).main Msg.TL r = 76 ∧ (inst 2).main Msg.WTX r = 0 := by
   have ms := hash_msg_sat hL hsat
   have c := fun (e : Expr) (h : e ∈ Msg.msgC) => Msg.sat ms (Msg.mem_msgC h) hr
@@ -957,7 +999,7 @@ theorem hdr_tuple {r : ℕ} (hr : r < 2 ^ L) (hh : (inst 2).main Msg.HDR r = 1) 
 
 /-- **One tuple per message id.** Two message starts with the same id agree on the header flag, the
 wtxid flag and the data range `TA`, `TL`; non-header ones also on `SEG` and `TW`. -/
-theorem mid_tuple (hL24 : L ≤ 23) {r0 r1 : ℕ} (h0 : r0 < 2 ^ L) (h1 : r1 < 2 ^ L)
+theorem mid_tuple (hL24 : ∀ i < 15, Ls i ≤ 23) {r0 r1 : ℕ} (h0 : r0 < 2 ^ Ls 2) (h1 : r1 < 2 ^ Ls 2)
     (f0 : (inst 2).main Msg.FIRSTM r0 = 1) (f1 : (inst 2).main Msg.FIRSTM r1 = 1)
     (hm : (inst 2).main Msg.MID r0 = (inst 2).main Msg.MID r1) :
     (inst 2).main Msg.HDR r0 = (inst 2).main Msg.HDR r1 ∧ (inst 2).main Msg.WTX r0 = (inst 2).main Msg.WTX r1 ∧
@@ -966,13 +1008,13 @@ theorem mid_tuple (hL24 : L ≤ 23) {r0 r1 : ℕ} (h0 : r0 < 2 ^ L) (h1 : r1 < 2
         (inst 2).main Msg.SEG r0 = (inst 2).main Msg.SEG r1 ∧ (inst 2).main Msg.TW r0 = (inst 2).main Msg.TW r1) := by
   have ms := hash_msg_sat hL hsat
   have fs := hash_fields_sat' hL hsat
-  have hP : 2 ^ L < P := by have := hash_rows_lt_P hL24; omega
-  have h25 : 2 ^ L ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans hL24 (by norm_num))
+  have hP : 2 ^ Ls 1 < P := rows_lt_P hL24 (by decide)
+  have h25 : 2 ^ Ls 1 ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans (hL24 1 (by decide)) (by norm_num))
   norm_num at h25
   rw [Msg.mid_eq ms h0, Msg.mid_eq ms h1] at hm
   -- a non-header message: its lock-time row `ρ` and its id as a natural number
-  have nat_id : ∀ {r}, r < 2 ^ L → (inst 2).main Msg.FIRSTM r = 1 → (inst 2).main Msg.HDR r = 0 →
-      ∃ ρ < 2 ^ L, ∃ w ≤ 1, (inst 1).main Fields.K_LOCK ρ = 1 ∧
+  have nat_id : ∀ {r}, r < 2 ^ Ls 2 → (inst 2).main Msg.FIRSTM r = 1 → (inst 2).main Msg.HDR r = 0 →
+      ∃ ρ < 2 ^ Ls 1, ∃ w ≤ 1, (inst 1).main Fields.K_LOCK ρ = 1 ∧
         (1 + 2 * (inst 2).main Msg.TI r + (inst 2).main Msg.WTX r) =
           ((1 + 2 * Fields.locks (inst 1).main ρ + w : ℕ) : F) ∧ (inst 2).main Msg.WTX r = (w : F) ∧
         Fields.locks (inst 1).main ρ ≤ ρ ∧
@@ -983,7 +1025,7 @@ theorem mid_tuple (hL24 : L ≤ 23) {r0 r1 : ℕ} (h0 : r0 < 2 ^ L) (h1 : r1 < 2
     have hw := Fields.bool_val (Msg.bool_col ms (e := Msg.WTX) (by simp) hr)
     refine ⟨ρ, hρ, ((inst 2).main Msg.WTX r).val, hw.2, hl, ?_, hw.1, Fields.locks_le ρ, ta, sg, tw, tl⟩
     rw [← ti, Fields.txi_count fs ρ hρ]; push_cast; rw [← hw.1]
-  have pos_id : ∀ {r}, r < 2 ^ L → (inst 2).main Msg.FIRSTM r = 1 → (inst 2).main Msg.HDR r = 0 →
+  have pos_id : ∀ {r}, r < 2 ^ Ls 2 → (inst 2).main Msg.FIRSTM r = 1 → (inst 2).main Msg.HDR r = 0 →
       (1 - (inst 2).main Msg.HDR r) * (1 + 2 * (inst 2).main Msg.TI r + (inst 2).main Msg.WTX r) ≠ 0 := by
     intro r hr hf hh e
     obtain ⟨ρ, hρ, w, hw, -, e0, -, b0, -⟩ := nat_id hr hf hh
@@ -1014,7 +1056,7 @@ theorem mid_tuple (hL24 : L ≤ 23) {r0 r1 : ℕ} (h0 : r0 < 2 ^ L) (h1 : r1 < 2
 
 /-- **One message per id.** Two message starts with the same id have the same data length and the
 same data bytes. -/
-theorem same_bytes (hL24 : L ≤ 23) {r0 r1 d0 d1 : ℕ} (h0 : r0 < 2 ^ L) (h1 : r1 < 2 ^ L)
+theorem same_bytes (hL24 : ∀ i < 15, Ls i ≤ 23) {r0 r1 d0 d1 : ℕ} (h0 : r0 < 2 ^ Ls 2) (h1 : r1 < 2 ^ Ls 2)
     (f0 : (inst 2).main Msg.FIRSTM r0 = 1) (f1 : (inst 2).main Msg.FIRSTM r1 = 1)
     (hm : (inst 2).main Msg.MID r0 = (inst 2).main Msg.MID r1)
     (hc0 : ∀ j < d0, (inst 2).main Msg.CONT (r0 + j) = 1 ∨ (inst 2).main Msg.SW (r0 + j) = 1)

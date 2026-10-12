@@ -180,12 +180,12 @@ theorem epoch_core (N : ℕ → ℕ) (γ : QM) (blocks : List BlockC) (g0 : ℕ)
       exact List.mem_map.mpr ⟨(p.1.vin[k], k), List.mem_zipIdx_iff_getElem?.mpr (by simp), rfl⟩
     exact hspR _ (mem_spent_all N blocks hBi htx hin)
 
-/-- **An epoch's block systems.** Block systems `i < nb` at heights `h0 + i` sharing the epoch's
+/-- **An epoch's block systems.** Block systems `i < nb` (component `c` of block `i` with `2^(L i c)` rows) at heights `h0 + i` sharing the epoch's
 challenge (`γ`, `z`, weights `αᵏ`) give the epoch's blocks: their public partial sums add up to the
 blocks' sum at `(α, z)`, and their spends and transactions satisfy `epoch_core`'s block facts. -/
-theorem epoch_blocks (nb : ℕ) (inst : ℕ → ℕ → Inst) (pub : ℕ → ℕ → F) (L : ℕ → ℕ)
-    (hL : ∀ i < nb, ∀ c < 15, (inst i c).logSize = L i) (hsat : ∀ i < nb, hashSys.SatisfiedExt (inst i) (pub i) [])
-    (hL24 : ∀ i < nb, L i ≤ 23) (S : ∀ i, Setup (inst i) (pub i) (L i)) (h0 : ℕ) (hh : h0 + nb ≤ 2 ^ 23)
+theorem epoch_blocks (nb : ℕ) (inst : ℕ → ℕ → Inst) (pub : ℕ → ℕ → F) (L : ℕ → ℕ → ℕ)
+    (hL : ∀ i < nb, ∀ c < 15, (inst i c).logSize = L i c) (hsat : ∀ i < nb, hashSys.SatisfiedExt (inst i) (pub i) [])
+    (hL24 : ∀ i < nb, ∀ c < 15, L i c ≤ 23) (S : ∀ i, Setup (inst i) (pub i) (L i 1)) (h0 : ℕ) (hh : h0 + nb ≤ 2 ^ 23)
     (hp2 : ∀ i < nb, pub i 2 = ((h0 + i : ℕ) : F)) (lost : ℕ → Bool)
     (hlost : ∀ i < nb, pub i Coin.PUB_LOST = if lost i then 1 else 0)
     (γ α z : QM) (hγ : ∀ i < nb, FpWalk.gQ (pub i) = γ) (hz : ∀ i < nb, RunSum.pQ (pub i) Coin.PUB_Z = z)
@@ -254,9 +254,9 @@ created before the epoch, well-formed events whose bytes `γ` separates and dist
 outside a bad set of `(α, z)` fixed by the events, if the blocks' public partial sums plus the initial
 set's fractions equal the final set's, Core's connect of the epoch's transactions from the initial view
 succeeds and ends at exactly the final set. -/
-theorem epoch_systems_core (nb : ℕ) (inst : ℕ → ℕ → Inst) (pub : ℕ → ℕ → F) (L : ℕ → ℕ)
-    (hL : ∀ i < nb, ∀ c < 15, (inst i c).logSize = L i) (hsat : ∀ i < nb, hashSys.SatisfiedExt (inst i) (pub i) [])
-    (hL24 : ∀ i < nb, L i ≤ 23) (S : ∀ i, Setup (inst i) (pub i) (L i)) (h0 : ℕ) (hh : h0 + nb ≤ 2 ^ 23)
+theorem epoch_systems_core (nb : ℕ) (inst : ℕ → ℕ → Inst) (pub : ℕ → ℕ → F) (L : ℕ → ℕ → ℕ)
+    (hL : ∀ i < nb, ∀ c < 15, (inst i c).logSize = L i c) (hsat : ∀ i < nb, hashSys.SatisfiedExt (inst i) (pub i) [])
+    (hL24 : ∀ i < nb, ∀ c < 15, L i c ≤ 23) (S : ∀ i, Setup (inst i) (pub i) (L i 1)) (h0 : ℕ) (hh : h0 + nb ≤ 2 ^ 23)
     (hp2 : ∀ i < nb, pub i 2 = ((h0 + i : ℕ) : F))
     (hlost : ∀ i < nb, pub i Coin.PUB_LOST = if Spec.Coins.bip30Lost (h0 + i) then 1 else 0)
     (γ α z : QM) (hγ : ∀ i < nb, FpWalk.gQ (pub i) = γ) (hz : ∀ i < nb, RunSum.pQ (pub i) Coin.PUB_Z = z)
@@ -318,7 +318,7 @@ theorem epoch_systems_core (nb : ℕ) (inst : ℕ → ℕ → Inst) (pub : ℕ �
   have hbnd : ∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → B.h < 2 ^ 24 ∧ B.txs.length < 2 ^ 25 := by
     intro i B hBi
     obtain ⟨hi, h2, h3, -⟩ := hB i B hBi
-    have hLb : 2 ^ L i ≤ 2 ^ 23 := Nat.pow_le_pow_right (by norm_num) (hL24 i hi)
+    have hLb : 2 ^ L i 1 ≤ 2 ^ 23 := Nat.pow_le_pow_right (by norm_num) (hL24 i hi 1 (by decide))
     have := (S i).hN25
     refine ⟨by rw [h2]; omega, by rw [h3]; omega⟩
   have hmem : ∀ B ∈ blocks, ∃ i, blocks[i]? = some B := fun B hBm => by
@@ -336,14 +336,14 @@ theorem epoch_systems_core (nb : ℕ) (inst : ℕ → ℕ → Inst) (pub : ℕ �
 
 section System
 
-variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ}
-  (hL : ∀ i < 15, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : L ≤ 23)
+variable {inst : ℕ → Inst} {pub : ℕ → F} {Ls : ℕ → ℕ}
+  (hL : ∀ i < 15, (inst i).logSize = Ls i) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : ∀ i < 15, Ls i ≤ 23)
 include hL hsat hL24
 
 /-- **An epoch block passes Core's checks.** A block system whose non-coinbase transactions spend
 distinct outpoints (as `epoch_systems_core` gives for every block of a balanced epoch) passes Core's
 `CheckBlock` and `ContextualCheckBlock` (`block_sound`). -/
-theorem epoch_block_valid (hL8 : 8 ≤ L) (S : Setup inst pub L) {c : Spec.Block.Ctx} (hh : c.height < 2 ^ 23)
+theorem epoch_block_valid (hL8 : 8 ≤ Ls 7) (S : Setup inst pub (Ls 1)) {c : Spec.Block.Ctx} (hh : c.height < 2 ^ 23)
     (hmtp : c.prevMtp < 2 ^ 32) (hpub : BlockPubs c pub)
     (hnd : ∀ (t : ℕ) (tx : Spec.Block.Tx), S.b.txs[t]? = some tx → 1 ≤ t →
       Spec.Block.nodupBy (tx.vin.map (·.prevout)) = true) :

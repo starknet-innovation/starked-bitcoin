@@ -207,20 +207,20 @@ theorem le3_lt (f : ℕ → UInt8) : Spec.Block.le ((List.range 3).map f) < 2 ^ 
 
 section System
 
-variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ}
-  (hL : ∀ i < 15, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : L ≤ 23)
+variable {inst : ℕ → Inst} {pub : ℕ → F} {Ls : ℕ → ℕ}
+  (hL : ∀ i < 15, (inst i).logSize = Ls i) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : ∀ i < 15, Ls i ≤ 23)
 include hL hsat hL24
 
 /-- **An input's claim is earlier**: with the claim's code below `2^26` and its `ctx` below `2^25`,
 `(code / 2, ctx) < (height, t)` lexicographically (the circuit's `ORD`/`OB` check). -/
-theorem coin_in_lex {j : ℕ} (hj : j < 2 ^ L) (hki : (inst 14).main Coin.KI j = 1) {h t code : ℕ}
+theorem coin_in_lex {j : ℕ} (hj : j < 2 ^ Ls 14) (hki : (inst 14).main Coin.KI j = 1) {h t code : ℕ}
     (hp2 : pub 2 = (h : F)) (hh : h < 2 ^ 23) (htxi : (inst 14).main Coin.TXI j = (t : F)) (ht : t < 2 ^ 23)
     (hcode : (inst 14).main Coin.CLO j + 65536 * (inst 14).main Coin.CHI j = (code : F)) (hc26 : code < 2 ^ 26)
     (hctx : ((inst 14).main Coin.CTX j).val < 2 ^ 25) :
     code / 2 < h ∨ (code / 2 = h ∧ ((inst 14).main Coin.CTX j).val < t) := by
   have cs := coin_sat hL hsat hL24
   obtain ⟨hc1, hhc, hord0, hord1, -, -, -, -⟩ := Coin.in_spec cs hj hki
-  have ek : (Coin.k Coin.KI).eval (2 ^ L) Coin.preCols pub (inst 14).main j = 1 := by rw [Coin.ev_k hj]; exact hki
+  have ek : (Coin.k Coin.KI).eval (2 ^ Ls 14) Coin.preCols pub (inst 14).main j = 1 := by rw [Coin.ev_k hj]; exact hki
   have hhb : ∀ i < 3, ((inst 14).main (Coin.HB i) j).val < 256 := by
     intro i hi
     have fam : Coin.lookups.getD (52 + i) ⟨0, .const 0, []⟩ = Coin.r8 (Coin.k (Coin.HB i)) (Coin.k Coin.KI) := by
@@ -265,26 +265,26 @@ theorem coin_in_lex {j : ℕ} (hj : j < 2 ^ L) (hki : (inst 14).main Coin.KI j =
 
 /-- **The block's claims.** A claim per (transaction, input) whose tuple is that input row's, earlier when
 small, with `ctx` below `P`. -/
-theorem block_claims (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
-    (hon : ∀ j < 2 ^ L, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
+theorem block_claims (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
+    (hon : ∀ j < 2 ^ Ls 14, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
     (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
     {parts : List (List Spec.Block.Tok)} (hf : List.Forall₂ Spec.Block.IoTx S.b.txs parts)
     (htg : Spec.Block.tagged 0 (Fields.toksFrom (inst 1).main (Rb inst pub) S.m 0) = Spec.Block.tagParts 0 parts)
     {h : ℕ} (hp2 : pub 2 = (h : F)) (hh : h < 2 ^ 23) :
     ∃ claim : ℕ → ℕ → Claim, ∀ (t : ℕ) (tx : Spec.Block.Tx), S.b.txs[t]? = some tx → 1 ≤ t →
       ∀ (k : ℕ) (i : Spec.Block.TxIn), tx.vin[k]? = some i →
-        rowTuple inst pub L (((parts.take t).map List.length).sum + k) =
+        rowTuple inst pub (Ls 14) (((parts.take t).map List.length).sum + k) =
           tupleOf (FpWalk.gQ pub) i.prevout.hash i.prevout.n (claim t k).code (claim t k).ser (claim t k).ctx ∧
         ((claim t k).code < 2 ^ 26 → (claim t k).ctx < 2 ^ 25 →
           ((claim t k).code / 2 < h ∨ ((claim t k).code / 2 = h ∧ (claim t k).ctx < t))) ∧ (claim t k).ctx < 2 ^ 24 ∧
-        ClaimAt inst pub L (((parts.take t).map List.length).sum + k) (claim t k) := by
+        ClaimAt inst pub (Ls 13) (((parts.take t).map List.length).sum + k) (claim t k) := by
   have cs := coin_sat hL hsat hL24
   have key : ∀ t k, ∃ c : Claim, ∀ (tx : Spec.Block.Tx), S.b.txs[t]? = some tx → 1 ≤ t →
       ∀ (i : Spec.Block.TxIn), tx.vin[k]? = some i →
-        rowTuple inst pub L (((parts.take t).map List.length).sum + k) =
+        rowTuple inst pub (Ls 14) (((parts.take t).map List.length).sum + k) =
           tupleOf (FpWalk.gQ pub) i.prevout.hash i.prevout.n c.code c.ser c.ctx ∧
         (c.code < 2 ^ 26 → c.ctx < 2 ^ 25 → (c.code / 2 < h ∨ (c.code / 2 = h ∧ c.ctx < t))) ∧ c.ctx < 2 ^ 24 ∧
-        ClaimAt inst pub L (((parts.take t).map List.length).sum + k) c := by
+        ClaimAt inst pub (Ls 13) (((parts.take t).map List.length).sum + k) c := by
     intro t k
     by_cases hv : ∃ tx i, S.b.txs[t]? = some tx ∧ 1 ≤ t ∧ tx.vin[k]? = some i
     · obtain ⟨tx, i, htx, ht1, hi⟩ := hv
@@ -300,7 +300,7 @@ theorem block_claims (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
         have htot : ((parts.take parts.length).map List.length).sum = (parts.map List.length).sum := by
           rw [List.take_length]
         omega
-      have hj2 : j < 2 ^ L := by omega
+      have hj2 : j < 2 ^ Ls 14 := by omega
       have hq : k < tx.vin.length + tx.vout.length := by omega
       have hki := (coin_kind_pos hL hsat hL24 S he hon hlen hst hf htg hj htx hjdef hq).2.1.mpr ⟨hk, ht1⟩
       obtain ⟨rj, hrj, honj, hJ, code, ser, ctx, htu, hcode, hctx, htl, u0, hu0, hu07, hu0l, hser, hcodeb, hctxb⟩ :=
@@ -314,7 +314,7 @@ theorem block_claims (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
       refine ⟨⟨code, ser, ctx⟩, fun tx' htx' _ i' hi' => ?_⟩
       rw [htx] at htx'; obtain rfl := Option.some.inj htx'
       rw [hi] at hi'; obtain rfl := Option.some.inj hi'
-      have hLb : 2 ^ L ≤ 2 ^ 23 := Nat.pow_le_pow_right (by norm_num) hL24
+      obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
       have htN : t < 2 ^ 23 := by have := (List.getElem?_eq_some_iff.mp htx).1; have := S.hN25; omega
       refine ⟨htu, fun hc26 hc25 => ?_, hc24, hki, hcode, rj, hrj, honj, hJ, htl, u0, hu0, hu07, hu0l, hser, hcodeb, hctxb⟩
       have := coin_in_lex hL hsat hL24 hj2 hki hp2 hh htxi htN hcode hc26 (by rw [hcv]; exact hc25)
@@ -325,8 +325,8 @@ theorem block_claims (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
 
 /-- **The block's partial sum, as epoch events.** With a claim function giving each input row's tuple,
 the public partial sum is the block's created events' `1/(z − φ(encE))` minus its spent events'. -/
-theorem block_event_sum (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
-    (hon : ∀ j < 2 ^ L, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
+theorem block_event_sum (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
+    (hon : ∀ j < 2 ^ Ls 14, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
     (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
     {parts : List (List Spec.Block.Tok)} (hf : List.Forall₂ Spec.Block.IoTx S.b.txs parts)
     (htg : Spec.Block.tagged 0 (Fields.toksFrom (inst 1).main (Rb inst pub) S.m 0) = Spec.Block.tagParts 0 parts)
@@ -334,7 +334,7 @@ theorem block_event_sum (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
     (N : ℕ → ℕ) (claim : ℕ → ℕ → Claim)
     (hcl : ∀ (t : ℕ) (tx : Spec.Block.Tx), S.b.txs[t]? = some tx → 1 ≤ t →
       ∀ (k : ℕ) (i : Spec.Block.TxIn), tx.vin[k]? = some i →
-        rowTuple inst pub L (((parts.take t).map List.length).sum + k) =
+        rowTuple inst pub (Ls 14) (((parts.take t).map List.length).sum + k) =
           tupleOf (FpWalk.gQ pub) i.prevout.hash i.prevout.n (claim t k).code (claim t k).ser (claim t k).ctx) :
     let F' := fun ev : CEv => (RunSum.pQ pub Coin.PUB_Z - phiOf pub (encE N (FpWalk.gQ pub) ev))⁻¹
     let B : BlockC := ⟨h, S.b.txs, lost, claim⟩

@@ -92,16 +92,16 @@ theorem sum_by_parts {β : Type} [AddCommMonoid β] (g : ℕ → β) (lens : Lis
 
 section System
 
-variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ}
-  (hL : ∀ i < 15, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : L ≤ 23)
+variable {inst : ℕ → Inst} {pub : ℕ → F} {Ls : ℕ → ℕ}
+  (hL : ∀ i < 15, (inst i).logSize = Ls i) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : ∀ i < 15, Ls i ≤ 23)
 include hL hsat hL24
 
 /-- An output row's single-byte range checks: `VB 0`, `VB 1`, `VHI`, `CB 0`, `CB 1`, `CHI`. -/
-theorem out_bytes {j : ℕ} (hj : j < 2 ^ L) (hko : (inst 14).main Coin.KO j = 1) :
+theorem out_bytes {j : ℕ} (hj : j < 2 ^ Ls 14) (hko : (inst 14).main Coin.KO j = 1) :
     ((inst 14).main (Coin.VB 0) j).val < 256 ∧ ((inst 14).main (Coin.VB 1) j).val < 256 ∧
       ((inst 14).main Coin.VHI j).val < 256 ∧ ((inst 14).main (Coin.CB 0) j).val < 256 ∧
       ((inst 14).main (Coin.CB 1) j).val < 256 ∧ ((inst 14).main Coin.CHI j).val < 256 := by
-  have ek : (Coin.k Coin.KO).eval (2 ^ L) Coin.preCols pub (inst 14).main j = 1 := by rw [Coin.ev_k hj]; exact hko
+  have ek : (Coin.k Coin.KO).eval (2 ^ Ls 14) Coin.preCols pub (inst 14).main j = 1 := by rw [Coin.ev_k hj]; exact hko
   exact ⟨coin_r8 hL hsat hL24 (k := 46) (by omega) (by omega) rfl hj ek,
     coin_r8 hL hsat hL24 (k := 47) (by omega) (by omega) rfl hj ek,
     coin_r8 hL hsat hL24 (k := 48) (by omega) (by omega) rfl hj ek,
@@ -110,7 +110,7 @@ theorem out_bytes {j : ℕ} (hj : j < 2 ^ L) (hko : (inst 14).main Coin.KO j = 1
     coin_r8 hL hsat hL24 (k := 51) (by omega) (by omega) rfl hj ek⟩
 
 /-- An output row's index limbs: `VLO + 65536·VHI = VOUT`. -/
-theorem out_vlimbs {j : ℕ} (hj : j < 2 ^ L) (hko : (inst 14).main Coin.KO j = 1) :
+theorem out_vlimbs {j : ℕ} (hj : j < 2 ^ Ls 14) (hko : (inst 14).main Coin.KO j = 1) :
     (inst 14).main Coin.VLO j + 65536 * (inst 14).main Coin.VHI j = (inst 14).main Coin.VOUT j := by
   have cs := coin_sat hL hsat hL24
   have := Coin.sat cs (Coin.mem_local (c := .mul (Coin.k Coin.KO) (.sub (.add (Coin.k Coin.VLO)
@@ -122,7 +122,7 @@ theorem out_vlimbs {j : ℕ} (hj : j < 2 ^ L) (hko : (inst 14).main Coin.KO j = 
 def rowTuple (inst : ℕ → Inst) (pub : ℕ → F) (L j : ℕ) : List F :=
   Coin.tuple.map fun ex => ex.eval (2 ^ L) Coin.preCols pub (inst 14).main j
 
-theorem rowTuple_eq {j : ℕ} (hj : j < 2 ^ L) : rowTuple inst pub L j =
+theorem rowTuple_eq {j : ℕ} (hj : j < 2 ^ Ls 14) : rowTuple inst pub (Ls 14) j =
     (List.range 16).map (fun i => (inst 14).main (Coin.TLB i) j) ++
       [(inst 14).main Coin.VLO j, (inst 14).main Coin.VHI j, (inst 14).main Coin.CLO j, (inst 14).main Coin.CHI j,
         (inst 14).main Coin.FH j, (inst 14).main (Coin.FH + 1) j, (inst 14).main (Coin.FH + 2) j,
@@ -131,8 +131,8 @@ theorem rowTuple_eq {j : ℕ} (hj : j < 2 ^ L) : rowTuple inst pub L j =
 
 /-- **An output row's tuple is its coin's.** The created coin of output `q − |vin|` of transaction `t`:
 its txid, index, code `2·height + [t = 0]`, `serTxOut`, and creating transaction `t`. -/
-theorem coin_out_tuple (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
-    (hon : ∀ j < 2 ^ L, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
+theorem coin_out_tuple (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
+    (hon : ∀ j < 2 ^ Ls 14, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
     (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
     {parts : List (List Spec.Block.Tok)} (hf : List.Forall₂ Spec.Block.IoTx S.b.txs parts)
     (htg : Spec.Block.tagged 0 (Fields.toksFrom (inst 1).main (Rb inst pub) S.m 0) = Spec.Block.tagParts 0 parts)
@@ -140,12 +140,12 @@ theorem coin_out_tuple (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
     {j t q : ℕ} {tx : Spec.Block.Tx} {o : Spec.Block.TxOut} (hj : j < e) (hko : (inst 14).main Coin.KO j = 1)
     (htx : S.b.txs[t]? = some tx) (hjq : j = ((parts.take t).map List.length).sum + q)
     (hq : q < tx.vin.length + tx.vout.length) (ho : tx.vout[q - tx.vin.length]? = some o) :
-    rowTuple inst pub L j = tupleOf (FpWalk.gQ pub) (Spec.Block.txid tx) (q - tx.vin.length)
+    rowTuple inst pub (Ls 14) j = tupleOf (FpWalk.gQ pub) (Spec.Block.txid tx) (q - tx.vin.length)
       (2 * h + if t = 0 then 1 else 0) (Spec.Block.serTxOut o) t := by
   have cs := coin_sat hL hsat hL24
   have fs := fields_sat' hL hsat hL24
-  have hj2 : j < 2 ^ L := by omega
-  have hLb : 2 ^ L ≤ 2 ^ 23 := Nat.pow_le_pow_right (by norm_num) hL24
+  have hj2 : j < 2 ^ Ls 14 := by omega
+  obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
   -- the row's transaction and output
   obtain ⟨t0, q0, tx0, htx0, htxi, hjq0, hq0, hko0, -⟩ := coin_row_tx hL hsat hL24 S he hon hlen hst hf htg hj
   obtain ⟨hpl, hpe⟩ := part_len hf htx
@@ -196,7 +196,7 @@ theorem coin_out_tuple (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
   set ρ := (ioRows inst S.m).getD j 0 with hρdef
   have hρ : ρ ∈ ioRows inst S.m := by rw [hρdef, List.getD_eq_getElem _ _ (by omega)]; exact List.getElem_mem _
   obtain ⟨hρm, -⟩ := mem_ioRows.mp hρ
-  have hρn : ρ < 2 ^ L := by have := S.hmn; omega
+  have hρn : ρ < 2 ^ Ls 1 := by have := S.hmn; omega
   have hrt := (coin_row_tok hL hsat hL24 S he hon hlen hst hj).1 hko
   obtain ⟨-, hT⟩ := hrt
   have hLEN : (inst 14).main Coin.LEN j = (inst 1).main Fields.LEN ρ := by
@@ -250,17 +250,17 @@ theorem slice_getD {R : Spec.Block.Bytes} {a l i : ℕ} (hi : i < l) (hal : a + 
 prevout's hash and index, and the claim of undo record `J` (URec row `rj`): its code (four undo bytes,
 little-endian), its creating transaction's index (the next three), and its `serTxOut` (the record's undo
 bytes from `S + 9`). -/
-theorem coin_in_tuple (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
-    (hon : ∀ j < 2 ^ L, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
+theorem coin_in_tuple (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
+    (hon : ∀ j < 2 ^ Ls 14, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
     (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
     {parts : List (List Spec.Block.Tok)} (hf : List.Forall₂ Spec.Block.IoTx S.b.txs parts)
     (htg : Spec.Block.tagged 0 (Fields.toksFrom (inst 1).main (Rb inst pub) S.m 0) = Spec.Block.tagParts 0 parts)
     {j t q : ℕ} {tx : Spec.Block.Tx} {i : Spec.Block.TxIn} (hj : j < e) (hki : (inst 14).main Coin.KI j = 1)
     (htx : S.b.txs[t]? = some tx) (hjq : j = ((parts.take t).map List.length).sum + q)
     (hq : q < tx.vin.length + tx.vout.length) (hi : tx.vin[q]? = some i) :
-    ∃ rj < 2 ^ L, (inst 13).main URec.ON rj = 1 ∧ (inst 14).main Coin.J j = (inst 13).main URec.J rj ∧
+    ∃ rj < 2 ^ Ls 13, (inst 13).main URec.ON rj = 1 ∧ (inst 14).main Coin.J j = (inst 13).main URec.J rj ∧
       ∃ (code : ℕ) (ser : Spec.Block.Bytes) (ctx : ℕ),
-        rowTuple inst pub L j = tupleOf (FpWalk.gQ pub) i.prevout.hash i.prevout.n code ser ctx ∧
+        rowTuple inst pub (Ls 14) j = tupleOf (FpWalk.gQ pub) i.prevout.hash i.prevout.n code ser ctx ∧
         (inst 14).main Coin.CLO j + 65536 * (inst 14).main Coin.CHI j = (code : F) ∧
         (inst 14).main Coin.CTX j = (ctx : F) ∧ (inst 13).main URec.TL rj = (ser.length : F) ∧
         (∃ u0 : ℕ, (inst 13).main URec.S rj + 9 = (u0 : F) ∧ 9 ≤ u0 ∧ u0 + ser.length ≤ (pub 8).val ∧
@@ -269,8 +269,8 @@ theorem coin_in_tuple (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
           ctx = Spec.Block.le ((List.range 3).map fun k => (Ub inst pub).getD (u0 - 5 + k) 0)) := by
   have cs := coin_sat hL hsat hL24
   have fs := fields_sat' hL hsat hL24
-  have hj2 : j < 2 ^ L := by omega
-  have hLb : 2 ^ L ≤ 2 ^ 23 := Nat.pow_le_pow_right (by norm_num) hL24
+  have hj2 : j < 2 ^ Ls 14 := by omega
+  obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
   have hRl := len_R hL hsat hL24
   have hU := undo_len hL hsat hL24
   have hcbi : (inst 14).main Coin.CBI j = 0 := by
@@ -287,7 +287,7 @@ theorem coin_in_tuple (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
   set ρ := (ioRows inst S.m).getD j 0 with hρdef
   have hρ : ρ ∈ ioRows inst S.m := by rw [hρdef, List.getD_eq_getElem _ _ (by omega)]; exact List.getElem_mem _
   obtain ⟨hρm, -⟩ := mem_ioRows.mp hρ
-  have hρn : ρ < 2 ^ L := by have := S.hmn; omega
+  have hρn : ρ < 2 ^ Ls 1 := by have := S.hmn; omega
   obtain ⟨hkin, -⟩ := (coin_row_tok hL hsat hL24 S he hon hlen hst hj).2 hkc
   -- the input token: the prevout's hash and index bytes
   have hSTART := hst j hj
@@ -429,7 +429,7 @@ theorem coin_in_tuple (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
 /-- **Unspendable, as Core decides it.** For an output row whose script `s` has length `SVAL` and first
 byte `SB` (when nonempty), `UNSP` is Boolean and is 1 exactly when `s` starts with `OP_RETURN` or is over
 10,000 bytes (`Spec.Coins.unspendable`). -/
-theorem coin_unsp {j : ℕ} (hj : j < 2 ^ L) (hko : (inst 14).main Coin.KO j = 1) (s : Spec.Block.Bytes)
+theorem coin_unsp {j : ℕ} (hj : j < 2 ^ Ls 14) (hko : (inst 14).main Coin.KO j = 1) (s : Spec.Block.Bytes)
     (hsl : ((inst 14).main Coin.SVAL j).val = s.length) (hsb : ∀ b ∈ s.head?, ((inst 14).main Coin.SB j).val = b.toNat)
     (hsmall : s.length ≤ 2 ^ 25) :
     ((inst 14).main Coin.UNSP j = 1 ↔ (s.head? == some 0x6a || decide (10000 < s.length)) = true) ∧
@@ -439,7 +439,7 @@ theorem coin_unsp {j : ℕ} (hj : j < 2 ^ L) (hko : (inst 14).main Coin.KO j = 1
   have bzs := Coin.bool_col cs (c := Coin.ZS) (by simp) hj
   have bu6 := Coin.bool_col cs (c := Coin.U6A) (by simp) hj
   have bbig := Coin.bool_col cs (c := Coin.BIG) (by simp) hj
-  have ek : (Coin.k Coin.KO).eval (2 ^ L) Coin.preCols pub (inst 14).main j = 1 := by rw [Coin.ev_k hj]; exact hko
+  have ek : (Coin.k Coin.KO).eval (2 ^ Ls 14) Coin.preCols pub (inst 14).main j = 1 := by rw [Coin.ev_k hj]; exact hko
   have hgb : ∀ i < 3, ((inst 14).main (Coin.GB i) j).val < 256 := by
     intro i hi
     have fam : Coin.lookups.getD (61 + i) ⟨0, .const 0, []⟩ = Coin.r8 (Coin.k (Coin.GB i)) (Coin.k Coin.KO) := by
@@ -510,8 +510,8 @@ theorem coin_unsp {j : ℕ} (hj : j < 2 ^ L) (hko : (inst 14).main Coin.KO j = 1
 
 /-- **An output row's multiplicity**: 1 for a spendable output that is not a lost coinbase output (the
 public lost bit, for transaction 0), else 0. -/
-theorem coin_out_mm (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
-    (hon : ∀ j < 2 ^ L, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
+theorem coin_out_mm (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
+    (hon : ∀ j < 2 ^ Ls 14, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
     (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
     {parts : List (List Spec.Block.Tok)} (hf : List.Forall₂ Spec.Block.IoTx S.b.txs parts)
     (htg : Spec.Block.tagged 0 (Fields.toksFrom (inst 1).main (Rb inst pub) S.m 0) = Spec.Block.tagParts 0 parts)
@@ -522,7 +522,7 @@ theorem coin_out_mm (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
     (inst 14).main Coin.MM j = if !Spec.Coins.unspendable o && !(t == 0 && lost) then 1 else 0 := by
   have cs := coin_sat hL hsat hL24
   have fs := fields_sat' hL hsat hL24
-  have hj2 : j < 2 ^ L := by omega
+  have hj2 : j < 2 ^ Ls 14 := by omega
   obtain ⟨t0, q0, tx0, htx0, htxi, hjq0, hq0, hko0, -⟩ := coin_row_tx hL hsat hL24 S he hon hlen hst hf htg hj
   obtain ⟨hpl, hpe⟩ := part_len hf htx
   obtain ⟨hpl0, hpe0⟩ := part_len hf htx0
@@ -536,7 +536,7 @@ theorem coin_out_mm (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
   set ρ := (ioRows inst S.m).getD j 0 with hρdef
   have hρ : ρ ∈ ioRows inst S.m := by rw [hρdef, List.getD_eq_getElem _ _ (by omega)]; exact List.getElem_mem _
   obtain ⟨hρm, -⟩ := mem_ioRows.mp hρ
-  have hρn : ρ < 2 ^ L := by have := S.hmn; omega
+  have hρn : ρ < 2 ^ Ls 1 := by have := S.hmn; omega
   obtain ⟨hk, hT⟩ := (coin_row_tok hL hsat hL24 S he hon hlen hst hj).1 hko
   have hSSC : (inst 14).main Coin.SSC j = (inst 1).main Fields.SSC ρ := by
     have := congrArg (fun l => l.getD 3 0) hT
@@ -588,8 +588,8 @@ theorem coin_out_mm (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
   rw [hko, hki, one_mul, sub_zero] at hmm
   have hcbo := Coin.cbo_spec cs hj2
   rw [htxi] at hcbo
-  have hLb : 2 ^ L ≤ 2 ^ 23 := Nat.pow_le_pow_right (by norm_num) hL24
-  have htN : t < 2 ^ L := by have := (List.getElem?_eq_some_iff.mp htx).1; have := S.hN25; omega
+  obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
+  have htN : t < 2 ^ Ls 1 := by have := (List.getElem?_eq_some_iff.mp htx).1; have := S.hN25; omega
   have ht0 : (t : F) = 0 ↔ t = 0 := ⟨fun e => Coin.lift (a := t) (b := 0) (by simpa using e)
     (lt_of_lt_of_le (show t < 2 ^ 25 by omega) (by unfold P; norm_num)) (by unfold P; norm_num), fun e => by simp [e]⟩
   have hcb : (inst 14).main Coin.CBO j = if t = 0 then 1 else 0 := by
@@ -616,7 +616,7 @@ noncomputable def phiOf (pub : ℕ → F) (tu : List F) : QM :=
   ((List.range Coin.W).map fun k => RunSum.pQ pub (Coin.PUB_ALPHA k) * emb (tu.getD k 0)).sum
 
 omit hL hsat hL24 in
-theorem phiQ_eq {j : ℕ} : Coin.phiQ pub (inst 14).main (2 ^ L) j = phiOf pub (rowTuple inst pub L j) := by
+theorem phiQ_eq {j : ℕ} : Coin.phiQ pub (inst 14).main (2 ^ Ls 14) j = phiOf pub (rowTuple inst pub (Ls 14) j) := by
   unfold Coin.phiQ phiOf rowTuple
   congr 1
 
@@ -639,16 +639,16 @@ noncomputable def blockTerm (inst : ℕ → Inst) (pub : ℕ → F) (L : ℕ) (t
 /-- **The block's partial sum, by its coin events.** The public partial sum is, over the block's
 transactions and their input/output positions: each created output's `1/(z − φ)` (with its coin's
 tuple), minus each non-coinbase input's `1/(z − φ)` (with its row's claimed tuple). -/
-theorem coin_block_sum (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
-    (hon : ∀ j < 2 ^ L, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
+theorem coin_block_sum (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
+    (hon : ∀ j < 2 ^ Ls 14, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
     (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
     {parts : List (List Spec.Block.Tok)} (hf : List.Forall₂ Spec.Block.IoTx S.b.txs parts)
     (htg : Spec.Block.tagged 0 (Fields.toksFrom (inst 1).main (Rb inst pub) S.m 0) = Spec.Block.tagParts 0 parts)
     {h : ℕ} (hp2 : pub 2 = (h : F)) (hh : h < 2 ^ 23) {lost : Bool} (hlost : pub Coin.PUB_LOST = if lost then 1 else 0) :
     RunSum.pQ pub Coin.PUB_S = ∑ t ∈ Finset.range S.b.txs.length, ∑ q ∈ Finset.range ((parts.getD t []).length),
-      blockTerm inst pub L S.b.txs parts h lost t q := by
+      blockTerm inst pub (Ls 14) S.b.txs parts h lost t q := by
   have cs := coin_sat hL hsat hL24
-  obtain ⟨hS, hrow⟩ := Coin.coin_runsum cs (n := 2 ^ L) (by positivity)
+  obtain ⟨hS, hrow⟩ := Coin.coin_runsum cs (n := 2 ^ Ls 14) (by positivity)
   rw [hS]
   -- e is the total length
   have hft := fields_tagged hL hsat hL24 S
@@ -656,7 +656,7 @@ theorem coin_block_sum (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
   have he' : e = (parts.map List.length).sum := by
     rw [hlen, ← Spec.Block.tagParts_length 0, hft, List.length_map]
   -- rows from e on contribute nothing
-  have hoff : ∀ r ∈ Finset.range (2 ^ L), e ≤ r → RunSum.cQ (inst 14).main Coin.FC r = 0 := by
+  have hoff : ∀ r ∈ Finset.range (2 ^ Ls 14), e ≤ r → RunSum.cQ (inst 14).main Coin.FC r = 0 := by
     intro r hr her
     have hr' := Finset.mem_range.mp hr
     apply (hrow r hr').2
@@ -670,7 +670,7 @@ theorem coin_block_sum (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
     · rw [k.2.2.2] at hoff; exact absurd hoff one_ne_zero
     · rw [k.2.2.2] at hoff; exact absurd hoff one_ne_zero
     · rw [k.1, k.2.1]; ring
-  rw [← Finset.sum_range_add_sum_Ico _ (show e ≤ 2 ^ L by omega),
+  rw [← Finset.sum_range_add_sum_Ico _ (show e ≤ 2 ^ Ls 14 by omega),
     Finset.sum_eq_zero (fun r hr => hoff r (Finset.mem_range.mpr (Finset.mem_Ico.mp hr).2) (Finset.mem_Ico.mp hr).1),
     add_zero, he', sum_by_parts, List.length_map, ← hf.length_eq]
   apply Finset.sum_congr rfl
@@ -693,7 +693,7 @@ theorem coin_block_sum (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
     have := pre_mono parts (t := t + 1) (t' := parts.length) (by omega) le_rfl
     rw [he', ← List.take_length (l := parts), ← List.take_length (l := parts)] at *
     simp only [List.take_length] at *; omega
-  have hj2 : j < 2 ^ L := by omega
+  have hj2 : j < 2 ^ Ls 14 := by omega
   have hqt : q < tx.vin.length + tx.vout.length := by omega
   obtain ⟨hko, hki, hcbi⟩ := coin_kind_pos hL hsat hL24 S he hon hlen hst hf htg hj htx hjdef hqt
   obtain ⟨hfrac, hzero⟩ := hrow j hj2
@@ -726,7 +726,7 @@ theorem coin_block_sum (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
       rw [hko0, hki1, zero_mul, zero_sub] at hmm
       have hneg : emb (-1 : F) = -1 := by simp [Spec.QM31.emb]
       rw [hmm, hneg] at hfrac
-      have : (RunSum.pQ pub Coin.PUB_Z - phiOf pub (rowTuple inst pub L j)) * -RunSum.cQ (inst 14).main Coin.FC j = 1 := by
+      have : (RunSum.pQ pub Coin.PUB_Z - phiOf pub (rowTuple inst pub (Ls 14) j)) * -RunSum.cQ (inst 14).main Coin.FC j = 1 := by
         rw [mul_neg, hfrac, neg_neg]
       rw [← neg_neg (RunSum.cQ (inst 14).main Coin.FC j), eq_inv_of_mul_eq_one_right this]
     · have hcbi1 := hcbi.mpr ⟨by omega, by omega⟩

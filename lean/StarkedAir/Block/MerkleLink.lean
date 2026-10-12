@@ -38,19 +38,19 @@ theorem npad_eq : Sha.npadBlock = HashSpec.npadBlk := by
 
 section System
 
-variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ}
-  (hL : ∀ i < 15, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub [])
+variable {inst : ℕ → Inst} {pub : ℕ → F} {Ls : ℕ → ℕ}
+  (hL : ∀ i < 15, (inst i).logSize = Ls i) (hsat : hashSys.SatisfiedExt inst pub [])
 include hL hsat
 
 /-- The digest tuple of a second-hash period: its id and the limbs of its output state's words. -/
-theorem digest_vals {q : ℕ} (hn : 72 * q + 72 ≤ 2 ^ L) :
+theorem digest_vals {q : ℕ} (hn : 72 * q + 72 ≤ 2 ^ Ls 3) :
     siteVals hashSys inst pub (3, 72 * q + 71, 2) = (inst 3).main Sha.MID (72 * q) ::
       (List.range 16).map (fun j =>
         ((Sha256.half16 (Spec.Bitcoin.stateWord (outputAt (inst 3).main (72 * q)) (j / 2)) (j % 2) : ℕ) : F)) := by
   have ss := hash_sha_sat hL hsat
-  have hr : 72 * q + 71 < 2 ^ L := by omega
+  have hr : 72 * q + 71 < 2 ^ Ls 3 := by omega
   have e : siteVals hashSys inst pub (3, 72 * q + 71, 2) =
-      (Sha.k Sha.MID :: Sha.digestLimbs).map (Expr.eval (2 ^ L) Sha.preCols pub (inst 3).main (72 * q + 71)) := by
+      (Sha.k Sha.MID :: Sha.digestLimbs).map (Expr.eval (2 ^ Ls 3) Sha.preCols pub (inst 3).main (72 * q + 71)) := by
     simp [siteVals, siteEval, siteLookup, hashSys, hL 3 (by decide), Sha.sha, Sha.lookups]
   rw [e, List.map_cons]
   congr 1
@@ -66,11 +66,11 @@ theorem digest_vals {q : ℕ} (hn : 72 * q + 72 ≤ 2 ^ L) :
       exact this
 
 /-- Message ids are small: below `2^26 + 2`, hence below `NB`. -/
-theorem msg_mid_lt (hL24 : L ≤ 23) {r0 : ℕ} (h0 : r0 < 2 ^ L) (f0 : (inst 2).main Msg.FIRSTM r0 = 1) :
+theorem msg_mid_lt (hL24 : ∀ i < 15, Ls i ≤ 23) {r0 : ℕ} (h0 : r0 < 2 ^ Ls 2) (f0 : (inst 2).main Msg.FIRSTM r0 = 1) :
     ((inst 2).main Msg.MID r0).val < Merkle.NB := by
   have ms := hash_msg_sat hL hsat
   have fs := hash_fields_sat' hL hsat
-  have h25 : 2 ^ L ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans hL24 (by norm_num))
+  have h25 : 2 ^ Ls 1 ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans (hL24 1 (by decide)) (by norm_num))
   norm_num at h25
   rw [Msg.mid_eq ms h0]
   rcases Msg.bool_col ms (e := Msg.HDR) (by simp) h0 with h | h
@@ -85,33 +85,33 @@ theorem msg_mid_lt (hL24 : L ≤ 23) {r0 : ℕ} (h0 : r0 < 2 ^ L) (f0 : (inst 2)
   · rw [h, sub_self, zero_mul]; simp [Merkle.NB]
 
 /-- **A node id's second hash** finishes a node block and its padding block (same id). -/
-theorem node_period (hL24 : L ≤ 23) {q : ℕ} (hn : 72 * q + 72 ≤ 2 ^ L) (hd : (inst 3).main Sha.DBL (72 * q) = 1)
+theorem node_period (hL24 : ∀ i < 15, Ls i ≤ 23) {q : ℕ} (hn : 72 * q + 72 ≤ 2 ^ Ls 3) (hd : (inst 3).main Sha.DBL (72 * q) = 1)
     (hmid : Merkle.NB ≤ ((inst 3).main Sha.MID (72 * q)).val) :
     2 ≤ q ∧ (inst 3).main Sha.NPAD (72 * (q - 1)) = 1 ∧ (inst 3).main Sha.NODE (72 * (q - 2)) = 1 ∧
       (inst 3).main Sha.MID (72 * (q - 2)) = (inst 3).main Sha.MID (72 * q) := by
   have ss := hash_sha_sat hL hsat
   have ms := hash_msg_sat hL hsat
-  have hx : 72 * q < 2 ^ L := by omega
-  have h25 : 2 ^ L ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans hL24 (by norm_num))
+  have hx : 72 * q < 2 ^ Ls 3 := by omega
+  have h25 : 2 ^ Ls 3 ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans (hL24 3 (by decide)) (by norm_num))
   norm_num at h25
-  have r0q : (pre Sha.ROW0).eval (2 ^ L) Sha.preCols pub (inst 3).main (72 * q) = 1 := Sha.row0_at ss hx
+  have r0q : (pre Sha.ROW0).eval (2 ^ Ls 3) Sha.preCols pub (inst 3).main (72 * q) = 1 := Sha.row0_at ss hx
   -- not period 0
   have hq1 : 1 ≤ q := by
     by_contra h
     have e : q = 0 := by omega
     subst e
     have := Sha.order_sat ss (c := .mul (pre Sha.FIRST) (.add (Sha.k Sha.CHN) (Sha.k Sha.DBL))) (by simp [Sha.orderC])
-      (show 0 < 2 ^ L by omega)
-    have hfirst : (pre Sha.FIRST).eval (2 ^ L) Sha.preCols pub (inst 3).main 0 = 1 := by
-      simp only [pre, Expr.eval, wrap_zero (show 0 < 2 ^ L by omega)]
+      (show 0 < 2 ^ Ls 3 by omega)
+    have hfirst : (pre Sha.FIRST).eval (2 ^ Ls 3) Sha.preCols pub (inst 3).main 0 = 1 := by
+      simp only [pre, Expr.eval, wrap_zero (show 0 < 2 ^ Ls 3 by omega)]
       rw [show Sha.preCols.getD Sha.FIRST (.periodic [0]) = .isFirst from rfl]; simp [PreCol.eval]
     simp only [Nat.mul_zero] at hd
-    simp only [Expr.eval, hfirst, one_mul, Sha.k, StarkedAir.Sha256.eval_col, wrap_zero (show 0 < 2 ^ L by omega), hd] at this
-    have hc := Sha.chn_eq ss (show 0 < 2 ^ L by omega)
+    simp only [Expr.eval, hfirst, one_mul, Sha.k, StarkedAir.Sha256.eval_col, wrap_zero (show 0 < 2 ^ Ls 3 by omega), hd] at this
+    have hc := Sha.chn_eq ss (show 0 < 2 ^ Ls 3 by omega)
     rw [hd] at hc
-    obtain ⟨-, -, -, -, e5, -, -, -, e9, -⟩ := Sha.kinds_excl ss (show 0 < 2 ^ L by omega)
+    obtain ⟨-, -, -, -, e5, -, -, -, e9, -⟩ := Sha.kinds_excl ss (show 0 < 2 ^ Ls 3 by omega)
     rw [hd, mul_one] at e5 e9
-    obtain ⟨e1, -, e3, -⟩ := Sha.kinds_excl ss (show 0 < 2 ^ L by omega)
+    obtain ⟨e1, -, e3, -⟩ := Sha.kinds_excl ss (show 0 < 2 ^ Ls 3 by omega)
     rw [hd, mul_one] at e1; rw [hd, one_mul] at e3
     rw [hc, e1, e3, e5, e9] at this
     norm_num at this
@@ -122,12 +122,12 @@ theorem node_period (hL24 : L ≤ 23) {q : ℕ} (hn : 72 * q + 72 ≤ 2 ^ L) (hd
     simp only [Sha.sha, Sha.lookups, List.getD_cons_succ, List.getD_cons_zero, Expr.eval]
     rw [r0q, Sha.k, StarkedAir.Sha256.eval_col, wrap_zero hx, hd]; ring
   have hv3 : siteVals hashSys inst pub (3, 72 * q, 1) = [(inst 3).main Sha.MID (72 * q),
-      (Expr.add (.mul (cst 64) (Sha.kp Sha.BLKI)) (cst 64)).eval (2 ^ L) Sha.preCols pub (inst 3).main (72 * q)] := by
+      (Expr.add (.mul (cst 64) (Sha.kp Sha.BLKI)) (cst 64)).eval (2 ^ Ls 3) Sha.preCols pub (inst 3).main (72 * q)] := by
     simp [siteVals, siteEval, siteLookup, hashSys, hL 3 (by decide), Sha.sha, Sha.lookups, Sha.k,
       StarkedAir.Sha256.eval_col, wrap_zero hx]
-  obtain ⟨r', hr', hlink⟩ := sha_use_linked hL hsat hL24 hx (kk := 1) (by norm_num) hm'
+  obtain ⟨r', hlink⟩ := sha_use_linked hL hsat hL24 hx (kk := 1) (by norm_num) hm'
   have hb1 : (inst 3).main Sha.BLKI (72 * (q - 1)) = 1 := by
-    rcases hlink with ⟨hym, hyv⟩ | ⟨-, hym, hyv⟩ | ⟨-, hym, hyv⟩
+    rcases hlink with ⟨hr', hym, hyv⟩ | ⟨-, hr', hym, hyv⟩ | ⟨-, hr', hym, hyv⟩
     · exfalso
       have hmult : (inst 2).main Msg.LN r' * (inst 2).main Msg.MM r' ≠ 0 := by
         simpa [siteMult, siteEval, siteLookup, hashSys, hL 2 (by decide), Msg.msg, Msg.lookups, Expr.eval, Msg.k,
@@ -138,7 +138,7 @@ theorem node_period (hL24 : L ≤ 23) {q : ℕ} (hn : 72 * q + 72 ≤ 2 ^ L) (hd
           StarkedAir.Sha256.eval_col, wrap_zero hr', Expr.eval, StarkedAir.Sha256.eval_cst]
       rw [hv2, hv3] at hyv
       simp only [List.cons.injEq] at hyv
-      have h0 : r0 < 2 ^ L := by omega
+      have h0 : r0 < 2 ^ Ls 2 := by omega
       have := msg_mid_lt hL hsat hL24 h0 f0
       rw [← hm0, hyv.1] at this; omega
     · have hw : siteVals hashSys inst pub (4, r', 1) = [(Merkle.NB : F) + (inst 4).main Merkle.RIX r', 128] := by
@@ -180,7 +180,7 @@ theorem node_period (hL24 : L ≤ 23) {q : ℕ} (hn : 72 * q + 72 ≤ 2 ^ L) (hd
   -- the previous period's kind
   have hp := (Sha.prev_facts ss hq1 hn).2 hd
   obtain ⟨hpd, hpn⟩ := Sha.not_dn ss (by omega) hp.2
-  have hpr : 72 * (q - 1) < 2 ^ L := by omega
+  have hpr : 72 * (q - 1) < 2 ^ Ls 3 := by omega
   have fst0 : (inst 3).main Sha.FST (72 * (q - 1)) = 0 := by
     rcases Sha.kbool ss (c := Sha.FST) (by simp) hpr with h | h
     · exact h
@@ -211,9 +211,9 @@ theorem node_period (hL24 : L ≤ 23) {q : ℕ} (hn : 72 * q + 72 ≤ 2 ^ L) (hd
         Sha.per_const ss (X := Sha.NILS) (by simp) hs 4 (by norm_num) (by omega),
         Sha.per_const ss (X := Sha.NODE) (by simp) hs 4 (by norm_num) (by omega),
         Sha.per_const ss (X := Sha.NPAD) (by simp) hs 4 (by norm_num) (by omega), hpd, hpn, node0, hnp]; ring
-    have hrow : (Expr.mul (pre Sha.MSGROW) (Sha.k Sha.USEW)).eval (2 ^ L) Sha.preCols pub (inst 3).main
+    have hrow : (Expr.mul (pre Sha.MSGROW) (Sha.k Sha.USEW)).eval (2 ^ Ls 3) Sha.preCols pub (inst 3).main
         (72 * (q - 1) + 4) = 1 := by
-      simp only [Expr.eval, Sha.k, StarkedAir.Sha256.eval_col, wrap_zero (show 72 * (q - 1) + 4 < 2 ^ L by omega), hu,
+      simp only [Expr.eval, Sha.k, StarkedAir.Sha256.eval_col, wrap_zero (show 72 * (q - 1) + 4 < 2 ^ Ls 3 by omega), hu,
         mul_one]
       rw [Sha.eval_per72 ss (i := Sha.MSGROW) (f := fun q => if 4 ≤ q ∧ q < 20 then 1 else 0) rfl (by omega),
         show (72 * (q - 1) + 4) % 72 = 4 by omega]; simp
@@ -227,16 +227,16 @@ theorem node_period (hL24 : L ≤ 23) {q : ℕ} (hn : 72 * q + 72 ≤ 2 ^ L) (hd
 
 /-- **A node block's children.** Words `0..7` (`8..15`) of a node block at `s` are the output state of a
 second hash whose id is the node's left (right) child. -/
-theorem node_children (hL24 : L ≤ 23) {p : ℕ} (hp : 72 * p + 72 ≤ 2 ^ L) (ho : (inst 3).main Sha.NODE (72 * p) = 1)
+theorem node_children (hL24 : ∀ i < 15, Ls i ≤ 23) {p : ℕ} (hp : 72 * p + 72 ≤ 2 ^ Ls 3) (ho : (inst 3).main Sha.NODE (72 * p) = 1)
     (hid : ((inst 3).main Sha.LID (72 * p)).val < 2 ^ 28 ∧ ((inst 3).main Sha.RID (72 * p)).val < 2 ^ 28) :
-    ∀ half ≤ 1, ∃ q', 72 * q' + 72 ≤ 2 ^ L ∧ (inst 3).main Sha.DBL (72 * q') = 1 ∧
+    ∀ half ≤ 1, ∃ q', 72 * q' + 72 ≤ 2 ^ Ls 3 ∧ (inst 3).main Sha.DBL (72 * q') = 1 ∧
       (inst 3).main Sha.MID (72 * q') = (if half = 0 then (inst 3).main Sha.LID (72 * p) else (inst 3).main Sha.RID (72 * p)) ∧
       ∀ t < 8, messageAt (inst 3).main (72 * p) (8 * half + t) = Spec.Bitcoin.stateWord (outputAt (inst 3).main (72 * q')) t := by
   intro half hh
   have ss := hash_sha_sat hL hsat
   have hs : (72 * p) % 72 = 0 := by omega
   set x := 72 * p + 11 + 8 * half with hx
-  have hxr : x < 2 ^ L := by omega
+  have hxr : x < 2 ^ Ls 3 := by omega
   have hxs : x = 72 * p + (11 + 8 * half) := by omega
   have hnode : (inst 3).main Sha.NODE x = 1 := by
     rw [hxs, Sha.per_const ss (X := Sha.NODE) (by simp) hs _ (by omega) (by omega), ho]
@@ -254,7 +254,7 @@ theorem node_children (hL24 : L ≤ 23) {p : ℕ} (hp : 72 * p + 72 ≤ 2 ^ L) (
         show x % 72 = 19 by omega]; simp
   have hu : siteVals hashSys inst pub (3, x, 4 + half) =
       ((if half = 0 then Sha.k Sha.LID else Sha.k Sha.RID) :: Sha.nodeWordLimbs).map
-        (Expr.eval (2 ^ L) Sha.preCols pub (inst 3).main x) := by
+        (Expr.eval (2 ^ Ls 3) Sha.preCols pub (inst 3).main x) := by
     interval_cases half <;> simp [siteVals, siteEval, siteLookup, hashSys, hL 3 (by decide), Sha.sha, Sha.lookups]
   obtain ⟨q', hq', hd', hv⟩ := digest_linked hL hsat hL24 (i := 3) (k := 4 + half)
     (Or.inl ⟨rfl, by interval_cases half <;> simp⟩) hxr hm (by
@@ -297,13 +297,12 @@ theorem node_children (hL24 : L ≤ 23) {p : ℕ} (hp : 72 * p + 72 ≤ 2 ^ L) (
     exact word_of_halves (natCast_inj_of_lt (hb _ 0) (hb _ 0) h0) (natCast_inj_of_lt (hb _ 1) (hb _ 1) h1)
 
 /-- Tree ids are below `2^28`. -/
-theorem idOf_small (hL24 : L ≤ 23) {N : ℕ} (hN : pub 1 = (N : F)) (hN1 : 1 ≤ N) (hN25 : N < 2 ^ L)
+theorem idOf_small (hL24 : ∀ i < 15, Ls i ≤ 23) {N : ℕ} (hN : pub 1 = (N : F)) (hN1 : 1 ≤ N) (hN25 : N < 2 ^ Ls 1)
     {l j : ℕ} (hj : j < Merkle.cntL N l) (hl : l = 0 ∨ (1 ≤ l ∧ 2 ≤ Merkle.cntL N (l - 1))) :
     ((Merkle.idOf N l j : ℕ) : F).val < 2 ^ 28 := by
   have ks := hash_merkle_sat hL hsat
-  have h24 : 2 ^ L ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans hL24 (by norm_num))
-  norm_num at h24
-  have tr := Merkle.tree_rows ks (show 0 < 2 ^ L by positivity) (by omega) hN hN1 (by omega)
+  obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
+  have tr := Merkle.tree_rows ks (show 0 < 2 ^ Ls 4 by positivity) (by omega) hN hN1 (by omega)
   rcases hl with rfl | ⟨h1, h2⟩
   · simp only [Merkle.idOf, if_true, Merkle.cntL] at hj ⊢
     rw [ZMod.val_natCast_of_lt (Fields.lt_P (by omega))]; omega
@@ -313,8 +312,8 @@ theorem idOf_small (hL24 : L ≤ 23) {N : ℕ} (hN : pub 1 = (N : F)) (hN1 : 1 �
 
 /-- **A hashed node entry's block.** A second hash with id `(l + 1, i)` follows a node block whose children
 are `(l, 2i)` and `(l, min (2i + 1) (cnt l − 1))`, duplicating exactly when `2i + 1 = cnt l`. -/
-theorem node_setup (hL24 : L ≤ 23) {N : ℕ} (hN : pub 1 = (N : F)) (hN1 : 1 ≤ N) (hN25 : N < 2 ^ L)
-    {l i q : ℕ} (hc2 : 2 ≤ Merkle.cntL N l) (hi : i < Merkle.cntL N (l + 1)) (hq : 72 * q + 72 ≤ 2 ^ L)
+theorem node_setup (hL24 : ∀ i < 15, Ls i ≤ 23) {N : ℕ} (hN : pub 1 = (N : F)) (hN1 : 1 ≤ N) (hN25 : N < 2 ^ Ls 1)
+    {l i q : ℕ} (hc2 : 2 ≤ Merkle.cntL N l) (hi : i < Merkle.cntL N (l + 1)) (hq : 72 * q + 72 ≤ 2 ^ Ls 3)
     (hd : (inst 3).main Sha.DBL (72 * q) = 1) (hm : (inst 3).main Sha.MID (72 * q) = (Merkle.idOf N (l + 1) i : F)) :
     2 ≤ q ∧ (inst 3).main Sha.NODE (72 * (q - 2)) = 1 ∧
       (inst 3).main Sha.NDUP (72 * (q - 2)) = (if 2 * i + 1 = Merkle.cntL N l then 1 else 0) ∧
@@ -322,14 +321,13 @@ theorem node_setup (hL24 : L ≤ 23) {N : ℕ} (hN : pub 1 = (N : F)) (hN1 : 1 �
       (inst 3).main Sha.RID (72 * (q - 2)) = (Merkle.idOf N l (min (2 * i + 1) (Merkle.cntL N l - 1)) : F) := by
   have ss := hash_sha_sat hL hsat
   have ks := hash_merkle_sat hL hsat
-  have h25 : 2 ^ L ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans hL24 (by norm_num))
-  norm_num at h25
-  have tr := Merkle.tree_rows ks (show 0 < 2 ^ L by positivity) (by omega) hN hN1 (by omega)
+  obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
+  have tr := Merkle.tree_rows ks (show 0 < 2 ^ Ls 4 by positivity) (by omega) hN hN1 (by omega)
   obtain ⟨hlt, rows⟩ := tr.1 (l + 1) (by omega) (by simpa using hc2)
   have hmv : ((inst 3).main Sha.MID (72 * q)).val = Merkle.NB + Merkle.baseL N (l + 1) + i := by
     rw [hm, Merkle.idOf, if_neg (by omega), ZMod.val_natCast_of_lt (Fields.lt_P (by unfold Merkle.NB; omega))]
   obtain ⟨hq2, hnp, hno, hme⟩ := node_period hL hsat hL24 hq hd (by omega)
-  have hsr : 72 * (q - 2) < 2 ^ L := by omega
+  have hsr : 72 * (q - 2) < 2 ^ Ls 3 := by omega
   obtain ⟨r', hr', ha', hmr, hlr, hrr, hdr⟩ := node_row hL hsat hL24 hsr (by
     simp only [Expr.eval, Sha.k, StarkedAir.Sha256.eval_col, wrap_zero hsr, hno, mul_one]
     rw [Sha.eval_per72 ss (i := Sha.ROW0) (f := fun q => if q = 0 then 1 else 0) rfl hsr,
@@ -348,21 +346,20 @@ theorem node_setup (hL24 : L ≤ 23) {N : ℕ} (hN : pub 1 = (N : F)) (hN1 : 1 �
 
 /-- **Every tree entry's second hash.** With `b` the parsed block (`N` transactions, public input 1), a
 second hash whose id is tree entry `(l, i)` outputs entry `i` of level `l` of the txid Merkle tree. -/
-theorem id_digest (hL24 : L ≤ 23) {b : Spec.Block.Blk}
+theorem id_digest (hL24 : ∀ i < 15, Ls i ≤ 23) {b : Spec.Block.Blk}
     (hb : Spec.Block.parseBlock (Fields.blockBytes (inst 0).main (pub 0).val) = some b)
-    (hN : pub 1 = (b.txs.length : F)) (hN1 : 1 ≤ b.txs.length) (hN25 : b.txs.length < 2 ^ L) :
+    (hN : pub 1 = (b.txs.length : F)) (hN1 : 1 ≤ b.txs.length) (hN25 : b.txs.length < 2 ^ Ls 1) :
     ∀ l, (l = 0 ∨ (1 ≤ l ∧ 2 ≤ Merkle.cntL b.txs.length (l - 1))) → ∀ i < Merkle.cntL b.txs.length l,
-      ∀ q, 72 * q + 72 ≤ 2 ^ L → (inst 3).main Sha.DBL (72 * q) = 1 →
+      ∀ q, 72 * q + 72 ≤ 2 ^ Ls 3 → (inst 3).main Sha.DBL (72 * q) = 1 →
         (inst 3).main Sha.MID (72 * q) = (Merkle.idOf b.txs.length l i : F) →
         Spec.Block.stateBytes (outputAt (inst 3).main (72 * q)) =
           (Spec.Block.lvs (b.txs.map Spec.Block.txid) l).getD i [] := by
   have ms := hash_msg_sat hL hsat
   have ss := hash_sha_sat hL hsat
   have ks := hash_merkle_sat hL hsat
-  have h25 : 2 ^ L ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans hL24 (by norm_num))
-  norm_num at h25
+  obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
   set N := b.txs.length with hNdef
-  have tr := Merkle.tree_rows ks (show 0 < 2 ^ L by positivity) (by omega) hN hN1 (by omega)
+  have tr := Merkle.tree_rows ks (show 0 < 2 ^ Ls 4 by positivity) (by omega) hN hN1 (by omega)
   intro l
   induction l with
   | zero =>
@@ -406,7 +403,7 @@ theorem id_digest (hL24 : L ≤ 23) {b : Spec.Block.Blk}
         have := (tr.1 (l + 1) (by omega) (by simpa using hc2)).1; unfold Merkle.NB; omega))]
     obtain ⟨hq2, hnp, hno, hme⟩ := node_period hL hsat hL24 hq hd (by omega)
     set s := 72 * (q - 2) with hs
-    have hsr : s < 2 ^ L := by omega
+    have hsr : s < 2 ^ Ls 3 := by omega
     obtain ⟨r', hr', ha', hmr, hlr, hrr, hdr⟩ := node_row hL hsat hL24 hsr (by
       simp only [Expr.eval, Sha.k, StarkedAir.Sha256.eval_col, wrap_zero hsr, hno, mul_one]
       rw [Sha.eval_per72 ss (i := Sha.ROW0) (f := fun q => if q = 0 then 1 else 0) rfl hsr,
@@ -469,17 +466,17 @@ theorem id_digest (hL24 : L ≤ 23) {b : Spec.Block.Blk}
 /-- **Every entry below a hashed root is hashed**, and **no level is mutated**: with `H` levels (`cnt H = 1`)
 and the root entry `(H, 0)` hashed, every entry has a second hash, and on each level below `H` the pairs
 `(2i, 2i + 1)` differ. -/
-theorem tree_hashed (hL24 : L ≤ 23) {b : Spec.Block.Blk}
+theorem tree_hashed (hL24 : ∀ i < 15, Ls i ≤ 23) {b : Spec.Block.Blk}
     (hb : Spec.Block.parseBlock (Fields.blockBytes (inst 0).main (pub 0).val) = some b)
-    (hN : pub 1 = (b.txs.length : F)) (hN1 : 1 ≤ b.txs.length) (hN25 : b.txs.length < 2 ^ L)
+    (hN : pub 1 = (b.txs.length : F)) (hN1 : 1 ≤ b.txs.length) (hN25 : b.txs.length < 2 ^ Ls 1)
     {H : ℕ} (hH : Merkle.cntL b.txs.length H = 1) (hHl : ∀ l < H, 2 ≤ Merkle.cntL b.txs.length l)
-    {qr : ℕ} (hqr : 72 * qr + 72 ≤ 2 ^ L) (hdr : (inst 3).main Sha.DBL (72 * qr) = 1)
+    {qr : ℕ} (hqr : 72 * qr + 72 ≤ 2 ^ Ls 3) (hdr : (inst 3).main Sha.DBL (72 * qr) = 1)
     (hmr : (inst 3).main Sha.MID (72 * qr) = (Merkle.idOf b.txs.length H 0 : F)) :
     ∀ l < H, Spec.Block.dupPair (Spec.Block.lvs (b.txs.map Spec.Block.txid) l) = false := by
   have ss := hash_sha_sat hL hsat
   set N := b.txs.length with hNdef
   -- every entry of levels `≤ H` is hashed
-  have hashed : ∀ d l, l + d = H → ∀ i < Merkle.cntL N l, ∃ q, 72 * q + 72 ≤ 2 ^ L ∧
+  have hashed : ∀ d l, l + d = H → ∀ i < Merkle.cntL N l, ∃ q, 72 * q + 72 ≤ 2 ^ Ls 3 ∧
       (inst 3).main Sha.DBL (72 * q) = 1 ∧ (inst 3).main Sha.MID (72 * q) = (Merkle.idOf N l i : F) := by
     intro d
     induction d with
@@ -543,14 +540,13 @@ theorem tree_hashed (hL24 : L ≤ 23) {b : Spec.Block.Blk}
   rw [wL t ht, show t + 8 = 8 + t by ring, wR t ht, hs]
 
 /-- **The root row's header words** are the block's bytes 36..67 (big-endian 16-bit limbs). -/
-theorem header_word (hL24 : L ≤ 23) {r : ℕ} (hr : r < 2 ^ L) (hrt : (inst 4).main Merkle.RT r = 1) {w : ℕ} (hw : w < 8) :
+theorem header_word (hL24 : ∀ i < 15, Ls i ≤ 23) {r : ℕ} (hr : r < 2 ^ Ls 4) (hrt : (inst 4).main Merkle.RT r = 1) {w : ℕ} (hw : w < 8) :
     79 < (pub 0).val ∧
     (inst 4).main (Merkle.RL (2 * w)) r = 256 * (inst 0).main BYTE (38 + 4 * w) + (inst 0).main BYTE (39 + 4 * w) ∧
     (inst 4).main (Merkle.RL (2 * w + 1)) r = 256 * (inst 0).main BYTE (36 + 4 * w) + (inst 0).main BYTE (37 + 4 * w) := by
   have ms := hash_msg_sat hL hsat
   have fs := hash_fields_sat' hL hsat
-  have h25 : 2 ^ L ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans hL24 (by norm_num))
-  norm_num at h25
+  obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
   have hm : siteMult hashSys inst pub (4, r, 3 + w) = -1 := by
     simp only [siteMult, siteEval, siteLookup, hashSys, hL 4 (by decide)]
     simp only [show (4 : ℕ) ≠ 0 by decide, show (4 : ℕ) ≠ 1 by decide, show (4 : ℕ) ≠ 2 by decide,
@@ -558,7 +554,7 @@ theorem header_word (hL24 : L ≤ 23) {r : ℕ} (hr : r < 2 ^ L) (hrt : (inst 4)
     interval_cases w <;> simp [Merkle.merkle, Merkle.lookups, Expr.eval, Merkle.k, StarkedAir.Sha256.eval_col,
       wrap_zero hr, hrt]
   obtain ⟨r', hr', hym, hyv⟩ := merkle_word_linked hL hsat hL24 (k := 3 + w) (by omega) (by omega) hr hm
-  have hmult : (pre Msg.IS3).eval (2 ^ L) Msg.preCols pub (inst 2).main r' * (inst 2).main Msg.WM r' ≠ 0 := by
+  have hmult : (pre Msg.IS3).eval (2 ^ Ls 2) Msg.preCols pub (inst 2).main r' * (inst 2).main Msg.WM r' ≠ 0 := by
     simpa [siteMult, siteEval, siteLookup, hashSys, hL 2 (by decide), Msg.msg, Msg.lookups, Expr.eval, Msg.k,
       StarkedAir.Sha256.eval_col, wrap_zero hr'] using hym
   obtain ⟨r0, j, rfl, hj, ha, f0, -, hb, hmid, -, hvals⟩ := Msg.word_yield ms hr' hmult
@@ -573,7 +569,7 @@ theorem header_word (hL24 : L ≤ 23) {r : ℕ} (hr : r < 2 ^ L) (hrt : (inst 4)
   rw [hv2, hv4] at hyv
   simp only [List.cons.injEq, and_true] at hyv
   obtain ⟨e0, e1, e2, e3⟩ := hyv
-  have h0 : r0 < 2 ^ L := by omega
+  have h0 : r0 < 2 ^ Ls 2 := by omega
   -- the header message
   have hh : (inst 2).main Msg.HDR r0 = 1 := by
     rcases Msg.bool_col ms (e := Msg.HDR) (by simp) h0 with h | h
@@ -604,7 +600,7 @@ theorem header_word (hL24 : L ≤ 23) {r : ℕ} (hr : r < 2 ^ L) (hrt : (inst 4)
     obtain ⟨hd, -, hpos, -⟩ := rows j' hj'
     obtain ⟨ρ, hρ, pρ, bρ⟩ := msg_read hL hsat hL24 hl hd
     rw [hpos, ta, zero_add] at pρ
-    have hLEN : (pub 0).val ≤ 2 ^ 25 := Fields.len_le (le_trans hL24 (by norm_num)) fs (hash_bytes_sat hL hsat) (hash_fields_read hL hsat hL24)
+    have hLEN : (pub 0).val ≤ 2 ^ 25 := Fields.len_le (le_trans (hL24 0 (by decide)) (by norm_num)) fs (hash_bytes_sat hL hsat) (hash_fields_read hL hsat hL24)
     have e := natCast_inj_of_lt (a := j') (b := ρ) (Fields.lt_P (by omega)) (Fields.lt_P (by omega)) pρ
     subst e; exact ⟨hρ, bρ⟩
   -- the word's index
@@ -620,27 +616,28 @@ theorem header_word (hL24 : L ≤ 23) {r : ℕ} (hr : r < 2 ^ L) (hrt : (inst 4)
 /-- **Merkle soundness (M3a.4).** In a satisfied (bytes, fields, msg, sha, merkle) system with at most `2^25`
 rows, the block's bytes parse as a block `b` whose txid Merkle root is the header's Merkle field and whose
 tree is not mutated: `bad-txnmrklroot` and `bad-txns-duplicate` cannot fire. -/
-theorem merkle_sound (hL24 : L ≤ 23) :
+theorem merkle_sound (hL24 : ∀ i < 15, Ls i ≤ 23) :
     ∃ b, Spec.Block.parseBlock (Fields.blockBytes (inst 0).main (pub 0).val) = some b ∧
       Spec.Block.merkleRoot (b.txs.map Spec.Block.txid) = (Spec.Block.headerMerkle b, false) := by
   have ms := hash_msg_sat hL hsat
   have fs := hash_fields_sat' hL hsat
   have hb0 := hash_bytes_sat hL hsat
   have ks := hash_merkle_sat hL hsat
-  have h25 : 2 ^ L ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans hL24 (by norm_num))
-  norm_num at h25
-  have hn0 : 0 < 2 ^ L := by positivity
+  obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
+  have hn0 : 0 < 2 ^ Ls 0 := by positivity
+  have hn1 : 0 < 2 ^ Ls 1 := by positivity
+  have hn4 : 0 < 2 ^ Ls 4 := by positivity
   obtain ⟨m, hmn, hnp, hpad, hfit, hcs, cat, mono, hSm⟩ :=
-    Fields.block_ctx (le_trans hL24 (by norm_num)) fs hb0 (hash_fields_read hL hsat hL24)
+    Fields.block_ctx (le_trans (hL24 0 (by decide)) (by norm_num)) fs hb0 (hash_fields_read hL hsat hL24)
   obtain ⟨b, hparse, hhead, hlenv, hN1, hN25, -⟩ :=
-    Fields.block_index (le_trans hL24 (by norm_num)) fs hb0 (hash_fields_read hL hsat hL24) hmn hnp hpad hfit hcs cat mono hSm
+    Fields.block_index (le_trans (hL24 0 (by decide)) (by norm_num)) fs hb0 (hash_fields_read hL hsat hL24) hmn hnp hpad hfit hcs cat mono hSm
   refine ⟨b, hparse, ?_⟩
   set N := b.txs.length with hNdef
   -- public input 1 is the transaction count
   have hN : pub 1 = (N : F) := by
-    have := fs 0 hn0 (.mul Fields.first (.sub (Fields.k Fields.VAL) (.pub 1)))
+    have := fs 0 hn1 (.mul Fields.first (.sub (Fields.k Fields.VAL) (.pub 1)))
       (by simp [Fields.constraints, Fields.pubC])
-    simp only [Expr.eval, Fields.ev_first hn0, if_true, one_mul, Fields.ev_k hn0, sub_eq_zero] at this
+    simp only [Expr.eval, Fields.ev_first hn1, if_true, one_mul, Fields.ev_k hn1, sub_eq_zero] at this
     rw [← this, hlenv, ZMod.natCast_zmod_val]
   -- the number of levels
   have hex : ∃ H, Merkle.cntL N H = 1 := ⟨N, by
@@ -649,7 +646,7 @@ theorem merkle_sound (hL24 : L ≤ 23) :
     refine ⟨Nat.find hex, Nat.find_spec hex, fun l hl => ?_⟩
     have := Nat.find_min hex hl; have := Merkle.cntL_pos hN1 l; omega
   -- the root row reads the top entry's digest
-  obtain ⟨rr, hrr, hrt, hrid⟩ := Merkle.root_row ks hn0 (by omega) hN hN1 (by omega) hH hHl
+  obtain ⟨rr, hrr, hrt, hrid⟩ := Merkle.root_row ks hn4 (by omega) hN hN1 (by omega) hH hHl
   have hmr : siteMult hashSys inst pub (4, rr, 2) = -1 := by
     simp [siteMult, siteEval, siteLookup, hashSys, hL 4 (by decide), Merkle.merkle, Merkle.lookups, Expr.eval,
       Merkle.k, StarkedAir.Sha256.eval_col, wrap_zero hrr, hrt]
@@ -688,9 +685,9 @@ theorem merkle_sound (hL24 : L ≤ 23) :
     have hw0 := header_word hL hsat hL24 hrr hrt (w := 0) (by norm_num)
     have hLEN : 79 < (pub 0).val := hw0.1
     have tb : ∀ p, p < 80 → ((inst 0).main BYTE p).val < 256 := fun p hp =>
-      Block.byte_lt (n := 2 ^ L) hb0 (by
-        have := (Block.bytes_rows (n := 2 ^ L) (pub := pub) (main := (inst 0).main) hb0
-          (by have := hash_rows_lt_P hL24; omega) hn0).2.1
+      Block.byte_lt (n := 2 ^ Ls 0) hb0 (by
+        have := (Block.bytes_rows (n := 2 ^ Ls 0) (pub := pub) (main := (inst 0).main) hb0
+          (by have := rows_lt_P hL24 (i := 0) (by decide); omega) hn0).2.1
         omega)
     have hR : (Fields.blockBytes (inst 0).main (pub 0).val).length = (pub 0).val := Fields.blockBytes_length _ _
     apply HashSpec.stateBytes_of_words

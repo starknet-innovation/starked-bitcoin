@@ -14,12 +14,12 @@ open Fields (blockBytes slice toksFrom tokOf prefOf locks TxAt)
 
 section System
 
-variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ}
-  (hL : ∀ i < 15, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : L ≤ 23)
+variable {inst : ℕ → Inst} {pub : ℕ → F} {Ls : ℕ → ℕ}
+  (hL : ∀ i < 15, (inst i).logSize = Ls i) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : ∀ i < 15, Ls i ≤ 23)
 include hL hsat hL24
 
 /-- A transaction of the block is at a lock-time row. -/
-theorem tx_at (S : Setup inst pub L) {t : Spec.Block.Tx} (ht : t ∈ S.b.txs) :
+theorem tx_at (S : Setup inst pub (Ls 1)) {t : Spec.Block.Tx} (ht : t ∈ S.b.txs) :
     ∃ j ρ, j < S.b.txs.length ∧ S.b.txs[j]? = some t ∧ ρ < S.m ∧ (inst 1).main Fields.K_LOCK ρ = 1 ∧
       locks (inst 1).main ρ = j ∧ TxAt (inst 1).main (Rb inst pub) S.m ρ t := by
   obtain ⟨j, hj, rfl⟩ := List.getElem_of_mem ht
@@ -28,11 +28,11 @@ theorem tx_at (S : Setup inst pub L) {t : Spec.Block.Tx} (ht : t ∈ S.b.txs) :
   exact ⟨j, ρ, hj, List.getElem?_eq_getElem hj, hρ, hl, hlk, hget ▸ hat⟩
 
 /-- **Inputs, outputs and output values.** -/
-theorem txs_basic (S : Setup inst pub L) : ∀ t ∈ S.b.txs, t.vin ≠ [] ∧ t.vout ≠ [] ∧
+theorem txs_basic (S : Setup inst pub (Ls 1)) : ∀ t ∈ S.b.txs, t.vin ≠ [] ∧ t.vout ≠ [] ∧
     (∀ o ∈ t.vout, 0 ≤ o.value) ∧ (t.vout.map (·.value)).sum ≤ Spec.Block.MAX_MONEY := by
   intro t ht
   have fs := hash_fields_sat' hL hsat
-  have h25 : 2 ^ L ≤ 2 ^ 25 := Nat.pow_le_pow_right (by norm_num) (by omega)
+  have h25 : 2 ^ Ls 1 ≤ 2 ^ 25 := Nat.pow_le_pow_right (by norm_num) (by have := hL24 1 (by decide); omega)
   obtain ⟨j, ρ, -, -, hρ, hl, -, hat⟩ := tx_at hL hsat hL24 S ht
   obtain ⟨rh, -, -, -, -, h1, -⟩ := Fields.tx_rows fs (Rb inst pub) S.hcs S.hmn S.hpad S.hfit hat hρ
   refine ⟨fun h => by rw [h] at h1; simp at h1, Fields.tx_vout_ne fs (Rb inst pub) S.hcs S.hmn S.hpad S.hfit hat hρ, ?_⟩
@@ -40,37 +40,36 @@ theorem txs_basic (S : Setup inst pub L) : ∀ t ∈ S.b.txs, t.vin ≠ [] ∧ t
     (fun r hr j hj => fields_rg_lt hL hsat hL24 hr hj) h25 hat hρ hl
 
 /-- **Later transactions spend no null prevout.** -/
-theorem txs_later (S : Setup inst pub L) {j : ℕ} (hj1 : 1 ≤ j) (hj : j < S.b.txs.length) {t : Spec.Block.Tx}
+theorem txs_later (S : Setup inst pub (Ls 1)) {j : ℕ} (hj1 : 1 ≤ j) (hj : j < S.b.txs.length) {t : Spec.Block.Tx}
     (ht : S.b.txs[j]? = some t) : ∀ i ∈ t.vin, i.prevout.isNull = false := by
   have fs := hash_fields_sat' hL hsat
-  have h25 : 2 ^ L ≤ 2 ^ 25 := Nat.pow_le_pow_right (by norm_num) (by omega)
+  have h25 : 2 ^ Ls 1 ≤ 2 ^ 25 := Nat.pow_le_pow_right (by norm_num) (by have := hL24 1 (by decide); omega)
   obtain ⟨ρ, tx, hρ, hl, hlk, hget, hat⟩ := S.hsurj j hj
   rw [ht, Option.some.injEq] at hget
   subst hget
   exact Fields.tx_prevouts fs (Rb inst pub) S.hcs S.hmn S.hpad S.hfit (hbq_R hL hsat hL24) h25 hat hρ (by omega)
 
 /-- **Transaction 0 is the context's coinbase**: its lock-time row carries the context's tuple. -/
-theorem tx0 (S : Setup inst pub L) : ∃ ρ t, ρ < S.m ∧ (inst 1).main Fields.K_LOCK ρ = 1 ∧ locks (inst 1).main ρ = 0 ∧
+theorem tx0 (S : Setup inst pub (Ls 1)) : ∃ ρ t, ρ < S.m ∧ (inst 1).main Fields.K_LOCK ρ = 1 ∧ locks (inst 1).main ρ = 0 ∧
     S.b.txs[0]? = some t ∧ TxAt (inst 1).main (Rb inst pub) S.m ρ t ∧
     (inst 1).main Fields.TXA ρ = (inst 7).main Ctx.A0 0 ∧ (inst 1).main Fields.SEG ρ = (inst 7).main Ctx.SEG0 0 ∧
     (inst 1).main Fields.WST ρ = (inst 7).main Ctx.W0 0 ∧ (inst 1).main Fields.START ρ = (inst 7).main Ctx.L0 0 := by
   have fs := hash_fields_sat' hL hsat
-  have h24 := rows_le hL hsat hL24
-  norm_num at h24
+  obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
   obtain ⟨ρ0, hρ0, hl0, hti, hta, hsg, hws, hst⟩ := tx0_link hL hsat hL24
   obtain ⟨ρ, t, hρ, hl, hlk, hget, hat⟩ := S.hsurj 0 S.hN1
-  have hP : 2 ^ L < P := by have := hash_rows_lt_P hL24; omega
+  have hP : 2 ^ Ls 1 < P := rows_lt_P hL24 (by decide)
   obtain rfl : ρ0 = ρ := Fields.lock_unique fs hP hρ0 (by have := S.hmn; omega) hl0 hl (by
     rw [hti, Fields.txi_count fs ρ (by have := S.hmn; omega), hlk]; simp)
   exact ⟨ρ0, t, hρ, hl, hlk, hget, hat, hta, hsg, hws, hst⟩
 
-theorem ctx_sat8 (hL8 : 8 ≤ L) : 256 ≤ 2 ^ L := by
+theorem ctx_sat8 (hL8 : 8 ≤ Ls 7) : 256 ≤ 2 ^ Ls 7 := by
   calc 256 = 2 ^ 8 := by norm_num
-    _ ≤ 2 ^ L := Nat.pow_le_pow_right (by norm_num) hL8
+    _ ≤ 2 ^ Ls 7 := Nat.pow_le_pow_right (by norm_num) hL8
 
 /-- **The coinbase**: transaction 0 has one input, with a null prevout and a 2–100-byte scriptSig
 (`cbase = A0 + 2·SEG0` is where the context reads it); with BIP34 its first bytes push the height. -/
-theorem cb_facts (hL8 : 8 ≤ L) (S : Setup inst pub L) :
+theorem cb_facts (hL8 : 8 ≤ Ls 7) (S : Setup inst pub (Ls 1)) :
     ∃ ρ t inp, ρ < S.m ∧ (inst 1).main Fields.K_LOCK ρ = 1 ∧ locks (inst 1).main ρ = 0 ∧ S.b.txs[0]? = some t ∧
       TxAt (inst 1).main (Rb inst pub) S.m ρ t ∧
       (inst 1).main Fields.TXA ρ = (inst 7).main Ctx.A0 0 ∧ (inst 1).main Fields.SEG ρ = (inst 7).main Ctx.SEG0 0 ∧
@@ -89,17 +88,16 @@ theorem cb_facts (hL8 : 8 ≤ L) (S : Setup inst pub L) :
           65536 * ((Rb inst pub).getD (Ctx.cbase (inst 7).main + 45) 0).toNat : ℕ) : F) = pub 2) := by
   have fs := hash_fields_sat' hL hsat
   have cs := hash_ctx_sat' hL hsat
-  have h24 := rows_le hL hsat hL24
-  norm_num at h24
+  obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
   have h256 := ctx_sat8 hL hsat hL24 hL8
   obtain ⟨ρ, t, hρ, hl, hlk, hget, hat, hta, hsg, hws, hst⟩ := tx0 hL hsat hL24 S
   obtain ⟨rh, hrh, ht, hnt, -⟩ := Fields.tx_rows fs (Rb inst pub) S.hcs S.hmn S.hpad S.hfit hat hρ
   obtain ⟨hta', hsg'⟩ := Fields.head_cols fs (Rb inst pub) S.hcs S.hmn S.hpad S.hfit S.hnp (hmk_R hL hsat hL24) hat hρ hrh
     ht hnt
   have hseg : (inst 7).main Ctx.SEG0 0 = 0 ∨ (inst 7).main Ctx.SEG0 0 = 1 := by
-    rw [← hsg]; exact Fields.seg_bool fs (show ρ < 2 ^ L by have := S.hmn; omega)
+    rw [← hsg]; exact Fields.seg_bool fs (show ρ < 2 ^ Ls 1 by have := S.hmn; omega)
   have ha0 : ((inst 7).main Ctx.A0 0).val < 2 ^ 25 := by
-    rw [← hta, hta']; exact Fields.start_lt fs (show rh < 2 ^ L by have := S.hmn; omega)
+    rw [← hta, hta']; exact Fields.start_lt fs (show rh < 2 ^ Ls 1 by have := S.hmn; omega)
   have fc := fun r (hr : r ≤ 36) =>
     Ctx.cb_read cs h256 (by omega) (Rb inst pub) (ctx_read hL hsat hL24) (ctx_ra hL hsat hL24) hseg ha0 hr
   obtain ⟨hs1, hs2, hs3⟩ := Ctx.slen_fact cs h256 (by omega) (Rb inst pub) (ctx_read hL hsat hL24) (ctx_ra hL hsat hL24)

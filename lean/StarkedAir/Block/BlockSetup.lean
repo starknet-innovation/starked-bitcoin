@@ -47,49 +47,47 @@ structure Setup (inst : ℕ → Inst) (pub : ℕ → F) (L : ℕ) where
 
 section System
 
-variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ}
-  (hL : ∀ i < 15, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : L ≤ 23)
+variable {inst : ℕ → Inst} {pub : ℕ → F} {Ls : ℕ → ℕ}
+  (hL : ∀ i < 15, (inst i).logSize = Ls i) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : ∀ i < 15, Ls i ≤ 23)
 include hL hsat hL24
 
-theorem setup_exists : Nonempty (Setup inst pub L) := by
+/-- The setup's rows are the fields component's (`Setup … (Ls 1)`). -/
+theorem setup_exists : Nonempty (Setup inst pub (Ls 1)) := by
   have fs := hash_fields_sat' hL hsat
   have hb0 := hash_bytes_sat hL hsat
   obtain ⟨m, hmn, hnp, hpad, hfit, hcs, cat, mono, hSm⟩ :=
-    Fields.block_ctx (le_trans hL24 (by norm_num)) fs hb0 (hash_fields_read hL hsat hL24)
+    Fields.block_ctx (le_trans (hL24 0 (by decide)) (by norm_num)) fs hb0 (hash_fields_read hL hsat hL24)
   obtain ⟨b, hparse, hhead, hlenv, hN1, hN25, hidx, htok, hsurj⟩ :=
-    Fields.block_index (le_trans hL24 (by norm_num)) fs hb0 (hash_fields_read hL hsat hL24) hmn hnp hpad hfit hcs cat
+    Fields.block_index (le_trans (hL24 0 (by decide)) (by norm_num)) fs hb0 (hash_fields_read hL hsat hL24) hmn hnp hpad hfit hcs cat
       mono hSm
   exact ⟨⟨m, b, hmn, hnp, hpad, hfit, hcs, cat, mono, hSm, hparse, hhead, hlenv, hN1, hN25, hidx, htok, hsurj⟩⟩
 
-theorem rows_le : 2 ^ L ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans hL24 (by norm_num))
-
-theorem len_R : (Rb inst pub).length ≤ 2 ^ L := by
-  have hP : 2 ^ L < P := by have := hash_rows_lt_P hL24; omega
-  have := (Block.bytes_rows (n := 2 ^ L) (pub := pub) (main := (inst 0).main) (hash_bytes_sat hL hsat) hP
+theorem len_R : (Rb inst pub).length ≤ 2 ^ Ls 0 := by
+  have hP : 2 ^ Ls 0 < P := rows_lt_P hL24 (by decide)
+  have := (Block.bytes_rows (n := 2 ^ Ls 0) (pub := pub) (main := (inst 0).main) (hash_bytes_sat hL hsat) hP
     (by positivity)).2.1
   rw [Fields.blockBytes_length]; exact this
 
 /-- **The marker read**, in terms of the block's bytes. -/
-theorem hmk_R : ∀ r < 2 ^ L, (inst 1).main Fields.K_TXH r = 1 → (inst 1).main Fields.SEG r = 1 →
+theorem hmk_R : ∀ r < 2 ^ Ls 1, (inst 1).main Fields.K_TXH r = 1 → (inst 1).main Fields.SEG r = 1 →
     ((inst 1).main Fields.START r).val + 5 < (Rb inst pub).length ∧
     (Rb inst pub).getD (((inst 1).main Fields.START r).val + 4) 0 = 0 ∧
     (Rb inst pub).getD (((inst 1).main Fields.START r).val + 5) 0 = 1 := by
   intro r hr ht hs
-  obtain ⟨hlt, h4, h5⟩ := Fields.marker_read (le_trans hL24 (by norm_num)) (hash_fields_sat' hL hsat)
+  obtain ⟨hlt, h4, h5⟩ := Fields.marker_read (le_trans (hL24 0 (by decide)) (by norm_num)) (hash_fields_sat' hL hsat)
     (hash_bytes_sat hL hsat) (hash_fields_read hL hsat hL24) hr ht hs
   refine ⟨by rw [Fields.blockBytes_length]; exact hlt, ?_, ?_⟩
   · rw [Fields.blockBytes_get (by omega), h4]; rfl
   · rw [Fields.blockBytes_get hlt, h5]; rfl
 
 /-- **The fields' byte slots**, in terms of the block's bytes. -/
-theorem hby_R (S : Setup inst pub L) : ∀ r < 2 ^ L, ∀ j < 8,
-    (Fields.chkLookups.getD j ⟨0, .const 0, []⟩).mult.eval (2 ^ L) Fields.preCols pub (inst 1).main r = -1 →
+theorem hby_R (S : Setup inst pub (Ls 1)) : ∀ r < 2 ^ Ls 1, ∀ j < 8,
+    (Fields.chkLookups.getD j ⟨0, .const 0, []⟩).mult.eval (2 ^ Ls 1) Fields.preCols pub (inst 1).main r = -1 →
     ((inst 1).main Fields.BASEC r).val + j < (Rb inst pub).length ∧
     ((inst 1).main (Fields.BY j) r).val = ((Rb inst pub).getD (((inst 1).main Fields.BASEC r).val + j) 0).toNat := by
   intro r hr j hj hm
   have fs := hash_fields_sat' hL hsat
-  have h24 := rows_le hL hsat hL24
-  norm_num at h24
+  obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
   obtain ⟨r0, hr0, hp, hb⟩ := fields_by_read hL hsat hL24 hr hj hm
   -- the row is an output, lock-time or input row
   have hk : (inst 1).main Fields.K_OUT r = 1 ∨ (inst 1).main Fields.K_LOCK r = 1 ∨ (inst 1).main Fields.K_IN r = 1 := by
@@ -116,12 +114,11 @@ theorem hby_R (S : Setup inst pub L) : ∀ r < 2 ^ L, ∀ j < 8,
   rw [hpv, hb]; exact read_R hL hsat hL24 hr0
 
 /-- **The fields' auxiliary read**, in terms of the block's bytes. -/
-theorem hbq_R : ∀ r < 2 ^ L, (inst 1).main Fields.GIN r + (inst 1).main Fields.MMB r = 1 →
+theorem hbq_R : ∀ r < 2 ^ Ls 1, (inst 1).main Fields.GIN r + (inst 1).main Fields.MMB r = 1 →
     ((inst 1).main Fields.AQ r).val < (Rb inst pub).length ∧
     ((inst 1).main Fields.BQ r).val = ((Rb inst pub).getD ((inst 1).main Fields.AQ r).val 0).toNat := by
   intro r hr hm
-  have h24 := rows_le hL hsat hL24
-  norm_num at h24
+  obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
   obtain ⟨r0, hr0, hp, hb⟩ := fields_bq_read hL hsat hL24 hr hm
   have hl := len_R hL hsat hL24 (inst := inst) (pub := pub)
   have hpv : ((inst 1).main Fields.AQ r).val = r0 := by

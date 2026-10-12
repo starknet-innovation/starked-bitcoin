@@ -53,17 +53,17 @@ theorem insBefore_le {txs : List Spec.Block.Tx} {parts : List (List Spec.Block.T
 
 section System
 
-variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ}
-  (hL : ∀ i < 15, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : L ≤ 23)
+variable {inst : ℕ → Inst} {pub : ℕ → F} {Ls : ℕ → ℕ}
+  (hL : ∀ i < 15, (inst i).logSize = Ls i) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : ∀ i < 15, Ls i ≤ 23)
 include hL hsat hL24
 
 /-- A URec byte column at an on row, as a stream byte at `S + c`, with `S + c` a natural below the
 stream's length. -/
-theorem urec_byte_at {r c : ℕ} (hr : r < 2 ^ L) (hon : (inst 13).main URec.ON r = 1) (hc : c < 17) :
+theorem urec_byte_at {r c : ℕ} (hr : r < 2 ^ Ls 13) (hon : (inst 13).main URec.ON r = 1) (hc : c < 17) :
     ((inst 13).main URec.S r).val + c < (pub 8).val ∧
       ((inst 13).main (URec.ucol c) r).val = ((Ub inst pub).getD (((inst 13).main URec.S r).val + c) 0).toNat := by
   have hU := undo_len hL hsat hL24
-  have hLb : 2 ^ L ≤ 2 ^ 23 := Nat.pow_le_pow_right (by norm_num) hL24
+  obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
   have hP : P = 2147483647 := rfl
   -- `S` itself is a stream position (c = 0), so `S + c` does not wrap
   obtain ⟨u0, hu0, hpu0, -⟩ := urec_bytes hL hsat hL24 hr hon (c := 0) (by norm_num)
@@ -77,18 +77,18 @@ theorem urec_byte_at {r c : ℕ} (hr : r < 2 ^ L) (hon : (inst 13).main URec.ON 
   rw [e]; exact ⟨hu, hb⟩
 
 /-- **Record starts are the stream's parse.** -/
-theorem rec_starts : ∃ e < 2 ^ L, (∀ r < 2 ^ L, ((inst 13).main URec.ON r = 1 ↔ r < e)) ∧
+theorem rec_starts : ∃ e < 2 ^ Ls 13, (∀ r < 2 ^ Ls 13, ((inst 13).main URec.ON r = 1 ↔ r < e)) ∧
     ∀ r < e, ((inst 13).main URec.S r).val = recStart (Ub inst pub) r := by
-  obtain ⟨e, hen, hon, -, hS0, hstep, -, -⟩ := URec.rows_sound (urec_sat' hL hsat hL24) (n := 2 ^ L) (by positivity)
+  obtain ⟨e, hen, hon, -, hS0, hstep, -, -⟩ := URec.rows_sound (urec_sat' hL hsat hL24) (n := 2 ^ Ls 13) (by positivity)
   refine ⟨e, hen, hon, fun r => ?_⟩
   induction r with
   | zero => intro _; rw [hS0]; rfl
   | succ r ih =>
     intro hr
-    have hr0 : r < 2 ^ L := by omega
+    have hr0 : r < 2 ^ Ls 13 := by omega
     have hon0 : (inst 13).main URec.ON r = 1 := (hon r hr0).mpr (by omega)
     have hon1 : (inst 13).main URec.ON (r + 1) = 1 := (hon (r + 1) (by omega)).mpr hr
-    have htl := URec.tl_bytes (urec_sat' hL hsat hL24) (n := 2 ^ L) hr0 hon0
+    have htl := URec.tl_bytes (urec_sat' hL hsat hL24) (n := 2 ^ Ls 13) hr0 hon0
     obtain ⟨-, b7⟩ := urec_byte_at hL hsat hL24 hr0 hon0 (c := 7) (by norm_num)
     obtain ⟨hlt8, b8⟩ := urec_byte_at hL hsat hL24 hr0 hon0 (c := 8) (by norm_num)
     obtain ⟨hlt1, -⟩ := urec_byte_at hL hsat hL24 (by omega) hon1 (c := 0) (by norm_num)
@@ -101,7 +101,7 @@ theorem rec_starts : ∃ e < 2 ^ L, (∀ r < 2 ^ L, ((inst 13).main URec.ON r = 
     apply Coin.lift _ (by omega) (by
       have : tlAt (Ub inst pub) (recStart (Ub inst pub) r) < 65536 := le2_lt (fun k => (Ub inst pub).getD (recStart (Ub inst pub) r + 7 + k) 0)
       have hU := undo_len hL hsat hL24
-      have hLb : 2 ^ L ≤ 2 ^ 23 := Nat.pow_le_pow_right (by norm_num) hL24
+      obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
       unfold P; omega)
     rw [ZMod.natCast_zmod_val, hS, htl]
     rw [← ZMod.natCast_zmod_val ((inst 13).main URec.S r), ih (by omega),
@@ -114,21 +114,21 @@ theorem rec_starts : ∃ e < 2 ^ L, (∀ r < 2 ^ L, ((inst 13).main URec.ON r = 
 
 /-- **A claim is its record.** Every input claim the coin component uses is the stream's record at its
 URec row: code, script (of the record's length) and creating transaction's index. -/
-theorem claim_is_record {j : ℕ} {c : Claim} (hc : ClaimAt inst pub L j c) :
-    ∃ rj < 2 ^ L, (inst 13).main URec.ON rj = 1 ∧ (inst 14).main Coin.J j = (inst 13).main URec.J rj ∧
+theorem claim_is_record {j : ℕ} {c : Claim} (hc : ClaimAt inst pub (Ls 13) j c) :
+    ∃ rj < 2 ^ Ls 13, (inst 13).main URec.ON rj = 1 ∧ (inst 14).main Coin.J j = (inst 13).main URec.J rj ∧
       c = recAt (Ub inst pub) rj := by
   obtain ⟨-, -, rj, hrj, honj, hJ, htl, u0, hu0, h9, hlen, hser, hcodeb, hctxb⟩ := hc
   obtain ⟨e, -, hon, hst⟩ := rec_starts hL hsat hL24
   have hs : ((inst 13).main URec.S rj).val = recStart (Ub inst pub) rj := hst rj ((hon rj hrj).mp honj)
   have hU := undo_len hL hsat hL24
-  have hLb : 2 ^ L ≤ 2 ^ 23 := Nat.pow_le_pow_right (by norm_num) hL24
+  obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
   have hP : P = 2147483647 := rfl
   obtain ⟨hlt0, -⟩ := urec_byte_at hL hsat hL24 hrj honj (c := 0) (by norm_num)
   have hu : u0 = recStart (Ub inst pub) rj + 9 := by
     apply Coin.lift _ (by omega) (by omega)
     rw [← hu0, ← hs]; push_cast; rw [ZMod.natCast_zmod_val]
   -- the script's length is the record's
-  have htl2 := URec.tl_bytes (urec_sat' hL hsat hL24) (n := 2 ^ L) hrj honj
+  have htl2 := URec.tl_bytes (urec_sat' hL hsat hL24) (n := 2 ^ Ls 13) hrj honj
   obtain ⟨-, b7⟩ := urec_byte_at hL hsat hL24 hrj honj (c := 7) (by norm_num)
   obtain ⟨-, b8⟩ := urec_byte_at hL hsat hL24 hrj honj (c := 8) (by norm_num)
   simp only [URec.ucol, show ¬ (7 < 4) by norm_num, show ¬ (7 < 7) by norm_num, show 7 < 9 by norm_num,
@@ -155,16 +155,16 @@ theorem claim_is_record {j : ℕ} {c : Claim} (hc : ClaimAt inst pub L j c) :
 
 /-- **The claim of the input at coin row `j` is the stream's record `J j`** (the number of inputs
 before it): no choice is left to the prover beyond the committed stream. -/
-theorem claim_is_record_at {j : ℕ} {c : Claim} (hc : ClaimAt inst pub L j c) :
+theorem claim_is_record_at {j : ℕ} {c : Claim} (hc : ClaimAt inst pub (Ls 13) j c) :
     c = recAt (Ub inst pub) ((inst 14).main Coin.J j).val := by
   obtain ⟨rj, hrj, honj, hJ, rfl⟩ := claim_is_record hL hsat hL24 hc
-  have hLb : 2 ^ L ≤ 2 ^ 23 := Nat.pow_le_pow_right (by norm_num) hL24
+  obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
   rw [hJ, urec_j hL hsat hL24 hrj honj, ZMod.val_natCast_of_lt (by unfold P; omega)]
 
 /-! ### The record index is the input's position in the block -/
 
-variable (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
-    (hon : ∀ j < 2 ^ L, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
+variable (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
+    (hon : ∀ j < 2 ^ Ls 14, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
     (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
     {parts : List (List Spec.Block.Tok)} (hf : List.Forall₂ Spec.Block.IoTx S.b.txs parts)
     (htg : Spec.Block.tagged 0 (Fields.toksFrom (inst 1).main (Rb inst pub) S.m 0) = Spec.Block.tagParts 0 parts)
@@ -216,7 +216,7 @@ theorem ki_count : ∀ t ≤ S.b.txs.length,
 /-- **The claim of input `k` of transaction `t ≥ 1` is the stream's record `insBefore t + k`**: a
 function of the block and the committed undo stream only (D-041, step 4 of utxo.md's plan). -/
 theorem claim_at_input {t k : ℕ} {tx : Spec.Block.Tx} (htx : S.b.txs[t]? = some tx) (ht1 : 1 ≤ t)
-    (hk : k < tx.vin.length) {c : Claim} (hc : ClaimAt inst pub L (((parts.take t).map List.length).sum + k) c) :
+    (hk : k < tx.vin.length) {c : Claim} (hc : ClaimAt inst pub (Ls 13) (((parts.take t).map List.length).sum + k) c) :
     c = recAt (Ub inst pub) (insBefore S.b.txs t + k) := by
   have cs := coin_sat hL hsat hL24
   obtain ⟨hpl, hpe⟩ := part_len hf htx
@@ -232,7 +232,7 @@ theorem claim_at_input {t k : ℕ} {tx : Spec.Block.Tx} (htx : S.b.txs[t]? = som
     rw [List.take_add_one, List.map_append, List.sum_append, ← hpe]
     simp [List.getElem?_eq_getElem hpl, List.getD_eq_getElem _ _ hpl]
   set j := ((parts.take t).map List.length).sum + k with hj
-  have hjL : j < 2 ^ L := by omega
+  have hjL : j < 2 ^ Ls 14 := by omega
   rw [claim_is_record_at hL hsat hL24 hc]
   congr 1
   -- J j = KI rows before j = insBefore t + k
@@ -246,7 +246,7 @@ theorem claim_at_input {t k : ℕ} {tx : Spec.Block.Tx} (htx : S.b.txs[t]? = som
   rw [hJ]
   have hib : insBefore S.b.txs t + k < P := by
     have := insBefore_le hf t (by have := (List.getElem?_eq_some_iff.mp htx).1; omega)
-    have hLb : 2 ^ L ≤ 2 ^ 23 := Nat.pow_le_pow_right (by norm_num) hL24
+    obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
     unfold P; omega
   rw [← Nat.cast_add, ZMod.val_natCast_of_lt hib]
 

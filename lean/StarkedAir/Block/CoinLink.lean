@@ -94,28 +94,28 @@ theorem ind_sum_pos {s : Finset ℕ} {p : ℕ → Prop} [DecidablePred p] :
 
 section System
 
-variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ}
-  (hL : ∀ i < 15, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : L ≤ 23)
+variable {inst : ℕ → Inst} {pub : ℕ → F} {Ls : ℕ → ℕ}
+  (hL : ∀ i < 15, (inst i).logSize = Ls i) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : ∀ i < 15, Ls i ≤ 23)
 include hL hsat hL24
 
 /-- **Two sites, one relation: yields and uses sum alike.** -/
 theorem pair_sum {R i₁ k₁ i₂ k₂ : ℕ} (honly : onlyAt R i₁ k₁ i₂ k₂ = true) (hi₁ : i₁ < 15) (hi₂ : i₂ < 15)
     (hk₁ : k₁ < (hashSys.comp i₁).lookups.length) (hk₂ : k₂ < (hashSys.comp i₂).lookups.length)
     (hrel₁ : relAt i₁ k₁ = R) (hrel₂' : relAt i₂ k₂ = R)
-    (f₁ f₂ : ℕ → F) (hm₁ : ∀ r < 2 ^ L, siteMult hashSys inst pub (i₁, r, k₁) = f₁ r)
-    (hm₂ : ∀ r < 2 ^ L, siteMult hashSys inst pub (i₂, r, k₂) = -f₂ r)
-    (hb₁ : ∀ r < 2 ^ L, f₁ r = 0 ∨ f₁ r = 1) (hb₂ : ∀ r < 2 ^ L, f₂ r = 0 ∨ f₂ r = 1)
-    (v₁ v₂ : ℕ → List F) (hv₁ : ∀ r < 2 ^ L, siteVals hashSys inst pub (i₁, r, k₁) = v₁ r)
-    (hv₂ : ∀ r < 2 ^ L, siteVals hashSys inst pub (i₂, r, k₂) = v₂ r) (g : List F → ℕ) :
-    ∑ r ∈ (Finset.range (2 ^ L)).filter (fun r => f₁ r = 1), g (v₁ r) =
-      ∑ r ∈ (Finset.range (2 ^ L)).filter (fun r => f₂ r = 1), g (v₂ r) := by
+    (f₁ f₂ : ℕ → F) (hm₁ : ∀ r < 2 ^ Ls i₁, siteMult hashSys inst pub (i₁, r, k₁) = f₁ r)
+    (hm₂ : ∀ r < 2 ^ Ls i₂, siteMult hashSys inst pub (i₂, r, k₂) = -f₂ r)
+    (hb₁ : ∀ r < 2 ^ Ls i₁, f₁ r = 0 ∨ f₁ r = 1) (hb₂ : ∀ r < 2 ^ Ls i₂, f₂ r = 0 ∨ f₂ r = 1)
+    (v₁ v₂ : ℕ → List F) (hv₁ : ∀ r < 2 ^ Ls i₁, siteVals hashSys inst pub (i₁, r, k₁) = v₁ r)
+    (hv₂ : ∀ r < 2 ^ Ls i₂, siteVals hashSys inst pub (i₂, r, k₂) = v₂ r) (g : List F → ℕ) :
+    ∑ r ∈ (Finset.range (2 ^ Ls i₁)).filter (fun r => f₁ r = 1), g (v₁ r) =
+      ∑ r ∈ (Finset.range (2 ^ Ls i₂)).filter (fun r => f₂ r = 1), g (v₂ r) := by
   classical
   have n1 : (1 : F) ≠ -1 := by
     intro h
     have : (2 : F) = 0 := by linear_combination h
     have := natCast_inj_of_lt (a := 2) (b := 0) (by unfold P; norm_num) (by unfold P; norm_num) (by simpa using this)
     omega
-  have hsite : ∀ i r k, i < 15 → r < 2 ^ L → k < (hashSys.comp i).lookups.length → siteRel hashSys (i, r, k) = R →
+  have hsite : ∀ i r k, i < 15 → r < 2 ^ Ls i → k < (hashSys.comp i).lookups.length → siteRel hashSys (i, r, k) = R →
       (i = i₁ ∧ k = k₁) ∨ (i = i₂ ∧ k = k₂) := fun i r k hi _ hk h => only_rel honly hi hk h
   have hm : ∀ s ∈ sites hashSys inst, siteRel hashSys s = R →
       siteMult hashSys inst pub s = 0 ∨ siteMult hashSys inst pub s = 1 ∨ siteMult hashSys inst pub s = -1 := by
@@ -148,22 +148,22 @@ theorem pair_sum {R i₁ k₁ i₂ k₂ : ℕ} (honly : onlyAt R i₁ k₁ i₂ 
   simp only [List.map_map] at hsum
   rw [list_sum_filter_range, list_sum_filter_range] at hsum
   simp only [Function.comp_def] at hsum
-  have hrel₂ : ∀ r < 2 ^ L, siteRel hashSys (i₂, r, k₂) = R := fun _ _ => hrel₂'
-  have e1 : ∀ r ∈ (Finset.range (2 ^ L)).filter (fun r => siteRel hashSys (i₁, r, k₁) = R ∧
+  have hrel₂ : ∀ r < 2 ^ Ls i₂, siteRel hashSys (i₂, r, k₂) = R := fun _ _ => hrel₂'
+  have e1 : ∀ r ∈ (Finset.range (2 ^ Ls i₁)).filter (fun r => siteRel hashSys (i₁, r, k₁) = R ∧
       siteMult hashSys inst pub (i₁, r, k₁) = 1), g (siteVals hashSys inst pub (i₁, r, k₁)) = g (v₁ r) := by
     intro r hr; rw [hv₁ r (Finset.mem_range.mp (Finset.mem_filter.mp hr).1)]
-  have e2 : ∀ r ∈ (Finset.range (2 ^ L)).filter (fun r => siteRel hashSys (i₂, r, k₂) = R ∧
+  have e2 : ∀ r ∈ (Finset.range (2 ^ Ls i₂)).filter (fun r => siteRel hashSys (i₂, r, k₂) = R ∧
       siteMult hashSys inst pub (i₂, r, k₂) = -1), g (siteVals hashSys inst pub (i₂, r, k₂)) = g (v₂ r) := by
     intro r hr; rw [hv₂ r (Finset.mem_range.mp (Finset.mem_filter.mp hr).1)]
   rw [Finset.sum_congr rfl e1, Finset.sum_congr rfl e2] at hsum
-  have f1 : (Finset.range (2 ^ L)).filter (fun r => siteRel hashSys (i₁, r, k₁) = R ∧
-      siteMult hashSys inst pub (i₁, r, k₁) = 1) = (Finset.range (2 ^ L)).filter (fun r => f₁ r = 1) := by
+  have f1 : (Finset.range (2 ^ Ls i₁)).filter (fun r => siteRel hashSys (i₁, r, k₁) = R ∧
+      siteMult hashSys inst pub (i₁, r, k₁) = 1) = (Finset.range (2 ^ Ls i₁)).filter (fun r => f₁ r = 1) := by
     ext r; simp only [Finset.mem_filter, Finset.mem_range]
     constructor
     · rintro ⟨hr, -, h⟩; exact ⟨hr, by rw [← hm₁ r hr]; exact h⟩
     · rintro ⟨hr, h⟩; exact ⟨hr, hrel₁, by rw [hm₁ r hr]; exact h⟩
-  have f2 : (Finset.range (2 ^ L)).filter (fun r => siteRel hashSys (i₂, r, k₂) = R ∧
-      siteMult hashSys inst pub (i₂, r, k₂) = -1) = (Finset.range (2 ^ L)).filter (fun r => f₂ r = 1) := by
+  have f2 : (Finset.range (2 ^ Ls i₂)).filter (fun r => siteRel hashSys (i₂, r, k₂) = R ∧
+      siteMult hashSys inst pub (i₂, r, k₂) = -1) = (Finset.range (2 ^ Ls i₂)).filter (fun r => f₂ r = 1) := by
     ext r; simp only [Finset.mem_filter, Finset.mem_range]
     constructor
     · rintro ⟨hr, -, h⟩; rw [hm₂ r hr, neg_inj] at h; exact ⟨hr, h⟩
@@ -171,20 +171,20 @@ theorem pair_sum {R i₁ k₁ i₂ k₂ : ℕ} (honly : onlyAt R i₁ k₁ i₂ 
   rw [f1, f2] at hsum
   exact hsum
 
-theorem coin_sat : ∀ r < 2 ^ L, ∀ c ∈ Coin.constraints, c.eval (2 ^ L) Coin.preCols pub (inst 14).main r = 0 :=
+theorem coin_sat : ∀ r < 2 ^ Ls 14, ∀ c ∈ Coin.constraints, c.eval (2 ^ Ls 14) Coin.preCols pub (inst 14).main r = 0 :=
   hash_coin_sat hL hsat
 
 /-- The output relation's sites: the fields' yield `K_OUT`, the coin use `−KO`. -/
-theorem outt_sites {r : ℕ} (hr : r < 2 ^ L) :
-    siteMult hashSys inst pub (1, r, 34) = (inst 1).main Fields.K_OUT r ∧
-    siteMult hashSys inst pub (14, r, 0) = -(inst 14).main Coin.KO r ∧
-    siteVals hashSys inst pub (1, r, 34) = [(inst 1).main Fields.TXI r, (inst 1).main Fields.START r,
+theorem outt_sites {r : ℕ} :
+    (r < 2 ^ Ls 1 → siteMult hashSys inst pub (1, r, 34) = (inst 1).main Fields.K_OUT r) ∧
+    (r < 2 ^ Ls 14 → siteMult hashSys inst pub (14, r, 0) = -(inst 14).main Coin.KO r) ∧
+    (r < 2 ^ Ls 1 → siteVals hashSys inst pub (1, r, 34) = [(inst 1).main Fields.TXI r, (inst 1).main Fields.START r,
       (inst 1).main Fields.LEN r, (inst 1).main Fields.SSC r, (inst 1).main Fields.VAL r,
-      Fields.vlo.eval (2 ^ L) Fields.preCols pub (inst 1).main r, Fields.vhi.eval (2 ^ L) Fields.preCols pub (inst 1).main r] ∧
-    siteVals hashSys inst pub (14, r, 0) = [(inst 14).main Coin.TXI r, (inst 14).main Coin.START r,
+      Fields.vlo.eval (2 ^ Ls 1) Fields.preCols pub (inst 1).main r, Fields.vhi.eval (2 ^ Ls 1) Fields.preCols pub (inst 1).main r]) ∧
+    (r < 2 ^ Ls 14 → siteVals hashSys inst pub (14, r, 0) = [(inst 14).main Coin.TXI r, (inst 14).main Coin.START r,
       (inst 14).main Coin.LEN r, (inst 14).main Coin.SSC r, (inst 14).main Coin.SVAL r,
-      (inst 14).main Coin.VL r, (inst 14).main Coin.VH r] := by
-  refine ⟨?_, ?_, ?_, ?_⟩
+      (inst 14).main Coin.VL r, (inst 14).main Coin.VH r]) := by
+  refine ⟨fun hr => ?_, fun hr => ?_, fun hr => ?_, fun hr => ?_⟩
   · simp only [siteMult, siteEval, siteLookup, hashSys, hL 1 (by decide)]
     simp [Fields.fields, Fields.lookups, Fields.chkLookups, Expr.eval, Fields.k, StarkedAir.Sha256.eval_col, wrap_zero hr]
   · simp only [siteMult, siteEval, siteLookup, hashSys, hL 14 (by decide)]
@@ -195,12 +195,12 @@ theorem outt_sites {r : ℕ} (hr : r < 2 ^ L) :
       StarkedAir.Sha256.eval_col, wrap_zero hr]
 
 /-- The input relation's sites: the fields' yield `K_IN`, the coin use `−(KI + CBI)`. -/
-theorem int_sites {r : ℕ} (hr : r < 2 ^ L) :
-    siteMult hashSys inst pub (1, r, 35) = (inst 1).main Fields.K_IN r ∧
-    siteMult hashSys inst pub (14, r, 1) = -((inst 14).main Coin.KI r + (inst 14).main Coin.CBI r) ∧
-    siteVals hashSys inst pub (1, r, 35) = [(inst 1).main Fields.TXI r, (inst 1).main Fields.START r] ∧
-    siteVals hashSys inst pub (14, r, 1) = [(inst 14).main Coin.TXI r, (inst 14).main Coin.START r] := by
-  refine ⟨?_, ?_, ?_, ?_⟩
+theorem int_sites {r : ℕ} :
+    (r < 2 ^ Ls 1 → siteMult hashSys inst pub (1, r, 35) = (inst 1).main Fields.K_IN r) ∧
+    (r < 2 ^ Ls 14 → siteMult hashSys inst pub (14, r, 1) = -((inst 14).main Coin.KI r + (inst 14).main Coin.CBI r)) ∧
+    (r < 2 ^ Ls 1 → siteVals hashSys inst pub (1, r, 35) = [(inst 1).main Fields.TXI r, (inst 1).main Fields.START r]) ∧
+    (r < 2 ^ Ls 14 → siteVals hashSys inst pub (14, r, 1) = [(inst 14).main Coin.TXI r, (inst 14).main Coin.START r]) := by
+  refine ⟨fun hr => ?_, fun hr => ?_, fun hr => ?_, fun hr => ?_⟩
   · simp only [siteMult, siteEval, siteLookup, hashSys, hL 1 (by decide)]
     simp [Fields.fields, Fields.lookups, Fields.chkLookups, Expr.eval, Fields.k, StarkedAir.Sha256.eval_col, wrap_zero hr]
   · simp only [siteMult, siteEval, siteLookup, hashSys, hL 14 (by decide)]
@@ -210,42 +210,42 @@ theorem int_sites {r : ℕ} (hr : r < 2 ^ L) :
   · simp [siteVals, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups, Coin.k,
       StarkedAir.Sha256.eval_col, wrap_zero hr]
 
-theorem fields_sat' : ∀ r < 2 ^ L, ∀ c ∈ Fields.constraints, c.eval (2 ^ L) Fields.preCols pub (inst 1).main r = 0 :=
+theorem fields_sat' : ∀ r < 2 ^ Ls 1, ∀ c ∈ Fields.constraints, c.eval (2 ^ Ls 1) Fields.preCols pub (inst 1).main r = 0 :=
   hash_fields_sat' hL hsat
 
 /-- **Output tokens are the coin output rows** (as multisets of tuples): any function sums alike. -/
 theorem outt_sum (g : List F → ℕ) :
-    ∑ r ∈ (Finset.range (2 ^ L)).filter (fun r => (inst 1).main Fields.K_OUT r = 1),
+    ∑ r ∈ (Finset.range (2 ^ Ls 1)).filter (fun r => (inst 1).main Fields.K_OUT r = 1),
       g [(inst 1).main Fields.TXI r, (inst 1).main Fields.START r, (inst 1).main Fields.LEN r, (inst 1).main Fields.SSC r,
-        (inst 1).main Fields.VAL r, Fields.vlo.eval (2 ^ L) Fields.preCols pub (inst 1).main r,
-        Fields.vhi.eval (2 ^ L) Fields.preCols pub (inst 1).main r] =
-    ∑ r ∈ (Finset.range (2 ^ L)).filter (fun r => (inst 14).main Coin.KO r = 1),
+        (inst 1).main Fields.VAL r, Fields.vlo.eval (2 ^ Ls 1) Fields.preCols pub (inst 1).main r,
+        Fields.vhi.eval (2 ^ Ls 1) Fields.preCols pub (inst 1).main r] =
+    ∑ r ∈ (Finset.range (2 ^ Ls 14)).filter (fun r => (inst 14).main Coin.KO r = 1),
       g [(inst 14).main Coin.TXI r, (inst 14).main Coin.START r, (inst 14).main Coin.LEN r, (inst 14).main Coin.SSC r,
         (inst 14).main Coin.SVAL r, (inst 14).main Coin.VL r, (inst 14).main Coin.VH r] :=
   pair_sum hL hsat hL24 outt_only (by decide) (by decide) (by decide) (by decide) (by decide) (by decide)
-    _ _ (fun r hr => (outt_sites hL hsat hL24 hr).1) (fun r hr => (outt_sites hL hsat hL24 hr).2.1)
+    _ _ (fun r hr => (outt_sites hL hsat hL24).1 hr) (fun r hr => (outt_sites hL hsat hL24).2.1 hr)
     (fun r hr => Fields.kind_bool (fields_sat' hL hsat hL24) (by simp [Fields.kinds]) hr)
     (fun r hr => Coin.bool_col (coin_sat hL hsat hL24) (by simp) hr)
-    _ _ (fun r hr => (outt_sites hL hsat hL24 hr).2.2.1) (fun r hr => (outt_sites hL hsat hL24 hr).2.2.2) g
+    _ _ (fun r hr => (outt_sites hL hsat hL24).2.2.1 hr) (fun r hr => (outt_sites hL hsat hL24).2.2.2 hr) g
 
 /-- **Input tokens are the coin input rows** (non-coinbase and coinbase), as multisets of `(tx, start)`. -/
 theorem int_sum (g : List F → ℕ) :
-    ∑ r ∈ (Finset.range (2 ^ L)).filter (fun r => (inst 1).main Fields.K_IN r = 1),
+    ∑ r ∈ (Finset.range (2 ^ Ls 1)).filter (fun r => (inst 1).main Fields.K_IN r = 1),
       g [(inst 1).main Fields.TXI r, (inst 1).main Fields.START r] =
-    ∑ r ∈ (Finset.range (2 ^ L)).filter (fun r => (inst 14).main Coin.KI r + (inst 14).main Coin.CBI r = 1),
+    ∑ r ∈ (Finset.range (2 ^ Ls 14)).filter (fun r => (inst 14).main Coin.KI r + (inst 14).main Coin.CBI r = 1),
       g [(inst 14).main Coin.TXI r, (inst 14).main Coin.START r] :=
   pair_sum hL hsat hL24 int_only (by decide) (by decide) (by decide) (by decide) (by decide) (by decide)
-    _ _ (fun r hr => (int_sites hL hsat hL24 hr).1) (fun r hr => (int_sites hL hsat hL24 hr).2.1)
+    _ _ (fun r hr => (int_sites hL hsat hL24).1 hr) (fun r hr => (int_sites hL hsat hL24).2.1 hr)
     (fun r hr => Fields.kind_bool (fields_sat' hL hsat hL24) (by simp [Fields.kinds]) hr)
     (fun r hr => by
       rcases Coin.kinds (coin_sat hL hsat hL24) hr with h | h | h | h <;> simp [h.2.1, h.2.2.1])
-    _ _ (fun r hr => (int_sites hL hsat hL24 hr).2.2.1) (fun r hr => (int_sites hL hsat hL24 hr).2.2.2) g
+    _ _ (fun r hr => (int_sites hL hsat hL24).2.2.1 hr) (fun r hr => (int_sites hL hsat hL24).2.2.2 hr) g
 
 /-- **A coin range check is a byte.** If the coin component's lookup `k` is `r8 (col c) mexp` and `mexp`
 is 1 at row `r`, column `c` holds a byte there. -/
 theorem coin_r8 {k c : ℕ} {mexp : Expr} (hk : k < 94) (hk4 : k ≠ 4)
-    (hlk : Coin.lookups.getD k ⟨0, .const 0, []⟩ = Coin.r8 (Coin.k c) mexp) {r : ℕ} (hr : r < 2 ^ L)
-    (hm : mexp.eval (2 ^ L) Coin.preCols pub (inst 14).main r = 1) : ((inst 14).main c r).val < 256 := by
+    (hlk : Coin.lookups.getD k ⟨0, .const 0, []⟩ = Coin.r8 (Coin.k c) mexp) {r : ℕ} (hr : r < 2 ^ Ls 14)
+    (hm : mexp.eval (2 ^ Ls 14) Coin.preCols pub (inst 14).main r = 1) : ((inst 14).main c r).val < 256 := by
   have hlen : k < (hashSys.comp 14).lookups.length := by
     show k < Coin.lookups.length; rw [Coin.lookups_len]; exact hk
   have hs := site_mem hL (i := 14) (by decide) hr hlen
@@ -261,7 +261,7 @@ theorem coin_r8 {k c : ℕ} {mexp : Expr} (hk : k < 94) (hk4 : k ≠ 4)
     simp [siteEval, Coin.r8, hpre, hL 14 (by decide), Coin.k, StarkedAir.Sha256.eval_col, wrap_zero hr]
 
 /-- **The coin component's range facts**, by multiplicity. -/
-theorem coin_bytes {r : ℕ} (hr : r < 2 ^ L) :
+theorem coin_bytes {r : ℕ} (hr : r < 2 ^ Ls 14) :
     let M := (inst 14).main
     (M Coin.MNB r = 1 → ∀ i < 3, (M (Coin.NB i) r).val < 256) ∧
     (M Coin.MC1 r = 1 → (∀ i < 3, (M (Coin.Q1 i) r).val < 256) ∧ (∀ i < 4, (M (Coin.H1 i) r).val < 256) ∧
@@ -290,7 +290,7 @@ theorem coin_bytes {r : ℕ} (hr : r < 2 ^ L) :
     intro i hi; interval_cases i <;> rfl
   have f43 : ∀ i < 3, Coin.lookups.getD (43 + i) ⟨0, .const 0, []⟩ = Coin.r8 (Coin.k (Coin.D i)) (.mul Coin.notFirst Coin.on) := by
     intro i hi; interval_cases i <;> rfl
-  have ek : ∀ c, (Coin.k c).eval (2 ^ L) Coin.preCols pub (inst 14).main r = M c r := fun c => Coin.ev_k hr
+  have ek : ∀ c, (Coin.k c).eval (2 ^ Ls 14) Coin.preCols pub (inst 14).main r = M c r := fun c => Coin.ev_k hr
   refine ⟨fun h i hi => ?_, fun h => ⟨fun i hi => ?_, fun i hi => ?_, ?_, fun i hi => ?_, fun i hi => ?_, ?_⟩,
     fun h => ⟨fun i hi => ?_, fun i hi => ?_, ?_⟩, fun h i hi => ?_, fun h i hi => ?_⟩
   · exact coin_r8 hL hsat hL24 (k := 64 + i) (by omega) (by omega) (f64 i hi) hr (by rw [ek]; exact h)
@@ -311,7 +311,7 @@ theorem coin_bytes {r : ℕ} (hr : r < 2 ^ L) :
 /-! ### Fields' input and output tokens -/
 
 /-- A fields row's kind is boolean and kinds exclude each other (padding rows have no other kind). -/
-theorem fields_io_lt_m (S : Setup inst pub L) {r : ℕ} (hr : r < 2 ^ L)
+theorem fields_io_lt_m (S : Setup inst pub (Ls 1)) {r : ℕ} (hr : r < 2 ^ Ls 1)
     (hio : (inst 1).main Fields.K_OUT r = 1 ∨ (inst 1).main Fields.K_IN r = 1) : r < S.m := by
   have fs := fields_sat' hL hsat hL24
   rcases hio with h | h
@@ -323,11 +323,11 @@ theorem fields_io_lt_m (S : Setup inst pub L) {r : ℕ} (hr : r < 2 ^ L)
         (by simp [Fields.K_IN, Fields.K_PAD]) (by rw [h]; exact one_ne_zero))
 
 /-- An input or output token has positive length, so the next token starts later. -/
-theorem fields_io_step (S : Setup inst pub L) {r : ℕ} (hr : r < S.m)
+theorem fields_io_step (S : Setup inst pub (Ls 1)) {r : ℕ} (hr : r < S.m)
     (hio : (inst 1).main Fields.K_OUT r = 1 ∨ (inst 1).main Fields.K_IN r = 1) :
     ((inst 1).main Fields.START r).val < ((inst 1).main Fields.START (r + 1)).val := by
   have fs := fields_sat' hL hsat hL24
-  have hr1 : r + 1 < 2 ^ L := by have := S.hmn; omega
+  have hr1 : r + 1 < 2 ^ Ls 1 := by have := S.hmn; omega
   rw [Fields.start_val_succ fs (Rb inst pub) S.hcs (hmk_R hL hsat hL24) hr1]
   rcases hio with h | h
   · obtain ⟨-, hlen, -, -, -⟩ := Fields.row_info fs (Rb inst pub) S.hcs S.hmn S.hpad S.hfit hr (a := Fields.K_OUT)
@@ -338,7 +338,7 @@ theorem fields_io_step (S : Setup inst pub L) {r : ℕ} (hr : r < S.m)
     rw [hlen]; simp [Fields.lenN, Fields.K_IN, Fields.K_BLK, Fields.K_TXH]
 
 /-- **Fields' input and output token starts strictly increase.** -/
-theorem fields_io_strict (S : Setup inst pub L) {r s : ℕ} (hrs : r < s) (hs : s ≤ S.m)
+theorem fields_io_strict (S : Setup inst pub (Ls 1)) {r s : ℕ} (hrs : r < s) (hs : s ≤ S.m)
     (hio : (inst 1).main Fields.K_OUT r = 1 ∨ (inst 1).main Fields.K_IN r = 1) :
     ((inst 1).main Fields.START r).val < ((inst 1).main Fields.START s).val :=
   lt_of_lt_of_le (fields_io_step hL hsat hL24 S (by omega) hio) (S.mono (r + 1) s (by omega) hs)
@@ -354,11 +354,11 @@ def cOut (inst : ℕ → Inst) (r : ℕ) : List F :=
   [(inst 14).main Coin.TXI r, (inst 14).main Coin.START r, (inst 14).main Coin.LEN r, (inst 14).main Coin.SSC r,
     (inst 14).main Coin.SVAL r, (inst 14).main Coin.VL r, (inst 14).main Coin.VH r]
 
-theorem out_match_l {j : ℕ} (hj : j < 2 ^ L) (hko : (inst 14).main Coin.KO j = 1) :
-    ∃ ρ < 2 ^ L, (inst 1).main Fields.K_OUT ρ = 1 ∧ fOut inst pub L ρ = cOut inst j := by
+theorem out_match_l {j : ℕ} (hj : j < 2 ^ Ls 14) (hko : (inst 14).main Coin.KO j = 1) :
+    ∃ ρ < 2 ^ Ls 1, (inst 1).main Fields.K_OUT ρ = 1 ∧ fOut inst pub (Ls 1) ρ = cOut inst j := by
   classical
   have h := outt_sum hL hsat hL24 (fun v => if v = cOut inst j then 1 else 0)
-  have hpos : 0 < ∑ r ∈ (Finset.range (2 ^ L)).filter (fun r => (inst 14).main Coin.KO r = 1),
+  have hpos : 0 < ∑ r ∈ (Finset.range (2 ^ Ls 14)).filter (fun r => (inst 14).main Coin.KO r = 1),
       (if cOut inst r = cOut inst j then 1 else 0) :=
     ind_sum_pos.mpr ⟨j, Finset.mem_filter.mpr ⟨Finset.mem_range.mpr hj, hko⟩, rfl⟩
   have hpos' := lt_of_lt_of_eq hpos h.symm
@@ -366,24 +366,24 @@ theorem out_match_l {j : ℕ} (hj : j < 2 ^ L) (hko : (inst 14).main Coin.KO j =
   obtain ⟨hρr, hk⟩ := Finset.mem_filter.mp hρ
   exact ⟨ρ, Finset.mem_range.mp hρr, hk, he⟩
 
-theorem out_match_r {ρ : ℕ} (hρ : ρ < 2 ^ L) (hk : (inst 1).main Fields.K_OUT ρ = 1) :
-    ∃ j < 2 ^ L, (inst 14).main Coin.KO j = 1 ∧ cOut inst j = fOut inst pub L ρ := by
+theorem out_match_r {ρ : ℕ} (hρ : ρ < 2 ^ Ls 1) (hk : (inst 1).main Fields.K_OUT ρ = 1) :
+    ∃ j < 2 ^ Ls 14, (inst 14).main Coin.KO j = 1 ∧ cOut inst j = fOut inst pub (Ls 1) ρ := by
   classical
-  have h := outt_sum hL hsat hL24 (fun v => if v = fOut inst pub L ρ then 1 else 0)
-  have hpos : 0 < ∑ r ∈ (Finset.range (2 ^ L)).filter (fun r => (inst 1).main Fields.K_OUT r = 1),
-      (if fOut inst pub L r = fOut inst pub L ρ then 1 else 0) :=
+  have h := outt_sum hL hsat hL24 (fun v => if v = fOut inst pub (Ls 1) ρ then 1 else 0)
+  have hpos : 0 < ∑ r ∈ (Finset.range (2 ^ Ls 1)).filter (fun r => (inst 1).main Fields.K_OUT r = 1),
+      (if fOut inst pub (Ls 1) r = fOut inst pub (Ls 1) ρ then 1 else 0) :=
     ind_sum_pos.mpr ⟨ρ, Finset.mem_filter.mpr ⟨Finset.mem_range.mpr hρ, hk⟩, rfl⟩
   have hpos' := lt_of_lt_of_eq hpos h
   obtain ⟨j, hj, he⟩ := ind_sum_pos.mp hpos'
   obtain ⟨hjr, hko⟩ := Finset.mem_filter.mp hj
   exact ⟨j, Finset.mem_range.mp hjr, hko, he⟩
 
-theorem in_match_l {j : ℕ} (hj : j < 2 ^ L) (hki : (inst 14).main Coin.KI j + (inst 14).main Coin.CBI j = 1) :
-    ∃ ρ < 2 ^ L, (inst 1).main Fields.K_IN ρ = 1 ∧ (inst 1).main Fields.TXI ρ = (inst 14).main Coin.TXI j ∧
+theorem in_match_l {j : ℕ} (hj : j < 2 ^ Ls 14) (hki : (inst 14).main Coin.KI j + (inst 14).main Coin.CBI j = 1) :
+    ∃ ρ < 2 ^ Ls 1, (inst 1).main Fields.K_IN ρ = 1 ∧ (inst 1).main Fields.TXI ρ = (inst 14).main Coin.TXI j ∧
       (inst 1).main Fields.START ρ = (inst 14).main Coin.START j := by
   classical
   have h := int_sum hL hsat hL24 (fun v => if v = [(inst 14).main Coin.TXI j, (inst 14).main Coin.START j] then 1 else 0)
-  have hpos : 0 < ∑ r ∈ (Finset.range (2 ^ L)).filter (fun r => (inst 14).main Coin.KI r + (inst 14).main Coin.CBI r = 1),
+  have hpos : 0 < ∑ r ∈ (Finset.range (2 ^ Ls 14)).filter (fun r => (inst 14).main Coin.KI r + (inst 14).main Coin.CBI r = 1),
       (if [(inst 14).main Coin.TXI r, (inst 14).main Coin.START r] =
         [(inst 14).main Coin.TXI j, (inst 14).main Coin.START j] then 1 else 0) :=
     ind_sum_pos.mpr ⟨j, Finset.mem_filter.mpr ⟨Finset.mem_range.mpr hj, hki⟩, rfl⟩
@@ -393,12 +393,12 @@ theorem in_match_l {j : ℕ} (hj : j < 2 ^ L) (hki : (inst 14).main Coin.KI j + 
   simp only [List.cons.injEq, and_true] at he
   exact ⟨ρ, Finset.mem_range.mp hρr, hk, he.1, he.2⟩
 
-theorem in_match_r {ρ : ℕ} (hρ : ρ < 2 ^ L) (hk : (inst 1).main Fields.K_IN ρ = 1) :
-    ∃ j < 2 ^ L, (inst 14).main Coin.KI j + (inst 14).main Coin.CBI j = 1 ∧
+theorem in_match_r {ρ : ℕ} (hρ : ρ < 2 ^ Ls 1) (hk : (inst 1).main Fields.K_IN ρ = 1) :
+    ∃ j < 2 ^ Ls 14, (inst 14).main Coin.KI j + (inst 14).main Coin.CBI j = 1 ∧
       (inst 14).main Coin.TXI j = (inst 1).main Fields.TXI ρ ∧ (inst 14).main Coin.START j = (inst 1).main Fields.START ρ := by
   classical
   have h := int_sum hL hsat hL24 (fun v => if v = [(inst 1).main Fields.TXI ρ, (inst 1).main Fields.START ρ] then 1 else 0)
-  have hpos : 0 < ∑ r ∈ (Finset.range (2 ^ L)).filter (fun r => (inst 1).main Fields.K_IN r = 1),
+  have hpos : 0 < ∑ r ∈ (Finset.range (2 ^ Ls 1)).filter (fun r => (inst 1).main Fields.K_IN r = 1),
       (if [(inst 1).main Fields.TXI r, (inst 1).main Fields.START r] =
         [(inst 1).main Fields.TXI ρ, (inst 1).main Fields.START ρ] then 1 else 0) :=
     ind_sum_pos.mpr ⟨ρ, Finset.mem_filter.mpr ⟨Finset.mem_range.mpr hρ, hk⟩, rfl⟩
@@ -423,7 +423,7 @@ theorem mem_ioRows {m r : ℕ} : r ∈ ioRows inst m ↔ r < m ∧ ((inst 1).mai
   simp [ioRows]
 
 /-- A coin row in use is a token: its start is a fields token's start, at most the block's length. -/
-theorem coin_on_tok (S : Setup inst pub L) {j : ℕ} (hj : j < 2 ^ L) (hon : Coin.onV (inst 14).main j = 1) :
+theorem coin_on_tok (S : Setup inst pub (Ls 1)) {j : ℕ} (hj : j < 2 ^ Ls 14) (hon : Coin.onV (inst 14).main j = 1) :
     ∃ ρ, ρ ∈ ioRows inst S.m ∧ (inst 1).main Fields.START ρ = (inst 14).main Coin.START j := by
   have cs := coin_sat hL hsat hL24
   rcases Coin.kinds cs hj with h | h | h | h
@@ -438,9 +438,9 @@ theorem coin_on_tok (S : Setup inst pub L) {j : ℕ} (hj : j < 2 ^ L) (hon : Coi
   · rw [h.2.2.2] at hon; exact absurd hon zero_ne_one
 
 /-- A token is a coin row in use. -/
-theorem tok_coin_on {ρ : ℕ} (hρ : ρ < 2 ^ L)
+theorem tok_coin_on {ρ : ℕ} (hρ : ρ < 2 ^ Ls 1)
     (hio : (inst 1).main Fields.K_OUT ρ = 1 ∨ (inst 1).main Fields.K_IN ρ = 1) :
-    ∃ j < 2 ^ L, Coin.onV (inst 14).main j = 1 ∧ (inst 14).main Coin.START j = (inst 1).main Fields.START ρ := by
+    ∃ j < 2 ^ Ls 14, Coin.onV (inst 14).main j = 1 ∧ (inst 14).main Coin.START j = (inst 1).main Fields.START ρ := by
   have cs := coin_sat hL hsat hL24
   rcases hio with hk | hk
   · obtain ⟨j, hj, hko, he⟩ := out_match_r hL hsat hL24 hρ hk
@@ -457,8 +457,8 @@ theorem tok_coin_on {ρ : ℕ} (hρ : ρ < 2 ^ L)
     · rw [h.2.1, h.2.2.1] at hki; simp at hki
 
 /-- A coin row in use starts within the block. -/
-theorem coin_start_le (S : Setup inst pub L) {j : ℕ} (hj : j < 2 ^ L) (hon : Coin.onV (inst 14).main j = 1) :
-    ((inst 14).main Coin.START j).val ≤ 2 ^ L := by
+theorem coin_start_le (S : Setup inst pub (Ls 1)) {j : ℕ} (hj : j < 2 ^ Ls 14) (hon : Coin.onV (inst 14).main j = 1) :
+    ((inst 14).main Coin.START j).val ≤ 2 ^ Ls 0 := by
   obtain ⟨ρ, hρ, hst⟩ := coin_on_tok hL hsat hL24 S hj hon
   obtain ⟨hρm, -⟩ := mem_ioRows.mp hρ
   have := S.hfit ρ hρm
@@ -466,7 +466,7 @@ theorem coin_start_le (S : Setup inst pub L) {j : ℕ} (hj : j < 2 ^ L) (hon : C
   rw [← hst]; omega
 
 /-- **Coin rows in use have strictly increasing starts.** -/
-theorem coin_start_strict (S : Setup inst pub L) {j : ℕ} (hj1 : j + 1 < 2 ^ L) (hon0 : Coin.onV (inst 14).main j = 1)
+theorem coin_start_strict (S : Setup inst pub (Ls 1)) {j : ℕ} (hj1 : j + 1 < 2 ^ Ls 14) (hon0 : Coin.onV (inst 14).main j = 1)
     (hon1 : Coin.onV (inst 14).main (j + 1) = 1) :
     ((inst 14).main Coin.START j).val < ((inst 14).main Coin.START (j + 1)).val := by
   have cs := coin_sat hL hsat hL24
@@ -475,7 +475,7 @@ theorem coin_start_strict (S : Setup inst pub L) {j : ℕ} (hj1 : j + 1 < 2 ^ L)
   have hb := Coin.b3N_lt hD
   have h0 := coin_start_le hL hsat hL24 S (by omega) hon0
   have h1 := coin_start_le hL hsat hL24 S hj1 hon1
-  have hLb : 2 ^ L ≤ 2 ^ 23 := Nat.pow_le_pow_right (by norm_num) hL24
+  obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
   have e : ((inst 14).main Coin.START (j + 1)).val = ((inst 14).main Coin.START j).val + 1 + Coin.b3N (inst 14).main Coin.D (j + 1) := by
     apply Coin.lift _ (ZMod.val_lt _) (lt_of_lt_of_le (show ((inst 14).main Coin.START j).val + 1 +
       Coin.b3N (inst 14).main Coin.D (j + 1) < 2 ^ 25 by omega) (by unfold P; norm_num))
@@ -484,8 +484,8 @@ theorem coin_start_strict (S : Setup inst pub L) {j : ℕ} (hj1 : j + 1 < 2 ^ L)
 
 /-- **The alignment.** The coin rows in use are `[0, e)` with `e` the number of fields input and output
 tokens, and coin row `j` starts where the `j`-th such token does. -/
-theorem coin_align (S : Setup inst pub L) :
-    ∃ e, e < 2 ^ L ∧ (∀ j < 2 ^ L, Coin.onV (inst 14).main j = 1 ↔ j < e) ∧ e = (ioRows inst S.m).length ∧
+theorem coin_align (S : Setup inst pub (Ls 1)) :
+    ∃ e, e < 2 ^ Ls 14 ∧ (∀ j < 2 ^ Ls 14, Coin.onV (inst 14).main j = 1 ↔ j < e) ∧ e = (ioRows inst S.m).length ∧
       ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0) := by
   have cs := coin_sat hL hsat hL24
   obtain ⟨e, he, hon⟩ := Coin.on_prefix cs (by positivity)
@@ -530,7 +530,7 @@ theorem coin_align (S : Setup inst pub L) :
   exact ZMod.val_injective _ (heq j (by omega)).symm
 
 /-- Token starts identify input and output rows. -/
-theorem io_start_inj (S : Setup inst pub L) {ρ ρ' : ℕ} (h1 : ρ ∈ ioRows inst S.m) (h2 : ρ' ∈ ioRows inst S.m)
+theorem io_start_inj (S : Setup inst pub (Ls 1)) {ρ ρ' : ℕ} (h1 : ρ ∈ ioRows inst S.m) (h2 : ρ' ∈ ioRows inst S.m)
     (he : (inst 1).main Fields.START ρ = (inst 1).main Fields.START ρ') : ρ = ρ' := by
   obtain ⟨m1, k1⟩ := mem_ioRows.mp h1
   obtain ⟨m2, k2⟩ := mem_ioRows.mp h2
@@ -542,19 +542,19 @@ theorem io_start_inj (S : Setup inst pub L) {ρ ρ' : ℕ} (h1 : ρ ∈ ioRows i
 /-- **Each coin row is its token.** For coin row `j < e` and the `j`-th token row `ρ`: an output row is an
 output token with the same tuple; an input or coinbase-input row is an input token with the same
 transaction. -/
-theorem coin_row_tok (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
-    (hon : ∀ j < 2 ^ L, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
+theorem coin_row_tok (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
+    (hon : ∀ j < 2 ^ Ls 14, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
     (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
     {j : ℕ} (hj : j < e) :
     ((inst 14).main Coin.KO j = 1 → (inst 1).main Fields.K_OUT ((ioRows inst S.m).getD j 0) = 1 ∧
-        cOut inst j = fOut inst pub L ((ioRows inst S.m).getD j 0)) ∧
+        cOut inst j = fOut inst pub (Ls 1) ((ioRows inst S.m).getD j 0)) ∧
       ((inst 14).main Coin.KI j + (inst 14).main Coin.CBI j = 1 →
         (inst 1).main Fields.K_IN ((ioRows inst S.m).getD j 0) = 1 ∧
           (inst 14).main Coin.TXI j = (inst 1).main Fields.TXI ((ioRows inst S.m).getD j 0)) := by
   set ρ := (ioRows inst S.m).getD j 0 with hρdef
   have hρ : ρ ∈ ioRows inst S.m := by
     rw [hρdef, List.getD_eq_getElem _ _ (by omega)]; exact List.getElem_mem _
-  have hj2 : j < 2 ^ L := by omega
+  have hj2 : j < 2 ^ Ls 14 := by omega
   refine ⟨fun hko => ?_, fun hki => ?_⟩
   · obtain ⟨ρ', hρ', hk, hT⟩ := out_match_l hL hsat hL24 hj2 hko
     have hs' : (inst 1).main Fields.START ρ' = (inst 1).main Fields.START ρ := by
@@ -574,22 +574,22 @@ theorem coin_row_tok (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
 /-! ### Txids -/
 
 /-- `pub 1` is the block's transaction count. -/
-theorem pub1_N (S : Setup inst pub L) : pub 1 = (S.b.txs.length : F) := by
+theorem pub1_N (S : Setup inst pub (Ls 1)) : pub 1 = (S.b.txs.length : F) := by
   have fs := fields_sat' hL hsat hL24
-  have hn0 : 0 < 2 ^ L := by positivity
+  have hn0 : 0 < 2 ^ Ls 1 := by positivity
   have := fs 0 hn0 (.mul Fields.first (.sub (Fields.k Fields.VAL) (.pub 1))) (by simp [Fields.constraints, Fields.pubC])
   simp only [Expr.eval, Fields.ev_first hn0, if_true, one_mul, Fields.ev_k hn0, sub_eq_zero] at this
   rw [← this, S.hlenv, ZMod.natCast_zmod_val]
 
 /-- **An output row's txid.** Its sixteen txid limbs are the 16-bit halves of a second-hash output that is
 the txid of transaction `TXI`. -/
-theorem coin_txid (S : Setup inst pub L) {j t : ℕ} (hj : j < 2 ^ L) (hko : (inst 14).main Coin.KO j = 1)
+theorem coin_txid (S : Setup inst pub (Ls 1)) {j t : ℕ} (hj : j < 2 ^ Ls 14) (hko : (inst 14).main Coin.KO j = 1)
     (ht : (inst 14).main Coin.TXI j = (t : F)) (htN : t < S.b.txs.length) :
-    ∃ q tx, 72 * q + 72 ≤ 2 ^ L ∧ S.b.txs[t]? = some tx ∧
+    ∃ q tx, 72 * q + 72 ≤ 2 ^ Ls 3 ∧ S.b.txs[t]? = some tx ∧
       Spec.Block.stateBytes (outputAt (inst 3).main (72 * q)) = Spec.Block.txid tx ∧
       ∀ i < 16, (inst 14).main (Coin.TLB i) j =
         ((Sha256.half16 (Spec.Bitcoin.stateWord (outputAt (inst 3).main (72 * q)) (i / 2)) (i % 2) : ℕ) : F) := by
-  have hLb : 2 ^ L ≤ 2 ^ 23 := Nat.pow_le_pow_right (by norm_num) hL24
+  obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
   have hN25 := S.hN25
   -- the coin's digest use: id `2·TXI + 1`, the txid limbs
   have hm : siteMult hashSys inst pub (14, j, 2) = -1 := by
@@ -621,14 +621,14 @@ theorem coin_txid (S : Setup inst pub L) {j t : ℕ} (hj : j < 2 ^ L) (hko : (in
 
 /-! ### Fingerprints -/
 
-theorem fpwalk_sat' : ∀ r < 2 ^ L, ∀ c ∈ FpWalk.constraints, c.eval (2 ^ L) FpWalk.preCols pub (inst 12).main r = 0 :=
+theorem fpwalk_sat' : ∀ r < 2 ^ Ls 12, ∀ c ∈ FpWalk.constraints, c.eval (2 ^ Ls 12) FpWalk.preCols pub (inst 12).main r = 0 :=
   hash_fpwalk_sat hL hsat
 
 /-- **A fingerprint use is a segment's last row.** A use of relation 22 (`fp`) with multiplicity `−1` is
 matched by the walker's yield at a row `r'` with `LST = 1` and the same tuple. -/
 theorem fp_yield {i r k : ℕ} (hs : ((i, r, k) : Site) ∈ sites hashSys inst) (hu : isUse i k = true)
     (hrel : siteRel hashSys (i, r, k) = FpWalk.REL_FP) (hm : siteMult hashSys inst pub (i, r, k) = -1) :
-    ∃ r' < 2 ^ L, (inst 12).main FpWalk.LST r' = 1 ∧
+    ∃ r' < 2 ^ Ls 12, (inst 12).main FpWalk.LST r' = 1 ∧
       [(inst 12).main FpWalk.STR r', (inst 12).main FpWalk.SID r', (inst 12).main FpWalk.LEN r',
         (inst 12).main FpWalk.H r', (inst 12).main (FpWalk.H + 1) r', (inst 12).main (FpWalk.H + 2) r',
         (inst 12).main (FpWalk.H + 3) r'] = siteVals hashSys inst pub (i, r, k) := by
@@ -649,7 +649,7 @@ theorem fp_yield {i r k : ℕ} (hs : ((i, r, k) : Site) ∈ sites hashSys inst) 
 
 /-- **A raw segment starts at its id.** The walker's first row of a raw segment (`STR = 0`) uses
 `seg(0, SID, POS, REM)`, which only the coin's output rows yield, as `(0, START, START, LEN)`. -/
-theorem seg_raw_start {s : ℕ} (hs : s < 2 ^ L) (hf : (inst 12).main FpWalk.FST s = 1)
+theorem seg_raw_start {s : ℕ} (hs : s < 2 ^ Ls 12) (hf : (inst 12).main FpWalk.FST s = 1)
     (hstr : (inst 12).main FpWalk.STR s = 0) :
     (inst 12).main FpWalk.POS s = (inst 12).main FpWalk.SID s := by
   have hsite := site_mem hL (i := 12) (by decide) hs (k := 2) (by simp [hashSys, FpWalk.fpwalk, FpWalk.lookups])
@@ -681,7 +681,7 @@ theorem seg_raw_start {s : ℕ} (hs : s < 2 ^ L) (hf : (inst 12).main FpWalk.FST
     rw [← hsv.2.2.1, ← hsv.2.1]
 
 /-- **A raw segment's bytes are the block's.** -/
-theorem fp_byte {q : ℕ} (hq : q < 2 ^ L) (hon : (inst 12).main FpWalk.ON q = 1) (hstr : (inst 12).main FpWalk.STR q = 0) :
+theorem fp_byte {q : ℕ} (hq : q < 2 ^ Ls 12) (hon : (inst 12).main FpWalk.ON q = 1) (hstr : (inst 12).main FpWalk.STR q = 0) :
     ((inst 12).main FpWalk.POS q).val < (Rb inst pub).length ∧
       ((inst 12).main FpWalk.B q).val = ((Rb inst pub).getD ((inst 12).main FpWalk.POS q).val 0).toNat := by
   have hsite := site_mem hL (i := 12) (by decide) hq (k := 0) (by simp [hashSys, FpWalk.fpwalk, FpWalk.lookups])
@@ -694,7 +694,7 @@ theorem fp_byte {q : ℕ} (hq : q < 2 ^ L) (hon : (inst 12).main FpWalk.ON q = 1
 open StarkedAir.Spec.QM31 (QM toQ emb) in
 /-- **An output's fingerprint** is the Horner fingerprint (at the public `γ`) of the block bytes
 `[START, START + SLEN)`. -/
-theorem coin_fp_out (S : Setup inst pub L) {j : ℕ} (hj : j < 2 ^ L) (hko : (inst 14).main Coin.KO j = 1) :
+theorem coin_fp_out (S : Setup inst pub (Ls 1)) {j : ℕ} (hj : j < 2 ^ Ls 14) (hko : (inst 14).main Coin.KO j = 1) :
     ∃ len : ℕ, (inst 14).main Coin.SLEN j = (len : F) ∧ ((inst 14).main Coin.START j).val + len ≤ (Rb inst pub).length ∧
       toQ ⟨(inst 14).main Coin.FH j, (inst 14).main (Coin.FH + 1) j, (inst 14).main (Coin.FH + 2) j,
         (inst 14).main (Coin.FH + 3) j⟩ =
@@ -726,7 +726,7 @@ theorem coin_fp_out (S : Setup inst pub L) {j : ℕ} (hj : j < 2 ^ L) (hko : (in
   have hstr0 : (inst 12).main FpWalk.STR s0 = 0 := by rw [(hrow s0 le_rfl hse).2.1, tstr]
   have hpos0 : (inst 12).main FpWalk.POS s0 = (inst 14).main Coin.START j := by
     rw [seg_raw_start hL hsat hL24 (by omega) hfs hstr0, (hrow s0 le_rfl hse).2.2.1, tsid]
-  have hLb : 2 ^ L ≤ 2 ^ 23 := Nat.pow_le_pow_right (by norm_num) hL24
+  obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
   have hRl := len_R hL hsat hL24
   -- each byte
   have hbyte : ∀ i < len, ((inst 14).main Coin.START j).val + i < (Rb inst pub).length ∧
@@ -737,7 +737,7 @@ theorem coin_fp_out (S : Setup inst pub L) {j : ℕ} (hj : j < 2 ^ L) (hko : (in
     rw [tstr] at hstr
     obtain ⟨hlt, hb⟩ := fp_byte hL hsat hL24 (q := s0 + i) (by omega) hon hstr
     have hst := coin_start_le hL hsat hL24 S hj (by rcases Coin.kinds cs hj with h | h | h | h <;> simp_all)
-    have hlenb : len ≤ 2 ^ L := by omega
+    have hlenb : len ≤ 2 ^ Ls 12 := by omega
     have hpv : ((inst 12).main FpWalk.POS (s0 + i)).val = ((inst 14).main Coin.START j).val + i := by
       have e : (inst 12).main FpWalk.POS (s0 + i) = ((((inst 14).main Coin.START j).val + i : ℕ) : F) := by
         rw [hpos, hpos0, show s0 + i - s0 = i by omega]; push_cast; rw [Coin.cast_val]
@@ -759,13 +759,13 @@ theorem coin_fp_out (S : Setup inst pub L) {j : ℕ} (hj : j < 2 ^ L) (hko : (in
 
 /-! ### Claims: undo records -/
 
-theorem urec_sat' : ∀ r < 2 ^ L, ∀ c ∈ URec.constraints, c.eval (2 ^ L) URec.preCols pub (inst 13).main r = 0 :=
+theorem urec_sat' : ∀ r < 2 ^ Ls 13, ∀ c ∈ URec.constraints, c.eval (2 ^ Ls 13) URec.preCols pub (inst 13).main r = 0 :=
   hash_urec_sat hL hsat
 
 /-- **An input's claim is undo record `J`.** The coin's `urec(J, code, amount, index)` use is URec row `J`
 (an on row, its `J` the row index), with the same code and amount limbs and creating-transaction index. -/
-theorem coin_urec {j : ℕ} (hj : j < 2 ^ L) (hki : (inst 14).main Coin.KI j = 1) :
-    ∃ rj < 2 ^ L, (inst 13).main URec.ON rj = 1 ∧ (inst 14).main Coin.J j = (inst 13).main URec.J rj ∧
+theorem coin_urec {j : ℕ} (hj : j < 2 ^ Ls 14) (hki : (inst 14).main Coin.KI j = 1) :
+    ∃ rj < 2 ^ Ls 13, (inst 13).main URec.ON rj = 1 ∧ (inst 14).main Coin.J j = (inst 13).main URec.J rj ∧
       (inst 14).main Coin.CLO j = (inst 13).main (URec.C 0) rj + 256 * (inst 13).main (URec.C 1) rj ∧
       (inst 14).main Coin.CHI j = (inst 13).main (URec.C 2) rj + 256 * (inst 13).main (URec.C 3) rj ∧
       (inst 14).main Coin.VL j = (inst 13).main (URec.V 0) rj + 256 * (inst 13).main (URec.V 1) rj +
@@ -808,21 +808,21 @@ theorem coin_urec {j : ℕ} (hj : j < 2 ^ L) (hki : (inst 14).main Coin.KI j = 1
   exact ⟨a.symm, b.symm, c.symm, d.symm, e.symm, g.symm⟩
 
 /-- A URec on row's `J` is its index. -/
-theorem urec_j {r : ℕ} (hr : r < 2 ^ L) (hon : (inst 13).main URec.ON r = 1) : (inst 13).main URec.J r = (r : F) := by
-  obtain ⟨e, -, hon', hj, -⟩ := URec.rows_sound (urec_sat' hL hsat hL24) (n := 2 ^ L) (by positivity)
+theorem urec_j {r : ℕ} (hr : r < 2 ^ Ls 13) (hon : (inst 13).main URec.ON r = 1) : (inst 13).main URec.J r = (r : F) := by
+  obtain ⟨e, -, hon', hj, -⟩ := URec.rows_sound (urec_sat' hL hsat hL24) (n := 2 ^ Ls 13) (by positivity)
   exact hj r ((hon' r hr).mp hon)
 
 /-- URec rows with the same `J` are the same row. -/
-theorem urec_j_inj {r r' : ℕ} (hr : r < 2 ^ L) (hr' : r' < 2 ^ L) (h1 : (inst 13).main URec.ON r = 1)
+theorem urec_j_inj {r r' : ℕ} (hr : r < 2 ^ Ls 13) (hr' : r' < 2 ^ Ls 13) (h1 : (inst 13).main URec.ON r = 1)
     (h2 : (inst 13).main URec.ON r' = 1) (he : (inst 13).main URec.J r = (inst 13).main URec.J r') : r = r' := by
   rw [urec_j hL hsat hL24 hr h1, urec_j hL hsat hL24 hr' h2] at he
-  have hLb : 2 ^ L ≤ 2 ^ 23 := Nat.pow_le_pow_right (by norm_num) hL24
+  obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
   exact Coin.lift he (by unfold P; omega) (by unfold P; omega)
 
 open StarkedAir.Spec.QM31 (QM toQ emb) in
 /-- **An input's fingerprint** is the Horner fingerprint of undo record `J`'s `serTxOut` bytes:
 the undo bytes from `S + 9`, `TL` of them, for the URec row of record `J`. -/
-theorem coin_fp_in {j : ℕ} (hj : j < 2 ^ L) (hki : (inst 14).main Coin.KI j = 1) {rj : ℕ} (hrj : rj < 2 ^ L)
+theorem coin_fp_in {j : ℕ} (hj : j < 2 ^ Ls 14) (hki : (inst 14).main Coin.KI j = 1) {rj : ℕ} (hrj : rj < 2 ^ Ls 13)
     (hon : (inst 13).main URec.ON rj = 1) (hJ : (inst 14).main Coin.J j = (inst 13).main URec.J rj) :
     ∃ len : ℕ, (inst 13).main URec.TL rj = (len : F) ∧ (inst 14).main Coin.SLEN j = (len : F) ∧
       ∃ u0 : ℕ, (inst 13).main URec.S rj + 9 = (u0 : F) ∧ u0 + len ≤ (pub 8).val ∧
@@ -851,7 +851,7 @@ theorem coin_fp_in {j : ℕ} (hj : j < 2 ^ L) (hki : (inst 14).main Coin.KI j = 
   obtain ⟨s0, hse, hfs, hrow, hrem, hlen, hh⟩ := FpWalk.seg_sound fw hr' hl
   set len := r' - s0 + 1 with hlendef
   -- the segment's start: URec's yield `seg(1, J, S + 9, TL)` of the same record
-  have hs0 : s0 < 2 ^ L := by omega
+  have hs0 : s0 < 2 ^ Ls 12 := by omega
   have hsite2 := site_mem hL (i := 12) (by decide) hs0 (k := 2) (by simp [hashSys, FpWalk.fpwalk, FpWalk.lookups])
   have hm2 : siteMult hashSys inst pub (12, s0, 2) = -1 := by
     simp [siteMult, siteEval, siteLookup, hashSys, hL 12 (by decide), FpWalk.fpwalk, FpWalk.lookups, Expr.eval,
@@ -888,14 +888,14 @@ theorem coin_fp_in {j : ℕ} (hj : j < 2 ^ L) (hki : (inst 14).main Coin.KI j = 
   have hsame : r'' = rj := urec_j_inj hL hsat hL24 hr'' hrj hon'' hon (by rw [hJ'', hJ])
   subst hsame
   -- the bytes
-  have hLb : 2 ^ L ≤ 2 ^ 23 := Nat.pow_le_pow_right (by norm_num) hL24
+  obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
   have hU := undo_len hL hsat hL24
   have hbyte : ∀ i < len, ∃ u : ℕ, u < (pub 8).val ∧ (inst 12).main FpWalk.POS (s0 + i) = (u : F) ∧
       (inst 12).main FpWalk.B (s0 + i) = ((((Ub inst pub).getD u 0).toNat : ℕ) : F) := by
     intro i hi
     obtain ⟨hon, hstr, -, -, -⟩ := hrow (s0 + i) (by omega) (by omega)
     rw [tstr] at hstr
-    have hq : s0 + i < 2 ^ L := by omega
+    have hq : s0 + i < 2 ^ Ls 12 := by omega
     have hsq := site_mem hL (i := 12) (by decide) hq (k := 1) (by simp [hashSys, FpWalk.fpwalk, FpWalk.lookups])
     obtain ⟨u, hu, hp, hb⟩ := undo_read hL hsat hL24 hsq rfl rfl (p := (inst 12).main FpWalk.POS (s0 + i))
       (b := (inst 12).main FpWalk.B (s0 + i))
@@ -935,7 +935,7 @@ theorem prevout_lookup : ∀ i < 36, Coin.lookups.getD (7 + i) ⟨0, .const 0, [
   intro i hi; interval_cases i <;> rfl
 
 /-- **An input's prevout bytes** are the block's 36 bytes from its start. -/
-theorem coin_prevout {j : ℕ} (hj : j < 2 ^ L) (hki : (inst 14).main Coin.KI j = 1) {i : ℕ} (hi : i < 36) :
+theorem coin_prevout {j : ℕ} (hj : j < 2 ^ Ls 14) (hki : (inst 14).main Coin.KI j = 1) {i : ℕ} (hi : i < 36) :
     ((inst 14).main Coin.START j + (i : F)).val < (Rb inst pub).length ∧
       ((inst 14).main (Coin.PB i) j).val = ((Rb inst pub).getD ((inst 14).main Coin.START j + (i : F)).val 0).toNat := by
   have hlen : 7 + i < (hashSys.comp 14).lookups.length := by
@@ -954,7 +954,7 @@ theorem coin_prevout {j : ℕ} (hj : j < 2 ^ L) (hki : (inst 14).main Coin.KI j 
       StarkedAir.Sha256.eval_cst, wrap_zero hj]
 
 /-- **An output's first script byte** (nonempty script) is the block's byte at the script's start. -/
-theorem coin_script_byte {j : ℕ} (hj : j < 2 ^ L) (hko : (inst 14).main Coin.KO j = 1)
+theorem coin_script_byte {j : ℕ} (hj : j < 2 ^ Ls 14) (hko : (inst 14).main Coin.KO j = 1)
     (hzs : (inst 14).main Coin.ZS j = 0) :
     ((inst 14).main Coin.SSC j).val < (Rb inst pub).length ∧
       ((inst 14).main Coin.SB j).val = ((Rb inst pub).getD ((inst 14).main Coin.SSC j).val 0).toNat := by
@@ -1011,7 +1011,7 @@ theorem urec_uidx_lt : ∀ c < 17, URec.uidx c < URec.lookups.length := by
 /-- **An undo record's bytes.** On URec row `r`, header and amount byte `c` (code `0–3`, creating
 transaction index `4–6`, length `7–8`, amount `9–16`) is the undo byte at `S + c` (positions inside the
 undo stream). -/
-theorem urec_bytes {r : ℕ} (hr : r < 2 ^ L) (hon : (inst 13).main URec.ON r = 1) {c : ℕ} (hc : c < 17) :
+theorem urec_bytes {r : ℕ} (hr : r < 2 ^ Ls 13) (hon : (inst 13).main URec.ON r = 1) {c : ℕ} (hc : c < 17) :
     ∃ u, u < (pub 8).val ∧ (inst 13).main URec.S r + (c : F) = (u : F) ∧
       ((inst 13).main (URec.ucol c) r).val = ((Ub inst pub).getD u 0).toNat := by
   have hpre : (hashSys.comp 13).air.pre = URec.preCols := rfl
@@ -1039,12 +1039,12 @@ theorem urec_bytes {r : ℕ} (hr : r < 2 ^ L) (hon : (inst 13).main URec.ON r = 
 
 /-- A row before the padding is an input or output token exactly when it is of kind `K_IN` or `K_OUT`,
 and a lock-time token exactly when it is of kind `K_LOCK`. -/
-theorem tok_kinds (S : Setup inst pub L) {r : ℕ} (hr : r < S.m) :
+theorem tok_kinds (S : Setup inst pub (Ls 1)) {r : ℕ} (hr : r < S.m) :
     ((Fields.tokOf (inst 1).main (Rb inst pub) r).isIo = true ↔
       ((inst 1).main Fields.K_OUT r = 1 ∨ (inst 1).main Fields.K_IN r = 1)) ∧
     ((Fields.tokOf (inst 1).main (Rb inst pub) r).isLock = true ↔ (inst 1).main Fields.K_LOCK r = 1) := by
   have fs := fields_sat' hL hsat hL24
-  have hrn : r < 2 ^ L := by have := S.hmn; omega
+  have hrn : r < 2 ^ Ls 1 := by have := S.hmn; omega
   obtain ⟨a, ha, h1⟩ := Fields.kind_exists fs hrn
   have kat := Fields.kinds_at fs hrn ha h1
   have hpad := S.hnp r hr
@@ -1056,7 +1056,7 @@ theorem tok_kinds (S : Setup inst pub L) {r : ℕ} (hr : r < S.m) :
       Fields.K_WITEM, Fields.K_LOCK, Spec.Block.Tok.isIo, Spec.Block.Tok.isLock]
 
 /-- **The fields' tagged tokens**: each input or output row with its lock-time count (its `TXI`). -/
-theorem fields_tagged (S : Setup inst pub L) :
+theorem fields_tagged (S : Setup inst pub (Ls 1)) :
     Spec.Block.tagged 0 (Fields.toksFrom (inst 1).main (Rb inst pub) S.m 0) =
       (ioRows inst S.m).map fun ρ => (Fields.locks (inst 1).main ρ, Fields.tokOf (inst 1).main (Rb inst pub) ρ) := by
   have e : Fields.toksFrom (inst 1).main (Rb inst pub) S.m 0 = (List.range S.m).map (Fields.tokOf (inst 1).main (Rb inst pub)) := by
@@ -1092,8 +1092,8 @@ theorem fields_tagged (S : Setup inst pub L) :
 /-- **A coin row's transaction and position.** Coin row `j` (in use) is token `q` of transaction `t`'s
 input/output tokens, with `TXI = t`: an output row's token describes output `q − |vin|`, an input row's
 token input `q`. -/
-theorem coin_row_tx (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
-    (hon : ∀ j < 2 ^ L, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
+theorem coin_row_tx (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
+    (hon : ∀ j < 2 ^ Ls 14, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
     (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
     {parts : List (List Spec.Block.Tok)} (hf : List.Forall₂ Spec.Block.IoTx S.b.txs parts)
     (htg : Spec.Block.tagged 0 (Fields.toksFrom (inst 1).main (Rb inst pub) S.m 0) = Spec.Block.tagParts 0 parts)
@@ -1137,13 +1137,13 @@ theorem coin_row_tx (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
   -- the coin row's TXI is its token's lock count
   have hρ : io.getD j 0 ∈ io := by rw [List.getD_eq_getElem _ _ (by omega)]; exact List.getElem_mem _
   obtain ⟨hρm, -⟩ := mem_ioRows.mp hρ
-  have hρn : io.getD j 0 < 2 ^ L := by have := S.hmn; omega
+  have hρn : io.getD j 0 < 2 ^ Ls 1 := by have := S.hmn; omega
   have htxi : (inst 1).main Fields.TXI (io.getD j 0) = (t : F) := by
     rw [Fields.txi_count fs _ hρn, hlocks]
   have htxi' : (inst 1).main Fields.TXI ((ioRows inst S.m)[j]?.getD 0) = (t : F) := by
     rw [← List.getD_eq_getElem?_getD]; exact htxi
   have hrt := coin_row_tok hL hsat hL24 S he hon hlen hst hj
-  have hj2 : j < 2 ^ L := by omega
+  have hj2 : j < 2 ^ Ls 14 := by omega
   have hcoinTXI : (inst 14).main Coin.TXI j = (t : F) := by
     have cs' := cs
     rcases Coin.kinds cs hj2 with h | h | h | h
@@ -1261,15 +1261,15 @@ theorem part_len {txs : List Spec.Block.Tx} {parts : List (List Spec.Block.Tok)}
   rw [List.getD_eq_getElem _ _ (by omega), he, List.length_append, hi.length_eq, ho.length_eq]
 
 /-- Every transaction has an input. -/
-theorem vin_pos (S : Setup inst pub L) {t : ℕ} {tx : Spec.Block.Tx} (htx : S.b.txs[t]? = some tx) :
+theorem vin_pos (S : Setup inst pub (Ls 1)) {t : ℕ} {tx : Spec.Block.Tx} (htx : S.b.txs[t]? = some tx) :
     1 ≤ tx.vin.length := by
   have hwf := (Spec.Block.toksBlock_sound S.htok).1.2.2 tx (List.mem_of_getElem? htx)
   have := hwf.2.2.1
   exact List.length_pos_of_ne_nil this
 
 /-- **An output row's index** is the output's index in its transaction. -/
-theorem coin_vout (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
-    (hon : ∀ j < 2 ^ L, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
+theorem coin_vout (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
+    (hon : ∀ j < 2 ^ Ls 14, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
     (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
     {parts : List (List Spec.Block.Tok)} (hf : List.Forall₂ Spec.Block.IoTx S.b.txs parts)
     (htg : Spec.Block.tagged 0 (Fields.toksFrom (inst 1).main (Rb inst pub) S.m 0) = Spec.Block.tagParts 0 parts) :
@@ -1307,7 +1307,7 @@ theorem coin_vout (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
     rcases Nat.eq_or_lt_of_le hvq with heq | hlt
     · -- the transaction's first output: the previous row is an input
       have hko0' : (inst 14).main Coin.KO p = 0 := by
-        rcases Coin.kinds cs (show p < 2 ^ L by omega) with h | h | h | h
+        rcases Coin.kinds cs (show p < 2 ^ Ls 14 by omega) with h | h | h | h
         · exact absurd (hko1 h.1).1 (by omega)
         · exact h.1
         · exact h.1
@@ -1315,7 +1315,7 @@ theorem coin_vout (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
       rw [hvs, hko0', zero_mul, ← heq, Nat.sub_self, Nat.cast_zero]
     · -- a later output: the previous row is the previous output
       have hkop : (inst 14).main Coin.KO p = 1 := by
-        rcases Coin.kinds cs (show p < 2 ^ L by omega) with h | h | h | h
+        rcases Coin.kinds cs (show p < 2 ^ Ls 14 by omega) with h | h | h | h
         · exact h.1
         · exact absurd (hki1 (by rw [h.2.1, h.2.2.1]; simp)).1 (by omega)
         · exact absurd (hki1 (by rw [h.2.1, h.2.2.1]; simp)).1 (by omega)
@@ -1326,8 +1326,8 @@ theorem coin_vout (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
 
 /-- **A coin row's kind is its position's**: an output iff `q ≥ |vin|`; a non-coinbase input iff `q < |vin|`
 in a transaction `t ≥ 1`; the coinbase input iff `q < |vin|` in transaction 0. -/
-theorem coin_kind_pos (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
-    (hon : ∀ j < 2 ^ L, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
+theorem coin_kind_pos (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
+    (hon : ∀ j < 2 ^ Ls 14, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
     (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
     {parts : List (List Spec.Block.Tok)} (hf : List.Forall₂ Spec.Block.IoTx S.b.txs parts)
     (htg : Spec.Block.tagged 0 (Fields.toksFrom (inst 1).main (Rb inst pub) S.m 0) = Spec.Block.tagParts 0 parts)
@@ -1337,14 +1337,14 @@ theorem coin_kind_pos (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
       ((inst 14).main Coin.KI j = 1 ↔ q < tx.vin.length ∧ 1 ≤ t) ∧
       ((inst 14).main Coin.CBI j = 1 ↔ q < tx.vin.length ∧ t = 0) := by
   have cs := coin_sat hL hsat hL24
-  have hj2 : j < 2 ^ L := by omega
+  have hj2 : j < 2 ^ Ls 14 := by omega
   obtain ⟨t0, q0, tx0, htx0, htxi, hjq0, hq0, hko, hki⟩ := coin_row_tx hL hsat hL24 S he hon hlen hst hf htg hj
   obtain ⟨hpl, hpe⟩ := part_len hf htx
   obtain ⟨hpl0, hpe0⟩ := part_len hf htx0
   obtain ⟨rfl, rfl⟩ := decomp_unique parts hpl hpl0 (by omega) (by omega) (hjq.symm.trans hjq0)
   rw [htx] at htx0; obtain rfl := Option.some.inj htx0
-  have htN : t < 2 ^ L := by have := (List.getElem?_eq_some_iff.mp htx).1; have := S.hN25; omega
-  have hLb : 2 ^ L ≤ 2 ^ 23 := Nat.pow_le_pow_right (by norm_num) hL24
+  have htN : t < 2 ^ Ls 1 := by have := (List.getElem?_eq_some_iff.mp htx).1; have := S.hN25; omega
+  obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
   have ht0 : (t : F) = 0 ↔ t = 0 := by
     constructor
     · intro h; exact Coin.lift (a := t) (b := 0) (by simpa using h) (by unfold P; omega) (by unfold P; norm_num)
@@ -1383,8 +1383,8 @@ def inBefore (txs : List Spec.Block.Tx) (t q : ℕ) : ℕ :=
   ((List.range t).map fun t' => if 1 ≤ t' then vinLen txs t' else 0).sum + (if 1 ≤ t then min q (vinLen txs t) else 0)
 
 /-- **An input row's record index** is the number of non-coinbase inputs before it. -/
-theorem coin_J (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
-    (hon : ∀ j < 2 ^ L, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
+theorem coin_J (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
+    (hon : ∀ j < 2 ^ Ls 14, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
     (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
     {parts : List (List Spec.Block.Tok)} (hf : List.Forall₂ Spec.Block.IoTx S.b.txs parts)
     (htg : Spec.Block.tagged 0 (Fields.toksFrom (inst 1).main (Rb inst pub) S.m 0) = Spec.Block.tagParts 0 parts) :
@@ -1451,7 +1451,7 @@ theorem coin_J (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
           rw [min_eq_left (by omega)]; omega
         rw [hn]; push_cast; ring
       · have hki0 : (inst 14).main Coin.KI p = 0 := by
-          rcases Coin.bool_col cs (c := Coin.KI) (by simp) (show p < 2 ^ L by omega) with h | h
+          rcases Coin.bool_col cs (c := Coin.KI) (by simp) (show p < 2 ^ Ls 14 by omega) with h | h
           · exact h
           · exact absurd h hki
         rw [hki0, add_zero]
@@ -1475,7 +1475,7 @@ theorem coin_J (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
           rw [min_eq_left (by omega), min_eq_left (by omega)]; omega
         rw [hn]; push_cast; ring
       · have hki0 : (inst 14).main Coin.KI p = 0 := by
-          rcases Coin.bool_col cs (c := Coin.KI) (by simp) (show p < 2 ^ L by omega) with h | h
+          rcases Coin.bool_col cs (c := Coin.KI) (by simp) (show p < 2 ^ Ls 14 by omega) with h | h
           · exact h
           · exact absurd h hki
         rw [hki0, add_zero]
