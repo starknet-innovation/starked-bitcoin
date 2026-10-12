@@ -87,7 +87,16 @@ rows ranging over `2^(Ls i)` and its row valuation at that size. `StarkSoundV (f
 
 ## Status
 
-- Composition: `HookOk`, `partFold_soundV`, `sys_soundV` (milestone 2).
-- Statement: `stmtWordsV`, `statement_soundV` (milestone 2).
-- End to end: `instOfV`, `StarkSoundV`, `plain_soundV` (milestone 2).
-- Leaf / tree / forest keyed by profile (milestone 3).
+- **Done (milestone 2):**
+  - composition: `HookOk`, `partFold_soundV`, `sys_soundV`;
+  - statement: `stmtWordsV`, `Hook4Ok`, `statement_soundV`;
+  - end to end: `instOfV`, `StarkSoundV`, `plain_soundV`;
+  - DEEP periodicity flags: `deepPer`, `deep_leaf_per`.
+- **Done (milestone 3): leaf, tree and forest.**
+  - **Generic over the per-block statement:** `SumOkP ok`, `LeafOutP ok`, `tree_soundP`,
+    `forest_soundP`. `forest_epochV` gives the epoch hypotheses with a size per block and component.
+  - **Leaf keys:** `Tree.leaf k` and `leafH : ℕ → …` already take an arbitrary key. A `(L, profile)` key is
+    any injective encoding into `ℕ`, e.g. `Nat.pair L profile` or `L + 32·profile`. `block_forest.zig` must
+    use the same encoding in `expected`.
+  - **Mixing leaf kinds:** uniform leaves (`LeafOut`) and lifted leaves can share one tree under
+    `LeafOutP BlockPubOk'` (`LeafOut.toV`, `Trust.mono`).

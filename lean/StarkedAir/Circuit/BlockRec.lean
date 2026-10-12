@@ -48,7 +48,7 @@ namespace StarkedAir.Circuit.BlockRec
 
 open StarkedAir StarkedAir.Circuit StarkedAir.Block Q Spec.Blake2s
 open StarkedAir.Circuit.BlockNode
-open StarkedAir.Circuit.BlockTree (SumOk leafVec rngOf Linked' forest_rng)
+open StarkedAir.Circuit.BlockTree (SumOk SumOkP leafVec rngOf Linked' forest_rng forest_rngP)
 
 /-! ### Digests, keys, collisions -/
 
@@ -121,7 +121,8 @@ theorem rngOf_congr {v w : ℕ → F} (h : ∀ i < NSUM, v i = w i) (ℓ : ℕ) 
   simp only [rngOf, h 0 (by decide), h 6 (by decide), q 2 (by decide), q 7 (by decide), q 11 (by decide),
     q 15 (by decide)]
 
-theorem sumOk_congr {v w : ℕ → F} (h : ∀ i < NSUM, v i = w i) (hv : SumOk v) : SumOk w := by
+/-- `sumOk_congr` for any `ok`. -/
+theorem sumOk_congrP {ok : (ℕ → F) → Prop}  {v w : ℕ → F} (h : ∀ i < NSUM, v i = w i) (hv : SumOkP ok v) : SumOkP ok w := by
   obtain ⟨ℓ, P, h1, h2, h3, h4, hb, hs, hn, hh, hsd⟩ := hv
   have q2 : RunSum.pQ v 2 = RunSum.pQ w 2 := BlockTree.pQ_congr fun j hj => h _ (by unfold NSUM; omega)
   refine ⟨ℓ, P, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
@@ -134,6 +135,9 @@ theorem sumOk_congr {v w : ℕ → F} (h : ∀ i < NSUM, v i = w i) (hv : SumOk 
   · rw [← h 6 (by decide)]; exact hn
   · intro j hj; rw [← h (19 + j) (by unfold NSUM; omega)]; exact hh j hj
   · intro j hj; rw [← h (35 + j) (by unfold NSUM; omega)]; exact hsd j hj
+
+theorem sumOk_congr {v w : ℕ → F} (h : ∀ i < NSUM, v i = w i) (hv : SumOk v) : SumOk w :=
+  sumOk_congrP h hv
 
 /-! ### The block node program's digests and key -/
 
@@ -213,6 +217,18 @@ theorem bnode_digest {ρ : ℕ → Q} (h : Holds ρ blockNodeProgram.ops) :
   rw [bDigest, e] at hd ⊢
   exact pubsDigest_sum (blake2s_length _ _ _) hd
 
+/-- `block_node_sound` for any per-block statement `ok`. -/
+theorem block_node_soundP {ok : (ℕ → F) → Prop}  {ρ : ℕ → Q} (h : Holds ρ blockNodeProgram.ops)
+    (hL : SumOkP ok (childSum ρ bC0)) (hR : SumOkP ok (childSum ρ bC1)) :
+    SumOkP ok (outSum ρ) ∧
+    wordsOf ρ blockNodeProgram.results = sumDigest (keyOf (wordsOf ρ bC0.res.chash) (wordsOf ρ bC0.res.key)
+      (wordsOf ρ bC1.res.chash) (wordsOf ρ bC1.res.key)) (outSum ρ) ∧
+    wordsOf ρ bC0.res.digest = sumDigest (wordsOf ρ bC0.res.key) (childSum ρ bC0) ∧
+    wordsOf ρ bC1.res.digest = sumDigest (wordsOf ρ bC1.res.key) (childSum ρ bC1) := by
+  obtain ⟨h0, h1, hj, -, -⟩ := bnode_parts h
+  refine ⟨BlockTree.sumOk_nodeP hj hL hR, ?_, bchild_digest h0, bchild_digest h1⟩
+  rw [bnode_digest h, bnode_key h]
+
 /-- **The block node is sound.** If the node program holds and both children's summaries are proven,
 the node outputs the digest, under the key of its children's circuit hashes and keys, of a proven
 summary; and each child's hook checked the digest of that child's key and summary. -/
@@ -222,10 +238,8 @@ theorem block_node_sound {ρ : ℕ → Q} (h : Holds ρ blockNodeProgram.ops)
     wordsOf ρ blockNodeProgram.results = sumDigest (keyOf (wordsOf ρ bC0.res.chash) (wordsOf ρ bC0.res.key)
       (wordsOf ρ bC1.res.chash) (wordsOf ρ bC1.res.key)) (outSum ρ) ∧
     wordsOf ρ bC0.res.digest = sumDigest (wordsOf ρ bC0.res.key) (childSum ρ bC0) ∧
-    wordsOf ρ bC1.res.digest = sumDigest (wordsOf ρ bC1.res.key) (childSum ρ bC1) := by
-  obtain ⟨h0, h1, hj, -, -⟩ := bnode_parts h
-  refine ⟨BlockTree.sumOk_node hj hL hR, ?_, bchild_digest h0, bchild_digest h1⟩
-  rw [bnode_digest h, bnode_key h]
+    wordsOf ρ bC1.res.digest = sumDigest (wordsOf ρ bC1.res.key) (childSum ρ bC1) :=
+  block_node_soundP h hL hR
 
 /-! ### The block leaf's output, Lean-first -/
 
@@ -353,6 +367,24 @@ def LeafOut (d : List Word) : Prop :=
     (∀ k < Coin.W, RunSum.pQ p (Coin.PUB_ALPHA k) = RunSum.pQ p (Coin.PUB_ALPHA 1) ^ k) ∧
     (p Coin.PUB_NIN).val < 2 ^ 30 ∧ (∀ j < 16, (p (25 + j)).val < 65536) ∧ d = sumDigest zeroKey (leafVec p)
 
+/-- `LeafOut` for any per-block statement `ok`: a lifted block leaf guarantees `LeafOutP BlockPubOk'`
+(D-045). `LeafOut = LeafOutP BlockPubOk`. -/
+def LeafOutP (ok : (ℕ → F) → Prop) (d : List Word) : Prop :=
+  ∃ (p : ℕ → F) (Hh : ℕ), ok p ∧ Hh < 2 ^ 30 ∧ p 2 = (Hh : F) ∧
+    p Coin.PUB_LOST = (if Spec.Coins.bip30Lost Hh then 1 else 0) ∧
+    (∀ k < Coin.W, RunSum.pQ p (Coin.PUB_ALPHA k) = RunSum.pQ p (Coin.PUB_ALPHA 1) ^ k) ∧
+    (p Coin.PUB_NIN).val < 2 ^ 30 ∧ (∀ j < 16, (p (25 + j)).val < 65536) ∧ d = sumDigest zeroKey (leafVec p)
+
+theorem leafOut_iff {d : List Word} : LeafOut d ↔ LeafOutP BlockPubOk d := Iff.rfl
+
+theorem LeafOutP.mono {ok ok' : (ℕ → F) → Prop} (hm : ∀ p, ok p → ok' p) {d : List Word} (h : LeafOutP ok d) :
+    LeafOutP ok' d := by
+  obtain ⟨p, Hh, hp, rest⟩ := h
+  exact ⟨p, Hh, hm p hp, rest⟩
+
+/-- A uniform block leaf's guarantee is a per-component one. -/
+theorem LeafOut.toV {d : List Word} (h : LeafOut d) : LeafOutP BlockPubOk' d := LeafOutP.mono (fun _ => BlockPubOk.toV) h
+
 /-- **The named hypotheses** (see the header), for a tree whose nodes run the glue program `prog` and
 whose leaves guarantee `LeafOk` of their output. `Acc h d`: the native circuit verifier accepts a proof
 with circuit hash `h` and output digest `d` under the pinned config. `SatC h d`: some circuit with hash
@@ -371,6 +403,13 @@ structure Trust (Acc SatC : List Word → List Word → Prop) (VGates : (ℕ →
   binding of the verified public inputs); for the header tree `plain_leaf_valid` and `leaf_digest`. -/
   leafSound : ∀ L d, SatC (leafH L) d → LeafOk d
 
+/-- Weakening the leaf guarantee keeps the named hypotheses (e.g. uniform leaves under `LeafOutP BlockPubOk'`). -/
+theorem Trust.mono {Acc SatC : List Word → List Word → Prop} {VGates : (ℕ → Q) → ℕ → List ℕ → List ℕ → Prop}
+    {leafH : ℕ → List Word} {nodeH : List Word} {prog : Program} {LeafOk LeafOk' : List Word → Prop}
+    (T : Trust Acc SatC VGates leafH nodeH prog LeafOk) (hm : ∀ d, LeafOk d → LeafOk' d) :
+    Trust Acc SatC VGates leafH nodeH prog LeafOk' :=
+  ⟨T.stwoSound, T.nodeCircuit, T.recVerifies, fun L d h => hm d (T.leafSound L d h)⟩
+
 theorem wordsOf_length (ρ : ℕ → Q) (rs : List ℕ) : (wordsOf ρ rs).length = rs.length := by simp [wordsOf]
 
 theorem hook_mem0 : ∃ root : List ℕ, root.length = 8 ∧
@@ -387,14 +426,13 @@ section
 variable {Acc SatC : List Word → List Word → Prop} {VGates : (ℕ → Q) → ℕ → List ℕ → List ℕ → Prop}
   {leafH : ℕ → List Word} {nodeH : List Word}
 
-/-- **A tree is sound.** A satisfied circuit with the hash and key of tree shape `t`, outputting
-`sumDigest key v`, has a proven summary `v` (or Blake2s has a collision). -/
-theorem tree_sound (T : Trust Acc SatC VGates leafH nodeH blockNodeProgram LeafOut) (hl : ∀ L, (leafH L).length = 8) (hn : nodeH.length = 8) :
-    ∀ (t : Tree) (v : ℕ → F), SatC (t.hash leafH nodeH) (sumDigest (t.key leafH nodeH) v) → SumOk v ∨ Collision
+/-- **A tree is sound**, for leaves guaranteeing `LeafOutP ok` (`BlockPubOk'` for lifted leaves, D-045). -/
+theorem tree_soundP {ok : (ℕ → F) → Prop}  (T : Trust Acc SatC VGates leafH nodeH blockNodeProgram (LeafOutP ok)) (hl : ∀ L, (leafH L).length = 8) (hn : nodeH.length = 8) :
+    ∀ (t : Tree) (v : ℕ → F), SatC (t.hash leafH nodeH) (sumDigest (t.key leafH nodeH) v) → SumOkP ok v ∨ Collision
   | .leaf L, v, hs => by
     obtain ⟨p, Hh, hp, hH, h2, hlost, hα, hnin, hlimbs, hd⟩ := T.leafSound L _ hs
     rcases sumDigest_eq (Tree.key_length leafH nodeH (.leaf L)) (by simp [zeroKey]) hd with ⟨-, e⟩ | c
-    · exact Or.inl (sumOk_congr (fun i hi => (e i hi).symm) (BlockTree.sumOk_leaf hp hH h2 hlost hα hnin hlimbs))
+    · exact Or.inl (sumOk_congrP (fun i hi => (e i hi).symm) (BlockTree.sumOk_leafP hp hH h2 hlost hα hnin hlimbs))
     · exact Or.inr c
   | .node l r, v, hs => by
     obtain ⟨ρ, hρ, hres, hg⟩ := T.nodeCircuit _ hs
@@ -425,21 +463,27 @@ theorem tree_sound (T : Trust Acc SatC VGates leafH nodeH blockNodeProgram LeafO
     have e4' : wordsOf ρ bC1.res.key = r.key leafH nodeH := e4
     rw [e1', e2'] at s0
     rw [e3', e4'] at s1
-    rcases tree_sound T hl hn l _ s0 with sl | c
+    rcases tree_soundP T hl hn l _ s0 with sl | c
     swap; · exact Or.inr c
-    rcases tree_sound T hl hn r _ s1 with sr | c
+    rcases tree_soundP T hl hn r _ s1 with sr | c
     swap; · exact Or.inr c
-    exact Or.inl (sumOk_congr ev (block_node_sound hρ sl sr).1)
+    exact Or.inl (sumOk_congrP ev (block_node_soundP hρ sl sr).1)
 
-/-- `forest_rng` with the size kept positive. -/
-theorem forest_rng' (vs : List (ℕ → F)) (v0 : ℕ → F) (h0 : SumOk v0) (hs : ∀ v ∈ vs, SumOk v)
+/-- **A tree is sound.** A satisfied circuit with the hash and key of tree shape `t`, outputting
+`sumDigest key v`, has a proven summary `v` (or Blake2s has a collision). -/
+theorem tree_sound (T : Trust Acc SatC VGates leafH nodeH blockNodeProgram LeafOut) (hl : ∀ L, (leafH L).length = 8) (hn : nodeH.length = 8) :
+    ∀ (t : Tree) (v : ℕ → F), SatC (t.hash leafH nodeH) (sumDigest (t.key leafH nodeH) v) → SumOk v ∨ Collision :=
+  tree_soundP T hl hn
+
+/-- `forest_rng'` for any `ok`. -/
+theorem forest_rng'P {ok : (ℕ → F) → Prop}  (vs : List (ℕ → F)) (v0 : ℕ → F) (h0 : SumOkP ok v0) (hs : ∀ v ∈ vs, SumOkP ok v)
     (hlink : Linked' v0 vs) (hch : ∀ v ∈ vs, ∀ i < 12, v (7 + i) = v0 (7 + i)) :
-    ∃ n, 0 < n ∧ RngOk ⟨(v0 0).val, n, RunSum.pQ v0 2 + (vs.map fun v => RunSum.pQ v 2).sum,
+    ∃ n, 0 < n ∧ RngOkP ok ⟨(v0 0).val, n, RunSum.pQ v0 2 + (vs.map fun v => RunSum.pQ v 2).sum,
       (v0 6).val + (vs.map fun v => (v 6).val).sum, RunSum.pQ v0 7, RunSum.pQ v0 11, RunSum.pQ v0 15⟩ := by
   obtain ⟨ℓ0, hn0, hr0⟩ := h0.rng
-  have hrs : ∀ v ∈ vs, ∃ ℓ, (v 1).val = 2 ^ ℓ ∧ RngOk (rngOf v ℓ) := fun v hv => (hs v hv).rng
+  have hrs : ∀ v ∈ vs, ∃ ℓ, (v 1).val = 2 ^ ℓ ∧ RngOkP ok (rngOf v ℓ) := fun v hv => (hs v hv).rng
   choose! ℓs hℓs using hrs
-  have key := BlockTree.rng_forest (vs.map fun v => rngOf v (ℓs v)) (rngOf v0 ℓ0) hr0
+  have key := BlockTree.rng_forestP (vs.map fun v => rngOf v (ℓs v)) (rngOf v0 ℓ0) hr0
     (fun r hr => by obtain ⟨v, hv, rfl⟩ := List.mem_map.mp hr; exact (hℓs v hv).2)
     (BlockTree.linked_of vs v0 ℓ0 hn0 hlink fun v hv => (hℓs v hv).1)
     (fun r hr => by
@@ -451,6 +495,32 @@ theorem forest_rng' (vs : List (ℕ → F)) (v0 : ℕ → F) (h0 : SumOk v0) (hs
       exact ⟨q 7 (by simp), q 11 (by simp), q 15 (by simp)⟩)
   rw [List.map_map, List.map_map, List.map_map] at key
   exact ⟨_, by simp only [rngOf]; positivity, key⟩
+
+/-- `forest_rng` with the size kept positive. -/
+theorem forest_rng' (vs : List (ℕ → F)) (v0 : ℕ → F) (h0 : SumOk v0) (hs : ∀ v ∈ vs, SumOk v)
+    (hlink : Linked' v0 vs) (hch : ∀ v ∈ vs, ∀ i < 12, v (7 + i) = v0 (7 + i)) :
+    ∃ n, 0 < n ∧ RngOk ⟨(v0 0).val, n, RunSum.pQ v0 2 + (vs.map fun v => RunSum.pQ v 2).sum,
+      (v0 6).val + (vs.map fun v => (v 6).val).sum, RunSum.pQ v0 7, RunSum.pQ v0 11, RunSum.pQ v0 15⟩ :=
+  forest_rng'P vs v0 h0 hs hlink hch
+
+/-- **The outer verifier, composed**, for leaves guaranteeing `LeafOutP ok`. -/
+theorem forest_soundP {ok : (ℕ → F) → Prop}  (T : Trust Acc SatC VGates leafH nodeH blockNodeProgram (LeafOutP ok)) (hl : ∀ L, (leafH L).length = 8) (hn : nodeH.length = 8)
+    (t0 : Tree) (v0 : ℕ → F) (rest : List (Tree × (ℕ → F)))
+    (h0 : Acc (t0.hash leafH nodeH) (sumDigest (t0.key leafH nodeH) v0))
+    (hs : ∀ tv ∈ rest, Acc (tv.1.hash leafH nodeH) (sumDigest (tv.1.key leafH nodeH) tv.2))
+    (hlink : Linked' v0 (rest.map Prod.snd)) (hch : ∀ tv ∈ rest, ∀ i < 12, tv.2 (7 + i) = v0 (7 + i)) :
+    (∃ n, 0 < n ∧ RngOkP ok ⟨(v0 0).val, n, RunSum.pQ v0 2 + ((rest.map Prod.snd).map fun v => RunSum.pQ v 2).sum,
+      (v0 6).val + ((rest.map Prod.snd).map fun v => (v 6).val).sum, RunSum.pQ v0 7, RunSum.pQ v0 11,
+      RunSum.pQ v0 15⟩) ∨ Collision := by
+  by_cases hc : Collision
+  · exact Or.inr hc
+  refine Or.inl (forest_rng'P _ v0 ((tree_soundP T hl hn t0 v0 (T.stwoSound _ _ h0)).resolve_right hc) ?_ hlink ?_)
+  · intro v hv
+    obtain ⟨tv, htv, rfl⟩ := List.mem_map.mp hv
+    exact (tree_soundP T hl hn tv.1 tv.2 (T.stwoSound _ _ (hs tv htv))).resolve_right hc
+  · intro v hv
+    obtain ⟨tv, htv, rfl⟩ := List.mem_map.mp hv
+    exact hch tv htv
 
 /-- **The outer verifier, composed.** Roots `(t₀, v₀), (t₁, v₁), …` (tree shapes as `expected` folds
 them, summaries as stored): if the native verifier accepts each root's proof with the expected hash and
@@ -465,16 +535,29 @@ theorem forest_sound (T : Trust Acc SatC VGates leafH nodeH blockNodeProgram Lea
     (hlink : Linked' v0 (rest.map Prod.snd)) (hch : ∀ tv ∈ rest, ∀ i < 12, tv.2 (7 + i) = v0 (7 + i)) :
     (∃ n, 0 < n ∧ RngOk ⟨(v0 0).val, n, RunSum.pQ v0 2 + ((rest.map Prod.snd).map fun v => RunSum.pQ v 2).sum,
       (v0 6).val + ((rest.map Prod.snd).map fun v => (v 6).val).sum, RunSum.pQ v0 7, RunSum.pQ v0 11,
-      RunSum.pQ v0 15⟩) ∨ Collision := by
-  by_cases hc : Collision
-  · exact Or.inr hc
-  refine Or.inl (forest_rng' _ v0 ((tree_sound T hl hn t0 v0 (T.stwoSound _ _ h0)).resolve_right hc) ?_ hlink ?_)
-  · intro v hv
-    obtain ⟨tv, htv, rfl⟩ := List.mem_map.mp hv
-    exact (tree_sound T hl hn tv.1 tv.2 (T.stwoSound _ _ (hs tv htv))).resolve_right hc
-  · intro v hv
-    obtain ⟨tv, htv, rfl⟩ := List.mem_map.mp hv
-    exact hch tv htv
+      RunSum.pQ v0 15⟩) ∨ Collision :=
+  forest_soundP T hl hn t0 v0 rest h0 hs hlink hch
+
+/-- **The epoch's blocks are proven, per-component sizes.** With block leaves guaranteeing
+`LeafOutP BlockPubOk'` (uniform leaves do too: `LeafOut.toV`, `Trust.mono`), `epoch_systems_core`'s block
+hypotheses hold with a size per block and component (or Blake2s has a collision). -/
+theorem forest_epochV (T : Trust Acc SatC VGates leafH nodeH blockNodeProgram (LeafOutP BlockPubOk'))
+    (hl : ∀ L, (leafH L).length = 8) (hn : nodeH.length = 8)
+    (t0 : Tree) (v0 : ℕ → F) (rest : List (Tree × (ℕ → F)))
+    (h0 : Acc (t0.hash leafH nodeH) (sumDigest (t0.key leafH nodeH) v0))
+    (hs : ∀ tv ∈ rest, Acc (tv.1.hash leafH nodeH) (sumDigest (tv.1.key leafH nodeH) tv.2))
+    (hlink : Linked' v0 (rest.map Prod.snd)) (hch : ∀ tv ∈ rest, ∀ i < 12, tv.2 (7 + i) = v0 (7 + i)) :
+    (∃ n, 0 < n ∧ ∃ (pub : ℕ → ℕ → F) (inst : ℕ → ℕ → Inst) (L : ℕ → ℕ → ℕ) (_ : ∀ i, Setup (inst i) (pub i) (L i 1)),
+      (∀ i < n, ∀ c < 15, (inst i c).logSize = L i c) ∧ (∀ i < n, hashSys.SatisfiedExt (inst i) (pub i) []) ∧
+      (∀ i < n, ∀ c < 15, L i c ≤ 23) ∧ (∀ i < n, pub i 2 = (((v0 0).val + i : ℕ) : F)) ∧
+      (∀ i < n, pub i Coin.PUB_LOST = if Spec.Coins.bip30Lost ((v0 0).val + i) then 1 else 0) ∧
+      (∀ i < n, FpWalk.gQ (pub i) = RunSum.pQ v0 7) ∧ (∀ i < n, RunSum.pQ (pub i) Coin.PUB_Z = RunSum.pQ v0 11) ∧
+      (∀ i < n, ∀ k < Coin.W, RunSum.pQ (pub i) (Coin.PUB_ALPHA k) = RunSum.pQ v0 15 ^ k) ∧
+      ∑ i ∈ Finset.range n, RunSum.pQ (pub i) Coin.PUB_S =
+        RunSum.pQ v0 2 + ((rest.map Prod.snd).map fun v => RunSum.pQ v 2).sum) ∨ Collision := by
+  rcases forest_soundP T hl hn t0 v0 rest h0 hs hlink hch with ⟨n, hn0, hr⟩ | c
+  · exact Or.inl ⟨n, hn0, epoch_hyps_of_rng' hr hn0⟩
+  · exact Or.inr c
 
 /-- **The epoch's blocks are proven.** Under the outer verifier's checks, `epoch_systems_core`'s block
 hypotheses hold for the `n ≥ 1` blocks from `(v₀ 0)`, with the roots' summed partial sum (or Blake2s
@@ -492,7 +575,7 @@ theorem forest_epoch (T : Trust Acc SatC VGates leafH nodeH blockNodeProgram Lea
       (∀ i < n, ∀ k < Coin.W, RunSum.pQ (pub i) (Coin.PUB_ALPHA k) = RunSum.pQ v0 15 ^ k) ∧
       ∑ i ∈ Finset.range n, RunSum.pQ (pub i) Coin.PUB_S =
         RunSum.pQ v0 2 + ((rest.map Prod.snd).map fun v => RunSum.pQ v 2).sum) ∨ Collision := by
-  rcases forest_sound T hl hn t0 v0 rest h0 hs hlink hch with ⟨n, hn0, hr⟩ | c
+  rcases forest_soundP (ok := BlockPubOk) T hl hn t0 v0 rest h0 hs hlink hch with ⟨n, hn0, hr⟩ | c
   · exact Or.inl ⟨n, hn0, epoch_hyps_of_rng hr hn0⟩
   · exact Or.inr c
 
