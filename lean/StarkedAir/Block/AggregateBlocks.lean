@@ -14,20 +14,37 @@ proofs establishes, and that it is what the epoch theorem consumes.
   adds the sums). `epoch_hyps_of_rng`: a proven range gives exactly the block hypotheses of
   `epoch_systems_core` (CoinEpochCore.lean), with its summed partial sum.
 
-What this file does not cover (D-043, proposed): the seed and the binding of block hashes to the
-chain, and the previous-block MTP (block-rec.md).
+What this file does not cover: the seed and the binding of block hashes to the chain (the outer verifier,
+`BlockTree.lean`). The previous-block MTP is bound inside each block proof (`BlockPubOk.mtp`, D-043 part 3).
 -/
 import StarkedAir.Block.CoinEpochCore
+import StarkedAir.Block.BlockAnc
 
 namespace StarkedAir.Block
 
 open StarkedAir
 open StarkedAir.Spec.QM31 (QM)
 
-/-- What a block leaf proves about public inputs `p`. -/
+/-- What a block leaf proves about public inputs `p`: the 16-component block system (`BlockAnc.lean`). -/
 def BlockPubOk (p : ℕ → F) : Prop :=
-  ∃ (inst : ℕ → Inst) (L : ℕ), (∀ c < 15, (inst c).logSize = L) ∧ L ≤ 23 ∧ hashSys.SatisfiedExt inst p [] ∧
+  ∃ (inst : ℕ → Inst) (L : ℕ), (∀ c < 16, (inst c).logSize = L) ∧ 8 ≤ L ∧ L ≤ 23 ∧ blockSys.SatisfiedExt inst p [] ∧
     Nonempty (Setup inst p L)
+
+/-- **The previous MTP of a proven block** (`block_mtp`): 0 below the CSV height; at and above it the
+median time past of 11 headers hash-chained, in order, to a header with the block's SHA256d. -/
+theorem BlockPubOk.mtp {p : ℕ → F} (hp : BlockPubOk p) :
+    (p Anc.PUB_CSV = 0 ∧ p Anc.PUB_MLO = 0 ∧ p Anc.PUB_MHI = 0) ∨
+    (p Anc.PUB_CSV = 1 ∧ ∃ (inst : ℕ → Inst) (b : Spec.Block.Blk) (hw : ℕ → ℕ → Spec.Sha256.Word),
+      Spec.Block.parseBlock (Rb inst p) = some b ∧
+      Spec.Block.stateBytes (Spec.Bitcoin.sha256d (hw Anc.NANC)) = Spec.Block.sha256d b.header ∧
+      (∀ j, 1 ≤ j → j ≤ Anc.NANC → Spec.Bitcoin.prevHash (hw j) = Spec.Bitcoin.sha256d (hw (j - 1))) ∧
+      (p Anc.PUB_MLO).val < 65536 ∧ (p Anc.PUB_MHI).val < 65536 ∧
+      Anc.mtpOf p = Spec.Bitcoin.medianTimePast
+        ((List.range Anc.NANC).map (fun k => Spec.Bitcoin.timeOf (hw k))).reverse) := by
+  obtain ⟨inst, L, hL, hL8, hL24, hsat, -⟩ := hp
+  rcases block_mtp hL hsat hL24 hL8 with h0 | ⟨h1, b, hw, h⟩
+  · exact Or.inl h0
+  · exact Or.inr ⟨h1, inst, b, hw, h⟩
 
 /-- A range summary: blocks `lo … lo + n − 1`. -/
 structure Rng where
@@ -125,8 +142,12 @@ theorem epoch_hyps_of_rng {r : Rng} (hr : RngOk r) (hn : 0 < r.n) :
   have hok : ∀ i, BlockPubOk (P (idx i)) := fun i => (hP _ (hidx i)).1
   let inst : ℕ → ℕ → Inst := fun i => Classical.choose (hok i)
   let L : ℕ → ℕ := fun i => Classical.choose (Classical.choose_spec (hok i))
+  have hspec' : ∀ i, (∀ c < 16, (inst i c).logSize = L i) ∧ 8 ≤ L i ∧ L i ≤ 23 ∧
+      blockSys.SatisfiedExt (inst i) (P (idx i)) [] ∧ Nonempty (Setup (inst i) (P (idx i)) (L i)) :=
+    fun i => Classical.choose_spec (Classical.choose_spec (hok i))
   have hspec : ∀ i, (∀ c < 15, (inst i c).logSize = L i) ∧ L i ≤ 23 ∧ hashSys.SatisfiedExt (inst i) (P (idx i)) [] ∧
-      Nonempty (Setup (inst i) (P (idx i)) (L i)) := fun i => Classical.choose_spec (Classical.choose_spec (hok i))
+      Nonempty (Setup (inst i) (P (idx i)) (L i)) := fun i =>
+    ⟨fun c hc => (hspec' i).1 c (by omega), (hspec' i).2.2.1, (blockSys_sat (hspec' i).2.2.2.1).1, (hspec' i).2.2.2.2⟩
   have hid : ∀ i < r.n, idx i = i := fun i hi => by simp only [idx]; rw [if_pos hi]
   refine ⟨fun i => P (idx i), inst, L, fun i => Classical.choice (hspec i).2.2.2, fun i _ => (hspec i).1,
     fun i _ => (hspec i).2.2.1, fun i _ => (hspec i).2.1, fun i hi => ?_, fun i hi => ?_, fun i hi => ?_,
