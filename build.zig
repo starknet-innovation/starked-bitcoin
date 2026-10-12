@@ -347,6 +347,30 @@ pub fn build(b: *std.Build) void {
         oracle.linkLibC();
         b.step("oracle", "VL-ORACLE: native verifier vs circuit on mutated proofs").dependOn(&b.addRunArtifact(oracle).step);
     }
+    // GPU plan step 3: our lowered STWZEVA programs as CUDA kernels, built as host C++ (no GPU
+    // needed; src/gpu/cuda_parity.zig).
+    {
+        const cuda_codegen = b.createModule(.{
+            .root_source_file = b.path("third_party/stwo-zig/src/integrations/cairo_cuda/eval_codegen.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "stwo_cairo_frontend", .module = stwo_circuit_cpu.import_table.get("stwo_cairo_frontend").? }},
+        });
+        const cuda_parity = b.addTest(.{
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/gpu/cuda_parity.zig"),
+                .target = target,
+                .optimize = optimize,
+                .imports = &.{
+                    .{ .name = "starked_bitcoin", .module = lib },
+                    .{ .name = "stwo_core", .module = stwo_core },
+                    .{ .name = "stwo_prover_engine", .module = stwo_prover_engine },
+                    .{ .name = "cairo_cuda_eval_codegen", .module = cuda_codegen },
+                },
+            }),
+        });
+        b.step("cuda-parity", "CUDA composition kernels (host C++ build) vs our interpreter").dependOn(&b.addRunArtifact(cuda_parity).step);
+    }
     const test_step = b.step("test", "Run starked-bitcoin tests");
     test_step.dependOn(&b.addRunArtifact(tests).step);
 }

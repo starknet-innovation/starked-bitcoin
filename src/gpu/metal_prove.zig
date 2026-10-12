@@ -10,7 +10,9 @@
 //! - `METAL_PROVE_DISCARD=1` (with `ONLY`): `discard_mains`, the witness is released mid-proof;
 //! - `METAL_PROVE_STORAGE=default|evaluations_only|compact`: the commitment storage policy;
 //! - `METAL_PROVE_COMPOSITION=interpreter|stwzeva|stwzeva_native`: the CPU prover's composition;
-//! - `METAL_PROVE_TIERED=1`: the tiered size profile (D-045).
+//! - `METAL_PROVE_TIERED=1`: the tiered size profile (D-045);
+//! - `METAL_PROVE_VERIFY=1` (with `ONLY`): verify the proof after proving;
+//! - `METAL_PROVE_LARGE=height`: one sample of `checks.samples_large` (e.g. 400000, a 2^22 block).
 
 const std = @import("std");
 const sb = @import("starked_bitcoin");
@@ -116,13 +118,20 @@ test "metal: block-system proofs on the Metal backend are byte-identical to CPU 
     const min_log = if (std.process.getEnvVarOwned(gpa, "METAL_PROVE_MIN_LOG")) |v| try std.fmt.parseInt(u32, v, 10) else |_| 0;
     const only: ?Mode = if (std.process.getEnvVarOwned(gpa, "METAL_PROVE_ONLY")) |v| std.meta.stringToEnum(Mode, v) orelse return error.BadMode else |_| null;
     const first = if (std.process.getEnvVarOwned(gpa, "METAL_PROVE_FIRST")) |v| try std.fmt.parseInt(usize, v, 10) else |_| 0;
-    for (sb.block.checks.samples_small[first..@min(n_samples, sb.block.checks.samples_small.len)]) |s| {
+    // `METAL_PROVE_LARGE=height`: that sample of `checks.samples_large` instead of the small ones.
+    const large: ?u32 = if (std.process.getEnvVarOwned(gpa, "METAL_PROVE_LARGE")) |v| try std.fmt.parseInt(u32, v, 10) else |_| null;
+    const samples = if (large) |h| blk: {
+        for (sb.block.checks.samples_large, 0..) |s, i| if (s.ctx.height == h) break :blk sb.block.checks.samples_large[i .. i + 1];
+        return error.NoSuchSample;
+    } else sb.block.checks.samples_small[first..@min(n_samples, sb.block.checks.samples_small.len)];
+    for (samples) |s| {
         var arena = std.heap.ArenaAllocator.init(gpa);
         defer arena.deinit();
         const a = arena.allocator();
         var timer = try std.time.Timer.start();
         const b = try bs.buildFull(a, s.raw, s.undo, s.ctx, .{ .min_log = min_log, .profile = if (std.process.hasEnvVarConstant("METAL_PROVE_TIERED")) .tiered else .uniform });
         const t_wit = timer.lap();
+        std.debug.print("height {d}: size profile {s}, L = {d}, component logs {any}\n", .{ s.ctx.height, @tagName(b.profile), b.log_size, b.logs });
         @import("stwo_prover_engine").measurement.process_usage.reportStage("witness built");
         const ps = bs.parts(&airs, &b);
         const fri = if (test_profile) try core.pcs.config_v2.FriConfigV2.init(10, 0, 1, 3, 1) else try core.pcs.config_v2.FriConfigV2.init(26, 0, 1, 70, 1);
@@ -134,7 +143,7 @@ test "metal: block-system proofs on the Metal backend are byte-identical to CPU 
             const compiles = mc.stats.compiles;
             var sampler = Sampler{ .device = MTLCreateSystemDefaultDevice(), .base_system = systemUsed() };
             const sampler_thread = try std.Thread.spawn(.{}, Sampler.run, .{&sampler});
-            const r = try proveOne(mode, a, &mc, cfg, &ps, &mains, false, std.process.hasEnvVarConstant("METAL_PROVE_DISCARD"));
+            const r = try proveOne(mode, a, &mc, cfg, &ps, &mains, std.process.hasEnvVarConstant("METAL_PROVE_VERIFY"), std.process.hasEnvVarConstant("METAL_PROVE_DISCARD"));
             var digest: [32]u8 = undefined;
             std.crypto.hash.sha2.Sha256.hash(r.bytes, &digest, .{});
             sampler.stop.store(true, .monotonic);
