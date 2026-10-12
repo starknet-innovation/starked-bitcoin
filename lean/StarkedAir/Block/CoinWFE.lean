@@ -221,4 +221,90 @@ theorem epoch_systems_wf (nb : ℕ) (inst : ℕ → ℕ → Inst) (pub : ℕ →
   · exact spent_wfe N blocks hwfB (hcl N) e h
   · exact hwfIF e (List.mem_append_right _ h)
 
+/-! ### Distinct created outpoints from distinct txids -/
+
+/-- The txids of an epoch's transactions, in order. -/
+def epochTxids (blocks : List BlockC) : List Spec.Block.Bytes := blocks.flatMap fun B => B.txs.map txid
+
+theorem outs_keys_nodup (B : BlockC) (t : ℕ) (tx : Tx) : (((txOuts B t tx).map Prod.fst)).Nodup := by
+  unfold txOuts
+  rw [List.map_map]
+  apply List.Nodup.map_on _ (((List.nodup_zipIdx_map_snd tx.vout).of_map _).filter _)
+  intro x hx y hy h
+  simp only [Function.comp, OutPoint.mk.injEq] at h
+  have ex := List.mem_zipIdx' (List.mem_filter.mp hx).1
+  have ey := List.mem_zipIdx' (List.mem_filter.mp hy).1
+  obtain ⟨a, i⟩ := x
+  obtain ⟨b, j⟩ := y
+  simp only at h ex ey
+  obtain rfl := h.2
+  exact Prod.ext (ex.2.trans ey.2.symm) rfl
+
+theorem key_hash_of_created (N : ℕ → ℕ) (B : BlockC) : ∀ (l : List (Tx × ℕ)) (g : ℕ) {e : CEv},
+    e ∈ created g (l.map fun p => (⟨txIns N B p.2 p.1, txOuts B p.2 p.1⟩ : Spec.Utxo.Tx OutPoint Val)) →
+    ∃ p ∈ l, e.1.hash = txid p.1
+  | [], g, e, h => by simp [created] at h
+  | p :: l, g, e, h => by
+    simp only [List.map_cons, created, Multiset.mem_add] at h
+    rcases h with h | h
+    · simp only [Spec.Utxo.outsT, Multiset.mem_coe] at h
+      obtain ⟨o, ho, rfl⟩ := List.mem_map.mp h
+      simp only [txOuts] at ho
+      obtain ⟨r, -, rfl⟩ := List.mem_map.mp ho
+      exact ⟨p, List.mem_cons_self, rfl⟩
+    · obtain ⟨p', hp', hh⟩ := key_hash_of_created N B l (g + 1) h
+      exact ⟨p', List.mem_cons_of_mem _ hp', hh⟩
+
+theorem created_txs_nodup (N : ℕ → ℕ) (B : BlockC) : ∀ (l : List (Tx × ℕ)) (g : ℕ), (l.map fun p => txid p.1).Nodup →
+    ((created g (l.map fun p => (⟨txIns N B p.2 p.1, txOuts B p.2 p.1⟩ : Spec.Utxo.Tx OutPoint Val))).map Prod.fst).Nodup
+  | [], g, _ => by simp [created]
+  | p :: l, g, hn => by
+    simp only [List.map_cons, List.nodup_cons] at hn
+    simp only [List.map_cons, created, Multiset.map_add]
+    refine Multiset.nodup_add.mpr ⟨?_, created_txs_nodup N B l (g + 1) hn.2, Multiset.disjoint_left.mpr fun {k} hk1 hk2 => ?_⟩
+    · simp only [Spec.Utxo.outsT, Multiset.map_coe, Multiset.coe_nodup, List.map_map]
+      have := outs_keys_nodup B p.2 p.1
+      convert this using 2
+      funext o; rfl
+    · simp only [Spec.Utxo.outsT, Multiset.map_coe, Multiset.mem_coe, List.map_map] at hk1
+      obtain ⟨o, ho, rfl⟩ := List.mem_map.mp hk1
+      obtain ⟨e', he', hke⟩ := Multiset.mem_map.mp hk2
+      obtain ⟨p', hp', hh⟩ := key_hash_of_created N B l (g + 1) he'
+      simp only [txOuts] at ho
+      obtain ⟨r, -, rfl⟩ := List.mem_map.mp ho
+      apply hn.1
+      rw [List.mem_map]
+      refine ⟨p', hp', ?_⟩
+      rw [← hh, hke]; rfl
+
+/-- **Distinct txids give distinct created outpoints**: the epoch theorem's remaining assumption on
+created coins is no repeated txid among the epoch's transactions — SHA256d collision resistance plus
+BIP34/BIP30 (utxo.md). -/
+theorem created_nodup_of_txids (N : ℕ → ℕ) : ∀ (blocks : List BlockC) (g : ℕ), (epochTxids blocks).Nodup →
+    ((created g (allTxs N blocks)).map Prod.fst).Nodup
+  | [], g, _ => by simp [allTxs, created]
+  | B :: bs, g, hn => by
+    simp only [epochTxids, List.flatMap_cons, List.nodup_append] at hn
+    obtain ⟨hB, hbs, hdis⟩ := hn
+    simp only [allTxs, List.flatMap_cons]
+    rw [created_append, Multiset.map_add]
+    have hBz : (B.txs.zipIdx.map fun p => txid p.1).Nodup := by
+      have : (B.txs.zipIdx.map fun p => txid p.1) = B.txs.map txid := by
+        rw [show (B.txs.zipIdx.map fun p => txid p.1) = (B.txs.zipIdx.map Prod.fst).map txid by rw [List.map_map]; rfl,
+          List.zipIdx_map_fst 0]
+      rwa [this]
+    refine Multiset.nodup_add.mpr ⟨created_txs_nodup N B B.txs.zipIdx g hBz,
+      created_nodup_of_txids N bs (g + (blockTxs N B).length) hbs, Multiset.disjoint_left.mpr fun {k} hk1 hk2 => ?_⟩
+    obtain ⟨e1, he1, rfl⟩ := Multiset.mem_map.mp hk1
+    obtain ⟨p, hp, hh⟩ := key_hash_of_created N B B.txs.zipIdx g he1
+    obtain ⟨e2, he2, hk⟩ := Multiset.mem_map.mp hk2
+    obtain ⟨i, B', hB', he'⟩ := mem_created_blocks N bs _ he2
+    obtain ⟨t, -, tx, htx, q, -, o, -, he2eq⟩ := mem_created_block' N B' _ he'
+    have hk' : e1.1.hash = txid tx := by rw [← hk, he2eq]
+    have hin1 : txid p.1 ∈ B.txs.map txid := List.mem_map.mpr ⟨p.1, by
+      have := List.mem_zipIdx' hp; rw [this.2]; exact List.getElem_mem _, rfl⟩
+    have hin2 : txid tx ∈ bs.flatMap fun B => B.txs.map txid :=
+      List.mem_flatMap.mpr ⟨B', List.mem_of_getElem? hB', List.mem_map.mpr ⟨tx, List.mem_of_getElem? htx, rfl⟩⟩
+    exact hdis _ hin1 _ hin2 (by rw [← hh, hk'])
+
 end StarkedAir.Block

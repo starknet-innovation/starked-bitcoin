@@ -108,7 +108,9 @@ So **each epoch must have fewer than p − 1 inputs**. Each block proof makes it
 the aggregator checks the epoch total; an epoch that would exceed it is split. Bitcoin's total inputs to
 ~840k are roughly 2–3 × 10⁹ (*est.*), near p, so the first epoch may need a split.
 
-**Distinct created outpoints.** A txid is SHA256d of the transaction. Assuming no SHA256d collision on the
+**Distinct created outpoints.** Reduced in Lean (2026-10-12, `created_nodup_of_txids`, `CoinWFE.lean`): the
+epoch's created outpoints are distinct whenever its transactions' txids are (`epochTxids` nodup) — what
+follows is the argument for that. A txid is SHA256d of the transaction. Assuming no SHA256d collision on the
 chain's data (a stated cryptographic assumption), equal txids mean equal transactions:
 - **coinbases after BIP34 (height 227,931)** commit to their height (proven in `block_sound`), so they
   are distinct;
