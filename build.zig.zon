@@ -12,5 +12,7 @@
         .stwo_proof_wire = .{ .path = "third_party/stwo-zig/src/interop/proof_wire" },
         .stwo_circuit_frontend = .{ .path = "third_party/stwo-zig/src/frontends/circuit" },
         .stwo_circuit_cpu_integration = .{ .path = "third_party/stwo-zig/src/integrations/circuit_cpu" },
+        // Resident CUDA prover (src/gpu/cuda, `-Dcuda=true` only; docs/design/gpu-cuda.md).
+        .stwo_circuit_cuda_integration = .{ .path = "third_party/stwo-zig/src/integrations/circuit_cuda", .lazy = true },
     },
 }

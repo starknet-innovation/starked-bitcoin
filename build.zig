@@ -371,6 +371,43 @@ pub fn build(b: *std.Build) void {
         });
         b.step("cuda-parity", "CUDA composition kernels (host C++ build) vs our interpreter").dependOn(&b.addRunArtifact(cuda_parity).step);
     }
+    // GPU plan step 3: the resident CUDA prover for the block system (src/gpu/cuda,
+    // docs/design/gpu-cuda.md). Off unless `-Dcuda=true`, so the normal build and `zig build test`
+    // never load stwo-zig's CUDA packages. Without a GPU the device calls link against C stubs.
+    if (b.option(bool, "cuda", "Enable the resident CUDA prover steps (cuda-test, cuda-check, cuda-aot)") orelse false) {
+        if (b.lazyDependency("stwo_circuit_cuda_integration", .{ .target = target, .optimize = optimize })) |dep| {
+            const circuit_cuda = dep.module("stwo_circuit_cuda_integration");
+            const imports = circuit_cuda.import_table;
+            const cairo_cuda = imports.get("stwo_cairo_cuda_integration").?;
+            const resident = b.createModule(.{
+                .root_source_file = b.path("src/gpu/cuda/mod.zig"),
+                .target = target,
+                .optimize = optimize,
+                .imports = &.{
+                    .{ .name = "starked_bitcoin", .module = lib },
+                    .{ .name = "stwo_core", .module = stwo_core },
+                    .{ .name = "stwo_prover_engine", .module = stwo_prover_engine },
+                    .{ .name = "stwo_cpu_backend", .module = stwo_cpu_backend },
+                    .{ .name = "stwo_circuit_cuda_integration", .module = circuit_cuda },
+                    .{ .name = "stwo_cuda_backend", .module = imports.get("stwo_cuda_backend").? },
+                    .{ .name = "stwo_cairo_cuda_integration", .module = cairo_cuda },
+                    .{ .name = "stwo_native_cuda_integration", .module = imports.get("stwo_native_cuda_integration").? },
+                    .{ .name = "stwo_cairo_frontend", .module = imports.get("stwo_cairo_frontend").? },
+                    .{ .name = "stwo_backend_contracts", .module = imports.get("stwo_backend_contracts").? },
+                },
+            });
+            const stubs = [_]std.Build.LazyPath{
+                b.path("third_party/stwo-zig/src/backends/cuda/runtime/stages/test_stubs.c"),
+                b.path("src/gpu/cuda/link_stubs.c"),
+            };
+            const cuda_tests = b.addTest(.{ .root_module = resident, .filters = test_filters });
+            for (stubs) |stub| cuda_tests.root_module.addCSourceFile(.{ .file = stub, .flags = &.{ "-std=c11", "-Wno-strict-prototypes" } });
+            cuda_tests.linkLibC();
+            const run_cuda_tests = b.addRunArtifact(cuda_tests);
+            run_cuda_tests.setCwd(b.path(".")); // the AOT drift check reads gpu/cuda_aot
+            b.step("cuda-test", "Resident CUDA prover: host-checkable plans, transcript and AOT catalog (no GPU)").dependOn(&run_cuda_tests.step);
+        }
+    }
     const test_step = b.step("test", "Run starked-bitcoin tests");
     test_step.dependOn(&b.addRunArtifact(tests).step);
 }
