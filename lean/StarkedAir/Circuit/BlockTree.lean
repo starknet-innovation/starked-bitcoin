@@ -349,4 +349,41 @@ theorem rng_forest : ∀ (rs : List Rng) (r0 : Rng), RngOk r0 → (∀ r ∈ rs,
     rw [e1, e2, e3] at this
     exact this
 
+/-- Linking as the verifier checks it, on the summaries' limbs. -/
+def Linked' : (ℕ → F) → List (ℕ → F) → Prop
+  | _, [] => True
+  | l, v :: vs => (v 0).val = (l 0).val + (l 1).val ∧ Linked' v vs
+
+theorem linked_of : ∀ (vs : List (ℕ → F)) (v0 : ℕ → F) (ℓ0 : ℕ), (v0 1).val = 2 ^ ℓ0 → Linked' v0 vs →
+    ∀ {ℓs : (ℕ → F) → ℕ}, (∀ v ∈ vs, (v 1).val = 2 ^ ℓs v) →
+    Linked (rngOf v0 ℓ0) (vs.map fun v => rngOf v (ℓs v))
+  | [], _, _, _, _, _, _ => trivial
+  | v :: vs, v0, ℓ0, hn0, ⟨h1, h2⟩, ℓs, hℓ => by
+    refine ⟨by simp only [rngOf]; rw [h1, hn0], ?_⟩
+    exact linked_of vs v (ℓs v) (hℓ v List.mem_cons_self) h2 (fun w hw => hℓ w (List.mem_cons_of_mem _ hw))
+
+/-- **What the outer verifier checks, composed.** Root summaries `v₀, v₁, …` (proven: `SumOk`), each
+starting where the previous ends (`(v j 0).val` and `(v j 1).val` as `verifyForest` reads them), with
+equal challenge limbs, describe one proven range from `(v₀ 0).val` covering all their blocks, whose
+partial sum is the sum of theirs: so `epoch_hyps_of_rng` applies to the whole epoch. -/
+theorem forest_rng (vs : List (ℕ → F)) (v0 : ℕ → F) (h0 : SumOk v0) (hs : ∀ v ∈ vs, SumOk v)
+    (hlink : Linked' v0 vs) (hch : ∀ v ∈ vs, ∀ i < 12, v (7 + i) = v0 (7 + i)) :
+    ∃ n, RngOk ⟨(v0 0).val, n, RunSum.pQ v0 2 + (vs.map fun v => RunSum.pQ v 2).sum,
+      (v0 6).val + (vs.map fun v => (v 6).val).sum, RunSum.pQ v0 7, RunSum.pQ v0 11, RunSum.pQ v0 15⟩ := by
+  obtain ⟨ℓ0, hn0, hr0⟩ := h0.rng
+  have hrs : ∀ v ∈ vs, ∃ ℓ, (v 1).val = 2 ^ ℓ ∧ RngOk (rngOf v ℓ) := fun v hv => (hs v hv).rng
+  choose! ℓs hℓs using hrs
+  have key := rng_forest (vs.map fun v => rngOf v (ℓs v)) (rngOf v0 ℓ0) hr0
+    (fun r hr => by obtain ⟨v, hv, rfl⟩ := List.mem_map.mp hr; exact (hℓs v hv).2)
+    (linked_of vs v0 ℓ0 hn0 hlink fun v hv => (hℓs v hv).1)
+    (fun r hr => by
+      obtain ⟨v, hv, rfl⟩ := List.mem_map.mp hr
+      have q : ∀ k ∈ [7, 11, 15], RunSum.pQ v k = RunSum.pQ v0 k := fun k hk =>
+        pQ_congr fun j hj => by
+          have : k + j = 7 + (k - 7 + j) := by simp at hk; omega
+          rw [this]; exact hch v hv _ (by simp at hk; omega)
+      exact ⟨q 7 (by simp), q 11 (by simp), q 15 (by simp)⟩)
+  rw [List.map_map, List.map_map, List.map_map] at key
+  exact ⟨_, key⟩
+
 end StarkedAir.Circuit.BlockTree
