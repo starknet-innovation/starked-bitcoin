@@ -400,6 +400,15 @@ pub fn build(b: *std.Build) void {
                 b.path("third_party/stwo-zig/src/backends/cuda/runtime/stages/test_stubs.c"),
                 b.path("src/gpu/cuda/link_stubs.c"),
             };
+            // `cuda-check`: the whole device schedule (`prover.prove`) compiled without optimisation, so
+            // every device call is emitted and linked against the stubs (no GPU, nothing executed).
+            const check_module = b.createModule(.{ .root_source_file = resident.root_source_file, .target = target, .optimize = .Debug });
+            for (resident.import_table.keys(), resident.import_table.values()) |name, module| check_module.addImport(name, module);
+            const check = b.addTest(.{ .root_module = check_module, .filters = &.{"typechecks"} });
+            for ([_]std.Build.LazyPath{ b.path("third_party/stwo-zig/src/backends/cuda/runtime/stages/test_stubs.c"), b.path("src/gpu/cuda/link_stubs.c") }) |stub|
+                check.root_module.addCSourceFile(.{ .file = stub, .flags = &.{ "-std=c11", "-Wno-strict-prototypes" } });
+            check.linkLibC();
+            b.step("cuda-check", "Resident CUDA prover: type-check and link the whole device schedule against C stubs (no GPU)").dependOn(&b.addRunArtifact(check).step);
             const cuda_tests = b.addTest(.{ .root_module = resident, .filters = test_filters });
             for (stubs) |stub| cuda_tests.root_module.addCSourceFile(.{ .file = stub, .flags = &.{ "-std=c11", "-Wno-strict-prototypes" } });
             cuda_tests.linkLibC();
