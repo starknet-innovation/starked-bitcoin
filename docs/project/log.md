@@ -50,10 +50,11 @@ Problems / lessons:
 - Lean, the coin theorem's hypotheses: `created_wfe_systems`, `spent_wfe`, `epoch_systems_wf` (WFE only for
   the sets; f108574, 4dbe410); `rec_starts`, `claim_is_record_at`, `ki_count`, **`claim_at_input`** (the
   events are functions of the committed data, D-041 in Lean; 8e6af52, 7181bf6); `created_nodup_of_txids`
-  (fa86d67). `decodeSet` range checks (2086bb8). `forest_rng` (ea15018). Epoch 171–1000 through the forest
-  started 01:55 (~10 h).
-Next: owner review of D-043 (MTP option A or B); then the MTP, a shipped block VK; read
-data/epoch/tree1000.log / verifytree1000.log when the 171–1000 run ends.
+  (fa86d67). `decodeSet` range checks (2086bb8). `forest_rng` (ea15018).
+- Epoch 171–1000 through the forest: 11 trees, 830 leaves, proved in 7.2 h (01:55–09:05, peak footprint
+  40.7 GB on the 24 GB Mac), `forest-1000.bin` 10.8 MB, verified in 1.4 s (the flat run: 63.8 s); same set,
+  998 coins, `29a42ec2…` = Core's HASH_SERIALIZED.
+Next: owner review of D-043 (MTP option A or B); then the MTP, a shipped block VK.
 
 ## 2026-10-11 (session 9) — VL-E2E: the plain verifier end to end
 Who: Claude (agent, Opus 5.5), on the owner's roadmap amendments (VL table, D-042)

@@ -160,7 +160,9 @@ estimated: per-leaf cost is seconds, not the header leaf's 31 s.
 
 - **Seed v3** (D-043 part 1, the forced part): `epoch.zig` `seedFrom` over aligned perfect subtrees of
   `seedLeaf = Blake2s(hash ‖ C_h)` leaves (tag v3). Epochs re-proved: 0–170 verifies to the same set
-  (171 coins, `hash_serialized 7105b60f…`).
+  (171 coins, `hash_serialized 7105b60f…`). Epoch 171–1000 through 11 trees (2026-10-12): proved in 25 859 s (830 leaves, ~31 s/leaf
+  wall incl. nodes; peak footprint 40.7 GB), `forest-1000.bin` 10.8 MB, verified in 1.4 s against
+  the flat run's 63.8 s; same set (998 coins, `29a42ec2…`, Core's HASH_SERIALIZED).
 - **Block leaf** (`block_rec.zig` `buildLeafCircuit`): the plain verifier over the block system, the
   Lean leaf checks (`Circuit/BlockLeaf.lean`: `αₖ = α₁ᵏ`, BIP30 flag, the seed leaf by the header
   tree's proven node gadget), `lt30` on the height and input count (`block_leaf_sum`), and the digest of
