@@ -2,7 +2,8 @@
 
 Interface between the Lean track (branch `c1/lean`) and the prover track (`c1/prover`, which owns
 `src/recursion/plain_verifier.zig` and the generated tables). Read it with
-`docs/design/component-sizes.md` (the design) and, once it exists, `component-sizes-prover-needs.md`.
+`docs/design/component-sizes.md` (the design) and the prover's `component-sizes-prover-needs.md`
+(branch `c1/prover`); §"Resolving the prover's P1–P5" answers it point by point.
 
 **Summary: no exported program has to change.** Every place a size enters the in-circuit verifier is
 a host hook or a host-side choice of point. The Lean programs never contain a size. For the
@@ -24,6 +25,45 @@ size (`PlainConfig.log_trace_size`); `g_N` generates the size-`2^N` trace subgro
 | Balance `balanceProg` | none | none (claimed sums per part, unchanged) | No | `balance_sound` unchanged. |
 | Merkle leaf hashing (`leafhash_*.json`) | column order in a leaf | stwo-zig's lifted trees order a leaf's columns by `(log size, index)` (`vcs_lifted/verifier.zig`). For a fixed profile this is a static permutation of the decommitted values. Zig permutes before hashing. | Per profile, a new `leafhash_<n>` only if a leaf's column **count** changes. It doesn't: counts are per tree. | `leaf_sound` is about the list it is given; the permutation is host-side. |
 | Leaf checks / ctx / out glue (`block_leaf_*.json`) | none | none | No | unchanged. |
+
+## Resolving the prover's P1–P5
+
+- **P1 (composition hook 2).**
+  - **Prover's proposal:** hook 2 `[i] → [1/2^(L_i)]`, with `i` a constant in the program.
+  - **Lean side instead:** keeps hook 2 argument-free and fixes the **call order**: the `k`-th hook-2 call
+    belongs to the `k`-th component with lookups, in component order. This is the same convention
+    hook 4 already uses (`next_part` in `verifyPlain`).
+  - **Why:** `composition_*.json` stay byte-identical, and the uniform path needs no change.
+  - **Zig:** keep a counter in the hook-2 handler and serve `config.partLog(i)` for the `i`-th part with
+    lookups (parts without lookups have no hook 2).
+  - **Lean:** `HookOk` (CompositionSound.lean) is exactly this per-call statement; `sys_soundV` and
+    `plain_soundV` take it.
+  - **If an index argument is still wanted:** it changes the composition ops of every export. It is a
+    small Lean change (`pShOps` with a constant, `HookOk` reading it), but it is not byte-identical.
+- **P2 (DEEP `per` field).**
+  - **Lean side:** done without touching `deep_leaf.json`.
+    - `deepPer tc` gives one flag per response (`deepPer_length`). `colResps_per` proves that a flagged
+      response is the periodicity copy (same label and value index as the column's last response).
+    - The new export target `deep_leaf_per` (`deepJsonPer`) emits the 5-field rows
+      `[tree, col, off, idx, per]` under the same schema. `DeepTable.parse` accepting 4 or 5 fields reads
+      both.
+  - **Note:** the flags depend only on the shape, not the sizes, so a uniform table read with `per`
+    gives the same points (`pt(off) + G_N = pt(off)`).
+- **P3 (statement), P4 (leaf hashes), P5 (transcript, shifts): agreed, no change.**
+  - **P3:** `statement_soundV`/`Hook4Ok` state the per-part size word; `stmtWordsV (fun _ => L) = stmtWords L`.
+  - **P4:** the `(log, column)` sort is a host permutation.
+
+**Wiring facts the hand-written Zig path must match by inspection.** These are what `plain_soundV`
+assumes the circuit wires; with the Lean-first programs they are theorems.
+1. The statement words are `stmtWordsV`: per component `[L_i, digest_i, n_pubs_i]`, then its public inputs.
+2. Each component's LogUp shift is `claimed_i · 1/2^(L_i)` (`starkParts`).
+3. The composition is `Σ` (Horner with `coeff`, component order) of every component's terms, times
+   `1/Z_N(oods)` at the max size (`sys_soundV`).
+4. Mask offsets and the interaction's previous row are at `g_N` for every component.
+5. Periodicity responses are at `pt + 2^(L_i)·g_N` (= `pt` when `L_i = N`).
+6. Each Merkle leaf's values are sorted by `(log, column)`.
+
+Items 4–6 sit under `StarkSoundV` (points and openings), as the OODS points sit under `StarkSound` today.
 
 ## The leaf's identity
 
