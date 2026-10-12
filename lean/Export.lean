@@ -11,6 +11,7 @@ import StarkedAir.Circuit.Pow
 import StarkedAir.Circuit.Oods
 import StarkedAir.Circuit.BlockLeaf
 import StarkedAir.Circuit.BlockNode
+import StarkedAir.Circuit.BlockRec
 import StarkedAir.Circuit.BlockCtx
 import StarkedAir.Block.ExtSum
 import StarkedAir.Block.FpWalk
@@ -62,7 +63,7 @@ def main (args : List String) : IO Unit := do
          StarkedAir.Circuit.Composition.compShape StarkedAir.HeaderTree.tree 0]))
   | ["block_leaf_ctx"] => IO.println StarkedAir.Circuit.BlockCtx.ctxJson
   | ["block_node_glue"] => IO.println StarkedAir.Circuit.BlockNode.nodeJson
-  | ["block_leaf_sum"] => IO.println StarkedAir.Circuit.BlockNode.leafSumJson
+  | ["block_leaf_out"] => IO.println StarkedAir.Circuit.BlockRec.leafOutJson
   | ["seed_leaf"] => IO.println StarkedAir.Circuit.BlockLeaf.seedLeafJson
   | ["block_leaf_checks"] => IO.println StarkedAir.Circuit.BlockLeaf.checksJson
   | ["pow_check", k] => IO.println (StarkedAir.Circuit.Pow.powJson k.toNat!)

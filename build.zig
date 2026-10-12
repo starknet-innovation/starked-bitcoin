@@ -166,7 +166,7 @@ pub fn build(b: *std.Build) void {
     lib.addAnonymousImport("air:deep_leaf", .{ .root_source_file = b.path("airs/deep_leaf.json") });
     lib.addAnonymousImport("air:block_leaf_ctx", .{ .root_source_file = b.path("airs/block_leaf_ctx.json") });
     lib.addAnonymousImport("air:block_node_glue", .{ .root_source_file = b.path("airs/block_node_glue.json") });
-    lib.addAnonymousImport("air:block_leaf_sum", .{ .root_source_file = b.path("airs/block_leaf_sum.json") });
+    lib.addAnonymousImport("air:block_leaf_out", .{ .root_source_file = b.path("airs/block_leaf_out.json") });
     lib.addAnonymousImport("air:seed_leaf", .{ .root_source_file = b.path("airs/seed_leaf.json") });
     lib.addAnonymousImport("air:block_leaf_checks", .{ .root_source_file = b.path("airs/block_leaf_checks.json") });
     lib.addAnonymousImport("air:oods_shift_leaf", .{ .root_source_file = b.path("airs/oods_shift_leaf.json") });
