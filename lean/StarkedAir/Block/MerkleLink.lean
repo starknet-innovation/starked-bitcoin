@@ -66,11 +66,11 @@ theorem digest_vals {q : ℕ} (hn : 72 * q + 72 ≤ 2 ^ Ls 3) :
       exact this
 
 /-- Message ids are small: below `2^26 + 2`, hence below `NB`. -/
-theorem msg_mid_lt (hL24 : ∀ i < 15, Ls i ≤ 23) {r0 : ℕ} (h0 : r0 < 2 ^ Ls 2) (f0 : (inst 2).main Msg.FIRSTM r0 = 1) :
+theorem msg_mid_lt (hL24 : SizeOk Ls) {r0 : ℕ} (h0 : r0 < 2 ^ Ls 2) (f0 : (inst 2).main Msg.FIRSTM r0 = 1) :
     ((inst 2).main Msg.MID r0).val < Merkle.NB := by
   have ms := hash_msg_sat hL hsat
   have fs := hash_fields_sat' hL hsat
-  have h25 : 2 ^ Ls 1 ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans (hL24 1 (by decide)) (by norm_num))
+  have h25 : 2 ^ Ls 1 ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans (hL24.1 1 (by decide)) (by norm_num))
   norm_num at h25
   rw [Msg.mid_eq ms h0]
   rcases Msg.bool_col ms (e := Msg.HDR) (by simp) h0 with h | h
@@ -85,14 +85,14 @@ theorem msg_mid_lt (hL24 : ∀ i < 15, Ls i ≤ 23) {r0 : ℕ} (h0 : r0 < 2 ^ Ls
   · rw [h, sub_self, zero_mul]; simp [Merkle.NB]
 
 /-- **A node id's second hash** finishes a node block and its padding block (same id). -/
-theorem node_period (hL24 : ∀ i < 15, Ls i ≤ 23) {q : ℕ} (hn : 72 * q + 72 ≤ 2 ^ Ls 3) (hd : (inst 3).main Sha.DBL (72 * q) = 1)
+theorem node_period (hL24 : SizeOk Ls) {q : ℕ} (hn : 72 * q + 72 ≤ 2 ^ Ls 3) (hd : (inst 3).main Sha.DBL (72 * q) = 1)
     (hmid : Merkle.NB ≤ ((inst 3).main Sha.MID (72 * q)).val) :
     2 ≤ q ∧ (inst 3).main Sha.NPAD (72 * (q - 1)) = 1 ∧ (inst 3).main Sha.NODE (72 * (q - 2)) = 1 ∧
       (inst 3).main Sha.MID (72 * (q - 2)) = (inst 3).main Sha.MID (72 * q) := by
   have ss := hash_sha_sat hL hsat
   have ms := hash_msg_sat hL hsat
   have hx : 72 * q < 2 ^ Ls 3 := by omega
-  have h25 : 2 ^ Ls 3 ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans (hL24 3 (by decide)) (by norm_num))
+  have h25 : 2 ^ Ls 3 ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans (hL24.1 3 (by decide)) (by norm_num))
   norm_num at h25
   have r0q : (pre Sha.ROW0).eval (2 ^ Ls 3) Sha.preCols pub (inst 3).main (72 * q) = 1 := Sha.row0_at ss hx
   -- not period 0
@@ -227,7 +227,7 @@ theorem node_period (hL24 : ∀ i < 15, Ls i ≤ 23) {q : ℕ} (hn : 72 * q + 72
 
 /-- **A node block's children.** Words `0..7` (`8..15`) of a node block at `s` are the output state of a
 second hash whose id is the node's left (right) child. -/
-theorem node_children (hL24 : ∀ i < 15, Ls i ≤ 23) {p : ℕ} (hp : 72 * p + 72 ≤ 2 ^ Ls 3) (ho : (inst 3).main Sha.NODE (72 * p) = 1)
+theorem node_children (hL24 : SizeOk Ls) {p : ℕ} (hp : 72 * p + 72 ≤ 2 ^ Ls 3) (ho : (inst 3).main Sha.NODE (72 * p) = 1)
     (hid : ((inst 3).main Sha.LID (72 * p)).val < 2 ^ 28 ∧ ((inst 3).main Sha.RID (72 * p)).val < 2 ^ 28) :
     ∀ half ≤ 1, ∃ q', 72 * q' + 72 ≤ 2 ^ Ls 3 ∧ (inst 3).main Sha.DBL (72 * q') = 1 ∧
       (inst 3).main Sha.MID (72 * q') = (if half = 0 then (inst 3).main Sha.LID (72 * p) else (inst 3).main Sha.RID (72 * p)) ∧
@@ -297,7 +297,7 @@ theorem node_children (hL24 : ∀ i < 15, Ls i ≤ 23) {p : ℕ} (hp : 72 * p + 
     exact word_of_halves (natCast_inj_of_lt (hb _ 0) (hb _ 0) h0) (natCast_inj_of_lt (hb _ 1) (hb _ 1) h1)
 
 /-- Tree ids are below `2^28`. -/
-theorem idOf_small (hL24 : ∀ i < 15, Ls i ≤ 23) {N : ℕ} (hN : pub 1 = (N : F)) (hN1 : 1 ≤ N) (hN25 : N < 2 ^ Ls 1)
+theorem idOf_small (hL24 : SizeOk Ls) {N : ℕ} (hN : pub 1 = (N : F)) (hN1 : 1 ≤ N) (hN25 : N < 2 ^ Ls 1)
     {l j : ℕ} (hj : j < Merkle.cntL N l) (hl : l = 0 ∨ (1 ≤ l ∧ 2 ≤ Merkle.cntL N (l - 1))) :
     ((Merkle.idOf N l j : ℕ) : F).val < 2 ^ 28 := by
   have ks := hash_merkle_sat hL hsat
@@ -312,7 +312,7 @@ theorem idOf_small (hL24 : ∀ i < 15, Ls i ≤ 23) {N : ℕ} (hN : pub 1 = (N :
 
 /-- **A hashed node entry's block.** A second hash with id `(l + 1, i)` follows a node block whose children
 are `(l, 2i)` and `(l, min (2i + 1) (cnt l − 1))`, duplicating exactly when `2i + 1 = cnt l`. -/
-theorem node_setup (hL24 : ∀ i < 15, Ls i ≤ 23) {N : ℕ} (hN : pub 1 = (N : F)) (hN1 : 1 ≤ N) (hN25 : N < 2 ^ Ls 1)
+theorem node_setup (hL24 : SizeOk Ls) {N : ℕ} (hN : pub 1 = (N : F)) (hN1 : 1 ≤ N) (hN25 : N < 2 ^ Ls 1)
     {l i q : ℕ} (hc2 : 2 ≤ Merkle.cntL N l) (hi : i < Merkle.cntL N (l + 1)) (hq : 72 * q + 72 ≤ 2 ^ Ls 3)
     (hd : (inst 3).main Sha.DBL (72 * q) = 1) (hm : (inst 3).main Sha.MID (72 * q) = (Merkle.idOf N (l + 1) i : F)) :
     2 ≤ q ∧ (inst 3).main Sha.NODE (72 * (q - 2)) = 1 ∧
@@ -346,7 +346,7 @@ theorem node_setup (hL24 : ∀ i < 15, Ls i ≤ 23) {N : ℕ} (hN : pub 1 = (N :
 
 /-- **Every tree entry's second hash.** With `b` the parsed block (`N` transactions, public input 1), a
 second hash whose id is tree entry `(l, i)` outputs entry `i` of level `l` of the txid Merkle tree. -/
-theorem id_digest (hL24 : ∀ i < 15, Ls i ≤ 23) {b : Spec.Block.Blk}
+theorem id_digest (hL24 : SizeOk Ls) {b : Spec.Block.Blk}
     (hb : Spec.Block.parseBlock (Fields.blockBytes (inst 0).main (pub 0).val) = some b)
     (hN : pub 1 = (b.txs.length : F)) (hN1 : 1 ≤ b.txs.length) (hN25 : b.txs.length < 2 ^ Ls 1) :
     ∀ l, (l = 0 ∨ (1 ≤ l ∧ 2 ≤ Merkle.cntL b.txs.length (l - 1))) → ∀ i < Merkle.cntL b.txs.length l,
@@ -466,7 +466,7 @@ theorem id_digest (hL24 : ∀ i < 15, Ls i ≤ 23) {b : Spec.Block.Blk}
 /-- **Every entry below a hashed root is hashed**, and **no level is mutated**: with `H` levels (`cnt H = 1`)
 and the root entry `(H, 0)` hashed, every entry has a second hash, and on each level below `H` the pairs
 `(2i, 2i + 1)` differ. -/
-theorem tree_hashed (hL24 : ∀ i < 15, Ls i ≤ 23) {b : Spec.Block.Blk}
+theorem tree_hashed (hL24 : SizeOk Ls) {b : Spec.Block.Blk}
     (hb : Spec.Block.parseBlock (Fields.blockBytes (inst 0).main (pub 0).val) = some b)
     (hN : pub 1 = (b.txs.length : F)) (hN1 : 1 ≤ b.txs.length) (hN25 : b.txs.length < 2 ^ Ls 1)
     {H : ℕ} (hH : Merkle.cntL b.txs.length H = 1) (hHl : ∀ l < H, 2 ≤ Merkle.cntL b.txs.length l)
@@ -540,7 +540,7 @@ theorem tree_hashed (hL24 : ∀ i < 15, Ls i ≤ 23) {b : Spec.Block.Blk}
   rw [wL t ht, show t + 8 = 8 + t by ring, wR t ht, hs]
 
 /-- **The root row's header words** are the block's bytes 36..67 (big-endian 16-bit limbs). -/
-theorem header_word (hL24 : ∀ i < 15, Ls i ≤ 23) {r : ℕ} (hr : r < 2 ^ Ls 4) (hrt : (inst 4).main Merkle.RT r = 1) {w : ℕ} (hw : w < 8) :
+theorem header_word (hL24 : SizeOk Ls) {r : ℕ} (hr : r < 2 ^ Ls 4) (hrt : (inst 4).main Merkle.RT r = 1) {w : ℕ} (hw : w < 8) :
     79 < (pub 0).val ∧
     (inst 4).main (Merkle.RL (2 * w)) r = 256 * (inst 0).main BYTE (38 + 4 * w) + (inst 0).main BYTE (39 + 4 * w) ∧
     (inst 4).main (Merkle.RL (2 * w + 1)) r = 256 * (inst 0).main BYTE (36 + 4 * w) + (inst 0).main BYTE (37 + 4 * w) := by
@@ -600,7 +600,7 @@ theorem header_word (hL24 : ∀ i < 15, Ls i ≤ 23) {r : ℕ} (hr : r < 2 ^ Ls 
     obtain ⟨hd, -, hpos, -⟩ := rows j' hj'
     obtain ⟨ρ, hρ, pρ, bρ⟩ := msg_read hL hsat hL24 hl hd
     rw [hpos, ta, zero_add] at pρ
-    have hLEN : (pub 0).val ≤ 2 ^ 25 := Fields.len_le (le_trans (hL24 0 (by decide)) (by norm_num)) fs (hash_bytes_sat hL hsat) (hash_fields_read hL hsat hL24)
+    have hLEN : (pub 0).val ≤ 2 ^ 25 := Fields.len_le (le_trans (hL24.1 0 (by decide)) (by norm_num)) fs (hash_bytes_sat hL hsat) (hash_fields_read hL hsat hL24)
     have e := natCast_inj_of_lt (a := j') (b := ρ) (Fields.lt_P (by omega)) (Fields.lt_P (by omega)) pρ
     subst e; exact ⟨hρ, bρ⟩
   -- the word's index
@@ -616,7 +616,7 @@ theorem header_word (hL24 : ∀ i < 15, Ls i ≤ 23) {r : ℕ} (hr : r < 2 ^ Ls 
 /-- **Merkle soundness (M3a.4).** In a satisfied (bytes, fields, msg, sha, merkle) system with at most `2^25`
 rows, the block's bytes parse as a block `b` whose txid Merkle root is the header's Merkle field and whose
 tree is not mutated: `bad-txnmrklroot` and `bad-txns-duplicate` cannot fire. -/
-theorem merkle_sound (hL24 : ∀ i < 15, Ls i ≤ 23) :
+theorem merkle_sound (hL24 : SizeOk Ls) :
     ∃ b, Spec.Block.parseBlock (Fields.blockBytes (inst 0).main (pub 0).val) = some b ∧
       Spec.Block.merkleRoot (b.txs.map Spec.Block.txid) = (Spec.Block.headerMerkle b, false) := by
   have ms := hash_msg_sat hL hsat
@@ -628,9 +628,9 @@ theorem merkle_sound (hL24 : ∀ i < 15, Ls i ≤ 23) :
   have hn1 : 0 < 2 ^ Ls 1 := by positivity
   have hn4 : 0 < 2 ^ Ls 4 := by positivity
   obtain ⟨m, hmn, hnp, hpad, hfit, hcs, cat, mono, hSm⟩ :=
-    Fields.block_ctx (le_trans (hL24 0 (by decide)) (by norm_num)) fs hb0 (hash_fields_read hL hsat hL24)
+    Fields.block_ctx (le_trans (hL24.1 0 (by decide)) (by norm_num)) fs hb0 (hash_fields_read hL hsat hL24)
   obtain ⟨b, hparse, hhead, hlenv, hN1, hN25, -⟩ :=
-    Fields.block_index (le_trans (hL24 0 (by decide)) (by norm_num)) fs hb0 (hash_fields_read hL hsat hL24) hmn hnp hpad hfit hcs cat mono hSm
+    Fields.block_index (le_trans (hL24.1 0 (by decide)) (by norm_num)) fs hb0 (hash_fields_read hL hsat hL24) hmn hnp hpad hfit hcs cat mono hSm
   refine ⟨b, hparse, ?_⟩
   set N := b.txs.length with hNdef
   -- public input 1 is the transaction count

@@ -95,7 +95,7 @@ theorem ind_sum_pos {s : Finset ℕ} {p : ℕ → Prop} [DecidablePred p] :
 section System
 
 variable {inst : ℕ → Inst} {pub : ℕ → F} {Ls : ℕ → ℕ}
-  (hL : ∀ i < 15, (inst i).logSize = Ls i) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : ∀ i < 15, Ls i ≤ 23)
+  (hL : ∀ i < 15, (inst i).logSize = Ls i) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : SizeOk Ls)
 include hL hsat hL24
 
 /-- **Two sites, one relation: yields and uses sum alike.** -/
@@ -478,7 +478,7 @@ theorem coin_start_strict (S : Setup inst pub (Ls 1)) {j : ℕ} (hj1 : j + 1 < 2
   obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
   have e : ((inst 14).main Coin.START (j + 1)).val = ((inst 14).main Coin.START j).val + 1 + Coin.b3N (inst 14).main Coin.D (j + 1) := by
     apply Coin.lift _ (ZMod.val_lt _) (lt_of_lt_of_le (show ((inst 14).main Coin.START j).val + 1 +
-      Coin.b3N (inst 14).main Coin.D (j + 1) < 2 ^ 25 by omega) (by unfold P; norm_num))
+      Coin.b3N (inst 14).main Coin.D (j + 1) < 2 ^ 26 by omega) (by unfold P; norm_num))
     rw [Coin.cast_val, hstep]; push_cast; rw [Coin.cast_val, Coin.b3V_eq]
   omega
 

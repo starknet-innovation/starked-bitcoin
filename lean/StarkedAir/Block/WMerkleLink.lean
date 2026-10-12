@@ -82,7 +82,7 @@ theorem hash_wmerkle_sat' : ∀ r < 2 ^ Ls 8, ∀ c ∈ WMerkle.constraints,
 /-- **Any digest use** (a node block's child read, the txid tree's root read, or the context's commitment
 read) with multiplicity `−1` reads a second hash's output, the zero digest, or the coinbase nonce yielded
 at context row 79. -/
-theorem digest_any (hL24 : ∀ i < 15, Ls i ≤ 23) {i r k : ℕ}
+theorem digest_any (hL24 : SizeOk Ls) {i r k : ℕ}
     (hu : (i = 3 ∧ (k = 4 ∨ k = 5)) ∨ (i = 4 ∧ k = 2) ∨ (i = 7 ∧ (k = 10 ∨ k = 11)))
     (hr : r < 2 ^ Ls i) (hm : siteMult hashSys inst pub (i, r, k) = -1) :
     (∃ q', 72 * q' + 72 ≤ 2 ^ Ls 3 ∧ (inst 3).main Sha.DBL (72 * q') = 1 ∧
@@ -148,7 +148,7 @@ theorem digest_any (hL24 : ∀ i < 15, Ls i ≤ 23) {i r k : ℕ}
       StarkedAir.Sha256.eval_cst, Ctx.ev_k (M := (inst 7).main) (pub := pub) hr']
 
 /-- **A second hash's id is below `2^28`**: a message id, or a tree node's. -/
-theorem dbl_mid_lt (hL24 : ∀ i < 15, Ls i ≤ 23) {q : ℕ} (hn : 72 * q + 72 ≤ 2 ^ Ls 3) (hd : (inst 3).main Sha.DBL (72 * q) = 1) :
+theorem dbl_mid_lt (hL24 : SizeOk Ls) {q : ℕ} (hn : 72 * q + 72 ≤ 2 ^ Ls 3) (hd : (inst 3).main Sha.DBL (72 * q) = 1) :
     ((inst 3).main Sha.MID (72 * q)).val < 2 ^ 28 := by
   have ss := hash_sha_sat hL hsat
   obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
@@ -211,7 +211,7 @@ theorem child_site {p : ℕ} (hp : 72 * p + 72 ≤ 2 ^ Ls 3) (ho : (inst 3).main
           Sha.node_tuple ss (s := 72 * p) (by omega) hj half hh]
 
 /-- Witness-tree ids are at most `ZERO_ID`, which only leaf 0 has. -/
-theorem wid_small (hL24 : ∀ i < 15, Ls i ≤ 23) {N : ℕ} (hN : pub 1 = (N : F)) (hN1 : 1 ≤ N) (hN25 : N < 2 ^ Ls 1)
+theorem wid_small (hL24 : SizeOk Ls) {N : ℕ} (hN : pub 1 = (N : F)) (hN1 : 1 ≤ N) (hN25 : N < 2 ^ Ls 1)
     (hW : (inst 8).main WMerkle.WON 0 = 1)
     {l j : ℕ} (hj : j < Merkle.cntL N l) (hl : l = 0 ∨ (1 ≤ l ∧ 2 ≤ Merkle.cntL N (l - 1))) :
     WMerkle.idOf N l j < P ∧ WMerkle.idOf N l j ≤ Ctx.ZERO_ID ∧
@@ -230,7 +230,7 @@ theorem wid_small (hL24 : ∀ i < 15, Ls i ≤ 23) {N : ℕ} (hN : pub 1 = (N : 
     unfold WMerkle.NBW Ctx.ZERO_ID at *; refine ⟨by omega, by omega, by omega⟩
 
 /-- A node block with a witness-tree id is a witness-tree row's. -/
-theorem wnode_row (hL24 : ∀ i < 15, Ls i ≤ 23) {x : ℕ} (hx : x < 2 ^ Ls 3)
+theorem wnode_row (hL24 : SizeOk Ls) {x : ℕ} (hx : x < 2 ^ Ls 3)
     (hm : (Expr.mul (pre Sha.ROW0) (Sha.k Sha.NODE)).eval (2 ^ Ls 3) Sha.preCols pub (inst 3).main x = 1)
     (hge : WMerkle.NBW ≤ ((inst 3).main Sha.MID x).val) :
     ∃ r' < 2 ^ Ls 8, (inst 3).main Sha.MID x = ((WMerkle.NBW + r' : ℕ) : F) ∧
@@ -243,7 +243,7 @@ theorem wnode_row (hL24 : ∀ i < 15, Ls i ≤ 23) {x : ℕ} (hx : x < 2 ^ Ls 3)
 
 /-- **A witness-tree node's child**: the node block's half holds the state of the child's entry, given the
 child's level (an id below `ZERO_ID` is a second hash; `ZERO_ID` is the zero leaf). -/
-theorem wchild (hL24 : ∀ i < 15, Ls i ≤ 23) {lw : List Spec.Block.Bytes} {N l j p half : ℕ}
+theorem wchild (hL24 : SizeOk Ls) {lw : List Spec.Block.Bytes} {N l j p half : ℕ}
     (hp : 72 * p + 72 ≤ 2 ^ Ls 3) (ho : (inst 3).main Sha.NODE (72 * p) = 1) (hh : half ≤ 1)
     (hcid : (if half = 0 then (inst 3).main Sha.LID (72 * p) else (inst 3).main Sha.RID (72 * p)) =
       (WMerkle.idOf N l j : F))
@@ -278,7 +278,7 @@ theorem wchild (hL24 : ∀ i < 15, Ls i ≤ 23) {lw : List Spec.Block.Bytes} {N 
     unfold Ctx.NONCE_ID Ctx.ZERO_ID at *; omega
 
 /-- **Every witness-tree entry's second hash** outputs that entry of the tree over `wleaves b`. -/
-theorem wid_digest (hL24 : ∀ i < 15, Ls i ≤ 23) {b : Spec.Block.Blk}
+theorem wid_digest (hL24 : SizeOk Ls) {b : Spec.Block.Blk}
     (hb : Spec.Block.parseBlock (Fields.blockBytes (inst 0).main (pub 0).val) = some b)
     (hN : pub 1 = (b.txs.length : F)) (hN1 : 1 ≤ b.txs.length) (hN25 : b.txs.length < 2 ^ Ls 1)
     (hW : (inst 8).main WMerkle.WON 0 = 1) :
@@ -408,7 +408,7 @@ def stLimbs (o : Spec.Sha256.State) : List F :=
 /-- **Witness tree soundness (M3a.5e).** When the commitment is checked (`HC`), the digest the context reads
 at row 117 is `SHA256d(root ++ nonce)`: `root` is the Merkle root of `wleaves b` and `nonce` the state whose
 limbs the context yields at row 79. -/
-theorem wmerkle_sound (hL24 : ∀ i < 15, Ls i ≤ 23) (h256 : 256 ≤ 2 ^ Ls 7) {b : Spec.Block.Blk}
+theorem wmerkle_sound (hL24 : SizeOk Ls) (h256 : 256 ≤ 2 ^ Ls 7) {b : Spec.Block.Blk}
     (hb : Spec.Block.parseBlock (Fields.blockBytes (inst 0).main (pub 0).val) = some b)
     (hN : pub 1 = (b.txs.length : F)) (hN1 : 1 ≤ b.txs.length) (hN25 : b.txs.length < 2 ^ Ls 1)
     (hc : (inst 7).main Ctx.HC 0 = 1) :

@@ -40,8 +40,9 @@ verifies to a 171-coin set of 850,000,000,000 sat; a tampered set is rejected.
 Proven in Lean (standard axioms):
 - **Spec:** `run_of_balance`, `epoch_sound`, `connect_of_run` (Core's coins view), QM31 is a finite field;
 - **Components:** `extsum_sound`, `seg_sound`, `rows_sound` (undo records);
-- **System:** `block_sound`, `commit_sound`, `hash_pub` still hold for the 15-component system
-  (`L ≤ 23`, 216 lookup sites per row);
+- **System:** `block_sound`, `commit_sound`, `hash_pub` still hold for the 15-component system, under
+  `SizeOk` (each component ≤ 2^24 rows and the lookup site count `Σ kᵢ·2^Lᵢ` below P): uniform up to
+  L = 23, tiered up to L = 24 (2026-10-12);
 - **The coin component, end to end (2026-10-11):** `epoch_systems_core`: block systems at consecutive
   heights sharing the epoch's challenge, with a balanced public sum (outside the fingerprint and LogUp
   bad sets), connect as Core does from the initial view and end at exactly the final set; every block

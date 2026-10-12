@@ -185,7 +185,7 @@ challenge (`γ`, `z`, weights `αᵏ`) give the epoch's blocks: their public par
 blocks' sum at `(α, z)`, and their spends and transactions satisfy `epoch_core`'s block facts. -/
 theorem epoch_blocks (nb : ℕ) (inst : ℕ → ℕ → Inst) (pub : ℕ → ℕ → F) (L : ℕ → ℕ → ℕ)
     (hL : ∀ i < nb, ∀ c < 15, (inst i c).logSize = L i c) (hsat : ∀ i < nb, hashSys.SatisfiedExt (inst i) (pub i) [])
-    (hL24 : ∀ i < nb, ∀ c < 15, L i c ≤ 23) (S : ∀ i, Setup (inst i) (pub i) (L i 1)) (h0 : ℕ) (hh : h0 + nb ≤ 2 ^ 23)
+    (hL24 : ∀ i < nb, SizeOk (L i)) (S : ∀ i, Setup (inst i) (pub i) (L i 1)) (h0 : ℕ) (hh : h0 + nb ≤ 2 ^ 23)
     (hp2 : ∀ i < nb, pub i 2 = ((h0 + i : ℕ) : F)) (lost : ℕ → Bool)
     (hlost : ∀ i < nb, pub i Coin.PUB_LOST = if lost i then 1 else 0)
     (γ α z : QM) (hγ : ∀ i < nb, FpWalk.gQ (pub i) = γ) (hz : ∀ i < nb, RunSum.pQ (pub i) Coin.PUB_Z = z)
@@ -256,7 +256,7 @@ set's fractions equal the final set's, Core's connect of the epoch's transaction
 succeeds and ends at exactly the final set. -/
 theorem epoch_systems_core (nb : ℕ) (inst : ℕ → ℕ → Inst) (pub : ℕ → ℕ → F) (L : ℕ → ℕ → ℕ)
     (hL : ∀ i < nb, ∀ c < 15, (inst i c).logSize = L i c) (hsat : ∀ i < nb, hashSys.SatisfiedExt (inst i) (pub i) [])
-    (hL24 : ∀ i < nb, ∀ c < 15, L i c ≤ 23) (S : ∀ i, Setup (inst i) (pub i) (L i 1)) (h0 : ℕ) (hh : h0 + nb ≤ 2 ^ 23)
+    (hL24 : ∀ i < nb, SizeOk (L i)) (S : ∀ i, Setup (inst i) (pub i) (L i 1)) (h0 : ℕ) (hh : h0 + nb ≤ 2 ^ 23)
     (hp2 : ∀ i < nb, pub i 2 = ((h0 + i : ℕ) : F))
     (hlost : ∀ i < nb, pub i Coin.PUB_LOST = if Spec.Coins.bip30Lost (h0 + i) then 1 else 0)
     (γ α z : QM) (hγ : ∀ i < nb, FpWalk.gQ (pub i) = γ) (hz : ∀ i < nb, RunSum.pQ (pub i) Coin.PUB_Z = z)
@@ -318,7 +318,7 @@ theorem epoch_systems_core (nb : ℕ) (inst : ℕ → ℕ → Inst) (pub : ℕ �
   have hbnd : ∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → B.h < 2 ^ 24 ∧ B.txs.length < 2 ^ 25 := by
     intro i B hBi
     obtain ⟨hi, h2, h3, -⟩ := hB i B hBi
-    have hLb : 2 ^ L i 1 ≤ 2 ^ 23 := Nat.pow_le_pow_right (by norm_num) (hL24 i hi 1 (by decide))
+    have hLb : 2 ^ L i 1 ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) ((hL24 i hi).1 1 (by decide))
     have := (S i).hN25
     refine ⟨by rw [h2]; omega, by rw [h3]; omega⟩
   have hmem : ∀ B ∈ blocks, ∃ i, blocks[i]? = some B := fun B hBm => by
@@ -337,7 +337,7 @@ theorem epoch_systems_core (nb : ℕ) (inst : ℕ → ℕ → Inst) (pub : ℕ �
 section System
 
 variable {inst : ℕ → Inst} {pub : ℕ → F} {Ls : ℕ → ℕ}
-  (hL : ∀ i < 15, (inst i).logSize = Ls i) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : ∀ i < 15, Ls i ≤ 23)
+  (hL : ∀ i < 15, (inst i).logSize = Ls i) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : SizeOk Ls)
 include hL hsat hL24
 
 /-- **An epoch block passes Core's checks.** A block system whose non-coinbase transactions spend

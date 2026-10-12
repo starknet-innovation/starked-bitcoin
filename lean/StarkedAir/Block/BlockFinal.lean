@@ -39,7 +39,7 @@ theorem le4_slice {R : Spec.Block.Bytes} {a : ℕ} (h : a + 4 ≤ R.length) :
 section System
 
 variable {inst : ℕ → Inst} {pub : ℕ → F} {Ls : ℕ → ℕ}
-  (hL : ∀ i < 15, (inst i).logSize = Ls i) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : ∀ i < 15, Ls i ≤ 23)
+  (hL : ∀ i < 15, (inst i).logSize = Ls i) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : SizeOk Ls)
 include hL hsat hL24
 
 /-- **Finality.** -/
@@ -52,7 +52,7 @@ theorem final_ok (hL8 : 8 ≤ Ls 7) (S : Setup inst pub (Ls 1)) {c : Spec.Block.
   have cs := hash_ctx_sat' hL hsat
   obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
   have h256 := ctx_sat8 hL hsat hL24 hL8
-  have h25 : 2 ^ Ls 1 ≤ 2 ^ 25 := Nat.pow_le_pow_right (by norm_num) (by have := hL24 1 (by decide); omega)
+  have h25 : 2 ^ Ls 1 ≤ 2 ^ 25 := Nat.pow_le_pow_right (by norm_num) (by have := hL24.1 1 (by decide); omega)
   obtain ⟨j, ρ, -, -, hρ, hl, -, hat⟩ := tx_at hL hsat hL24 S ht
   have hρn : ρ < 2 ^ Ls 1 := by have := S.hmn; omega
   -- the cutoff's limbs on the lock-time row are the context's

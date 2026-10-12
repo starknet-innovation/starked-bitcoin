@@ -70,10 +70,23 @@ theorem yield_table : ∀ i < 15, ∀ k < (hashSys.comp i).lookups.length, isUse
   simp only [hu, Bool.false_or, List.contains_iff_mem] at this
   exact this
 
+/-- The block system's lookup sites over all rows (per-component sizes, D-045): `Σᵢ kᵢ · 2^(Ls i)` with
+`kᵢ` the lookups per row — bytes 1, fields 36, messages 4, SHA 6, txid tree 11, tables 2, walker 5, context 12,
+witness tree 3, undo bytes 1, Blake2s words 6, Blake2s 11, fingerprints 4, undo records 20, coins 94 (216). -/
+def hashRows (Ls : ℕ → ℕ) : ℕ :=
+  2 ^ Ls 0 + 36 * 2 ^ Ls 1 + 4 * 2 ^ Ls 2 + 6 * 2 ^ Ls 3 + 11 * 2 ^ Ls 4 + 2 * 2 ^ Ls 5 + 5 * 2 ^ Ls 6 +
+    12 * 2 ^ Ls 7 + 3 * 2 ^ Ls 8 + 2 ^ Ls 9 + 6 * 2 ^ Ls 10 + 11 * 2 ^ Ls 11 + 4 * 2 ^ Ls 12 + 20 * 2 ^ Ls 13 +
+    94 * 2 ^ Ls 14
+
+/-- **The block system's size condition** (D-045): every component has at most `2^24` rows and the site
+count `Σᵢ kᵢ·2^(Ls i)` is below `P`. One shared size satisfies it up to `2^23` (`SizeOk.of_le23`); a size
+vector with SHA at `2^24` does when the heavy-lookup components are smaller (the tiered profile). -/
+def SizeOk (Ls : ℕ → ℕ) : Prop := (∀ i < 15, Ls i ≤ 24) ∧ hashRows Ls < P
+
 section System
 
 variable {inst : ℕ → Inst} {pub : ℕ → F} {Ls : ℕ → ℕ}
-  (hL : ∀ i < 15, (inst i).logSize = Ls i) (hL24 : ∀ i < 15, Ls i ≤ 23)
+  (hL : ∀ i < 15, (inst i).logSize = Ls i) (hL24 : SizeOk Ls)
   (hsat : hashSys.SatisfiedExt inst pub [])
 include hL hsat
 
@@ -133,15 +146,6 @@ theorem mem_sites {i r k : ℕ} : ((i, r, k) : Site) ∈ sites hashSys inst ↔
   · rintro ⟨hi, hr', hk'⟩
     exact ⟨i, hi, r, by rw [hL i hi]; exact hr', k, hk', rfl, rfl, rfl⟩
 
-omit hL hsat in
-/-- The block system's lookup sites over all rows (per-component sizes, D-045): `Σᵢ kᵢ · 2^(Ls i)` with
-`kᵢ` the lookups per row — bytes 1, fields 36, messages 4, SHA 6, txid tree 11, tables 2, walker 5, context 12,
-witness tree 3, undo bytes 1, Blake2s words 6, Blake2s 11, fingerprints 4, undo records 20, coins 94 (216). -/
-def hashRows (Ls : ℕ → ℕ) : ℕ :=
-  2 ^ Ls 0 + 36 * 2 ^ Ls 1 + 4 * 2 ^ Ls 2 + 6 * 2 ^ Ls 3 + 11 * 2 ^ Ls 4 + 2 * 2 ^ Ls 5 + 5 * 2 ^ Ls 6 +
-    12 * 2 ^ Ls 7 + 3 * 2 ^ Ls 8 + 2 ^ Ls 9 + 6 * 2 ^ Ls 10 + 11 * 2 ^ Ls 11 + 4 * 2 ^ Ls 12 + 20 * 2 ^ Ls 13 +
-    94 * 2 ^ Ls 14
-
 omit hsat in
 theorem hash_sites_len : (sites hashSys inst).length = hashRows Ls := by
   simp [sites, hashSys, hashRows, hL 0 (by decide), hL 1 (by decide), hL 2 (by decide), hL 3 (by decide), hL 4 (by decide),
@@ -158,9 +162,10 @@ omit hL hsat in
 theorem hashRows_const (L : ℕ) : hashRows (fun _ => L) = 216 * 2 ^ L := by unfold hashRows; ring
 
 omit hL hsat in
-/-- **The site count is below `P`** when every component has at most `2^23` rows (`Σᵢ kᵢ·2^(Ls i) ≤ 216·2^23`). -/
-theorem hash_rows_lt_P (hL24 : ∀ i < 15, Ls i ≤ 23) : hashRows Ls < P := by
-  have h : ∀ i < 15, 2 ^ Ls i ≤ 2 ^ 23 := fun i hi => Nat.pow_le_pow_right (by norm_num) (hL24 i hi)
+/-- Sizes of at most `2^23` rows satisfy the size condition (`Σᵢ kᵢ·2^(Ls i) ≤ 216·2^23 < P`). -/
+theorem SizeOk.of_le23 (h23 : ∀ i < 15, Ls i ≤ 23) : SizeOk Ls := by
+  refine ⟨fun i hi => le_trans (h23 i hi) (by norm_num), ?_⟩
+  have h : ∀ i < 15, 2 ^ Ls i ≤ 2 ^ 23 := fun i hi => Nat.pow_le_pow_right (by norm_num) (h23 i hi)
   have := h 0 (by decide); have := h 1 (by decide); have := h 2 (by decide); have := h 3 (by decide)
   have := h 4 (by decide); have := h 5 (by decide); have := h 6 (by decide); have := h 7 (by decide)
   have := h 8 (by decide); have := h 9 (by decide); have := h 10 (by decide); have := h 11 (by decide)
@@ -168,26 +173,30 @@ theorem hash_rows_lt_P (hL24 : ∀ i < 15, Ls i ≤ 23) : hashRows Ls < P := by
   unfold hashRows P; omega
 
 omit hL hsat in
-/-- Each component has at most `2^23` rows. -/
-theorem rows_le (hL24 : ∀ i < 15, Ls i ≤ 23) {i : ℕ} (hi : i < 15) : 2 ^ Ls i ≤ 8388608 :=
-  le_trans (Nat.pow_le_pow_right (by norm_num) (hL24 i hi)) (by norm_num)
+/-- **The site count is below `P`** under the size condition. -/
+theorem hash_rows_lt_P (hL24 : SizeOk Ls) : hashRows Ls < P := hL24.2
+
+omit hL hsat in
+/-- Each component has at most `2^24` rows. -/
+theorem rows_le (hL24 : SizeOk Ls) {i : ℕ} (hi : i < 15) : 2 ^ Ls i ≤ 16777216 :=
+  le_trans (Nat.pow_le_pow_right (by norm_num) (hL24.1 i hi)) (by norm_num)
 
 omit hL hsat in
 /-- All fifteen row bounds at once (for `omega`). -/
-theorem rows_le_all (hL24 : ∀ i < 15, Ls i ≤ 23) :
-    2 ^ Ls 0 ≤ 8388608 ∧ 2 ^ Ls 1 ≤ 8388608 ∧ 2 ^ Ls 2 ≤ 8388608 ∧ 2 ^ Ls 3 ≤ 8388608 ∧ 2 ^ Ls 4 ≤ 8388608 ∧
-      2 ^ Ls 5 ≤ 8388608 ∧ 2 ^ Ls 6 ≤ 8388608 ∧ 2 ^ Ls 7 ≤ 8388608 ∧ 2 ^ Ls 8 ≤ 8388608 ∧ 2 ^ Ls 9 ≤ 8388608 ∧
-      2 ^ Ls 10 ≤ 8388608 ∧ 2 ^ Ls 11 ≤ 8388608 ∧ 2 ^ Ls 12 ≤ 8388608 ∧ 2 ^ Ls 13 ≤ 8388608 ∧
-      2 ^ Ls 14 ≤ 8388608 :=
+theorem rows_le_all (hL24 : SizeOk Ls) :
+    2 ^ Ls 0 ≤ 16777216 ∧ 2 ^ Ls 1 ≤ 16777216 ∧ 2 ^ Ls 2 ≤ 16777216 ∧ 2 ^ Ls 3 ≤ 16777216 ∧ 2 ^ Ls 4 ≤ 16777216 ∧
+      2 ^ Ls 5 ≤ 16777216 ∧ 2 ^ Ls 6 ≤ 16777216 ∧ 2 ^ Ls 7 ≤ 16777216 ∧ 2 ^ Ls 8 ≤ 16777216 ∧ 2 ^ Ls 9 ≤ 16777216 ∧
+      2 ^ Ls 10 ≤ 16777216 ∧ 2 ^ Ls 11 ≤ 16777216 ∧ 2 ^ Ls 12 ≤ 16777216 ∧ 2 ^ Ls 13 ≤ 16777216 ∧
+      2 ^ Ls 14 ≤ 16777216 :=
   ⟨rows_le hL24 (by decide), rows_le hL24 (by decide), rows_le hL24 (by decide), rows_le hL24 (by decide),
     rows_le hL24 (by decide), rows_le hL24 (by decide), rows_le hL24 (by decide), rows_le hL24 (by decide),
     rows_le hL24 (by decide), rows_le hL24 (by decide), rows_le hL24 (by decide), rows_le hL24 (by decide),
     rows_le hL24 (by decide), rows_le hL24 (by decide), rows_le hL24 (by decide)⟩
 
 omit hL hsat in
-/-- Each component's rows are below `P` (`2^(Ls i) ≤ 2^23`). -/
-theorem rows_lt_P (hL24 : ∀ i < 15, Ls i ≤ 23) {i : ℕ} (hi : i < 15) : 2 ^ Ls i < P :=
-  lt_of_le_of_lt (Nat.pow_le_pow_right (by norm_num) (hL24 i hi)) (by unfold P; norm_num)
+/-- Each component's rows are below `P` (`2^(Ls i) ≤ 2^24`). -/
+theorem rows_lt_P (hL24 : SizeOk Ls) {i : ℕ} (hi : i < 15) : 2 ^ Ls i < P :=
+  lt_of_le_of_lt (rows_le hL24 hi) (by unfold P; norm_num)
 
 /-- SHA's word and length uses have multiplicity `−1` or `0`. -/
 theorem sha_use_mult {r : ℕ} (hr : r < 2 ^ Ls 3) {kk : ℕ} (hk : kk < 2) :
@@ -532,7 +541,7 @@ theorem use_mult : ∀ s ∈ sites hashSys inst, isUse s.1 s.2.2 = true →
 
 /-- **A use is matched by a yield.** A use site with multiplicity `−1` has a yield site (not a use) with
 nonzero multiplicity, the same relation and the same tuple. -/
-theorem linked (hL24 : ∀ i < 15, Ls i ≤ 23) {s0 : Site} (hs0 : s0 ∈ sites hashSys inst) (hu : isUse s0.1 s0.2.2 = true)
+theorem linked (hL24 : SizeOk Ls) {s0 : Site} (hs0 : s0 ∈ sites hashSys inst) (hu : isUse s0.1 s0.2.2 = true)
     (hm : siteMult hashSys inst pub s0 = -1) :
     ∃ s ∈ sites hashSys inst, isUse s.1 s.2.2 = false ∧ siteMult hashSys inst pub s ≠ 0 ∧
       siteRel hashSys s = siteRel hashSys s0 ∧ siteVals hashSys inst pub s = siteVals hashSys inst pub s0 := by
@@ -580,7 +589,7 @@ theorem yt (i k R : ℕ) : (i, k, R) ∈ yieldTable ↔
 
 /-- **Linking a use to its yield, by relation.** For a use site `s0` with multiplicity `−1` and relation
 `R`, a yield site `(i, r', k)` with nonzero multiplicity and the same tuple, listed under `R`. -/
-theorem link (hL24 : ∀ i < 15, Ls i ≤ 23) {i0 r0 k0 : ℕ} (hs0 : ((i0, r0, k0) : Site) ∈ sites hashSys inst)
+theorem link (hL24 : SizeOk Ls) {i0 r0 k0 : ℕ} (hs0 : ((i0, r0, k0) : Site) ∈ sites hashSys inst)
     (hu : isUse i0 k0 = true) (hm : siteMult hashSys inst pub (i0, r0, k0) = -1) :
     ∃ i r' k, r' < 2 ^ Ls i ∧ (i, k, siteRel hashSys (i0, r0, k0)) ∈ yieldTable ∧
       siteMult hashSys inst pub (i, r', k) ≠ 0 ∧
@@ -596,7 +605,7 @@ theorem site_mem {i r k : ℕ} (hi : i < 15) (hr : r < 2 ^ Ls i) (hk : k < (hash
 /-- **SHA's uses are message (or tree) yields.** A SHA word use (`kk = 0`) or length use (`kk = 1`) with
 multiplicity `−1` is matched by a message row yielding the same tuple (message lookup `kk + 2`) or, for a
 length, by a txid-tree node row (lookup 1) or a witness-tree row (lookup 1). -/
-theorem sha_use_linked (hL24 : ∀ i < 15, Ls i ≤ 23) {r : ℕ} (hr : r < 2 ^ Ls 3) {kk : ℕ} (hk : kk < 2)
+theorem sha_use_linked (hL24 : SizeOk Ls) {r : ℕ} (hr : r < 2 ^ Ls 3) {kk : ℕ} (hk : kk < 2)
     (hm : siteMult hashSys inst pub (3, r, kk) = -1) :
     ∃ r', (r' < 2 ^ Ls 2 ∧ siteMult hashSys inst pub (2, r', kk + 2) ≠ 0 ∧
       siteVals hashSys inst pub (2, r', kk + 2) = siteVals hashSys inst pub (3, r, kk)) ∨
@@ -621,7 +630,7 @@ theorem sha_use_linked (hL24 : ∀ i < 15, Ls i ≤ 23) {r : ℕ} (hr : r < 2 ^ 
 
 /-- The node tuple a SHA node block reads: yielded by a txid-tree row (`MID = NB + r'`) or a witness-tree
 row (`MID = NBW + r'`), with that row's children and duplicate flag. -/
-theorem node_link (hL24 : ∀ i < 15, Ls i ≤ 23) {x : ℕ} (hx : x < 2 ^ Ls 3)
+theorem node_link (hL24 : SizeOk Ls) {x : ℕ} (hx : x < 2 ^ Ls 3)
     (hm : (Expr.mul (pre Sha.ROW0) (Sha.k Sha.NODE)).eval (2 ^ Ls 3) Sha.preCols pub (inst 3).main x = 1) :
     ∃ r',
       (r' < 2 ^ Ls 4 ∧ (inst 4).main Merkle.ACTN r' = 1 ∧
@@ -673,10 +682,10 @@ theorem node_link (hL24 : ∀ i < 15, Ls i ≤ 23) {x : ℕ} (hx : x < 2 ^ Ls 3)
     exact ⟨hr', by rw [← e1]; push_cast; ring, e2.symm, e3.symm, e4.symm⟩
 
 /-- **A node block's id is a tree node id** (at least `NB`). -/
-theorem node_mid (hL24 : ∀ i < 15, Ls i ≤ 23) {x : ℕ} (hx : x < 2 ^ Ls 3)
+theorem node_mid (hL24 : SizeOk Ls) {x : ℕ} (hx : x < 2 ^ Ls 3)
     (hm : (Expr.mul (pre Sha.ROW0) (Sha.k Sha.NODE)).eval (2 ^ Ls 3) Sha.preCols pub (inst 3).main x = 1) :
     Merkle.NB ≤ ((inst 3).main Sha.MID x).val := by
-  have h24 : ∀ i < 15, 2 ^ Ls i ≤ 2 ^ 24 := fun i hi => Nat.pow_le_pow_right (by norm_num) (le_trans (hL24 i hi) (by norm_num))
+  have h24 : ∀ i < 15, 2 ^ Ls i ≤ 2 ^ 24 := fun i hi => Nat.pow_le_pow_right (by norm_num) (le_trans (hL24.1 i hi) (by norm_num))
   have h4 := h24 4 (by decide); have h8 := h24 8 (by decide)
   norm_num at h4 h8
   obtain ⟨r', h | h⟩ := node_link hL hsat hL24 hx hm
@@ -686,13 +695,13 @@ theorem node_mid (hL24 : ∀ i < 15, Ls i ≤ 23) {x : ℕ} (hx : x < 2 ^ Ls 3)
 
 /-- **A txid-tree node block's tuple is a txid-tree row's**: `MID = NB + r'`, children and `dup` as on row
 `r'` (for ids below the witness tree's). -/
-theorem node_row (hL24 : ∀ i < 15, Ls i ≤ 23) {x : ℕ} (hx : x < 2 ^ Ls 3)
+theorem node_row (hL24 : SizeOk Ls) {x : ℕ} (hx : x < 2 ^ Ls 3)
     (hm : (Expr.mul (pre Sha.ROW0) (Sha.k Sha.NODE)).eval (2 ^ Ls 3) Sha.preCols pub (inst 3).main x = 1)
     (hlt : ((inst 3).main Sha.MID x).val < WMerkle.NBW) :
     ∃ r' < 2 ^ Ls 4, (inst 4).main Merkle.ACTN r' = 1 ∧
       (inst 3).main Sha.MID x = ((Merkle.NB + r' : ℕ) : F) ∧ (inst 3).main Sha.LID x = (inst 4).main Merkle.LEFT r' ∧
       (inst 3).main Sha.RID x = (inst 4).main Merkle.RIGHT r' ∧ (inst 3).main Sha.NDUP x = (inst 4).main Merkle.DUP r' := by
-  have h24 : 2 ^ Ls 8 ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans (hL24 8 (by decide)) (by norm_num))
+  have h24 : 2 ^ Ls 8 ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans (hL24.1 8 (by decide)) (by norm_num))
   norm_num at h24
   obtain ⟨r', h | h⟩ := node_link hL hsat hL24 hx hm
   · exact ⟨r', h.1, h.2⟩
@@ -702,7 +711,7 @@ theorem node_row (hL24 : ∀ i < 15, Ls i ≤ 23) {x : ℕ} (hx : x < 2 ^ Ls 3)
 or the root row's read, txid-tree lookup 2) with multiplicity `−1` and an id below `2^28` reads the tuple
 yielded at the last row of a second-hash period `q'`. (Ids `2^28`, `2^28 + 1` are the context's
 pseudo-digests.) -/
-theorem digest_linked (hL24 : ∀ i < 15, Ls i ≤ 23) {i r k : ℕ} (hu : (i = 3 ∧ (k = 4 ∨ k = 5)) ∨ (i = 4 ∧ k = 2) ∨ (i = 14 ∧ k = 2))
+theorem digest_linked (hL24 : SizeOk Ls) {i r k : ℕ} (hu : (i = 3 ∧ (k = 4 ∨ k = 5)) ∨ (i = 4 ∧ k = 2) ∨ (i = 14 ∧ k = 2))
     (hr : r < 2 ^ Ls i) (hm : siteMult hashSys inst pub (i, r, k) = -1)
     (hid : ∀ v ∈ (siteVals hashSys inst pub (i, r, k)).head?, v.val < 2 ^ 28) :
     ∃ q', 72 * q' + 72 ≤ 2 ^ Ls 3 ∧ (inst 3).main Sha.DBL (72 * q') = 1 ∧
@@ -750,7 +759,7 @@ theorem digest_linked (hL24 : ∀ i < 15, Ls i ≤ 23) {i r k : ℕ} (hu : (i = 
 
 /-- **The root row's header reads are message yields.** A txid-tree word use (lookups 3–10) with
 multiplicity `−1` is matched by a message row yielding the same tuple. -/
-theorem merkle_word_linked (hL24 : ∀ i < 15, Ls i ≤ 23) {r k : ℕ} (hk : 3 ≤ k) (hk11 : k < 11) (hr : r < 2 ^ Ls 4)
+theorem merkle_word_linked (hL24 : SizeOk Ls) {r k : ℕ} (hk : 3 ≤ k) (hk11 : k < 11) (hr : r < 2 ^ Ls 4)
     (hm : siteMult hashSys inst pub (4, r, k) = -1) :
     ∃ r' < 2 ^ Ls 2, siteMult hashSys inst pub (2, r', 2) ≠ 0 ∧
       siteVals hashSys inst pub (2, r', 2) = siteVals hashSys inst pub (4, r, k) := by
@@ -764,7 +773,7 @@ theorem merkle_word_linked (hL24 : ∀ i < 15, Ls i ≤ 23) {r k : ℕ} (hk : 3 
 /-- **SHA message words are message bytes.** At a SHA message row `x` (rows 4..19 of a period) of a
 period that reads words, the word limbs are bytes `j − 3 .. j` (big-endian) of a message starting at
 message row `r0`, with the same id, where `j − 3 = 64 · BLKI + 4 · (row − 4)`. -/
-theorem sha_word (hL24 : ∀ i < 15, Ls i ≤ 23) {x : ℕ} (hx : x < 2 ^ Ls 3)
+theorem sha_word (hL24 : SizeOk Ls) {x : ℕ} (hx : x < 2 ^ Ls 3)
     (hm : (Expr.mul (pre Sha.MSGROW) (Sha.k Sha.USEW)).eval (2 ^ Ls 3) Sha.preCols pub (inst 3).main x = 1) :
     ∃ r0 j, r0 + j < 2 ^ Ls 2 ∧ 3 ≤ j ∧ r0 % 64 = 0 ∧ (inst 2).main Msg.FIRSTM r0 = 1 ∧
       (∀ i, r0 < i → i ≤ r0 + j → (inst 2).main Msg.FIRSTM i = 0 ∧ (inst 2).main Msg.NIL i = 0) ∧
@@ -808,7 +817,7 @@ theorem sha_word (hL24 : ∀ i < 15, Ls i ≤ 23) {x : ℕ} (hx : x < 2 ^ Ls 3)
 /-- **A second hash checks its message's padded length.** At a `DBL` period's first row `x`, the
 message with its id (starting at message row `r0`, data ending at index `d`) has padded length
 `64 · BLKI(x − 1) + 64`. -/
-theorem sha_len (hL24 : ∀ i < 15, Ls i ≤ 23) {x : ℕ} (hx : x < 2 ^ Ls 3)
+theorem sha_len (hL24 : SizeOk Ls) {x : ℕ} (hx : x < 2 ^ Ls 3)
     (hm : (Expr.mul (pre Sha.ROW0) (Sha.k Sha.DBL)).eval (2 ^ Ls 3) Sha.preCols pub (inst 3).main x = 1)
     (hmid : ((inst 3).main Sha.MID x).val < Merkle.NB) :
     ∃ r0 d, (inst 2).main Msg.FIRSTM r0 = 1 ∧ (inst 2).main Msg.ENDD (r0 + d) = 1 ∧
@@ -831,7 +840,7 @@ theorem sha_len (hL24 : ∀ i < 15, Ls i ≤ 23) {x : ℕ} (hx : x < 2 ^ Ls 3)
   -- not a Merkle node's length: node ids are at least `NB`
   obtain ⟨hr', hym, hyv⟩ := hlink.resolve_right (fun hh => by
     have h24 : ∀ i < 15, 2 ^ Ls i ≤ 2 ^ 24 :=
-      fun i hi => Nat.pow_le_pow_right (by norm_num) (le_trans (hL24 i hi) (by norm_num))
+      fun i hi => Nat.pow_le_pow_right (by norm_num) (le_trans (hL24.1 i hi) (by norm_num))
     have h4 := h24 4 (by decide); have h8 := h24 8 (by decide)
     norm_num at h4 h8
     rcases hh with ⟨-, hr', -, hv⟩ | ⟨-, hr', -, hv⟩
@@ -879,7 +888,7 @@ theorem hash_fields_sat' : ∀ r < 2 ^ Ls 1, ∀ c ∈ Fields.constraints,
 
 /-- **Every byte read is the block's.** A byte-read site of a non-table component with multiplicity
 `−1` reads `(r0, byte r0)` with `r0 < LEN`. -/
-theorem hash_read (hL24 : ∀ i < 15, Ls i ≤ 23) {i r k : ℕ} (hs0 : ((i, r, k) : Site) ∈ sites hashSys inst) (hi : i ≠ 0)
+theorem hash_read (hL24 : SizeOk Ls) {i r k : ℕ} (hs0 : ((i, r, k) : Site) ∈ sites hashSys inst) (hi : i ≠ 0)
     (hrel : siteRel hashSys (i, r, k) = REL_BYTE) (hm : siteMult hashSys inst pub (i, r, k) = -1) {p b : F}
     (hv : siteVals hashSys inst pub (i, r, k) = [p, b]) :
     ∃ r0, r0 < (pub 0).val ∧ p = (r0 : F) ∧ b = (inst 0).main BYTE r0 := by
@@ -903,7 +912,7 @@ theorem hash_read (hL24 : ∀ i < 15, Ls i ≤ 23) {i r k : ℕ} (hs0 : ((i, r, 
   exact ⟨r', hlt, hsv.1.symm, hsv.2.symm⟩
 
 /-- **Fields reads are the block's bytes** (the read oracle `Fields.Reads` needs, for the hashing system). -/
-theorem hash_fields_read (hL24 : ∀ i < 15, Ls i ≤ 23) : ∀ {r : ℕ}, r < 2 ^ Ls 1 → ∀ {kk : ℕ}, kk < 7 →
+theorem hash_fields_read (hL24 : SizeOk Ls) : ∀ {r : ℕ}, r < 2 ^ Ls 1 → ∀ {kk : ℕ}, kk < 7 →
     (Fields.lookups.getD kk ⟨0, .const 0, []⟩).mult.eval (2 ^ Ls 1) Fields.preCols pub (inst 1).main r = -1 →
     ∃ r0, r0 < (pub 0).val ∧
       ((Fields.lookups.getD kk ⟨0, .const 0, []⟩).vals.map (Expr.eval (2 ^ Ls 1) Fields.preCols pub (inst 1).main r)) =
@@ -930,7 +939,7 @@ theorem hash_fields_read (hL24 : ∀ i < 15, Ls i ≤ 23) : ∀ {r : ℕ}, r < 2
   exact ⟨r0, hr0, by rw [← e, hpb, hp, hb]⟩
 
 /-- **Message data bytes are the block's.** A message data row reads the block byte at its position. -/
-theorem msg_read (hL24 : ∀ i < 15, Ls i ≤ 23) {r : ℕ} (hr : r < 2 ^ Ls 2) (hd : (inst 2).main Msg.D r = 1) :
+theorem msg_read (hL24 : SizeOk Ls) {r : ℕ} (hr : r < 2 ^ Ls 2) (hd : (inst 2).main Msg.D r = 1) :
     ∃ r0, r0 < (pub 0).val ∧ (inst 2).main Msg.POS r = (r0 : F) ∧
       (inst 2).main Msg.BYTE r = (inst 0).main BYTE r0 := by
   have hs0 := site_mem hL (i := 2) (by decide) hr (k := 0) (by simp [hashSys, Msg.msg, Msg.lookups])
@@ -944,7 +953,7 @@ theorem msg_read (hL24 : ∀ i < 15, Ls i ≤ 23) {r : ℕ} (hr : r < 2 ^ Ls 2) 
 
 /-- **A message's transaction tuple comes from the fields.** A non-header message start reads its
 tuple `tx(i, a, seg, w, l)` from a fields row yielding it (lock-time row, multiplicity `K_LOCK · TXM`). -/
-theorem msg_tuple_linked (hL24 : ∀ i < 15, Ls i ≤ 23) {r : ℕ} (hr : r < 2 ^ Ls 2) (hf : (inst 2).main Msg.FIRSTM r = 1)
+theorem msg_tuple_linked (hL24 : SizeOk Ls) {r : ℕ} (hr : r < 2 ^ Ls 2) (hf : (inst 2).main Msg.FIRSTM r = 1)
     (hh : (inst 2).main Msg.HDR r = 0) :
     ∃ r' < 2 ^ Ls 1, siteMult hashSys inst pub (1, r', 7) ≠ 0 ∧
       siteVals hashSys inst pub (1, r', 7) = siteVals hashSys inst pub (2, r, 1) := by
@@ -959,7 +968,7 @@ theorem msg_tuple_linked (hL24 : ∀ i < 15, Ls i ≤ 23) {r : ℕ} (hr : r < 2 
   exact ⟨r', hr', hsm, hsv⟩
 
 /-- The tuple a non-header message start reads, from the fields' lock-time row of its transaction. -/
-theorem msg_tuple_row (hL24 : ∀ i < 15, Ls i ≤ 23) {r : ℕ} (hr : r < 2 ^ Ls 2) (hf : (inst 2).main Msg.FIRSTM r = 1)
+theorem msg_tuple_row (hL24 : SizeOk Ls) {r : ℕ} (hr : r < 2 ^ Ls 2) (hf : (inst 2).main Msg.FIRSTM r = 1)
     (hh : (inst 2).main Msg.HDR r = 0) :
     ∃ ρ < 2 ^ Ls 1, (inst 1).main Fields.K_LOCK ρ = 1 ∧
       (inst 1).main Fields.TXI ρ = (inst 2).main Msg.TI r ∧ (inst 1).main Fields.TXA ρ = (inst 2).main Msg.TA r ∧
@@ -999,7 +1008,7 @@ theorem hdr_tuple {r : ℕ} (hr : r < 2 ^ Ls 2) (hh : (inst 2).main Msg.HDR r = 
 
 /-- **One tuple per message id.** Two message starts with the same id agree on the header flag, the
 wtxid flag and the data range `TA`, `TL`; non-header ones also on `SEG` and `TW`. -/
-theorem mid_tuple (hL24 : ∀ i < 15, Ls i ≤ 23) {r0 r1 : ℕ} (h0 : r0 < 2 ^ Ls 2) (h1 : r1 < 2 ^ Ls 2)
+theorem mid_tuple (hL24 : SizeOk Ls) {r0 r1 : ℕ} (h0 : r0 < 2 ^ Ls 2) (h1 : r1 < 2 ^ Ls 2)
     (f0 : (inst 2).main Msg.FIRSTM r0 = 1) (f1 : (inst 2).main Msg.FIRSTM r1 = 1)
     (hm : (inst 2).main Msg.MID r0 = (inst 2).main Msg.MID r1) :
     (inst 2).main Msg.HDR r0 = (inst 2).main Msg.HDR r1 ∧ (inst 2).main Msg.WTX r0 = (inst 2).main Msg.WTX r1 ∧
@@ -1009,7 +1018,7 @@ theorem mid_tuple (hL24 : ∀ i < 15, Ls i ≤ 23) {r0 r1 : ℕ} (h0 : r0 < 2 ^ 
   have ms := hash_msg_sat hL hsat
   have fs := hash_fields_sat' hL hsat
   have hP : 2 ^ Ls 1 < P := rows_lt_P hL24 (by decide)
-  have h25 : 2 ^ Ls 1 ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans (hL24 1 (by decide)) (by norm_num))
+  have h25 : 2 ^ Ls 1 ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans (hL24.1 1 (by decide)) (by norm_num))
   norm_num at h25
   rw [Msg.mid_eq ms h0, Msg.mid_eq ms h1] at hm
   -- a non-header message: its lock-time row `ρ` and its id as a natural number
@@ -1056,7 +1065,7 @@ theorem mid_tuple (hL24 : ∀ i < 15, Ls i ≤ 23) {r0 r1 : ℕ} (h0 : r0 < 2 ^ 
 
 /-- **One message per id.** Two message starts with the same id have the same data length and the
 same data bytes. -/
-theorem same_bytes (hL24 : ∀ i < 15, Ls i ≤ 23) {r0 r1 d0 d1 : ℕ} (h0 : r0 < 2 ^ Ls 2) (h1 : r1 < 2 ^ Ls 2)
+theorem same_bytes (hL24 : SizeOk Ls) {r0 r1 d0 d1 : ℕ} (h0 : r0 < 2 ^ Ls 2) (h1 : r1 < 2 ^ Ls 2)
     (f0 : (inst 2).main Msg.FIRSTM r0 = 1) (f1 : (inst 2).main Msg.FIRSTM r1 = 1)
     (hm : (inst 2).main Msg.MID r0 = (inst 2).main Msg.MID r1)
     (hc0 : ∀ j < d0, (inst 2).main Msg.CONT (r0 + j) = 1 ∨ (inst 2).main Msg.SW (r0 + j) = 1)

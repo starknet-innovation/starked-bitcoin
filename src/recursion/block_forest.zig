@@ -48,6 +48,16 @@ pub fn sizeKey(log_size: u32, profile: bs.Profile) u8 {
     return @as(u8, @intCast(log_size)) | (@as(u8, @intFromEnum(profile)) << 7);
 }
 
+/// A size key the soundness theorems cover (Lean `SizeOk`): uniform up to L = 23, tiered from
+/// `TIERED_MIN_L` up to L = 24.
+pub fn keyOk(key: u8) bool {
+    const log: u32 = key & 0x7f;
+    if (log >= 25) return false;
+    const profile: bs.Profile = if (key & 0x80 != 0) .tiered else .uniform;
+    if (profile == .tiered and log < bs.TIERED_MIN_L) return false;
+    return bs.sizeOk(bs.profileLogs(log, profile));
+}
+
 /// The block tree's verifying key.
 pub const Vk = struct {
     /// The circuits' FRI configuration, and their (shared) padded trace size.
@@ -63,7 +73,7 @@ pub const Vk = struct {
     /// The leaf identity for a forest `logs` entry.
     pub fn leafFor(self: *const Vk, key: u8) !Id {
         const log = key & 0x7f;
-        if (log >= 25) return error.BadLogs;
+        if (!keyOk(key)) return error.BadLogs;
         const table = if (key & 0x80 != 0) &self.leaf_tiered else &self.leaf;
         return table[log] orelse error.LeafSizeNotSetUp;
     }
@@ -150,6 +160,7 @@ pub fn setup(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const leaf.T
     for (files, 0..) |f, i| {
         if (f.log_size >= 25) return error.LogSizeOutOfRange;
         const key = sizeKey(f.log_size, f.profile);
+        if (!keyOk(key)) return error.LogSizeOutOfRange;
         if (first[key] == null) first[key] = i;
     }
     var start: ?ComponentSizes = null;
@@ -377,6 +388,9 @@ test "block VK round trip; expected keys fold as the nodes do" {
     const uniform_bytes = try vk.encode(a);
     try std.testing.expectEqual(@as(u32, 22), sizeKey(22, .uniform));
     try std.testing.expectEqual(@as(u32, 0x80 | 22), sizeKey(22, .tiered));
+    try std.testing.expect(keyOk(sizeKey(23, .uniform)) and !keyOk(sizeKey(24, .uniform)));
+    try std.testing.expect(keyOk(sizeKey(24, .tiered)) and !keyOk(sizeKey(11, .tiered)));
+    try std.testing.expectError(error.BadLogs, vk.leafFor(sizeKey(24, .uniform)));
     try std.testing.expectError(error.LeafSizeNotSetUp, expected(&vk, &.{sizeKey(12, .tiered)}, 0, 0));
     vk.leaf_tiered[12] = .{ .root = @splat(5), .hash = @splat(6) };
     const both = try vk.encode(a);

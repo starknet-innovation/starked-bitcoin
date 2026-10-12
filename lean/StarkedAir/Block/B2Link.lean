@@ -21,7 +21,7 @@ abbrev Ub (inst : ℕ → Inst) (pub : ℕ → F) : Spec.Block.Bytes := Fields.b
 section System
 
 variable {inst : ℕ → Inst} {pub : ℕ → F} {Ls : ℕ → ℕ}
-  (hL : ∀ i < 15, (inst i).logSize = Ls i) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : ∀ i < 15, Ls i ≤ 23)
+  (hL : ∀ i < 15, (inst i).logSize = Ls i) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : SizeOk Ls)
 include hL hsat hL24
 
 theorem undo_bytes_sat : ∀ r < 2 ^ Ls 9, ∀ c ∈ Block.constraints,

@@ -124,7 +124,7 @@ theorem compat_Block_commit_sound : ∀ {inst : ℕ → StarkedAir.Inst} {pub : 
             ∀ h ≤ 1,
               pub (9 + 2 * i + h) = (↑(StarkedAir.Sha256.half16 (StarkedAir.Block.hwords inst pub i) h) : StarkedAir.F) :=
   fun {inst pub L} hL hsat hL24 => StarkedAir.Block.commit_sound (inst := inst) (pub := pub) (Ls := fun _ => L) hL hsat
-    (fun _ _ => hL24)
+    (Block.SizeOk.of_le23 fun _ _ => hL24)
 
 /-- StarkedAir.Block.B2Msg.walker_sound -/
 theorem compat_Block_B2Msg_walker_sound : ∀ {n : ℕ} {pub : ℕ → StarkedAir.F} {M : ℕ → ℕ → StarkedAir.F},
@@ -191,7 +191,7 @@ theorem compat_Block_block_mtp : ∀ {inst : ℕ → StarkedAir.Inst} {pub : ℕ
                               (List.map (fun (k : ℕ) => StarkedAir.Spec.Bitcoin.timeOf (hw k))
                                   (List.range StarkedAir.Block.Anc.NANC)).reverse :=
   fun {inst pub L} hL hsat hL24 => StarkedAir.Block.block_mtp (inst := inst) (pub := pub) (Ls := fun _ => L) hL hsat
-    (fun _ _ => hL24)
+    (Block.SizeOk.of_le23 fun _ _ => hL24)
 
 /-- StarkedAir.Block.block_sound -/
 theorem compat_Block_block_sound : ∀ {inst : ℕ → StarkedAir.Inst} {pub : ℕ → StarkedAir.F} {L : ℕ},
@@ -211,7 +211,7 @@ theorem compat_Block_block_sound : ∀ {inst : ℕ → StarkedAir.Inst} {pub : �
                             Bool.true) →
                         StarkedAir.Spec.Block.checkBlock c (StarkedAir.Block.Rb inst pub) = Option.none) :=
   fun {inst pub L} hL hsat hL24 => StarkedAir.Block.block_sound (inst := inst) (pub := pub) (Ls := fun _ => L) hL hsat
-    (fun _ _ => hL24)
+    (Block.SizeOk.of_le23 fun _ _ => hL24)
 
 /-- StarkedAir.Block.yield_sound -/
 theorem compat_Block_yield_sound : ∀ {n : ℕ} {pub : ℕ → StarkedAir.F} {main : ℕ → ℕ → StarkedAir.F},
@@ -268,7 +268,7 @@ theorem compat_Block_tx_claims_ok : ∀ {inst : ℕ → StarkedAir.Inst} {pub : 
                                                 StarkedAir.Spec.Coins.ClaimsOK
                                                   (StarkedAir.Spec.CoinEpoch.txcOf N B t tx) :=
   fun {inst pub L} hL hsat hL24 => StarkedAir.Block.tx_claims_ok (inst := inst) (pub := pub) (Ls := fun _ => L) hL hsat
-    (fun _ _ => hL24)
+    (Block.SizeOk.of_le23 fun _ _ => hL24)
 
 /-- StarkedAir.Block.epoch_block_valid -/
 theorem compat_Block_epoch_block_valid : ∀ {inst : ℕ → StarkedAir.Inst} {pub : ℕ → StarkedAir.F} {L : ℕ},
@@ -288,7 +288,7 @@ theorem compat_Block_epoch_block_valid : ∀ {inst : ℕ → StarkedAir.Inst} {p
                             Bool.true) →
                     StarkedAir.Spec.Block.checkBlock c (StarkedAir.Block.Rb inst pub) = Option.none :=
   fun {inst pub L} hL hsat hL24 => StarkedAir.Block.epoch_block_valid (inst := inst) (pub := pub) (Ls := fun _ => L) hL hsat
-    (fun _ _ => hL24)
+    (Block.SizeOk.of_le23 fun _ _ => hL24)
 
 /-- StarkedAir.Block.epoch_systems_core -/
 theorem compat_Block_epoch_systems_core : ∀ (nb : ℕ) (inst : ℕ → ℕ → StarkedAir.Inst) (pub : ℕ → ℕ → StarkedAir.F) (L : ℕ → ℕ),
@@ -392,7 +392,7 @@ theorem compat_Block_epoch_systems_core : ∀ (nb : ℕ) (inst : ℕ → ℕ →
                                                                         tx.vin) =
                                                                     Bool.true) :=
   fun nb inst pub L hL hsat hL24 => StarkedAir.Block.epoch_systems_core nb inst pub (fun i _ => L i) hL hsat
-    (fun i hi _ _ => hL24 i hi)
+    (fun i hi => Block.SizeOk.of_le23 fun _ _ => hL24 i hi)
 
 /-- StarkedAir.Block.ExtSum.extsum_sound -/
 theorem compat_Block_ExtSum_extsum_sound : ∀ {L : ℕ} {pub : ℕ → StarkedAir.F} {M : ℕ → ℕ → StarkedAir.F},
@@ -472,7 +472,7 @@ theorem compat_Block_merkle_sound : ∀ {inst : ℕ → StarkedAir.Inst} {pub : 
             StarkedAir.Spec.Block.merkleRoot (List.map StarkedAir.Spec.Block.txid b.txs) =
               (StarkedAir.Spec.Block.headerMerkle b, Bool.false) :=
   fun {inst pub L} hL hsat hL24 => StarkedAir.Block.merkle_sound (inst := inst) (pub := pub) (Ls := fun _ => L) hL hsat
-    (fun _ _ => hL24)
+    (Block.SizeOk.of_le23 fun _ _ => hL24)
 
 /-- StarkedAir.Block.RunSum.runsum_sound -/
 theorem compat_Block_RunSum_runsum_sound : ∀ {n : ℕ} {pub : ℕ → StarkedAir.F} {M : ℕ → ℕ → StarkedAir.F} {fc acc pz ps : ℕ} {phi : StarkedAir.Block.ExtSum.QE}
@@ -560,7 +560,7 @@ theorem compat_Block_wmerkle_sound : ∀ {inst : ℕ → StarkedAir.Inst} {pub :
                                 ((StarkedAir.Spec.Block.merkleRoot (StarkedAir.Block.wleaves b)).1 ++
                                   StarkedAir.Spec.Block.stateBytes oN) :=
   fun {inst pub L} hL hsat hL24 => StarkedAir.Block.wmerkle_sound (inst := inst) (pub := pub) (Ls := fun _ => L) hL hsat
-    (fun _ _ => hL24)
+    (Block.SizeOk.of_le23 fun _ _ => hL24)
 
 /-- StarkedAir.Circuit.Composition.balance_sound -/
 theorem compat_Circuit_Composition_balance_sound : ∀ {ρ : ℕ → StarkedAir.Circuit.Q} {n : ℕ} {claimed : List ℕ} {ext : List StarkedAir.Circuit.Composition.ExtE}
@@ -1681,7 +1681,7 @@ theorem compat_Block_epoch_systems_wf : ∀ (nb : ℕ) (inst : ℕ → ℕ → S
                                                                         tx.vin) =
                                                                     Bool.true) :=
   fun nb inst pub L hL hsat hL24 => StarkedAir.Block.epoch_systems_wf nb inst pub (fun i _ => L i) hL hsat
-    (fun i hi _ _ => hL24 i hi)
+    (fun i hi => Block.SizeOk.of_le23 fun _ _ => hL24 i hi)
 
 /-- StarkedAir.Block.created_wfe_systems -/
 theorem compat_Block_created_wfe_systems : ∀ {nb : ℕ} {inst : ℕ → ℕ → StarkedAir.Inst} {pub : ℕ → ℕ → StarkedAir.F} {L : ℕ → ℕ}
@@ -1879,7 +1879,7 @@ theorem compat_Block_epoch_blocks : ∀ (nb : ℕ) (inst : ℕ → ℕ → Stark
                                                       StarkedAir.Spec.Coins.ClaimsOK
                                                         (StarkedAir.Spec.CoinEpoch.txcOf N B t tx) :=
   fun nb inst pub L hL hsat hL24 => StarkedAir.Block.epoch_blocks nb inst pub (fun i _ => L i) hL hsat
-    (fun i hi _ _ => hL24 i hi)
+    (fun i hi => Block.SizeOk.of_le23 fun _ _ => hL24 i hi)
 
 /-- StarkedAir.Circuit.BlockTree.epoch_hyps_of_sum -/
 theorem compat_Circuit_BlockTree_epoch_hyps_of_sum : ∀ {v : ℕ → StarkedAir.F},

@@ -86,7 +86,7 @@ def msgData (inst : ℕ → Inst) (r0 d : ℕ) : Spec.Block.Bytes :=
   (List.range (d + 1)).map (fun j => UInt8.ofNat ((inst 2).main Msg.BYTE (r0 + j)).val)
 
 /-- **Every message with a given id is the padded data of one reference message.** -/
-theorem msg_rows_pad (hL24 : ∀ i < 15, Ls i ≤ 23) {r0 d r1 : ℕ} (h0 : r0 < 2 ^ Ls 2) (h1 : r1 < 2 ^ Ls 2)
+theorem msg_rows_pad (hL24 : SizeOk Ls) {r0 d r1 : ℕ} (h0 : r0 < 2 ^ Ls 2) (h1 : r1 < 2 ^ Ls 2)
     (f0 : (inst 2).main Msg.FIRSTM r0 = 1) (f1 : (inst 2).main Msg.FIRSTM r1 = 1)
     (hc0 : ∀ j < d, (inst 2).main Msg.CONT (r0 + j) = 1 ∨ (inst 2).main Msg.SW (r0 + j) = 1)
     (he0 : (inst 2).main Msg.ENDD (r0 + d) = 1)
@@ -95,7 +95,7 @@ theorem msg_rows_pad (hL24 : ∀ i < 15, Ls i ≤ 23) {r0 d r1 : ℕ} (h0 : r0 <
       ∀ i < (Spec.Block.pad (msgData inst r0 d)).length,
         ((inst 2).main Msg.BYTE (r1 + i)).val = ((Spec.Block.pad (msgData inst r0 d)).getD i 0).toNat := by
   have ms := hash_msg_sat hL hsat
-  have h27 : 2 ^ Ls 2 ≤ 2 ^ 27 := Nat.pow_le_pow_right (by norm_num) (by have := hL24 2 (by decide); omega)
+  have h27 : 2 ^ Ls 2 ≤ 2 ^ 27 := Nat.pow_le_pow_right (by norm_num) (by have := hL24.1 2 (by decide); omega)
   obtain ⟨d1, hc1, he1⟩ := Msg.data_exit ms h1 f1
   obtain ⟨hd, hb⟩ := same_bytes hL hsat hL24 h1 h0 f1 f0 hm hc1 he1 hc0 he0
   subst hd
@@ -111,7 +111,7 @@ theorem byte_val_lt {r : ℕ} (hr : r < 2 ^ Ls 2) : ((inst 2).main Msg.BYTE r).v
 
 /-- **SHA's message words are the padded message's words.** Word `t` of a period that starts or continues
 the message with id `MID r0`, as its block `b`, is word `t` of block `b` of `pad (msgData r0 d)`. -/
-theorem block_word (hL24 : ∀ i < 15, Ls i ≤ 23) {r0 d : ℕ} (h0 : r0 < 2 ^ Ls 2) (f0 : (inst 2).main Msg.FIRSTM r0 = 1)
+theorem block_word (hL24 : SizeOk Ls) {r0 d : ℕ} (h0 : r0 < 2 ^ Ls 2) (f0 : (inst 2).main Msg.FIRSTM r0 = 1)
     (hc0 : ∀ j < d, (inst 2).main Msg.CONT (r0 + j) = 1 ∨ (inst 2).main Msg.SW (r0 + j) = 1)
     (he0 : (inst 2).main Msg.ENDD (r0 + d) = 1)
     {s b t : ℕ} (hs : s % 72 = 0) (hsn : s + 72 ≤ 2 ^ Ls 3) (ht : t < 16)
@@ -121,7 +121,7 @@ theorem block_word (hL24 : ∀ i < 15, Ls i ≤ 23) {r0 d : ℕ} (h0 : r0 < 2 ^ 
     messageAt (inst 3).main s t =
       Spec.Block.chunkWords (((Spec.Block.pad (msgData inst r0 d)).drop (64 * b)).take 64) t := by
   have ss := hash_sha_sat hL hsat
-  have h25 : 2 ^ Ls 2 ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans (hL24 2 (by decide)) (by norm_num))
+  have h25 : 2 ^ Ls 2 ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans (hL24.1 2 (by decide)) (by norm_num))
   norm_num at h25
   set x := s + 4 + t with hxdef
   have hx : x < 2 ^ Ls 3 := by omega
@@ -192,7 +192,7 @@ theorem dbl_digest (h : Spec.Sha256.State) : Sha.dblBlock h = Spec.Bitcoin.diges
 
 /-- **Block hashing soundness.** In a satisfied hashing system with at most `2^25` rows, a second-hash
 period `q` outputs `SHA256d` of the data bytes of a message with the period's id. -/
-theorem digest_sha256d (hL24 : ∀ i < 15, Ls i ≤ 23) {q : ℕ} (hq : 1 ≤ q) (hn : 72 * q + 72 ≤ 2 ^ Ls 3)
+theorem digest_sha256d (hL24 : SizeOk Ls) {q : ℕ} (hq : 1 ≤ q) (hn : 72 * q + 72 ≤ 2 ^ Ls 3)
     (hd : (inst 3).main Sha.DBL (72 * q) = 1) (hmid : ((inst 3).main Sha.MID (72 * q)).val < Merkle.NB) :
     ∃ r0 d, r0 < 2 ^ Ls 2 ∧ (inst 2).main Msg.FIRSTM r0 = 1 ∧ (inst 2).main Msg.MID r0 = (inst 3).main Sha.MID (72 * q) ∧
       (∀ j < d, (inst 2).main Msg.CONT (r0 + j) = 1 ∨ (inst 2).main Msg.SW (r0 + j) = 1) ∧
@@ -200,8 +200,8 @@ theorem digest_sha256d (hL24 : ∀ i < 15, Ls i ≤ 23) {q : ℕ} (hq : 1 ≤ q)
       Spec.Block.stateBytes (outputAt (inst 3).main (72 * q)) = Spec.Block.sha256d (msgData inst r0 d) := by
   have ss := hash_sha_sat hL hsat
   have ms := hash_msg_sat hL hsat
-  have h25 : 2 ^ Ls 2 ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans (hL24 2 (by decide)) (by norm_num))
-  have h25' : 2 ^ Ls 3 ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans (hL24 3 (by decide)) (by norm_num))
+  have h25 : 2 ^ Ls 2 ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans (hL24.1 2 (by decide)) (by norm_num))
+  have h25' : 2 ^ Ls 3 ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans (hL24.1 3 (by decide)) (by norm_num))
   norm_num at h25 h25'
   -- the period before is no node block: node ids are at least `NB`
   have hpm : (inst 3).main Sha.MID (72 * (q - 1)) = (inst 3).main Sha.MID (72 * q) :=
@@ -270,17 +270,17 @@ theorem digest_sha256d (hL24 : ∀ i < 15, Ls i ≤ 23) {q : ℕ} (hq : 1 ≤ q)
   rw [hout, hfold _ le_rfl, dbl_digest, HashSpec.sha256d_eq _ _ hpl]
 
 /-- **A whole message's data is a block slice**: `msgData = R[TA, TA + d]`, and `TA + d = TL + 3`. -/
-theorem whole_data (hL24 : ∀ i < 15, Ls i ≤ 23) {r0 d : ℕ} (h0 : r0 < 2 ^ Ls 2) (f0 : (inst 2).main Msg.FIRSTM r0 = 1)
+theorem whole_data (hL24 : SizeOk Ls) {r0 d : ℕ} (h0 : r0 < 2 ^ Ls 2) (f0 : (inst 2).main Msg.FIRSTM r0 = 1)
     (hc0 : ∀ j < d, (inst 2).main Msg.CONT (r0 + j) = 1 ∨ (inst 2).main Msg.SW (r0 + j) = 1)
     (he0 : (inst 2).main Msg.ENDD (r0 + d) = 1) (hmt : (inst 2).main Msg.MT r0 = 0) :
     ((inst 2).main Msg.TA r0).val + d < (pub 0).val ∧
       msgData inst r0 d = Fields.slice (Fields.blockBytes (inst 0).main (pub 0).val) ((inst 2).main Msg.TA r0).val (d + 1) ∧
       ((((inst 2).main Msg.TA r0).val + d : ℕ) : F) = (inst 2).main Msg.TL r0 + 3 := by
   have ms := hash_msg_sat hL hsat
-  have h25 : 2 ^ Ls 2 ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans (hL24 2 (by decide)) (by norm_num))
+  have h25 : 2 ^ Ls 2 ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans (hL24.1 2 (by decide)) (by norm_num))
   norm_num at h25
   have hLEN : (pub 0).val ≤ 2 ^ 25 :=
-    Fields.len_le (le_trans (hL24 0 (by decide)) (by norm_num)) (hash_fields_sat' hL hsat) (hash_bytes_sat hL hsat) (hash_fields_read hL hsat hL24)
+    Fields.len_le (le_trans (hL24.1 0 (by decide)) (by norm_num)) (hash_fields_sat' hL hsat) (hash_bytes_sat hL hsat) (hash_fields_read hL hsat hL24)
   have rows := Msg.whole_rows ms h0 f0 hmt hc0 he0
   have rd : ∀ j ≤ d, ((inst 2).main Msg.TA r0).val + j < (pub 0).val ∧
       (inst 2).main Msg.BYTE (r0 + j) = (inst 0).main BYTE (((inst 2).main Msg.TA r0).val + j) := by
@@ -311,7 +311,7 @@ theorem whole_data (hL24 : ∀ i < 15, Ls i ≤ 23) {r0 d : ℕ} (h0 : r0 < 2 ^ 
 /-- **wtxid and legacy txid messages are `serWit`.** A non-header message start whose message is whole
 (`MT = 0`: a wtxid, or the txid of a transaction without the segwit flag) reads a transaction's
 `serWit`; for a txid message (`WTX = 0`) that is also its `serNoWit`. -/
-theorem whole_tx (hL24 : ∀ i < 15, Ls i ≤ 23) {m : ℕ} (hmn : m < 2 ^ Ls 1) (hnp : ∀ r < m, (inst 1).main Fields.K_PAD r = 0)
+theorem whole_tx (hL24 : SizeOk Ls) {m : ℕ} (hmn : m < 2 ^ Ls 1) (hnp : ∀ r < m, (inst 1).main Fields.K_PAD r = 0)
     (hpad : ∀ r < 2 ^ Ls 1, m ≤ r → (inst 1).main Fields.K_PAD r = 1)
     (hfit : ∀ r < m, ((inst 1).main Fields.START r).val + ((inst 1).main Fields.LEN r).val ≤ (Fields.blockBytes (inst 0).main (pub 0).val).length)
     (hcs : ∀ r < 2 ^ Ls 1, (inst 1).main Fields.K_LOCK r + (inst 1).main Fields.K_PAD r = 0 → ∀ o : ℕ,
@@ -335,10 +335,10 @@ theorem whole_tx (hL24 : ∀ i < 15, Ls i ≤ 23) {m : ℕ} (hmn : m < 2 ^ Ls 1)
   have fs := hash_fields_sat' hL hsat
   have hb0 := hash_bytes_sat hL hsat
   obtain ⟨ρ, hρ, hl, ti, ta, sg, tw, tl⟩ := msg_tuple_row hL hsat hL24 h0 f0 hh
-  obtain ⟨tx, hat, hw, -, hnn⟩ := Fields.lock_tx (le_trans (hL24 0 (by decide)) (by norm_num)) fs hb0 (hash_fields_read hL hsat hL24) hmn hnp hpad hfit hcs cat mono hSm hρ hl
+  obtain ⟨tx, hat, hw, -, hnn⟩ := Fields.lock_tx (le_trans (hL24.1 0 (by decide)) (by norm_num)) fs hb0 (hash_fields_read hL hsat hL24) hmn hnp hpad hfit hcs cat mono hSm hρ hl
   obtain ⟨hb, hdata, hend⟩ := whole_data hL hsat hL24 h0 f0 hc0 he0 hmt
   have hst := Fields.start_lt fs hρ
-  have hLEN : (pub 0).val ≤ 2 ^ 25 := Fields.len_le (le_trans (hL24 0 (by decide)) (by norm_num)) fs hb0 (hash_fields_read hL hsat hL24)
+  have hLEN : (pub 0).val ≤ 2 ^ 25 := Fields.len_le (le_trans (hL24.1 0 (by decide)) (by norm_num)) fs hb0 (hash_fields_read hL hsat hL24)
   -- `TA + d = TL + 3` as naturals
   have hta : ((inst 2).main Msg.TA r0).val = ((inst 1).main Fields.TXA ρ).val := by rw [ta]
   have hn : ((inst 2).main Msg.TA r0).val + d = ((inst 1).main Fields.START ρ).val + 3 := by
@@ -360,7 +360,7 @@ theorem map_range_add {α : Type} (f : ℕ → α) (x y : ℕ) :
   rw [List.range_add, List.map_append, List.map_map]; rfl
 
 /-- **Segwit txid messages are `serNoWit`.** -/
-theorem split_tx (hL24 : ∀ i < 15, Ls i ≤ 23) {m : ℕ} (hmn : m < 2 ^ Ls 1) (hnp : ∀ r < m, (inst 1).main Fields.K_PAD r = 0)
+theorem split_tx (hL24 : SizeOk Ls) {m : ℕ} (hmn : m < 2 ^ Ls 1) (hnp : ∀ r < m, (inst 1).main Fields.K_PAD r = 0)
     (hpad : ∀ r < 2 ^ Ls 1, m ≤ r → (inst 1).main Fields.K_PAD r = 1)
     (hfit : ∀ r < m, ((inst 1).main Fields.START r).val + ((inst 1).main Fields.LEN r).val ≤ (Fields.blockBytes (inst 0).main (pub 0).val).length)
     (hcs : ∀ r < 2 ^ Ls 1, (inst 1).main Fields.K_LOCK r + (inst 1).main Fields.K_PAD r = 0 → ∀ o : ℕ,
@@ -383,17 +383,17 @@ theorem split_tx (hL24 : ∀ i < 15, Ls i ≤ 23) {m : ℕ} (hmn : m < 2 ^ Ls 1)
   have ms := hash_msg_sat hL hsat
   have fs := hash_fields_sat' hL hsat
   have hb0 := hash_bytes_sat hL hsat
-  have h25 : 2 ^ Ls 2 ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans (hL24 2 (by decide)) (by norm_num))
-  have h25' : 2 ^ Ls 1 ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans (hL24 1 (by decide)) (by norm_num))
+  have h25 : 2 ^ Ls 2 ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans (hL24.1 2 (by decide)) (by norm_num))
+  have h25' : 2 ^ Ls 1 ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans (hL24.1 1 (by decide)) (by norm_num))
   norm_num at h25 h25'
-  have hLEN : (pub 0).val ≤ 2 ^ 25 := Fields.len_le (le_trans (hL24 0 (by decide)) (by norm_num)) fs hb0 (hash_fields_read hL hsat hL24)
+  have hLEN : (pub 0).val ≤ 2 ^ 25 := Fields.len_le (le_trans (hL24.1 0 (by decide)) (by norm_num)) fs hb0 (hash_fields_read hL hsat hL24)
   -- the flags: a txid message of a segwit transaction
   have hwseg : (inst 2).main Msg.WTX r0 = 0 ∧ (inst 2).main Msg.SEG r0 = 1 := by
     rw [Msg.mt_eq ms h0, hh] at hmt
     rcases Msg.bool_col ms (e := Msg.WTX) (by simp) h0 with w | w <;>
       rcases Msg.bool_col ms (e := Msg.SEG) (by simp) h0 with g | g <;> simp_all
   obtain ⟨ρ, hρ, hl, ti, ta, sg, tw, tl⟩ := msg_tuple_row hL hsat hL24 h0 f0 hh
-  obtain ⟨tx, hat, -, hnw, -⟩ := Fields.lock_tx (le_trans (hL24 0 (by decide)) (by norm_num)) fs hb0 (hash_fields_read hL hsat hL24) hmn hnp hpad hfit hcs cat mono hSm hρ hl
+  obtain ⟨tx, hat, -, hnw, -⟩ := Fields.lock_tx (le_trans (hL24.1 0 (by decide)) (by norm_num)) fs hb0 (hash_fields_read hL hsat hL24) hmn hnp hpad hfit hcs cat mono hSm hρ hl
   have hsegρ : (inst 1).main Fields.SEG ρ = 1 := sg.trans hwseg.2
   obtain ⟨d1, h4, hd1, rowsD, pos0, pos1, hsw, pos2, hend⟩ := Msg.split_pieces ms h0 f0 hmt hc0 he0
   -- every data row reads the block byte at its position
@@ -470,7 +470,7 @@ theorem split_tx (hL24 : ∀ i < 15, Ls i ≤ 23) {m : ℕ} (hmn : m < 2 ^ Ls 1)
 block's bytes parse as a block `b`, and each second-hash period `q` outputs `SHA256d` of `b.header` (for
 the header message) or, for a transaction message with index `TI = i`, the `wtxid` (`WTX = 1`) or the
 `txid` (`WTX = 0`) of `b.txs[i]`. -/
-theorem digest_tx (hL24 : ∀ i < 15, Ls i ≤ 23) {q : ℕ} (hq : 1 ≤ q) (hn : 72 * q + 72 ≤ 2 ^ Ls 3)
+theorem digest_tx (hL24 : SizeOk Ls) {q : ℕ} (hq : 1 ≤ q) (hn : 72 * q + 72 ≤ 2 ^ Ls 3)
     (hd : (inst 3).main Sha.DBL (72 * q) = 1) (hmid : ((inst 3).main Sha.MID (72 * q)).val < Merkle.NB) :
     ∃ b, Spec.Block.parseBlock (Fields.blockBytes (inst 0).main (pub 0).val) = some b ∧
       ∃ r0, r0 < 2 ^ Ls 2 ∧ (inst 2).main Msg.FIRSTM r0 = 1 ∧ (inst 2).main Msg.MID r0 = (inst 3).main Sha.MID (72 * q) ∧
@@ -483,9 +483,9 @@ theorem digest_tx (hL24 : ∀ i < 15, Ls i ≤ 23) {q : ℕ} (hq : 1 ≤ q) (hn 
   have fs := hash_fields_sat' hL hsat
   have hb0 := hash_bytes_sat hL hsat
   obtain ⟨m, hmn, hnp, hpad, hfit, hcs, cat, mono, hSm⟩ :=
-    Fields.block_ctx (le_trans (hL24 0 (by decide)) (by norm_num)) fs hb0 (hash_fields_read hL hsat hL24)
+    Fields.block_ctx (le_trans (hL24.1 0 (by decide)) (by norm_num)) fs hb0 (hash_fields_read hL hsat hL24)
   obtain ⟨b, hparse, hhead, -, -, -, hidx, -⟩ :=
-    Fields.block_index (le_trans (hL24 0 (by decide)) (by norm_num)) fs hb0 (hash_fields_read hL hsat hL24) hmn hnp hpad hfit hcs cat mono hSm
+    Fields.block_index (le_trans (hL24.1 0 (by decide)) (by norm_num)) fs hb0 (hash_fields_read hL hsat hL24) hmn hnp hpad hfit hcs cat mono hSm
   obtain ⟨r0, d, h0, f, hmid', hc, he, hdig⟩ := digest_sha256d hL hsat hL24 hq hn hd hmid
   refine ⟨b, hparse, r0, h0, f, hmid', fun hh => ?_, fun hh => ?_⟩
   · -- the header message: bytes `[0, 80)`
@@ -494,7 +494,7 @@ theorem digest_tx (hL24 : ∀ i < 15, Ls i ≤ 23) {q : ℕ} (hq : 1 ≤ q) (hn 
     obtain ⟨hb, hdata, hend⟩ := whole_data hL hsat hL24 h0 f hc he hmt
     have ha : ((inst 2).main Msg.TA r0).val = 0 := by rw [ta]; rfl
     rw [ha, tl] at hend; rw [ha] at hdata hb
-    have h25 : 2 ^ Ls 2 ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans (hL24 2 (by decide)) (by norm_num))
+    have h25 : 2 ^ Ls 2 ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans (hL24.1 2 (by decide)) (by norm_num))
     have hd79 : d = 79 := by
       have hdL : r0 + d < 2 ^ Ls 2 := (Msg.data_walk ms h0 f d hc).1
       have e : ((0 + d : ℕ) : F) = ((79 : ℕ) : F) := by rw [hend]; norm_num

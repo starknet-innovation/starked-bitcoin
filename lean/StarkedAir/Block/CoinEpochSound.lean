@@ -208,13 +208,13 @@ theorem le3_lt (f : ℕ → UInt8) : Spec.Block.le ((List.range 3).map f) < 2 ^ 
 section System
 
 variable {inst : ℕ → Inst} {pub : ℕ → F} {Ls : ℕ → ℕ}
-  (hL : ∀ i < 15, (inst i).logSize = Ls i) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : ∀ i < 15, Ls i ≤ 23)
+  (hL : ∀ i < 15, (inst i).logSize = Ls i) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : SizeOk Ls)
 include hL hsat hL24
 
 /-- **An input's claim is earlier**: with the claim's code below `2^26` and its `ctx` below `2^25`,
 `(code / 2, ctx) < (height, t)` lexicographically (the circuit's `ORD`/`OB` check). -/
 theorem coin_in_lex {j : ℕ} (hj : j < 2 ^ Ls 14) (hki : (inst 14).main Coin.KI j = 1) {h t code : ℕ}
-    (hp2 : pub 2 = (h : F)) (hh : h < 2 ^ 23) (htxi : (inst 14).main Coin.TXI j = (t : F)) (ht : t < 2 ^ 23)
+    (hp2 : pub 2 = (h : F)) (hh : h < 2 ^ 23) (htxi : (inst 14).main Coin.TXI j = (t : F)) (ht : t < 2 ^ 24)
     (hcode : (inst 14).main Coin.CLO j + 65536 * (inst 14).main Coin.CHI j = (code : F)) (hc26 : code < 2 ^ 26)
     (hctx : ((inst 14).main Coin.CTX j).val < 2 ^ 25) :
     code / 2 < h ∨ (code / 2 = h ∧ ((inst 14).main Coin.CTX j).val < t) := by
@@ -315,7 +315,7 @@ theorem block_claims (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
       rw [htx] at htx'; obtain rfl := Option.some.inj htx'
       rw [hi] at hi'; obtain rfl := Option.some.inj hi'
       obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
-      have htN : t < 2 ^ 23 := by have := (List.getElem?_eq_some_iff.mp htx).1; have := S.hN25; omega
+      have htN : t < 2 ^ 24 := by have := (List.getElem?_eq_some_iff.mp htx).1; have := S.hN25; omega
       refine ⟨htu, fun hc26 hc25 => ?_, hc24, hki, hcode, rj, hrj, honj, hJ, htl, u0, hu0, hu07, hu0l, hser, hcodeb, hctxb⟩
       have := coin_in_lex hL hsat hL24 hj2 hki hp2 hh htxi htN hcode hc26 (by rw [hcv]; exact hc25)
       rwa [hcv] at this

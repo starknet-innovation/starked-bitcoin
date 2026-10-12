@@ -21,6 +21,29 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-10-12 (session 11, evening) — SHA at 2^24: Lean `SizeOk` replaces the L ≤ 23 cap
+Who: Claude (agent, Opus 5.5)
+Roadmap: D-045 follow-up (tiered blocks up to L = 24 covered by the Lean theorems)
+Done:
+- Why: a consensus-valid block of ~16k minimal segwit transactions needs ~14M SHA rows (estimate:
+  ~12 compressions per tx × 72 rows), above 2^23. The cap was the lookup count bound 216·2^L < P.
+- Lean: `SizeOk Ls` (Link.lean) = every hashed-system component ≤ 2^24 rows and `hashRows Ls < P`; it
+  replaces `∀ i < 15, Ls i ≤ 23` in every block theorem. `SizeOk.of_le23` recovers the old case, so
+  the uniform statements and all 100 `Compat.lean` statements are unchanged (only their proof terms
+  route through it). `BlockPubOk'` and the forest/epoch conclusions use `SizeOk`. Two bounds tuned to
+  2^23 were widened (CoinLink `coin_start_strict` 2^25 → 2^26; `coin_in_lex` tx index < 2^24).
+- Zig: `bs.sizeOk` mirrors `SizeOk` (site counts tested equal to the AIRs' lookups); the block
+  builder refuses uncovered sizes (`SizesNotCovered`) and the forest refuses uncovered size keys
+  (`keyOk`). This also closes a pre-existing gap: the forest accepted a uniform L = 24 leaf that no
+  theorem covered.
+Evidence:
+- `lake build` 8867 jobs; `lake build StarkedAir.Compat` 8856 jobs; `#print axioms` on `SizeOk.of_le23`,
+  `BlockPubOk'.mtp`, `epoch_hyps_of_rng'`, `forest_epochV`, `epoch_systems_core`: standard three.
+- Zig: SizeOk, sizesFor, block VK tests (incl. the golden key) pass; full suite 111 passed + 1 skipped (opt-in). 24 exported AIRs byte-identical. Tiered L = 24 site count ≈ 4.5·10⁸.
+Problems / lessons:
+- Not run: a real or synthetic 2^24 block (≈ 53 GB tiered compact; beyond the Mac).
+Next: prove a real 2^22 block tiered; production-strength node measurement.
+
 ## 2026-10-12 (session 11, later) — Per-component trace sizes (D-045) merged; license; lean-consensus; S31
 Who: Claude (agent, Opus 5.5) with sub-agents (prover track, Lean track, s31 evaluation)
 Roadmap: D-045 implemented (uniform + tiered profiles); LICENSE done (Apache-2.0); memory (a1, a2) done

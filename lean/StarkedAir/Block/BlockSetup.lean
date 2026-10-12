@@ -48,7 +48,7 @@ structure Setup (inst : ℕ → Inst) (pub : ℕ → F) (L : ℕ) where
 section System
 
 variable {inst : ℕ → Inst} {pub : ℕ → F} {Ls : ℕ → ℕ}
-  (hL : ∀ i < 15, (inst i).logSize = Ls i) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : ∀ i < 15, Ls i ≤ 23)
+  (hL : ∀ i < 15, (inst i).logSize = Ls i) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : SizeOk Ls)
 include hL hsat hL24
 
 /-- The setup's rows are the fields component's (`Setup … (Ls 1)`). -/
@@ -56,9 +56,9 @@ theorem setup_exists : Nonempty (Setup inst pub (Ls 1)) := by
   have fs := hash_fields_sat' hL hsat
   have hb0 := hash_bytes_sat hL hsat
   obtain ⟨m, hmn, hnp, hpad, hfit, hcs, cat, mono, hSm⟩ :=
-    Fields.block_ctx (le_trans (hL24 0 (by decide)) (by norm_num)) fs hb0 (hash_fields_read hL hsat hL24)
+    Fields.block_ctx (le_trans (hL24.1 0 (by decide)) (by norm_num)) fs hb0 (hash_fields_read hL hsat hL24)
   obtain ⟨b, hparse, hhead, hlenv, hN1, hN25, hidx, htok, hsurj⟩ :=
-    Fields.block_index (le_trans (hL24 0 (by decide)) (by norm_num)) fs hb0 (hash_fields_read hL hsat hL24) hmn hnp hpad hfit hcs cat
+    Fields.block_index (le_trans (hL24.1 0 (by decide)) (by norm_num)) fs hb0 (hash_fields_read hL hsat hL24) hmn hnp hpad hfit hcs cat
       mono hSm
   exact ⟨⟨m, b, hmn, hnp, hpad, hfit, hcs, cat, mono, hSm, hparse, hhead, hlenv, hN1, hN25, hidx, htok, hsurj⟩⟩
 
@@ -74,7 +74,7 @@ theorem hmk_R : ∀ r < 2 ^ Ls 1, (inst 1).main Fields.K_TXH r = 1 → (inst 1).
     (Rb inst pub).getD (((inst 1).main Fields.START r).val + 4) 0 = 0 ∧
     (Rb inst pub).getD (((inst 1).main Fields.START r).val + 5) 0 = 1 := by
   intro r hr ht hs
-  obtain ⟨hlt, h4, h5⟩ := Fields.marker_read (le_trans (hL24 0 (by decide)) (by norm_num)) (hash_fields_sat' hL hsat)
+  obtain ⟨hlt, h4, h5⟩ := Fields.marker_read (le_trans (hL24.1 0 (by decide)) (by norm_num)) (hash_fields_sat' hL hsat)
     (hash_bytes_sat hL hsat) (hash_fields_read hL hsat hL24) hr ht hs
   refine ⟨by rw [Fields.blockBytes_length]; exact hlt, ?_, ?_⟩
   · rw [Fields.blockBytes_get (by omega), h4]; rfl

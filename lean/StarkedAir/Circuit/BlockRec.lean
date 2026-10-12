@@ -549,7 +549,7 @@ theorem forest_epochV (T : Trust Acc SatC VGates leafH nodeH blockNodeProgram (L
     (hlink : Linked' v0 (rest.map Prod.snd)) (hch : ∀ tv ∈ rest, ∀ i < 12, tv.2 (7 + i) = v0 (7 + i)) :
     (∃ n, 0 < n ∧ ∃ (pub : ℕ → ℕ → F) (inst : ℕ → ℕ → Inst) (L : ℕ → ℕ → ℕ) (_ : ∀ i, Setup (inst i) (pub i) (L i 1)),
       (∀ i < n, ∀ c < 15, (inst i c).logSize = L i c) ∧ (∀ i < n, hashSys.SatisfiedExt (inst i) (pub i) []) ∧
-      (∀ i < n, ∀ c < 15, L i c ≤ 23) ∧ (∀ i < n, pub i 2 = (((v0 0).val + i : ℕ) : F)) ∧
+      (∀ i < n, SizeOk (L i)) ∧ (∀ i < n, pub i 2 = (((v0 0).val + i : ℕ) : F)) ∧
       (∀ i < n, pub i Coin.PUB_LOST = if Spec.Coins.bip30Lost ((v0 0).val + i) then 1 else 0) ∧
       (∀ i < n, FpWalk.gQ (pub i) = RunSum.pQ v0 7) ∧ (∀ i < n, RunSum.pQ (pub i) Coin.PUB_Z = RunSum.pQ v0 11) ∧
       (∀ i < n, ∀ k < Coin.W, RunSum.pQ (pub i) (Coin.PUB_ALPHA k) = RunSum.pQ v0 15 ^ k) ∧

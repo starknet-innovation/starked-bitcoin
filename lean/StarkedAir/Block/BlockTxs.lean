@@ -15,7 +15,7 @@ open Fields (blockBytes slice toksFrom tokOf prefOf locks TxAt)
 section System
 
 variable {inst : ℕ → Inst} {pub : ℕ → F} {Ls : ℕ → ℕ}
-  (hL : ∀ i < 15, (inst i).logSize = Ls i) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : ∀ i < 15, Ls i ≤ 23)
+  (hL : ∀ i < 15, (inst i).logSize = Ls i) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : SizeOk Ls)
 include hL hsat hL24
 
 /-- A transaction of the block is at a lock-time row. -/
@@ -32,7 +32,7 @@ theorem txs_basic (S : Setup inst pub (Ls 1)) : ∀ t ∈ S.b.txs, t.vin ≠ [] 
     (∀ o ∈ t.vout, 0 ≤ o.value) ∧ (t.vout.map (·.value)).sum ≤ Spec.Block.MAX_MONEY := by
   intro t ht
   have fs := hash_fields_sat' hL hsat
-  have h25 : 2 ^ Ls 1 ≤ 2 ^ 25 := Nat.pow_le_pow_right (by norm_num) (by have := hL24 1 (by decide); omega)
+  have h25 : 2 ^ Ls 1 ≤ 2 ^ 25 := Nat.pow_le_pow_right (by norm_num) (by have := hL24.1 1 (by decide); omega)
   obtain ⟨j, ρ, -, -, hρ, hl, -, hat⟩ := tx_at hL hsat hL24 S ht
   obtain ⟨rh, -, -, -, -, h1, -⟩ := Fields.tx_rows fs (Rb inst pub) S.hcs S.hmn S.hpad S.hfit hat hρ
   refine ⟨fun h => by rw [h] at h1; simp at h1, Fields.tx_vout_ne fs (Rb inst pub) S.hcs S.hmn S.hpad S.hfit hat hρ, ?_⟩
@@ -43,7 +43,7 @@ theorem txs_basic (S : Setup inst pub (Ls 1)) : ∀ t ∈ S.b.txs, t.vin ≠ [] 
 theorem txs_later (S : Setup inst pub (Ls 1)) {j : ℕ} (hj1 : 1 ≤ j) (hj : j < S.b.txs.length) {t : Spec.Block.Tx}
     (ht : S.b.txs[j]? = some t) : ∀ i ∈ t.vin, i.prevout.isNull = false := by
   have fs := hash_fields_sat' hL hsat
-  have h25 : 2 ^ Ls 1 ≤ 2 ^ 25 := Nat.pow_le_pow_right (by norm_num) (by have := hL24 1 (by decide); omega)
+  have h25 : 2 ^ Ls 1 ≤ 2 ^ 25 := Nat.pow_le_pow_right (by norm_num) (by have := hL24.1 1 (by decide); omega)
   obtain ⟨ρ, tx, hρ, hl, hlk, hget, hat⟩ := S.hsurj j hj
   rw [ht, Option.some.injEq] at hget
   subst hget

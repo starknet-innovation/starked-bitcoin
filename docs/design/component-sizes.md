@@ -88,7 +88,7 @@ The semantics are already per instance: `Inst.logSize`, `sites` over `2^(inst i)
   - Block: 22 files, ≈330 mechanical edits, best done through `n i := 2^(inst i).logSize`.
   - Circuit: 7 files, ≈15–20 lemmas.
   - Count bound: 2 new lemmas.
-- **Bonus.** The Σ bound lets an L = 24 block pass the count bound. `BlockPubOk` caps L at 23 today even though `Vk` admits 24 (block_forest.zig:113). Lifting L≤23 also means re-checking `rows_le` (2^24) and the 2^26 id spaces; both still hold at 24.
+- **Bonus.** The Σ bound lets an L = 24 block pass the count bound. `BlockPubOk` caps L at 23 today even though `Vk` admits 24 (block_forest.zig:113). Lifting L≤23 also means re-checking `rows_le` (2^24) and the 2^26 id spaces; both still hold at 24. **Done 2026-10-12:** `SizeOk` (Link.lean) replaces the cap; uniform stays ≤ 23, tiered reaches 24; Zig `sizeOk`/`keyOk` refuse the rest.
 
 ## 4. VK and recursion
 

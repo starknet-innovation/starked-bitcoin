@@ -93,7 +93,7 @@ theorem sum_by_parts {β : Type} [AddCommMonoid β] (g : ℕ → β) (lens : Lis
 section System
 
 variable {inst : ℕ → Inst} {pub : ℕ → F} {Ls : ℕ → ℕ}
-  (hL : ∀ i < 15, (inst i).logSize = Ls i) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : ∀ i < 15, Ls i ≤ 23)
+  (hL : ∀ i < 15, (inst i).logSize = Ls i) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : SizeOk Ls)
 include hL hsat hL24
 
 /-- An output row's single-byte range checks: `VB 0`, `VB 1`, `VHI`, `CB 0`, `CB 1`, `CHI`. -/

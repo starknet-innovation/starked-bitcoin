@@ -179,7 +179,7 @@ theorem spent_wfe (N : ℕ → ℕ) (blocks : List BlockC)
 events' well-formedness is proven (`created_wfe_systems`, `spent_wfe`). -/
 theorem epoch_systems_wf (nb : ℕ) (inst : ℕ → ℕ → Inst) (pub : ℕ → ℕ → F) (L : ℕ → ℕ → ℕ)
     (hL : ∀ i < nb, ∀ c < 15, (inst i c).logSize = L i c) (hsat : ∀ i < nb, hashSys.SatisfiedExt (inst i) (pub i) [])
-    (hL24 : ∀ i < nb, ∀ c < 15, L i c ≤ 23) (S : ∀ i, Setup (inst i) (pub i) (L i 1)) (h0 : ℕ) (hh : h0 + nb ≤ 2 ^ 23)
+    (hL24 : ∀ i < nb, SizeOk (L i)) (S : ∀ i, Setup (inst i) (pub i) (L i 1)) (h0 : ℕ) (hh : h0 + nb ≤ 2 ^ 23)
     (hp2 : ∀ i < nb, pub i 2 = ((h0 + i : ℕ) : F))
     (hlost : ∀ i < nb, pub i Coin.PUB_LOST = if Spec.Coins.bip30Lost (h0 + i) then 1 else 0)
     (γ α z : QM) (hγ : ∀ i < nb, FpWalk.gQ (pub i) = γ) (hz : ∀ i < nb, RunSum.pQ (pub i) Coin.PUB_Z = z)

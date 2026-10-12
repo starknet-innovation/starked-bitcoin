@@ -361,7 +361,7 @@ block hypotheses with a size per block and component (`epoch_hyps_of_rng'`). -/
 theorem epoch_hyps_of_sumV {v : ℕ → F} (h : SumOkP BlockPubOk' v) : ∃ ℓ, (v 1).val = 2 ^ ℓ ∧
     ∃ (pub : ℕ → ℕ → F) (inst : ℕ → ℕ → Inst) (L : ℕ → ℕ → ℕ) (_ : ∀ i, Setup (inst i) (pub i) (L i 1)),
       (∀ i < 2 ^ ℓ, ∀ c < 15, (inst i c).logSize = L i c) ∧ (∀ i < 2 ^ ℓ, hashSys.SatisfiedExt (inst i) (pub i) []) ∧
-      (∀ i < 2 ^ ℓ, ∀ c < 15, L i c ≤ 23) ∧ (∀ i < 2 ^ ℓ, pub i 2 = (((v 0).val + i : ℕ) : F)) ∧
+      (∀ i < 2 ^ ℓ, SizeOk (L i)) ∧ (∀ i < 2 ^ ℓ, pub i 2 = (((v 0).val + i : ℕ) : F)) ∧
       (∀ i < 2 ^ ℓ, pub i Coin.PUB_LOST = if Spec.Coins.bip30Lost ((v 0).val + i) then 1 else 0) ∧
       (∀ i < 2 ^ ℓ, FpWalk.gQ (pub i) = RunSum.pQ v 7) ∧ (∀ i < 2 ^ ℓ, RunSum.pQ (pub i) Coin.PUB_Z = RunSum.pQ v 11) ∧
       (∀ i < 2 ^ ℓ, ∀ k < Coin.W, RunSum.pQ (pub i) (Coin.PUB_ALPHA k) = RunSum.pQ v 15 ^ k) ∧

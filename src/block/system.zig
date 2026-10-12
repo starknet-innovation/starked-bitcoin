@@ -77,6 +77,21 @@ pub fn profileLogs(L: u32, profile: Profile) [N_COMP]u32 {
     return out;
 }
 
+/// Lookup sites per row of the 15 hashed-system components (Lean `hashRows`, Link.lean).
+pub const SITES = [15]u64{ 1, 36, 4, 6, 11, 2, 5, 12, 3, 1, 6, 11, 4, 20, 94 };
+
+/// Lean's `SizeOk` (Link.lean): each hashed-system component has at most 2^24 rows and the lookup
+/// site count `Σ kᵢ·2^logsᵢ` is below P. The soundness theorems cover only such sizes: uniform up to
+/// L = 23, tiered up to L = 24.
+pub fn sizeOk(logs: [N_COMP]u32) bool {
+    var sum: u64 = 0;
+    for (SITES, logs[0..15]) |k, l| {
+        if (l > 24) return false;
+        sum += k << @intCast(l);
+    }
+    return sum < (1 << 31) - 1;
+}
+
 pub const Built = struct {
     /// L: the largest component log size (every component's under `uniform`).
     log_size: u32,
@@ -237,6 +252,7 @@ pub fn buildFull(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctx
     const sized = sizesFor(needs, opts.profile, opts.min_log);
     const log_size = sized.L;
     const logs = profileLogs(log_size, sized.profile);
+    if (!sizeOk(logs)) return error.SizesNotCovered;
 
     const fm = try fields.generate(a, logs[C.fields], raw, rows);
     const chk = try checks.fill(a, fm, raw, rows, ctx);
@@ -591,6 +607,17 @@ test "block system: sizesFor picks tiered only when every component fits, else u
     try std.testing.expectEqual(@as(u32, 16), sizesFor(needs, .tiered, 16).L);
     const logs = profileLogs(16, .tiered);
     try std.testing.expectEqualSlices(u32, &.{ 16, 11, 16, 16, 11, 8, 16, 8, 11, 14, 14, 14, 14, 11, 11, 12 }, &logs);
+}
+
+test "block system: SizeOk matches the AIRs' lookups; uniform stops at 23, tiered reaches 24" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const airs = try parseAirs(arena.allocator());
+    for (SITES, airs[0..15]) |k, air| try std.testing.expectEqual(k, air.lookups.len);
+    try std.testing.expect(sizeOk(profileLogs(23, .uniform)));
+    try std.testing.expect(!sizeOk(profileLogs(24, .uniform)));
+    try std.testing.expect(sizeOk(profileLogs(24, .tiered)));
+    try std.testing.expect(!sizeOk(profileLogs(25, .tiered)));
 }
 
 test "tiered real block (STARKED_TIERED_LARGE=height): constraints hold and lookups balance" {

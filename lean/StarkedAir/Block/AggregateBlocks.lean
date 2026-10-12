@@ -31,17 +31,17 @@ def BlockPubOk (p : ℕ → F) : Prop :=
     Nonempty (Setup inst p L)
 
 /-- **What a block leaf proves, with per-component trace sizes** (D-045): the 16-component block system
-satisfied by traces of sizes `2^(Ls c)` (each `≤ 2^23`; the context, Blake2s and ancestry components at
+satisfied by traces of sizes `2^(Ls c)` (`SizeOk`: each `≤ 2^24`, lookup sites below `P`; the context, Blake2s and ancestry components at
 least `2^8` rows), with a block setup over the fields component's rows. `BlockPubOk` is the case of one
 shared size (`BlockPubOk.toV`). -/
 def BlockPubOk' (p : ℕ → F) : Prop :=
   ∃ (inst : ℕ → Inst) (Ls : ℕ → ℕ), (∀ c < 16, (inst c).logSize = Ls c) ∧ 8 ≤ Ls 7 ∧ 8 ≤ Ls 11 ∧ 8 ≤ Ls 15 ∧
-    (∀ c < 16, Ls c ≤ 23) ∧ blockSys.SatisfiedExt inst p [] ∧ Nonempty (Setup inst p (Ls 1))
+    SizeOk Ls ∧ blockSys.SatisfiedExt inst p [] ∧ Nonempty (Setup inst p (Ls 1))
 
 /-- One shared size is a size vector: `BlockPubOk` implies `BlockPubOk'` (at `Ls = fun _ => L`). -/
 theorem BlockPubOk.toV {p : ℕ → F} (hp : BlockPubOk p) : BlockPubOk' p := by
   obtain ⟨inst, L, hL, h8, h23, hsat, hS⟩ := hp
-  exact ⟨inst, fun _ => L, hL, h8, h8, h8, fun _ _ => h23, hsat, hS⟩
+  exact ⟨inst, fun _ => L, hL, h8, h8, h8, SizeOk.of_le23 fun _ _ => h23, hsat, hS⟩
 
 /-- **The previous MTP of a proven block** (`block_mtp`), with per-component sizes: 0 below the CSV height; at and above it the
 median time past of 11 headers hash-chained, in order, to a header with the block's SHA256d. -/
@@ -231,7 +231,7 @@ challenge, whose partial sums add to the summary's. -/
 theorem epoch_hyps_of_rng' {r : Rng} (hr : RngOkP BlockPubOk' r) (hn : 0 < r.n) :
     ∃ (pub : ℕ → ℕ → F) (inst : ℕ → ℕ → Inst) (L : ℕ → ℕ → ℕ) (_ : ∀ i, Setup (inst i) (pub i) (L i 1)),
       (∀ i < r.n, ∀ c < 15, (inst i c).logSize = L i c) ∧ (∀ i < r.n, hashSys.SatisfiedExt (inst i) (pub i) []) ∧
-      (∀ i < r.n, ∀ c < 15, L i c ≤ 23) ∧ (∀ i < r.n, pub i 2 = ((r.lo + i : ℕ) : F)) ∧
+      (∀ i < r.n, SizeOk (L i)) ∧ (∀ i < r.n, pub i 2 = ((r.lo + i : ℕ) : F)) ∧
       (∀ i < r.n, pub i Coin.PUB_LOST = if Spec.Coins.bip30Lost (r.lo + i) then 1 else 0) ∧
       (∀ i < r.n, FpWalk.gQ (pub i) = r.γ) ∧ (∀ i < r.n, RunSum.pQ (pub i) Coin.PUB_Z = r.z) ∧
       (∀ i < r.n, ∀ k < Coin.W, RunSum.pQ (pub i) (Coin.PUB_ALPHA k) = r.α ^ k) ∧
@@ -244,12 +244,12 @@ theorem epoch_hyps_of_rng' {r : Rng} (hr : RngOkP BlockPubOk' r) (hn : 0 < r.n) 
   let inst : ℕ → ℕ → Inst := fun i => Classical.choose (hok i)
   let L : ℕ → ℕ → ℕ := fun i => Classical.choose (Classical.choose_spec (hok i))
   have hspec' : ∀ i, (∀ c < 16, (inst i c).logSize = L i c) ∧ 8 ≤ L i 7 ∧ 8 ≤ L i 11 ∧ 8 ≤ L i 15 ∧
-      (∀ c < 16, L i c ≤ 23) ∧ blockSys.SatisfiedExt (inst i) (P (idx i)) [] ∧
+      SizeOk (L i) ∧ blockSys.SatisfiedExt (inst i) (P (idx i)) [] ∧
       Nonempty (Setup (inst i) (P (idx i)) (L i 1)) :=
     fun i => Classical.choose_spec (Classical.choose_spec (hok i))
-  have hspec : ∀ i, (∀ c < 15, (inst i c).logSize = L i c) ∧ (∀ c < 15, L i c ≤ 23) ∧
+  have hspec : ∀ i, (∀ c < 15, (inst i c).logSize = L i c) ∧ SizeOk (L i) ∧
       hashSys.SatisfiedExt (inst i) (P (idx i)) [] ∧ Nonempty (Setup (inst i) (P (idx i)) (L i 1)) := fun i =>
-    ⟨fun c hc => (hspec' i).1 c (by omega), fun c hc => (hspec' i).2.2.2.2.1 c (by omega),
+    ⟨fun c hc => (hspec' i).1 c (by omega), (hspec' i).2.2.2.2.1,
       (blockSys_sat (hspec' i).2.2.2.2.2.1).1, (hspec' i).2.2.2.2.2.2⟩
   have hid : ∀ i < r.n, idx i = i := fun i hi => by simp only [idx]; rw [if_pos hi]
   refine ⟨fun i => P (idx i), inst, L, fun i => Classical.choice (hspec i).2.2.2, fun i _ => (hspec i).1,
