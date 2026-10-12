@@ -161,6 +161,9 @@ pub const Composition = enum {
     interpreter,
     /// stwo-zig's captured-AIR runtime over the lowered STWZEVA programs (`stwzeva.zig`).
     stwzeva,
+    /// As `stwzeva`, with the kernels stwo-zig's C code generator built for `stwzeva.aot_airs`
+    /// (other programs stay on the SIMD interpreter).
+    stwzeva_native,
 };
 
 /// Proves the system. `mains[i]` are part `i`'s main columns in natural row order.
@@ -218,7 +221,7 @@ pub fn proveWith(comptime E: type, caller_allocator: std.mem.Allocator, cfg: rec
         .interpreter => for (comps, provers) |*c, *p| {
             p.* = c.asProverComponent();
         },
-        .stwzeva => {
+        .stwzeva, .stwzeva_native => {
             const lowered = try a.alloc(stwzeva.composition.Component, comps.len);
             const wrapped = try a.alloc(stwzeva.Component, comps.len);
             var n_pre: usize = 0;
@@ -234,6 +237,7 @@ pub fn proveWith(comptime E: type, caller_allocator: std.mem.Allocator, cfg: rec
                 });
                 rc_offset += l.n_constraints;
                 w.* = try stwzeva.Component.init(a, c, l, n_pre);
+                if (composition == .stwzeva_native) w.prover.native_executor = @import("stwzeva_cpu_aot").executor();
                 out.* = w.asProverComponent();
             }
         },
@@ -256,14 +260,16 @@ pub fn proofBytes(a: std.mem.Allocator, proof: Proof) ![]u8 {
     return out.toOwnedSlice(a);
 }
 
-/// Parity (b): the system proved with the interpreter's composition and with stwo-zig's
-/// STWZEVA runtime gives byte-identical proofs, and the STWZEVA one passes `verifyExt`.
+/// Parity (b): the system proved with the interpreter's composition, with stwo-zig's STWZEVA
+/// runtime, and with that runtime plus the C-generated kernels gives byte-identical proofs, and
+/// the STWZEVA one passes `verifyExt`.
 /// Returns the proof size in bytes.
 pub fn checkStwzevaProof(comptime E: type, a: std.mem.Allocator, cfg: rec.Config, parts: []const Part, mains: []const []const []const M31, ext: []const PubEntry) !usize {
     const want = try proofBytes(a, try proveWith(E, a, cfg, parts, mains, .interpreter));
     const proof = try proveWith(E, a, cfg, parts, mains, .stwzeva);
     const got = try proofBytes(a, proof);
     try std.testing.expectEqualSlices(u8, want, got);
+    try std.testing.expectEqualSlices(u8, want, try proofBytes(a, try proveWith(E, a, cfg, parts, mains, .stwzeva_native)));
     try verifyExt(a, cfg, parts, ext, proof);
     return got.len;
 }

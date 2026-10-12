@@ -53,6 +53,50 @@ pub fn build(b: *std.Build) void {
         },
     });
 
+    // Native CPU composition kernels for our STWZEVA bundle (src/air/stwzeva.zig, `aot_airs`): stwo-zig's
+    // C code generator (`src/tools/cairo_composition_cpu_codegen/bundle_main.zig`) run on the committed
+    // bundle, wired as `integrations/circuit_cpu/composition_aot_build.zig` does for the circuit AIR.
+    {
+        const cairo_frontend = stwo_circuit_cpu.import_table.get("stwo_cairo_frontend").?;
+        const bundle_path = "testdata/stwzeva/pubfree.bin";
+        const bundle = b.build_root.handle.readFileAlloc(b.allocator, bundle_path, 64 << 20) catch @panic("missing " ++ bundle_path);
+        var digest: [32]u8 = undefined;
+        std.crypto.hash.sha2.Sha256.hash(bundle, &digest, .{});
+        const program_count: usize = 7;
+        const generator = b.addExecutable(.{
+            .name = "stwzeva-cpu-codegen",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("third_party/stwo-zig/src/tools/cairo_composition_cpu_codegen/bundle_main.zig"),
+                .target = b.graph.host,
+                .optimize = .ReleaseFast,
+            }),
+        });
+        const surface = b.createModule(.{
+            .root_source_file = b.path("third_party/stwo-zig/src/frontends/cairo/codegen_surface.zig"),
+            .target = b.graph.host,
+            .optimize = .ReleaseFast,
+        });
+        surface.addImport("stwo_core", b.dependency("stwo_core", .{ .target = b.graph.host, .optimize = .ReleaseFast }).module("stwo_core"));
+        generator.root_module.addImport("stwo_cairo", surface);
+        const generate = b.addRunArtifact(generator);
+        generate.addFileArg(b.path(bundle_path));
+        generate.addArgs(&.{ b.fmt("{s}", .{std.fmt.bytesToHex(digest, .lower)}), "stwzeva_cpu_air", b.fmt("{d}", .{program_count}) });
+        const directory = generate.addOutputDirectoryArg("stwzeva-cpu-aot");
+        const registry = b.createModule(.{ .root_source_file = directory.path(b, "registry.zig"), .target = target, .optimize = optimize });
+        registry.addImport("stwo_cairo_frontend", cairo_frontend);
+        const kernels = b.addLibrary(.{
+            .name = "stwzeva-cpu-kernels",
+            .linkage = .static,
+            .root_module = b.createModule(.{ .target = target, .optimize = optimize, .pic = true, .link_libc = true }),
+        });
+        for (0..program_count) |index| kernels.root_module.addCSourceFile(.{
+            .file = directory.path(b, b.fmt("stwzeva_cpu_air_{d}.c", .{index})),
+            .flags = &.{ "-std=c11", "-O3", "-fstrict-aliasing", "-fno-vectorize", "-fno-slp-vectorize", "-gline-tables-only" },
+        });
+        registry.linkLibrary(kernels);
+        lib.addImport("stwzeva_cpu_aot", registry);
+    }
+
     // AIRs exported from the Lean definitions (lean/), consumed verbatim.
     lib.addAnonymousImport("air:add32_chain", .{ .root_source_file = b.path("airs/add32_chain.json") });
     lib.addAnonymousImport("air:sha256_compress", .{ .root_source_file = b.path("airs/sha256_compress.json") });

@@ -45,6 +45,7 @@ pub const eval = cairo.witness.eval_program;
 pub const composition = cairo.witness.composition_bundle;
 pub const Captured = cairo.proving.air.component.Component;
 pub const RuntimeComponent = cairo.witness.resident_verifier.RuntimeComponent;
+pub const Native = cairo.proving.air.native_evaluator.Executor;
 
 /// Where a component sits in the shared trees (as `system.components` wires it).
 pub const Geometry = struct {
@@ -639,6 +640,36 @@ pub fn evalAtPoint(
     for (program.constraint_roots) |root| accumulator.accumulate(ext[root].mul(denominator_inv));
 }
 
+// ------------------------------------------------------------- C code generator
+
+/// The AIRs without public inputs compiled by stwo-zig's C code generator at build time
+/// (`build.zig`, `stwzeva_cpu_aot`). Public inputs are literals in a program, so an AIR with them
+/// has one program per statement; these have one program each.
+pub const aot_airs = [_][]const u8{ "byte_table", "byte_user", "block_reader", "block_tables", "block_msg", "block_walk", "block_sha" };
+/// The committed bundle the build generates C from (`testdata/stwzeva/pubfree.bin`).
+pub const aot_bundle_path = "testdata/stwzeva/pubfree.bin";
+const aot_log_size: u32 = 8;
+
+fn aotJson(comptime name: []const u8) []const u8 {
+    return @embedFile("air:" ++ name);
+}
+
+/// The bundle of `aot_airs` (laid out as one system at 2^8 rows).
+pub fn aotBundle(a: std.mem.Allocator) ![]u8 {
+    var comps: [aot_airs.len]composition.Component = undefined;
+    var g = Geometry{ .log_size = aot_log_size };
+    inline for (aot_airs, 0..) |name, i| {
+        const air = (try ir.Air.parseJson(a, aotJson(name))).value;
+        if (air.n_pub != 0) return error.PublicInputsInAotAir;
+        comps[i] = try lowerComponent(a, air, &.{}, g);
+        g.pre_offset += air.n_preprocessed;
+        g.main_offset += air.n_main;
+        g.inter_offset += @intCast(4 * component_mod.nBatches(air));
+        g.rc_offset += comps[i].n_constraints;
+    }
+    return encodeBundle(a, &comps);
+}
+
 // ---------------------------------------------------------------------- tests
 
 const testing = std.testing;
@@ -665,6 +696,11 @@ pub const ParityReport = struct {
 /// interpreter) and at the point (`evalAtPoint`, and stwo-zig's `RuntimeComponent` when every
 /// column is read). `pubs` are random.
 pub fn checkParity(a: std.mem.Allocator, air: ir.Air, log_size: u32, seed: u64) !ParityReport {
+    return checkParityWith(a, air, log_size, seed, null);
+}
+
+/// `checkParity`, the domain evaluated by a native kernel of `native` (which must have one).
+pub fn checkParityWith(a: std.mem.Allocator, air: ir.Air, log_size: u32, seed: u64, native: ?Native) !ParityReport {
     var prng = std.Random.DefaultPrng.init(seed);
     const r = prng.random();
     const pubs = try a.alloc(M31, air.n_pub);
@@ -675,7 +711,11 @@ pub fn checkParity(a: std.mem.Allocator, air: ir.Air, log_size: u32, seed: u64) 
     reference.n_trees = trees;
     if (n_batches != 0) reference.logup = .{ .z = randQM31(r), .alpha = randQM31(r), .claimed_sum = randQM31(r) };
     var captured = try lowerComponent(a, air, pubs, .{ .log_size = log_size });
-    const wrapped = try Component.init(a, &reference, &captured, air.n_preprocessed);
+    var wrapped = try Component.init(a, &reference, &captured, air.n_preprocessed);
+    if (native) |executor| {
+        if (executor.resolve(cairo.proving.air.native_evaluator.identity(captured.parts[0].program)) == null) return error.NoNativeKernel;
+        wrapped.prover.native_executor = executor;
+    }
     const n_constraints = reference.nConstraints();
     try testing.expectEqual(n_constraints, wrapped.nConstraints());
 
@@ -779,5 +819,34 @@ test "stwzeva: bundles round-trip through stwo-zig's parser" {
     for (bundle.components, comps) |got, want| {
         try testing.expectEqual(want.parts[0].program.header.semantic_hash, got.parts[0].program.header.semantic_hash);
         try testing.expectEqualSlices(u32, want.denominator_inverses, got.denominator_inverses);
+    }
+}
+
+test "stwzeva: the committed C-codegen bundle is the current lowering" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const bytes = try aotBundle(a);
+    // `STWZEVA_WRITE_BUNDLE=1` regenerates the file (then rebuild: the C kernels come from it).
+    if (std.process.hasEnvVarConstant("STWZEVA_WRITE_BUNDLE")) {
+        try std.fs.cwd().makePath("testdata/stwzeva");
+        try std.fs.cwd().writeFile(.{ .sub_path = aot_bundle_path, .data = bytes });
+    }
+    const committed = try std.fs.cwd().readFileAlloc(a, aot_bundle_path, 64 << 20);
+    try testing.expectEqualSlices(u8, committed, bytes);
+}
+
+test "stwzeva: stwo-zig's C code generator's kernels match the interpreter's composition" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const aot = @import("stwzeva_cpu_aot");
+    try testing.expectEqual(@as(usize, aot_airs.len), aot.generated_program_count);
+    inline for (aot_airs, 0..) |name, i| {
+        const air = (try ir.Air.parseJson(a, aotJson(name))).value;
+        for ([_]u32{ 6, 10 }) |log_size| {
+            const rep = try checkParityWith(a, air, log_size, 0xc0de + i, aot.executor());
+            std.debug.print("stwzeva C kernel {s} (log {d}): {d} constraints match\n", .{ name, log_size, rep.constraints });
+        }
     }
 }
