@@ -269,6 +269,7 @@ pub fn build(b: *std.Build) void {
                     .{ .name = "stwo_cpu_backend", .module = stwo_cpu_backend },
                     .{ .name = "stwo_metal_backend", .module = b.dependency("stwo_metal_backend", dep_opts).module("stwo_metal_backend") },
                     .{ .name = "cairo_metal_eval_codegen", .module = metal_codegen },
+                    .{ .name = "stwo_prover_engine", .module = stwo_prover_engine },
                 },
             }),
         });

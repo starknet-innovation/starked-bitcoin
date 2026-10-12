@@ -480,7 +480,8 @@ fn onDomain(
     buffers: *std.ArrayList([]M31),
 ) ![]const M31 {
     try poly.validate();
-    if (poly.log_size == eval_log_size) return poly.values;
+    // Compact storage keeps coefficients only (no values) at the committed log size.
+    if (poly.log_size == eval_log_size and poly.values.len != 0) return poly.values;
     const coefficients = poly.coefficients orelse return error.InvalidProofShape;
     if (coefficients.logSize() != trace_log_size) return error.InvalidProofShape;
     const values = try allocator.alloc(M31, eval_size);

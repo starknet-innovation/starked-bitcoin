@@ -150,6 +150,7 @@ pub const MetalComposition = struct {
         defer lease.deinit();
         const runtime = lease.runtime;
         var timer = try std.time.Timer.start();
+        @import("stwo_prover_engine").measurement.process_usage.reportStage(captured.label);
 
         const rows: usize = @as(usize, 1) << @intCast(captured.evaluation_log_size);
         const n_pre = captured.preprocessed_indices.len;

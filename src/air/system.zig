@@ -118,6 +118,15 @@ const Fractions = struct {
     /// Storage (bit-reversed circle-domain) index → natural row.
     natural: []const usize,
 
+    pre: [][]M31,
+
+    fn deinit(self: *Fractions, allocator: std.mem.Allocator) void {
+        allocator.free(self.values);
+        allocator.free(self.natural);
+        for (self.pre) |c| allocator.free(c);
+        allocator.free(self.pre);
+    }
+
     fn fill(self: *const Fractions, storage_row: usize, out: []logup_columns.Fraction) anyerror!void {
         @memcpy(out, self.values[self.natural[storage_row] * self.batches ..][0..self.batches]);
     }
@@ -133,7 +142,10 @@ fn fractions(allocator: std.mem.Allocator, part: Part, main: []const []const M31
     const n_threads = @min(std.Thread.getCpuCount() catch 1, 64, @max(n / 1024, 1));
     const chunk = (n + n_threads - 1) / n_threads;
     const scratch = try allocator.alloc(M31, n_threads * (air.exprs.len + air.constraints.len));
-    const job = FractionJob{ .air = air, .pubs = part.pubs, .log_size = part.log_size, .pre = @ptrCast(pre), .main = main, .el = el, .values = values, .batches = B };
+    defer allocator.free(scratch);
+    const reads = try LookupReads.init(allocator, air);
+    defer reads.deinit(allocator);
+    const job = FractionJob{ .live = reads.exprs, .air = air, .pubs = part.pubs, .log_size = part.log_size, .pre = @ptrCast(pre), .main = main, .el = el, .values = values, .batches = B };
     var threads: [64]std.Thread = undefined;
     const per = air.exprs.len + air.constraints.len;
     for (0..n_threads) |t| {
@@ -143,10 +155,54 @@ fn fractions(allocator: std.mem.Allocator, part: Part, main: []const []const M31
     for (threads[0..n_threads]) |th| th.join();
     const natural = try allocator.alloc(usize, n);
     for (0..n) |i| natural[utils.bitReverseIndex(utils.cosetIndexToCircleDomainIndex(i, part.log_size), part.log_size)] = i;
-    return .{ .values = values, .batches = B, .natural = natural };
+    return .{ .values = values, .batches = B, .natural = natural, .pre = pre };
 }
 
+/// Expressions the lookups read (their multiplicities and values, transitively), and the main
+/// columns among them. The fractions need only these; the rest of the witness is dead once it is
+/// in storage order.
+pub const LookupReads = struct {
+    exprs: []bool,
+    main: []bool,
+
+    pub fn init(allocator: std.mem.Allocator, air: ir.Air) !LookupReads {
+        const live = try allocator.alloc(bool, air.exprs.len);
+        @memset(live, false);
+        for (air.lookups) |l| {
+            live[l.mult] = true;
+            for (l.vals) |v| live[v] = true;
+        }
+        var id = air.exprs.len;
+        while (id > 0) {
+            id -= 1;
+            if (!live[id]) continue;
+            switch (air.exprs[id]) {
+                .add, .sub, .mul => |args| for (args) |x| {
+                    live[x] = true;
+                },
+                .neg => |x| live[x] = true,
+                else => {},
+            }
+        }
+        const main = try allocator.alloc(bool, air.n_main);
+        @memset(main, false);
+        for (air.exprs, live) |e, l| if (l) switch (e) {
+            .col => |c| if (c.tree == .main) {
+                main[c.index] = true;
+            },
+            else => {},
+        };
+        return .{ .exprs = live, .main = main };
+    }
+
+    pub fn deinit(self: LookupReads, allocator: std.mem.Allocator) void {
+        allocator.free(self.exprs);
+        allocator.free(self.main);
+    }
+};
+
 const FractionJob = struct {
+    live: []const bool,
     air: ir.Air,
     pubs: []const M31,
     log_size: u32,
@@ -161,9 +217,22 @@ const FractionJob = struct {
         var trace = interp.RowTrace{ .log_size = self.log_size, .pubs = self.pubs, .preprocessed = self.pre, .main = self.main };
         var vals: [component_mod.MAX_LOOKUP_VALS]QM31 = undefined;
         const B = self.batches;
+        _ = out;
         for (start..end) |r| {
             trace.row = r;
-            interp.evalConstraints(M31, air, self.pubs, scratch, &trace, out);
+            // Only what the lookups read.
+            for (air.exprs, self.live, 0..) |e, l, id| {
+                if (!l) continue;
+                scratch[id] = switch (e) {
+                    .col => |c| trace.read(c.tree, c.index, c.offset),
+                    .constant => |v| M31.fromCanonical(v),
+                    .add => |x| scratch[x[0]].add(scratch[x[1]]),
+                    .sub => |x| scratch[x[0]].sub(scratch[x[1]]),
+                    .mul => |x| scratch[x[0]].mul(scratch[x[1]]),
+                    .neg => |x| scratch[x].neg(),
+                    .@"pub" => |i| self.pubs[i],
+                };
+            }
             for (0..B) |b| {
                 var fr: [2]logup_columns.Fraction = undefined;
                 const k: usize = if (2 * b + 1 < air.lookups.len) 2 else 1;
@@ -210,6 +279,25 @@ pub const Options = struct {
     device: ?stwzeva.Device = null,
     /// Filled with the stage's counts when `device` is set.
     counts: ?*stwzeva.DeviceCounts = null,
+    /// The prover's working allocator (thread-safe, freeing); `std.heap.smp_allocator` by default.
+    work_allocator: ?std.mem.Allocator = null,
+    /// The caller will not read `mains` again: once the interaction trace is built, their pages
+    /// are returned to the OS (their contents become undefined). Saves one main-trace copy.
+    discard_mains: bool = false,
+    /// How the commitment scheme keeps committed trees (stwo-zig execution choices; proof bytes
+    /// are the same).
+    storage: Storage = .default,
+};
+
+pub const Storage = enum {
+    /// stwo-zig's default: each tree's coefficients and its blown-up evaluations (3 trace-size
+    /// copies per column at blowup 1).
+    default,
+    /// Blown-up evaluations only (`CoefficientRetentionPolicy.never`): 2 copies.
+    evaluations_only,
+    /// Coefficients only, committed by streaming batches (`setCompactPolynomialStorage`):
+    /// 1 copy; composition and quotients re-extend columns as they need them.
+    compact,
 };
 
 /// `STARKED_PHASES=1` prints the prover's phase times (benchmarks).
@@ -223,6 +311,8 @@ const Phases = struct {
     }
 
     fn mark(self: *Phases, name: []const u8) void {
+        // `STWO_HOST_MEMORY_PROFILE=1`: process footprint (current, lifetime peak) at each phase.
+        @import("stwo_prover_engine").measurement.process_usage.reportStage(name);
         if (!self.on) return;
         if (self.timer) |*t| std.debug.print("  phase {s}: {d} ms\n", .{ name, t.lap() / std.time.ns_per_ms });
     }
@@ -233,56 +323,96 @@ pub fn proveOpts(comptime E: type, caller_allocator: std.mem.Allocator, cfg: rec
     const composition = opts.composition;
     if (opts.device != null and composition == .interpreter) return error.DeviceNeedsStwzeva;
     var phase = Phases.start();
-    // With several components the prover evaluates them on concurrent threads, and each
-    // evaluator allocates from this allocator: callers may pass an arena, so serialize it.
-    var thread_safe = std.heap.ThreadSafeAllocator{ .child_allocator = caller_allocator };
-    const a = thread_safe.allocator();
+    // Everything the prover builds is freed as soon as it is dead, so all of it comes from a
+    // freeing, thread-safe allocator (stwo-zig's components evaluate on concurrent threads). Only
+    // the result is copied into `caller_allocator` (often an arena, which never frees).
+    const a = opts.work_allocator orelse std.heap.smp_allocator;
     _ = try checkSizes(parts);
     var channel = rec.Channel{};
     Revision.proving_5a7c5ed.mixConfig(cfg, &channel);
     var scheme = try E.initRevision(a, cfg);
     var scheme_owned = true;
     errdefer if (scheme_owned) E.deinit(&scheme, a);
+    switch (opts.storage) {
+        .default => {},
+        .evaluations_only => scheme.setCoefficientRetentionPolicy(.never),
+        .compact => scheme.setCompactPolynomialStorage(0),
+    }
+    const commit = struct {
+        fn f(s_: *E.Scheme, al: std.mem.Allocator, cols: []prover_pcs.ColumnEvaluation, ch: *rec.Channel, storage: Storage) !void {
+            if (storage == .compact)
+                try s_.commitOwnedStreamingWithRecorder(al, cols, 0, null, ch)
+            else
+                try E.commit(s_, al, cols, null, ch);
+        }
+    }.f;
 
-    try E.commit(&scheme, a, try preprocessedStorage(a, parts), null, &channel);
+    // `commit` consumes its columns (and their slice).
+    try commit(&scheme, a, try preprocessedStorage(a, parts), &channel, opts.storage);
     try E.flushPendingCommit(&scheme, a, &channel);
     phase.mark("preprocessed commit");
     try mixStatements(&channel, a, parts);
     var main_cols = std.ArrayList(prover_pcs.ColumnEvaluation).empty;
     for (parts, mains) |p, m| {
         if (m.len != p.air.n_main) return error.InvalidPreparedGeometry;
-        try main_cols.appendSlice(a, try base.toStorage(a, p.log_size, m));
+        const st = try base.toStorage(a, p.log_size, m);
+        defer a.free(st);
+        try main_cols.appendSlice(a, st);
+        // Witness columns no lookup reads are dead once in storage order.
+        if (opts.discard_mains) {
+            const reads = try LookupReads.init(a, p.air.*);
+            defer reads.deinit(a);
+            for (m, reads.main) |col, keep| if (!keep) discardPages(col);
+        }
     }
-    try E.commit(&scheme, a, try main_cols.toOwnedSlice(a), null, &channel);
+    phase.mark("main storage order");
+    try commit(&scheme, a, try main_cols.toOwnedSlice(a), &channel, opts.storage);
     try E.flushPendingCommit(&scheme, a, &channel);
     phase.mark("main commit");
 
     const comps = try components(a, parts);
+    defer {
+        for (comps) |*c| c.deinit();
+        a.free(comps);
+    }
     var sums = std.ArrayList(QM31).empty;
+    defer sums.deinit(a);
     if (hasLookups(parts)) {
         const el = try lookup_transcript.drawLookupElements(a, &channel);
         var inter_cols = std.ArrayList(prover_pcs.ColumnEvaluation).empty;
         for (parts, mains, comps) |p, m, *c| {
+            // A component's witness is dead once its fractions are built.
+            defer if (opts.discard_mains) for (m) |col| discardPages(col);
             if (p.air.lookups.len == 0) continue;
-            const fr = try fractions(a, p, m, el);
+            // One component's fractions at a time.
+            var fr = try fractions(a, p, m, el);
+            defer fr.deinit(a);
             phase.mark("  fractions");
             const built = try logup_columns.build(a, p.log_size, fr.batches, &fr, struct {
                 fn f(ctx: *const Fractions, row: usize, out: []logup_columns.Fraction) anyerror!void {
                     return ctx.fill(row, out);
                 }
             }.f);
+            defer a.free(built.columns);
             try inter_cols.appendSlice(a, built.columns);
             try sums.append(a, built.claimed_sum);
             c.logup = .{ .z = el.z, .alpha = el.alpha, .claimed_sum = built.claimed_sum };
         }
         phase.mark("interaction trace (host)");
         lookup_transcript.mixInteractionClaim(&channel, sums.items);
-        try E.commit(&scheme, a, try inter_cols.toOwnedSlice(a), null, &channel);
+        try commit(&scheme, a, try inter_cols.toOwnedSlice(a), &channel, opts.storage);
         phase.mark("interaction commit");
-    }
+    } else if (opts.discard_mains) for (mains) |m| for (m) |col| discardPages(col);
     const provers = try a.alloc(prover_component.ComponentProver, comps.len);
+    defer a.free(provers);
     var lowered: []stwzeva.composition.Component = &.{};
     var wrapped: []stwzeva.Component = &.{};
+    defer {
+        for (lowered) |*l| stwzeva.composition.deinitComponent(a, l);
+        a.free(lowered);
+        for (wrapped) |w| a.free(w.preprocessed_logs);
+        a.free(wrapped);
+    }
     switch (composition) {
         .interpreter => for (comps, provers) |*c, *p| {
             p.* = c.asProverComponent();
@@ -308,23 +438,44 @@ pub fn proveOpts(comptime E: type, caller_allocator: std.mem.Allocator, cfg: rec
             }
         },
     }
+    var captured: []stwzeva.Captured = &.{};
+    defer a.free(captured);
     var bound: ?stwzeva.DeviceBound = null;
     defer if (bound) |*b| b.close();
     if (opts.device) |device| {
         if (try device.open(device.context, a, lowered, &.{})) |session| {
-            const captured = try a.alloc(stwzeva.Captured, wrapped.len);
+            captured = try a.alloc(stwzeva.Captured, wrapped.len);
             for (captured, wrapped) |*c, w| c.* = w.prover;
             bound = .{ .allocator = a, .components = captured, .captured = lowered, .session = session, .recorder = null };
         }
     }
+    phase.mark("components ready");
     scheme_owned = false;
     var extended = try E.prove(a, provers, &channel, scheme, .{
         .composition_stage = if (bound) |*b| b.asStage() else null,
     });
     extended.aux.deinit(a);
-    phase.mark("lowering + STARK (composition, quotients, FRI, PoW, decommit)");
+    defer extended.proof.deinit(a);
+    phase.mark("STARK done");
     if (opts.counts) |out| out.* = if (bound) |b| b.counts else .{};
-    return .{ .stark = extended.proof, .claimed_sums = try sums.toOwnedSlice(a) };
+    // The result, in the caller's allocator (postcard round trip: a deep copy).
+    var bytes = std.ArrayList(u8).empty;
+    defer bytes.deinit(a);
+    try @import("stwo_postcard").serializeProof(rec.Hasher, bytes.writer(a), extended.proof);
+    var fbs = std.io.fixedBufferStream(bytes.items);
+    const stark = try @import("stwo_postcard").deserializeProof(rec.Hasher, caller_allocator, fbs.reader());
+    return .{ .stark = stark, .claimed_sums = try caller_allocator.dupe(QM31, sums.items) };
+}
+
+/// Returns `column`'s whole pages to the OS; their contents become undefined. For witness columns
+/// the caller will not read again (`Options.discard_mains`), possibly inside an arena.
+fn discardPages(column: []const M31) void {
+    const page = std.heap.pageSize();
+    const start = std.mem.alignForward(usize, @intFromPtr(column.ptr), page);
+    const end = std.mem.alignBackward(usize, @intFromPtr(column.ptr) + column.len * @sizeOf(M31), page);
+    if (end <= start) return;
+    const advice: u32 = if (@import("builtin").os.tag == .macos) 7 else std.posix.MADV.DONTNEED; // MADV_FREE_REUSABLE
+    std.posix.madvise(@ptrFromInt(start), end - start, advice) catch {};
 }
 
 /// The proof's bytes: claimed sums, then the STARK proof in stwo's postcard encoding.
@@ -349,6 +500,11 @@ pub fn checkStwzevaProof(comptime E: type, a: std.mem.Allocator, cfg: rec.Config
     const got = try proofBytes(a, proof);
     try std.testing.expectEqualSlices(u8, want, got);
     try std.testing.expectEqualSlices(u8, want, try proofBytes(a, try proveWith(E, a, cfg, parts, mains, .stwzeva_native)));
+    // Storage policies change only memory, never bytes.
+    for ([_]Storage{ .evaluations_only, .compact }) |storage| {
+        for ([_]Composition{ .interpreter, .stwzeva }) |c|
+            try std.testing.expectEqualSlices(u8, want, try proofBytes(a, try proveOpts(E, a, cfg, parts, mains, .{ .composition = c, .storage = storage })));
+    }
     try verifyExt(a, cfg, parts, ext, proof);
     return got.len;
 }
