@@ -401,3 +401,21 @@ block-system component, `block_anc` (`Block/Anc.lean`, `AncSound.anc_sound`, `Bl
 the 11 predecessors and the block's header hashed and linked in the header chain's layout, the MTP
 limbs (public 3, 7) pinned to their median; below the CSV height the limbs are 0. The times stay
 private; the tree carries nothing for the MTP.
+
+### D-044 — The recursion's trust boundary: stwo-zig's verifier circuits upstream, our wiring here
+Date: 2026-10-12 · By: owner, with Claude (agent) · Status: **accepted**
+Decision:
+- **VL-FRI belongs upstream.** stwo-zig's in-circuit verifier gadgets (`sv.*`: FRI commit and
+  decommit, folding, query selection, DEEP quotients, circle arithmetic) are stwo-zig code, not ours.
+  Their formalization runs in the stwo-zig repo, briefed in `~/Workshop/stwo-zig/VERIFIER_FORMALIZATION_BRIEF.md`
+  (a separate agent). Until it lands they are trusted as StarkWare-derived and parity-tested, with
+  VL-ORACLE as evidence.
+- **VL-NODE is split.** The recursive verifier itself (`stark_verifier.verify`, `CircuitStatement`) goes
+  upstream, under the same brief. Our wiring around it moves to Lean-first programs here, with
+  theorems and named hypotheses for the trusted call (branch `vl/node-wiring`). That wiring is the
+  statement passed, the child digest binding, the circuit hash, the key and the root output.
+- **Node mutation testing is not scheduled.** It would test the upstream half as we use it. Run it if
+  the upstream work stalls, or before any external soundness claim.
+Why: "everything we wrote is proven, only StarkWare-derived software is trusted" (verifier-formalization.md).
+The gadgets serve every stwo-zig user, so their proofs belong where the code lives.
+Review: soundness claims built on this boundary need review before external use.
