@@ -327,7 +327,7 @@ test "block fields: tampered rows or bytes are rejected" {
         var b = try bsys.build(a, raw, s.ctx);
         const tampered = try a.dupe(u8, raw);
         tampered[rows[1].start + rows[1].off] ^= 1;
-        b.mains[0] = try bytes.generate(a, b.log_size, tampered, b.reads);
+        b.mains[0] = try bytes.generate(a, b.logs[0], tampered, b.reads);
         try std.testing.expect(try bsys.unbalanced(a, &airs, &b) != null);
     }
 }

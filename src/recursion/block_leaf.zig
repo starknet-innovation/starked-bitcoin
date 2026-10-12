@@ -26,13 +26,20 @@ const M31 = core.fields.m31.M31;
 const QM31 = core.fields.qm31.QM31;
 const FriConfigV2 = core.pcs.config_v2.FriConfigV2;
 
-/// The plain-verifier configuration of a block proof at `log_size`.
+/// The plain-verifier configuration of a block proof at `log_size` (uniform profile).
 pub fn config(a: std.mem.Allocator, airs: *const [bs.N_COMP]ir.Air, log_size: u32, fri: FriConfigV2) !pv.PlainConfig {
+    return configOf(a, airs, log_size, .uniform, fri);
+}
+
+/// The plain-verifier configuration of a block proof at (L, profile) (D-045).
+pub fn configOf(a: std.mem.Allocator, airs: *const [bs.N_COMP]ir.Air, log_size: u32, profile: bs.Profile, fri: FriConfigV2) !pv.PlainConfig {
+    const logs = bs.profileLogs(log_size, profile);
     const parts = try a.alloc(pv.PartConfig, bs.N_COMP);
-    for (parts, airs) |*p, *air| p.* = .{
+    for (parts, airs, logs) |*p, *air, l| p.* = .{
         .n_preprocessed = air.n_preprocessed,
         .main_offsets = try pv.mainOffsets(a, air.*),
         .n_inter = 4 * component.nBatches(air.*),
+        .log_size = if (l == log_size) null else l,
     };
     return .{ .log_trace_size = log_size, .fri = rec.Config.fromFriAndTraceSize(fri, log_size).fri_config, .system = true, .parts = parts };
 }

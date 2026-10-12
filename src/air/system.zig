@@ -54,10 +54,12 @@ fn hasLookups(parts: []const Part) bool {
     return false;
 }
 
-fn checkSizes(parts: []const Part) !u32 {
+/// The system's largest log size (the PCS lifts every tree to it, D-045).
+pub fn maxLogSize(parts: []const Part) !u32 {
     if (parts.len == 0) return error.EmptySystem;
-    for (parts) |p| if (p.log_size != parts[0].log_size) return error.LiftingUnsupported;
-    return parts[0].log_size;
+    var max: u32 = 0;
+    for (parts) |p| max = @max(max, p.log_size);
+    return max;
 }
 
 fn mixStatements(channel: anytype, allocator: std.mem.Allocator, parts: []const Part) !void {
@@ -357,7 +359,7 @@ pub fn proveOpts(comptime E: type, caller_allocator: std.mem.Allocator, cfg: rec
     // freeing, thread-safe allocator (stwo-zig's components evaluate on concurrent threads). Only
     // the result is copied into `caller_allocator` (often an arena, which never frees).
     const a = opts.work_allocator orelse std.heap.smp_allocator;
-    _ = try checkSizes(parts);
+    const max_log = try maxLogSize(parts);
     var channel = rec.Channel{};
     Revision.proving_5a7c5ed.mixConfig(cfg, &channel);
     var scheme = try E.initRevision(a, cfg);
@@ -483,8 +485,9 @@ pub fn proveOpts(comptime E: type, caller_allocator: std.mem.Allocator, cfg: rec
         .stwzeva, .stwzeva_native => {
             lowered = try a.alloc(stwzeva.composition.Component, comps.len);
             wrapped = try a.alloc(stwzeva.Component, comps.len);
-            var n_pre: usize = 0;
-            for (parts) |p| n_pre += p.air.n_preprocessed;
+            var pre_logs = std.ArrayList(u32).empty;
+            defer pre_logs.deinit(a);
+            for (parts) |p| try pre_logs.appendNTimes(a, p.log_size, p.air.n_preprocessed);
             var rc_offset: u32 = 0;
             for (parts, comps, lowered, wrapped, provers) |p, *c, *l, *w, *out| {
                 l.* = try stwzeva.lowerComponent(a, p.air.*, p.pubs, .{
@@ -495,7 +498,7 @@ pub fn proveOpts(comptime E: type, caller_allocator: std.mem.Allocator, cfg: rec
                     .rc_offset = rc_offset,
                 });
                 rc_offset += l.n_constraints;
-                w.* = try stwzeva.Component.init(a, c, l, n_pre);
+                w.* = try stwzeva.Component.init(a, c, l, pre_logs.items, max_log);
                 if (composition == .stwzeva_native) w.prover.native_executor = @import("stwzeva_cpu_aot").executor();
                 out.* = w.asProverComponent();
             }
@@ -620,7 +623,7 @@ pub fn extSum(ext: []const PubEntry, el: lookup_transcript.LookupElements) !QM31
 }
 
 fn verifyImpl(a: std.mem.Allocator, cfg: rec.Config, parts: []const Part, ext: []const PubEntry, proof: Proof, capture: ?*core.verifier.ProofCapture(rec.Hasher), borrowed: bool) !void {
-    _ = try checkSizes(parts);
+    _ = try maxLogSize(parts);
     const lookups = hasLookups(parts);
     const n_trees: usize = if (lookups) 3 else 2;
     if (proof.stark.commitment_scheme_proof.commitments.items.len != n_trees + 1) return error.InvalidProofShape;
@@ -743,4 +746,33 @@ test "LogUp system: the byte system's STWZEVA-composed proof is byte-identical a
     const mains = [_][]const []const M31{ &.{mult}, &.{x} };
     const n = try checkStwzevaProof(rec.Engine(@import("stwo_cpu_backend").CpuBackend), a, cfg, &parts, &mains, &.{});
     std.debug.print("byte system: STWZEVA proof byte-identical ({d} bytes)\n", .{n});
+}
+
+test "LogUp system of mixed sizes (lifting, D-045): proves, verifies, STWZEVA byte-identical; a wrong table fails" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const airs = try byteSystem(a);
+    // The table at 2^8, the user at 2^10 (and the reverse sizes below).
+    for ([_][2]u32{ .{ 8, 10 }, .{ 10, 8 } }) |logs| {
+        const n_user = @as(usize, 1) << @intCast(logs[1]);
+        const parts = [_]Part{ .{ .air = &airs[0], .log_size = logs[0] }, .{ .air = &airs[1], .log_size = logs[1] } };
+        const cfg = rec.Config.fromFriAndTraceSize(try core.pcs.config_v2.FriConfigV2.init(10, 0, 1, 3, 1), @max(logs[0], logs[1]));
+        var prng = std.Random.DefaultPrng.init(11);
+        const x = try a.alloc(M31, n_user);
+        const mult = try a.alloc(M31, @as(usize, 1) << @intCast(logs[0]));
+        @memset(mult, M31.zero());
+        for (x) |*v| {
+            const b = prng.random().int(u8);
+            v.* = M31.fromCanonical(b);
+            mult[b] = mult[b].add(M31.one());
+        }
+        const mains = [_][]const []const M31{ &.{mult}, &.{x} };
+        const E = rec.Engine(@import("stwo_cpu_backend").CpuBackend);
+        const n = try checkStwzevaProof(E, a, cfg, &parts, &mains, &.{});
+        std.debug.print("mixed sizes {d}/{d}: proof byte-identical across evaluators ({d} bytes)\n", .{ logs[0], logs[1], n });
+        // The same columns claimed at uniform sizes do not verify against the mixed proof.
+        const uniform = [_]Part{ .{ .air = &airs[0], .log_size = @max(logs[0], logs[1]) }, .{ .air = &airs[1], .log_size = @max(logs[0], logs[1]) } };
+        try std.testing.expect(std.meta.isError(verify(a, cfg, &uniform, try prove(E, a, cfg, &parts, &mains))));
+    }
 }

@@ -51,6 +51,8 @@ pub const PartConfig = struct {
     main_offsets: []const []const i32,
     /// `4 · nBatches`: LogUp cumulative-sum limbs (the last 4 sampled at the previous row too).
     n_inter: usize = 0,
+    /// This component's trace size when it differs from the proof's largest (lifted, D-045).
+    log_size: ?u32 = null,
 };
 
 /// Shape of a plain proof: trace size, FRI parameters, and the components' columns.
@@ -66,6 +68,16 @@ pub const PlainConfig = struct {
     }
     pub fn hasLookups(self: PlainConfig) bool {
         for (self.parts) |pc| if (pc.n_inter != 0) return true;
+        return false;
+    }
+
+    /// Part `i`'s log size (`log_trace_size` unless lifted).
+    pub fn partLog(self: PlainConfig, i: usize) u32 {
+        return self.parts[i].log_size orelse self.log_trace_size;
+    }
+    /// Whether some part is smaller than the largest (a lifted proof).
+    pub fn mixed(self: PlainConfig) bool {
+        for (self.parts, 0..) |_, i| if (self.partLog(i) != self.log_trace_size) return true;
         return false;
     }
 
@@ -630,6 +642,8 @@ fn compositionViaProgram(
     coeff: Var,
     elements: ?[2]Var,
 ) !Var {
+    // Its hook 2 is one 1/2^L for every component (component-sizes-prover-needs.md, P1).
+    if (config.mixed()) return error.LeanProgramNeedsPerPartSizes;
     var ins: std.ArrayListUnmanaged(Var) = .empty;
     const s = ctx.scratch();
     try ins.appendSlice(s, p.preprocessed_at_oods);
@@ -679,8 +693,8 @@ fn secure(comptime V: type, ctx: *Context(V), limbs: [4]Var) !Var {
 }
 
 /// Every component's constraints (AIR DAG, then LogUp) at the OODS point, Horner-combined with
-/// `coeff` across components in order, divided by the trace domain's vanishing polynomial (all
-/// components share the trace size).
+/// `coeff` across components in order, divided by the largest trace domain's vanishing polynomial
+/// (a lifted component's Z_n(π^k p) is Z_N(p)); each LogUp shift uses its component's own size.
 fn compositionAtOods(
     comptime V: type,
     ctx: *Context(V),
@@ -696,7 +710,7 @@ fn compositionAtOods(
     var main_at: usize = 0;
     var inter_at: usize = 0;
     var sum_at: usize = 0;
-    for (st.parts, config.parts) |part, pc| {
+    for (st.parts, config.parts, 0..) |part, pc, part_i| {
         const air = part.air;
         const vals = try ctx.scratch().alloc(Var, air.exprs.len);
         for (air.exprs, 0..) |node, k| vals[k] = switch (node) {
@@ -741,7 +755,7 @@ fn compositionAtOods(
             const last = 4 * (B - 1);
             const s_prev = try secure(V, ctx, .{ inter[last][0], inter[last + 1][0], inter[last + 2][0], inter[last + 3][0] });
             // shift = claimed_sum / 2^log_size
-            const n_inv = try ctx.constant(QM31.fromBase(try M31.fromU64(@as(u64, 1) << @intCast(config.log_trace_size)).inv()));
+            const n_inv = try ctx.constant(QM31.fromBase(try M31.fromU64(@as(u64, 1) << @intCast(config.partLog(part_i))).inv()));
             const shift = try ctx.mul(p.claimed_sums[sum_at], n_inv);
             for (0..B) |b| {
                 const j = 2 * b;
@@ -761,6 +775,47 @@ fn compositionAtOods(
         inter_at += pc.n_inter;
     }
     return ctx.mul(acc, try sv.circle.denomInverse(V, ctx, oods_x, config.log_trace_size));
+}
+
+/// The log size of every column of `tree` (preprocessed, main or interaction), in column order.
+fn columnLogs(a: std.mem.Allocator, config: PlainConfig, tree: usize) ![]u32 {
+    var out: std.ArrayListUnmanaged(u32) = .empty;
+    for (config.parts, 0..) |pc, i| {
+        const n = switch (tree) {
+            TREE_PRE => pc.n_preprocessed,
+            TREE_MAIN => pc.main_offsets.len,
+            TREE_INTER => pc.n_inter,
+            else => unreachable,
+        };
+        try out.appendNTimes(a, config.partLog(i), n);
+    }
+    return out.toOwnedSlice(a);
+}
+
+/// The columns of `tree` in Merkle leaf order: by (log size, column), stwo-zig's lifted order.
+fn leafOrder(a: std.mem.Allocator, config: PlainConfig, tree: usize, n_columns: usize) ![]usize {
+    const order = try a.alloc(usize, n_columns);
+    for (order, 0..) |*o, i| o.* = i;
+    if (tree == TREE_COMPOSITION or !config.mixed()) return order;
+    const logs = try columnLogs(a, config, tree);
+    if (logs.len != n_columns) return error.InvalidPlainProof;
+    std.sort.heap(usize, order, logs, struct {
+        fn less(l: []const u32, x: usize, y: usize) bool {
+            return l[x] < l[y] or (l[x] == l[y] and x < y);
+        }
+    }.less);
+    return order;
+}
+
+/// A column's periodicity point: `pt` plus the generator of order 2^(L − log) (`samples.zig`'s
+/// `lifting_domain_generator.repeatedDouble(log)`); `pt` itself when unlifted.
+fn periodic(comptime V: type, ctx: *Context(V), pt: Point(Var), L: u32, log: u32) !Point(Var) {
+    if (log == L) return pt;
+    const g = core.poly.circle.canonic.CanonicCoset.new(L).step().repeatedDouble(log);
+    return sv.circle.addPoints(V, ctx, pt, .{
+        .x = try ctx.constant(QM31.fromBase(g.x)),
+        .y = try ctx.constant(QM31.fromBase(g.y)),
+    });
 }
 
 fn hashLeafM31s(comptime V: type, ctx: *Context(V), values: []const M31Wrapper(Var)) !HashValue(Var) {
@@ -800,7 +855,7 @@ pub fn verifyPlain(
             ctx: *Context(V),
             channel: LeanChannel,
             st: *const PlainStatement,
-            log: u32,
+            config: PlainConfig,
             inputs: []const Var,
             next_part: *usize,
             pub fn call(self: @This(), id: u32, args: []const Var) ![]const Var {
@@ -814,9 +869,10 @@ pub fn verifyPlain(
                     },
                     4 => {
                         const part = self.st.parts[self.next_part.*];
+                        const part_log = self.config.partLog(self.next_part.*);
                         self.next_part.* += 1;
                         const out = try self.ctx.scratch().alloc(Var, 10);
-                        out[0] = (try builder.wrappers.constU32(V, self.ctx, self.log)).get();
+                        out[0] = (try builder.wrappers.constU32(V, self.ctx, part_log)).get();
                         for (0..8) |i| out[1 + i] = (try builder.wrappers.constU32(V, self.ctx, std.mem.readInt(u32, part.digest[4 * i ..][0..4], .little))).get();
                         out[9] = (try builder.wrappers.constU32(V, self.ctx, @intCast(part.pubs.len))).get();
                         return out;
@@ -826,12 +882,12 @@ pub fn verifyPlain(
             }
         };
         var next_part: usize = 0;
-        _ = try glue.run(V, ctx, prog, &.{}, Hooks{ .ctx = ctx, .channel = lc, .st = st, .log = log_trace, .inputs = ins.items, .next_part = &next_part });
+        _ = try glue.run(V, ctx, prog, &.{}, Hooks{ .ctx = ctx, .channel = lc, .st = st, .config = config, .inputs = ins.items, .next_part = &next_part });
     } else {
         if (config.system) try lc.mixU32s(V, ctx, &.{try builder.wrappers.constU32(V, ctx, @intCast(st.parts.len))});
-        for (st.parts) |part| {
+        for (st.parts, 0..) |part, part_i| {
             var words: [10]U32Wrapper(Var) = undefined;
-            words[0] = try builder.wrappers.constU32(V, ctx, log_trace);
+            words[0] = try builder.wrappers.constU32(V, ctx, config.partLog(part_i));
             for (0..8) |i| words[1 + i] = try builder.wrappers.constU32(V, ctx, std.mem.readInt(u32, part.digest[4 * i ..][0..4], .little));
             words[9] = try builder.wrappers.constU32(V, ctx, @intCast(part.pubs.len));
             try lc.mixU32s(V, ctx, &words);
@@ -913,15 +969,18 @@ pub fn verifyPlain(
     const bits = try ctx.scratch().alloc([]const Var, queries.bits.len);
     for (bits, queries.bits) |*u, b| u.* = try builder.simd.unpack(V, ctx, b);
 
-    // Merkle decommitment (all trees at the evaluation-domain height; no sorting).
+    // Merkle decommitment (every tree lifted to the evaluation-domain height). A leaf hashes its
+    // row's values sorted by (column log size, column), stwo-zig's lifted order: a static
+    // permutation, the identity when all sizes agree.
     const roots = [4]?HashValue(Var){ pre_root, p.trace_root, p.interaction_root, p.composition_root };
     const bits_for_query = try ctx.scratch().alloc(Var, bits.len);
     for (roots, 0..) |maybe_root, tree| {
         const root = maybe_root orelse continue;
         const n_columns = p.eval_domain_samples.nColumns(tree);
         const leaf_values = try ctx.scratch().alloc(M31Wrapper(Var), n_columns);
+        const order = try leafOrder(ctx.scratch(), config, tree, n_columns);
         for (0..config.nQueries()) |q| {
-            for (leaf_values, 0..) |*v, c| v.* = p.eval_domain_samples.at(tree, c, q);
+            for (leaf_values, order) |*v, c| v.* = p.eval_domain_samples.at(tree, c, q);
             const leaf = (try leafHashVia(V, ctx, st.leaf_hashes, leaf_values)) orelse try hashLeafM31s(V, ctx, leaf_values);
             for (bits_for_query, bits) |*b, qb| b.* = qb[q];
             if (st.merkle_node) |prog|
@@ -948,6 +1007,8 @@ pub fn verifyPlain(
 
     var responses: std.ArrayListUnmanaged(sv.oods.OodsResponse) = .empty;
     if (st.deep) |table| {
+        // Its entries carry no periodicity points (component-sizes-prover-needs.md, P2).
+        if (config.mixed()) return error.LeanProgramNeedsPerPartSizes;
         // The Lean table: each value is a mixed sample, at its label's point (`deep_sound`), and every
         // mixed sample is used (`deep_complete`).
         if (table.n_samples != values.items.len) return error.InvalidPlainProof;
@@ -962,19 +1023,22 @@ pub fn verifyPlain(
         }
     } else {
         // DEEP quotient inputs, in the native sample order (tree, column, mask; a two-sample column
-        // is preceded by its periodicity sample, which coincides with the first one here).
+        // is preceded by its periodicity sample: its second point plus the generator of order
+        // 2^(L − log) of the column's period, `samples.zig`; the same point when unlifted).
+        const main_logs = try columnLogs(ctx.scratch(), config, TREE_MAIN);
+        const inter_logs = try columnLogs(ctx.scratch(), config, TREE_INTER);
         for (p.preprocessed_at_oods, 0..) |v, c|
             try responses.append(ctx.scratch(), .{ .trace_idx = TREE_PRE, .column_idx = c, .pt = oods, .value = v });
         for (all_offsets.items, p.trace_at_oods, 0..) |offs, vals, c| {
             const pts = try ctx.scratch().alloc(Point(Var), offs.len);
             for (offs, pts) |off, *pt| pt.* = if (off == 0) oods else shifted.get(off).?;
-            if (offs.len == 2) try responses.append(ctx.scratch(), .{ .trace_idx = TREE_MAIN, .column_idx = c, .pt = pts[1], .value = vals[1] });
+            if (offs.len == 2) try responses.append(ctx.scratch(), .{ .trace_idx = TREE_MAIN, .column_idx = c, .pt = try periodic(V, ctx, pts[1], log_trace, main_logs[c]), .value = vals[1] });
             for (pts, vals) |pt, v| try responses.append(ctx.scratch(), .{ .trace_idx = TREE_MAIN, .column_idx = c, .pt = pt, .value = v });
         }
         for (p.interaction_at_oods, 0..) |vals, c| {
             if (vals.len == 2) {
                 // [prev, cur], preceded by the periodicity sample (as for two-offset main columns).
-                try responses.append(ctx.scratch(), .{ .trace_idx = TREE_INTER, .column_idx = c, .pt = oods, .value = vals[1] });
+                try responses.append(ctx.scratch(), .{ .trace_idx = TREE_INTER, .column_idx = c, .pt = try periodic(V, ctx, oods, log_trace, inter_logs[c]), .value = vals[1] });
                 try responses.append(ctx.scratch(), .{ .trace_idx = TREE_INTER, .column_idx = c, .pt = prev.?, .value = vals[0] });
                 try responses.append(ctx.scratch(), .{ .trace_idx = TREE_INTER, .column_idx = c, .pt = oods, .value = vals[1] });
             } else try responses.append(ctx.scratch(), .{ .trace_idx = TREE_INTER, .column_idx = c, .pt = oods, .value = vals[0] });
@@ -1584,4 +1648,67 @@ test "channel: mix_qm31s at the leaf's sample count (3757) replays gate for gate
     }
     try std.testing.expect(digests[0][0].eql(digests[1][0]) and digests[0][1].eql(digests[1][1]));
     try glue.expectSameCircuit(&ctxs[0].circuit, &ctxs[1].circuit);
+}
+
+test "plain in-circuit verifier: a LogUp system of mixed sizes (lifted, D-045) is accepted; tampering, or uniform sizes, are not" {
+    const system = @import("../air/system.zig");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const airs = try system.byteSystem(a);
+    for ([_][2]u32{ .{ 8, 10 }, .{ 10, 8 } }) |logs| {
+        const L = @max(logs[0], logs[1]);
+        const parts = [_]system.Part{ .{ .air = &airs[0], .log_size = logs[0] }, .{ .air = &airs[1], .log_size = logs[1] } };
+        const cfg = prove_rec.Config.fromFriAndTraceSize(try FriConfig.init(10, 0, 1, 3, 1), L);
+        var prng = std.Random.DefaultPrng.init(5);
+        const x = try a.alloc(M31, @as(usize, 1) << @intCast(logs[1]));
+        const mult = try a.alloc(M31, @as(usize, 1) << @intCast(logs[0]));
+        @memset(mult, M31.zero());
+        for (x) |*v| {
+            const b = prng.random().int(u8);
+            v.* = M31.fromCanonical(b);
+            mult[b] = mult[b].add(M31.one());
+        }
+        const mains = [_][]const []const M31{ &.{mult}, &.{x} };
+        const E = prove_rec.Engine(@import("stwo_cpu_backend").CpuBackend);
+        const configFor = struct {
+            fn f(al: std.mem.Allocator, airs_: *const [2]ir.Air, L_: u32, logs_: [2]u32, cfg_: prove_rec.Config) !PlainConfig {
+                return .{ .log_trace_size = L_, .fri = cfg_.fri_config, .system = true, .parts = try al.dupe(PartConfig, &.{
+                    .{ .n_preprocessed = 1, .main_offsets = try mainOffsets(al, airs_[0]), .n_inter = 4, .log_size = if (logs_[0] == L_) null else logs_[0] },
+                    .{ .n_preprocessed = 0, .main_offsets = try mainOffsets(al, airs_[1]), .n_inter = 4, .log_size = if (logs_[1] == L_) null else logs_[1] },
+                }) };
+            }
+        }.f;
+        const config = try configFor(a, &airs, L, logs, cfg);
+        const pre_root: [32]u8 = std.mem.toBytes(try system.preprocessedRoot(a, cfg, &parts));
+        const pa = try system.prove(E, a, cfg, &parts, &mains);
+        const pb = try system.prove(E, a, cfg, &parts, &mains);
+        var capture: core.verifier.ProofCapture(prove_rec.Hasher) = undefined;
+        try system.verifyCapture(a, cfg, &parts, &.{}, pa, &capture);
+        var values = try fromCapture(a, prove_rec.Hasher, &pb.stark, &capture, config, pb.claimed_sums);
+        const Run = struct {
+            fn run(al: std.mem.Allocator, airs_: *const [2]ir.Air, vals: *const PlainProof(QM31), cfg_: PlainConfig, root: [32]u8) !bool {
+                var ctx = try Context(QM31).init(al, 0);
+                defer ctx.deinit();
+                const g = try guess(QM31, &ctx, vals);
+                const st = PlainStatement{ .preprocessed_root = root, .parts = &.{
+                    .{ .air = &airs_[0], .digest = try airs_[0].digest(al), .pubs = &.{} },
+                    .{ .air = &airs_[1], .digest = try airs_[1].digest(al), .pubs = &.{} },
+                } };
+                verifyPlain(QM31, &ctx, &g, cfg_, &st) catch |e| switch (e) {
+                    error.EqFailedOnEval => return false,
+                    else => return e,
+                };
+                try ctx.finalizeGuessedVars();
+                return ctx.isCircuitValid();
+            }
+        };
+        try std.testing.expect(try Run.run(a, &airs, &values, config, pre_root));
+        // The same values claimed at uniform sizes fail.
+        try std.testing.expect(!try Run.run(a, &airs, &values, try configFor(a, &airs, L, .{ L, L }, cfg), pre_root));
+        // A tampered cumulative-sum sample of the smaller component fails.
+        const k: usize = if (logs[0] < logs[1]) 3 else 7;
+        values.interaction_at_oods[k][1] = values.interaction_at_oods[k][1].add(QM31.one());
+        try std.testing.expect(!try Run.run(a, &airs, &values, config, pre_root));
+    }
 }

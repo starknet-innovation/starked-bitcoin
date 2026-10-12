@@ -40,7 +40,9 @@ fn check(runtime: *metal.Runtime, a: std.mem.Allocator, name: []const u8, air: i
     reference.n_trees = if (n_batches != 0) 3 else 2;
     if (n_batches != 0) reference.logup = .{ .z = randQM31(r), .alpha = randQM31(r), .claimed_sum = randQM31(r) };
     var captured = try stwzeva.lowerComponent(a, air, pubs, .{ .log_size = log_size });
-    const wrapped = try stwzeva.Component.init(a, &reference, &captured, air.n_preprocessed);
+    const pre_logs = try a.alloc(u32, air.n_preprocessed);
+    @memset(pre_logs, log_size);
+    const wrapped = try stwzeva.Component.init(a, &reference, &captured, pre_logs, log_size);
     const program = captured.parts[0].program;
     const n: usize = captured.n_constraints;
     const eval_log = log_size + 1;

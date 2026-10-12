@@ -550,15 +550,16 @@ pub const Component = struct {
         prover_air_accumulation.DomainEvaluationAccumulator,
     );
 
-    /// `reference.logup` must be set (when the AIR has lookups) before proving.
-    pub fn init(allocator: std.mem.Allocator, reference: *const component_mod.Component, captured: *const composition.Component, n_preprocessed_total: usize) !Component {
-        const logs = try allocator.alloc(u32, n_preprocessed_total);
-        @memset(logs, reference.log_size);
+    /// `reference.logup` must be set (when the AIR has lookups) before proving. `preprocessed_logs`
+    /// are every preprocessed column's log size (copied); `max_log` is the system's largest
+    /// component log size (the lifting target).
+    pub fn init(allocator: std.mem.Allocator, reference: *const component_mod.Component, captured: *const composition.Component, preprocessed_logs: []const u32, max_log: u32) !Component {
+        const logs = try allocator.dupe(u32, preprocessed_logs);
         const lu = reference.logup orelse component_mod.Logup{ .z = QM31.zero(), .alpha = QM31.zero(), .claimed_sum = QM31.zero() };
         return .{
             .reference = reference,
             .captured = captured,
-            .prover = Captured.init(allocator, captured, logs, reference.log_size + 1, lu.z, lu.alpha, lu.claimed_sum),
+            .prover = Captured.init(allocator, captured, logs, max_log + 1, lu.z, lu.alpha, lu.claimed_sum),
             .preprocessed_logs = logs,
         };
     }
@@ -593,12 +594,12 @@ pub const Component = struct {
         accumulator: *core_air_accumulation.PointEvaluationAccumulator,
         max_log_degree_bound: u32,
     ) !void {
-        if (max_log_degree_bound != self.reference.log_size) return error.LiftingUnsupported;
+        if (max_log_degree_bound < self.reference.log_size) return error.InvalidLogSize;
         const params = try self.prover.runtime.extensionParameters();
         defer self.prover.runtime.allocator.free(params);
         const denominator_inv = try core_constraints.cosetVanishing(
             QM31,
-            canonic.CanonicCoset.new(self.reference.log_size).coset(),
+            canonic.CanonicCoset.new(max_log_degree_bound).coset(),
             point,
         ).inv();
         for (self.captured.parts) |part|
@@ -748,7 +749,9 @@ pub fn checkParityWith(a: std.mem.Allocator, air: ir.Air, log_size: u32, seed: u
     reference.n_trees = trees;
     if (n_batches != 0) reference.logup = .{ .z = randQM31(r), .alpha = randQM31(r), .claimed_sum = randQM31(r) };
     var captured = try lowerComponent(a, air, pubs, .{ .log_size = log_size });
-    var wrapped = try Component.init(a, &reference, &captured, air.n_preprocessed);
+    const pre_logs = try a.alloc(u32, air.n_preprocessed);
+    @memset(pre_logs, log_size);
+    var wrapped = try Component.init(a, &reference, &captured, pre_logs, log_size);
     if (native) |executor| {
         if (executor.resolve(cairo.proving.air.native_evaluator.identity(captured.parts[0].program)) == null) return error.NoNativeKernel;
         wrapped.prover.native_executor = executor;

@@ -30,7 +30,7 @@
 //!       Verifies the chain proof, the block file's headers against its MMR root, the block proof
 //!       under the pinned FRI configuration, and its height, context and block hash against those
 //!       headers. Needs no header file. Prints the proven statement.
-//!   chainproof prove-epoch <headers.bin> <dir> <to> <file.sbchain> [--test-strength]
+//!   chainproof prove-epoch <headers.bin> <dir> <to> <file.sbchain> [--test-strength] [--tiered]
 //!       M3b (D-040): proves blocks 0..to from <dir>/blocks/<h>.bin, <dir>/undo/<h>.undo and .ctx
 //!       (scripts/fetch_undo.py --ctx) under the epoch's challenge (derived from the blocks' hashes and
 //!       commitments), writing <dir>/proofs/<h>.sbblock and the coin set <dir>/set-<to>.bin.
@@ -38,7 +38,7 @@
 //!       Verifies every block proof against the chain, recomputes the challenge from their hashes and
 //!       commitments, and checks that their partial sums minus the coin set's fractions are zero, the
 //!       set strictly sorted: the coin set after block `to`. Prints Core's hash_serialized and total.
-//!   chainproof prove-epoch-tree <headers.bin> <dir> <to> <file.sbchain> [--from <a> <prev-set.bin>]
+//!   chainproof prove-epoch-tree <headers.bin> <dir> <to> <file.sbchain> [--from <a> <prev-set.bin>] [--test-strength]
 //!       BLOCK-REC: the epoch's block proofs (<dir>/proofs) as a forest of recursion trees, one per
 //!       aligned subtree; writes the block VK <dir>/blockvk.bin (setup) and <dir>/forest-<to>.bin.
 //!   chainproof verify-epoch-tree <vk> <file.sbchain> <dir> <to> [--from <a> <prev-set.bin>] [--min-work <hex> | --min-work 0]
@@ -136,8 +136,12 @@ pub fn main() !void {
             if (std.mem.eql(u8, args[i], "--test-strength")) {
                 weak = true;
                 i += 1;
+            } else if (std.mem.eql(u8, args[i], "--tiered")) {
+                from.tiered = true;
+                i += 1;
             } else if (std.mem.eql(u8, args[i], "--from") and i + 2 < args.len) {
-                from = .{ .height = try std.fmt.parseInt(u32, args[i + 1], 10), .prev_set = args[i + 2] };
+                from.height = try std.fmt.parseInt(u32, args[i + 1], 10);
+                from.prev_set = args[i + 2];
                 i += 3;
             } else usage();
         }
@@ -170,8 +174,12 @@ pub fn main() !void {
             if (std.mem.eql(u8, args[i], "--min-work") and i + 1 < args.len) {
                 min_work = try std.fmt.parseInt(u256, args[i + 1], 16);
                 i += 2;
+            } else if (std.mem.eql(u8, args[i], "--test-strength")) {
+                from.weak = true;
+                i += 1;
             } else if (std.mem.eql(u8, args[i], "--from") and i + 2 < args.len) {
-                from = .{ .height = try std.fmt.parseInt(u32, args[i + 1], 10), .prev_set = args[i + 2] };
+                from.height = try std.fmt.parseInt(u32, args[i + 1], 10);
+                from.prev_set = args[i + 2];
                 i += 3;
             } else usage();
         }
@@ -400,7 +408,7 @@ fn proveBlock(gpa: std.mem.Allocator, a: std.mem.Allocator, block_path: []const 
     const hashes = try a.alloc(HT.Words, n);
     for (hashes, all[0..n]) |*h, *hd| h.* = HT.blockHash(hd);
     const window = try PF.bindWindow(a, all, hashes, height);
-    const bytes = try PF.encode(a, &.{ .log_size = b.log_size, .pubs = b.pubs, .proof = proof, .provenance = prov, .chain_len = @intCast(n), .window = window });
+    const bytes = try PF.encode(a, &.{ .log_size = b.log_size, .profile = b.profile, .pubs = b.pubs, .proof = proof, .provenance = prov, .chain_len = @intCast(n), .window = window });
     try S.writeFileAtomic(out, bytes);
     const f = try PF.decode(a, try S.readFile(a, out));
     try PF.verifyStark(a, &airs, &f, fri);
@@ -414,7 +422,14 @@ fn pathOf(a: std.mem.Allocator, dir: []const u8, sub: []const u8, h: u32, ext: [
 }
 
 /// An epoch's start: genesis, or block `height` from the coin set after `height − 1` (`prev_set`).
-const EpochFrom = struct { height: u32 = 0, prev_set: ?[]const u8 = null };
+const EpochFrom = struct {
+    height: u32 = 0,
+    prev_set: ?[]const u8 = null,
+    /// prove-epoch `--tiered`: the tiered size profile where a block fits it (D-045).
+    tiered: bool = false,
+    /// prove-epoch-tree `--test-strength`: the block proofs were made at test strength.
+    weak: bool = false,
+};
 
 /// The initial set of an epoch from a previous set: decoded, strictly sorted, created before `from`.
 fn loadInit(a: std.mem.Allocator, from: EpochFrom) !struct { set: []const EP.Coin, hash: ?[32]u8, digest: ?[32]u8 } {
@@ -474,10 +489,10 @@ fn proveEpoch(gpa: std.mem.Allocator, a: std.mem.Allocator, headers_path: []cons
         const ba = arena.allocator();
         const hh: u32 = from.height + @as(u32, @intCast(i));
         const ctx = sb.block.checks.Ctx{ .height = hh, .prev_mtp = PF.prevMtp(all, hh), .anc = PF.ancestors(all, hh) };
-        const b = try BS.buildFull(ba, raws[i], undos[i], ctx, .{ .chal = ch, .ctx = ctxs[i] });
+        const b = try BS.buildFull(ba, raws[i], undos[i], ctx, .{ .chal = ch, .ctx = ctxs[i], .profile = if (from.tiered) .tiered else .uniform });
         const proof = try PF.prove(ba, &airs, &b, fri);
         const window = try PF.bindWindow(ba, all, tree, hh);
-        const bytes = try PF.encode(ba, &.{ .log_size = b.log_size, .pubs = b.pubs, .proof = proof, .provenance = "prove-epoch", .chain_len = @intCast(n), .window = window });
+        const bytes = try PF.encode(ba, &.{ .log_size = b.log_size, .profile = b.profile, .pubs = b.pubs, .proof = proof, .provenance = "prove-epoch", .chain_len = @intCast(n), .window = window });
         try S.writeFileAtomic(try pathOf(ba, dir, "proofs", hh, "sbblock"), bytes);
         if (hh % 50 == 0 or hh == to) std.debug.print("block {d}: proved ({d:.0}s so far)\n", .{ hh, secs(timer.read()) });
     }
@@ -557,13 +572,14 @@ fn proveEpochTree(gpa: std.mem.Allocator, a: std.mem.Allocator, headers_path: []
     const tables = try L.Tables.init(gpa);
     defer tables.deinit(gpa);
     var timer = try std.time.Timer.start();
-    var su = try BF.setup(gpa, a, tables, &airs, files, PF.productionFri());
+    const bfri = blockFri(from.weak);
+    var su = try BF.setup(gpa, a, tables, &airs, files, bfri);
     defer su.shape.deinit(gpa);
     try S.writeFileAtomic(try std.fmt.allocPrint(a, "{s}/blockvk.bin", .{dir}), try su.vk.encode(a));
     std.debug.print("setup: shape and block VK in {d:.1}s\n", .{secs(timer.lap())});
     const leaves = try a.alloc(HT.Words, n);
     for (leaves, all[0..n]) |*h, *hd| h.* = HT.blockHash(hd);
-    const forest = try BF.proveForest(gpa, a, tables, &su.shape, &airs, files, from.height, PF.productionFri(), leaves);
+    const forest = try BF.proveForest(gpa, a, tables, &su.shape, &airs, files, from.height, bfri, leaves);
     defer for (forest.roots) |*r| r.proved.proof.deinit();
     const out = try std.fmt.allocPrint(a, "{s}/forest-{d}.bin", .{ dir, to });
     try S.writeFileAtomic(out, try forest.encode(a));

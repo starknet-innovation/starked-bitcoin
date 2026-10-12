@@ -1,4 +1,4 @@
-Status: **proposed (2026-10-12), awaiting owner review.** Owner constraint: everything proven today stays proven.
+Status: **accepted (D-045); prover track implemented on `c1/prover`** (see Implementation status, at the end). Owner constraint: everything proven today stays proven.
 Paths written as `SB/` mean this repo; the row counts came from a throwaway planning-only program (not kept).
 
 # c1: per-component trace sizes — design note
@@ -131,3 +131,47 @@ Zig side:
 - Today's uniform VKs must still verify old forests.
 
 **Flag for review:** the `StarkSoundV` hypothesis for lifted proofs is a new trusted assumption (FRI/DEEP soundness under lifting). It should be checked against Stwo's lifting soundness argument before anyone relies on it.
+
+## Implementation status (prover track, `c1/prover`, 2026-10-12)
+
+### Proof system (`dd42720`)
+
+- Parts may have different sizes; the PCS lifts every tree to the largest.
+- Masks step by the largest domain's generator; the out-of-domain quotient divides by Z at the largest size; each LogUp shift uses its own component's size.
+- Works on CPU, under STWZEVA, in every storage mode, and on Metal.
+- Tests:
+  - "mixed sizes": the byte system at 8/10 and 10/8;
+  - golden SHA-256 for the six small samples' uniform proofs, computed on m3a5.
+
+### Block profiles (`7f8fb95`)
+
+- **Profiles:** `Profile {uniform, tiered}`, with `profileLogs(L, profile)` and per-component row needs. `sizesFor` falls back to uniform when a component doesn't fit its tier.
+- **Rule added:** tiered requires **L ≥ 12**, so anc at 12 never exceeds L and the largest size is always L (owner-accepted). Small blocks under tiered therefore use L = 12.
+- **Proof file v3** records the profile; v2 files are read as uniform.
+
+### In-circuit verifier and leaf (`31855ee`, and the leaf/VK commit)
+
+- The plain verifier handles per-part sizes:
+  - statement words;
+  - the LogUp shift;
+  - periodicity points (G of order 2^(L−l));
+  - Merkle leaf order, sorted by (log, column).
+- The Lean composition program and DEEP table refuse mixed sizes; their needed changes are in [component-sizes-prover-needs.md](component-sizes-prover-needs.md). The block leaf doesn't use them.
+- **Keys:**
+  - `Vk.leaf_tiered` is encoded only when set, so uniform keys keep their bytes;
+  - a forest's per-block key is `sizeKey(L, profile)` = L | profile·0x80, so uniform forests keep their bytes.
+- **Evidence:**
+  - a tiered block 0 and block 170: leaf proved and verified natively;
+  - a tiered epoch 0–3: forest proved (`prove-epoch --tiered`, `prove-epoch-tree --test-strength`) and verified with `verify-epoch-tree`, which reports Core's coin set;
+  - golden uniform block VK (blocks 0 and 170) equals m3a5's.
+
+### Memory, block 170 padded, compact + discard
+
+| log | uniform | tiered |
+|---|---|---|
+| 15 | 434 MB | 191 MB |
+| 16 | 809 MB | 321 MB |
+| 17 | 1,556 MB | 583 MB |
+| 18 | 3,049 MB | 1,080 MB |
+
+- **Real block, constraint check only:** block 400000 under tiered is L=22 with sizes {22,17,22,22,17,8,22,8,17,20,20,20,20,17,17,12}. Constraints hold and lookups balance, at about 6.7 GB max RSS.

@@ -1,7 +1,8 @@
 //! Block proof files (BLOCK-DATA): one block's STARK and its public inputs, and the checks a verifier
 //! makes against the header chain (docs/design/block-data.md § BLOCK-DATA).
 //!
-//! `.sbblock` layout (little-endian): magic `SBBLOCK\0`, version u32, log size u32, the 41 public inputs
+//! `.sbblock` layout (little-endian): magic `SBBLOCK\0`, version u32, log size u32, (version 3) the
+//! size profile u32 (D-045: 0 uniform, 1 tiered; version 2 files are uniform), the 41 public inputs
 //! (u32 each, canonical M31), the claimed LogUp sums (count u32, then 4 u32 per QM31), the STARK proof
 //! (length u32, then stwo's postcard encoding), the provenance (length u32, bytes), then the header
 //! window (D-039, self-contained files): the chain length `n` the paths are for (u32), the count (u32),
@@ -24,7 +25,7 @@ const bs = @import("system.zig");
 const checks = @import("checks.zig");
 
 pub const MAGIC = "SBBLOCK\x00";
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
 
 /// Production strength, as the chain proof's: 70 queries at blowup 2, 26 bits of proof of work.
 pub fn productionFri() FriConfigV2 {
@@ -43,6 +44,8 @@ pub const Bound = struct { height: u32, header: [80]u8, steps: []const HT.Step }
 
 pub const File = struct {
     log_size: u32,
+    /// The component sizes are `bs.profileLogs(log_size, profile)`.
+    profile: bs.Profile = .uniform,
     pubs: [bs.N_PUB]M31,
     proof: system.Proof,
     provenance: []const u8,
@@ -78,10 +81,8 @@ pub fn checkWindow(a: std.mem.Allocator, f: *const File, n: usize, t: HT.Words) 
     return hs;
 }
 
-pub fn partsOf(airs: *const [bs.N_COMP]ir.Air, log_size: u32, pubs: *const [bs.N_PUB]M31) [bs.N_COMP]system.Part {
-    var out: [bs.N_COMP]system.Part = undefined;
-    for (&out, 0..) |*p, i| p.* = .{ .air = &airs[i], .log_size = log_size, .pubs = pubs[0..bs.n_pubs[i]] };
-    return out;
+pub fn partsOf(airs: *const [bs.N_COMP]ir.Air, log_size: u32, profile: bs.Profile, pubs: *const [bs.N_PUB]M31) [bs.N_COMP]system.Part {
+    return bs.partsAt(airs, bs.profileLogs(log_size, profile), pubs);
 }
 
 /// Block proofs' prover options: compact commitment storage and the witness released as soon as it
@@ -107,11 +108,12 @@ pub fn proveOpts(a: std.mem.Allocator, airs: *const [bs.N_COMP]ir.Air, b: *const
 /// Verifies the STARK under the pinned `fri`: the proof's own configuration must match it.
 pub fn verifyStark(a: std.mem.Allocator, airs: *const [bs.N_COMP]ir.Air, f: *const File, fri: FriConfigV2) !void {
     if (f.log_size < 8 or f.log_size > 24) return error.LogSizeOutOfRange;
+    if (f.profile == .tiered and f.log_size < bs.TIERED_MIN_L) return error.LogSizeOutOfRange;
     const c = f.proof.stark.commitment_scheme_proof.config;
     if (c.pow_bits != fri.pow_bits or c.fri_config.log_blowup_factor != fri.log_blowup_factor or
         c.fri_config.n_queries != fri.n_queries or c.fri_config.log_last_layer_degree_bound != fri.log_last_layer_degree_bound)
         return error.ConfigMismatch;
-    const ps = partsOf(airs, f.log_size, &f.pubs);
+    const ps = partsOf(airs, f.log_size, f.profile, &f.pubs);
     try system.verifyExt(a, rec.Config.fromFriAndTraceSize(fri, f.log_size), &ps, &.{}, f.proof);
 }
 
@@ -121,6 +123,7 @@ pub fn encode(a: std.mem.Allocator, f: *const File) ![]u8 {
     try w.writeAll(MAGIC);
     try w.writeInt(u32, VERSION, .little);
     try w.writeInt(u32, f.log_size, .little);
+    try w.writeInt(u32, @intFromEnum(f.profile), .little);
     for (f.pubs) |p| try w.writeInt(u32, p.toU32(), .little);
     try w.writeInt(u32, @intCast(f.proof.claimed_sums.len), .little);
     for (f.proof.claimed_sums) |s| for (s.toM31Array()) |x| try w.writeInt(u32, x.toU32(), .little);
@@ -155,9 +158,11 @@ pub fn decode(a: std.mem.Allocator, bytes: []const u8) !File {
     var magic: [8]u8 = undefined;
     try r.readNoEof(&magic);
     if (!std.mem.eql(u8, &magic, MAGIC)) return error.BadMagic;
-    if (try r.readInt(u32, .little) != VERSION) return error.BadVersion;
+    const version = try r.readInt(u32, .little);
+    if (version != VERSION and version != 2) return error.BadVersion;
     var f: File = undefined;
     f.log_size = try r.readInt(u32, .little);
+    f.profile = if (version == 2) .uniform else std.meta.intToEnum(bs.Profile, try r.readInt(u32, .little)) catch return error.BadProfile;
     for (&f.pubs) |*p| p.* = try m31(try r.readInt(u32, .little));
     const n_sums = try r.readInt(u32, .little);
     if (n_sums > bs.N_COMP) return error.TooManySums;
@@ -263,7 +268,7 @@ test "block proof file: round trip, verify, and the header checks (block 170, te
     try std.testing.expectEqual(@as(u32, 170), s.ctx.height);
     const b = try bs.buildU(a, s.raw, s.undo, s.ctx);
     const proof = try prove(a, &airs, &b, testFri());
-    const bytes = try encode(a, &.{ .log_size = b.log_size, .pubs = b.pubs, .proof = proof, .provenance = "test" });
+    const bytes = try encode(a, &.{ .log_size = b.log_size, .profile = b.profile, .pubs = b.pubs, .proof = proof, .provenance = "test" });
     const f = try decode(a, bytes);
     try verifyStark(a, &airs, &f, testFri());
     try std.testing.expectError(error.ConfigMismatch, verifyStark(a, &airs, &f, productionFri()));
@@ -343,7 +348,7 @@ test "block proof file: a self-contained window binds block 170 to a 1024-header
     const b = try bs.buildU(a, s.raw, @embedFile("testdata:undo_170"), s.ctx);
     const proof = try prove(a, &airs, &b, testFri());
     const win = try bindWindow(a, headers, hashes, 170);
-    const bytes = try encode(a, &.{ .log_size = b.log_size, .pubs = b.pubs, .proof = proof, .provenance = "test", .chain_len = @intCast(headers.len), .window = win });
+    const bytes = try encode(a, &.{ .log_size = b.log_size, .profile = b.profile, .pubs = b.pubs, .proof = proof, .provenance = "test", .chain_len = @intCast(headers.len), .window = win });
     const f = try decode(a, bytes);
     try verifyStark(a, &airs, &f, testFri());
     const hs = try checkWindow(a, &f, headers.len, t);
