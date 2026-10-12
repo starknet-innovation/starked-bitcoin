@@ -108,6 +108,13 @@ The CPU path bakes public inputs into the program as literals. Our lowering dedu
 
 Estimate: 1–2 weeks with an H100 or H200, mostly steps 3–4. Later, device LogUp removes pass 1 (another 1–2 weeks).
 
+## CuMetal (local Apple-GPU run): blocked
+
+`~/Workshop/cuda-metal` is cloned at the pinned commit e88dd103 and not built. Three things block a local run:
+- **Missing tools.** The build needs CMake and Apple's Metal toolchain (`xcrun metal`, `xcrun metallib`; cuda-metal README, lines 30–44). This Mac has only the Command Line Tools. Both are system-wide installs (Homebrew CMake, Xcode), so they wait for the owner.
+- **No qualified path for our kernels.** stwo-zig qualifies CuMetal only for the Native wide-Fibonacci closure (`backends/cuda/cumetal/frontend_support.json`). There, Cairo evaluation is "unavailable" and circuit is not listed. Our schedule calls Cairo/circuit-family kernels (`stwo_cairo_eval_materialize_params_on`, addressed LDE and quotient buckets, `stwo_circuit_degree_verdict_on`), so even with the tools it would need stwo-zig CuMetal work.
+- **Our Metal backend already covers local device checks.** Step 2 runs whole proofs on the Apple GPU, byte-identical to CPU. A CuMetal run would add a check of the CUDA sources only.
+
 ## Risks and open items
 
 - **Fold step 1 is unqualified on CUDA**, and so is the packed-leaf FRI layout at fold 1 (`resident_decommit.zig` uses 4 rows per leaf). Only a device run settles it.

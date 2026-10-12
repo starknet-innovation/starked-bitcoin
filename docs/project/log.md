@@ -21,6 +21,21 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-10-12 (session 12, night) — GPU step 3: resident CUDA prover ported (host-checked, no device run)
+Who: Claude (agent, Opus 5.5), worktree branch `cuda/resident`
+Roadmap: GPU step 3 (CUDA): M0 design, M1 build and linked schedule, M2 host checks done; M3 (CuMetal) blocked on tooling
+Done:
+- docs/design/gpu-cuda.md: stage-by-stage port of stwo-zig's resident circuit pipeline (2f54632).
+- src/gpu/cuda: AOT catalog (one kernel per AIR, `gpu/cuda_aot/`), plans, transcript, memory, terminal, pipeline, two-pass prover; forks of stwo-zig's topology, OODS/quotient/layout and composition controller for empty spans, wide masks and 18 α powers (3ee987a, 85df3ec).
+Evidence:
+- `zig build cuda-test -Dcuda=true -Doptimize=ReleaseFast`: 8/8. AOT kernels (host C++) = interpreter; plans and transcript (host and device-sink model) reproduce CPU proofs of block 0, uniform and tiered; arena of 2^20/22/23 blocks plans and binds.
+- `zig build cuda-check -Dcuda=true`: the whole device schedule links against C stubs.
+- `zig build test -Dtest-filter=stwzeva` and `-Dtest-filter=byte-identical` (ReleaseFast): pass.
+Problems / lessons:
+- stwo-zig's circuit stages hard-code two mask offsets per column, six α powers and non-empty spans; ours need 23, 18 and an empty span (block_anc). Forked minimally; upstream changes listed in gpu-cuda.md.
+- Host writes are ingress-only, so host LogUp needs a roots pass first.
+Next: an NVIDIA host (owner decision): build the AOT archive with `gpu/cuda_aot/`, link `prover.zig`, prove block 0 and compare bytes.
+
 ## 2026-10-12 (session 11, evening) — SHA at 2^24: Lean `SizeOk` replaces the L ≤ 23 cap
 Who: Claude (agent, Opus 5.5)
 Roadmap: D-045 follow-up (tiered blocks up to L = 24 covered by the Lean theorems)
