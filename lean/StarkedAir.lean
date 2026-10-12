@@ -152,3 +152,4 @@ import StarkedAir.Circuit.BlockTree
 import StarkedAir.Circuit.BlockRec
 import StarkedAir.Circuit.HeaderRec
 import StarkedAir.Circuit.BlockCtx
+import StarkedAir.Compat
