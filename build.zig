@@ -229,6 +229,34 @@ pub fn build(b: *std.Build) void {
         spike.linkFramework("Metal");
         spike.linkSystemLibrary("objc");
         b.installArtifact(spike);
+
+        // GPU plan step 1: our lowered STWZEVA programs as Metal kernels (src/gpu/metal_parity.zig).
+        const cairo_frontend = stwo_circuit_cpu.import_table.get("stwo_cairo_frontend").?;
+        const metal_codegen = b.createModule(.{
+            .root_source_file = b.path("third_party/stwo-zig/src/integrations/cairo_metal/eval_codegen.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "stwo_cairo_frontend", .module = cairo_frontend }},
+        });
+        const metal_parity = b.addTest(.{
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/gpu/metal_parity.zig"),
+                .target = target,
+                .optimize = optimize,
+                .imports = &.{
+                    .{ .name = "starked_bitcoin", .module = lib },
+                    .{ .name = "stwo_core", .module = stwo_core },
+                    .{ .name = "stwo_prover_engine", .module = stwo_prover_engine },
+                    .{ .name = "stwo_metal_backend", .module = b.dependency("stwo_metal_backend", dep_opts).module("stwo_metal_backend") },
+                    .{ .name = "cairo_metal_eval_codegen", .module = metal_codegen },
+                },
+            }),
+        });
+        metal_parity.linkLibC();
+        metal_parity.linkFramework("Foundation");
+        metal_parity.linkFramework("Metal");
+        metal_parity.linkSystemLibrary("objc");
+        b.step("metal-parity", "STWZEVA programs of our AIRs as Metal kernels vs the interpreter").dependOn(&b.addRunArtifact(metal_parity).step);
     }
     // `chainproof`: the chain proof as a file (PROOF-STORE). Provenance: the commits it was built from.
     {
