@@ -419,3 +419,18 @@ Decision:
 Why: "everything we wrote is proven, only StarkWare-derived software is trusted" (verifier-formalization.md).
 The gadgets serve every stwo-zig user, so their proofs belong where the code lives.
 Review: soundness claims built on this boundary need review before external use.
+
+### D-045 — Per-component trace sizes: two profiles, Lean generalized, old theorems kept verbatim
+Date: 2026-10-12 · By: owner, with Claude (agent) · Status: **accepted** ("Go ahead")
+Decision: the block system's components may have different trace sizes
+([component-sizes.md](../design/component-sizes.md)).
+- **Profiles:** two, chosen per block.
+  - *uniform* is today's system; its proofs stay byte-identical.
+  - *tiered*: {sha, msg, bytes, walk} at L; {fpwalk, b2s, undo, b2msg} at L−2; the rest at L−5
+    (minimum 8); ctx and tables at 8; anc at 12. A block that doesn't fit the tiers uses *uniform*.
+- **Keys:** block VKs are keyed by (L, profile).
+- **Lean:** generalized to arbitrary size vectors.
+- **Acceptance (owner constraint, "anything proven today should be proven after the change"):**
+  `Compat.lean` restates every current theorem's statement verbatim as a corollary at the constant size
+  vector, and the build must pass it. The mixed-size soundness assumption (`StarkSoundV`) is a new named
+  hypothesis; it is checked against Stwo's lifting soundness argument before anything relies on it.
