@@ -65,75 +65,72 @@ def TLB (i : ℕ) : ℕ := 55 + i
 def CLO : ℕ := 71
 def CHI : ℕ := 72
 def CB (i : ℕ) : ℕ := 73 + i
-/-- The undo record's amount limbs. -/
-def VAMT (i : ℕ) : ℕ := 75 + i
-def HC : ℕ := 79
-def CBC : ℕ := 80
-def HB (i : ℕ) : ℕ := 81 + i
-def CTX : ℕ := 84
-def ORD : ℕ := 85
-def OB (i : ℕ) : ℕ := 86 + i
-def MB (i : ℕ) : ℕ := 89 + i
-def FH : ℕ := 92
-def SLEN : ℕ := 96
-def SB : ℕ := 97
-def ZS : ℕ := 98
-def SINV : ℕ := 99
-def U6A : ℕ := 100
-def INVB : ℕ := 101
-def BIG : ℕ := 102
-def GB (i : ℕ) : ℕ := 103 + i
-def UNSP : ℕ := 106
-def U6Z : ℕ := 107
-def MM : ℕ := 108
-def FC : ℕ := 109
-def ACC : ℕ := 113
+def HC : ℕ := 75
+def CBC : ℕ := 76
+def HB (i : ℕ) : ℕ := 77 + i
+def CTX : ℕ := 80
+def ORD : ℕ := 81
+def OB (i : ℕ) : ℕ := 82 + i
+def MB (i : ℕ) : ℕ := 85 + i
+def FH : ℕ := 88
+def SLEN : ℕ := 92
+def SB : ℕ := 93
+def ZS : ℕ := 94
+def SINV : ℕ := 95
+def U6A : ℕ := 96
+def INVB : ℕ := 97
+def BIG : ℕ := 98
+def GB (i : ℕ) : ℕ := 99 + i
+def UNSP : ℕ := 102
+def U6Z : ℕ := 103
+def MM : ℕ := 104
+def FC : ℕ := 105
+def ACC : ℕ := 109
 /-- The fingerprint segment's id: the start for an output, the record index for an input. -/
-def SIDC : ℕ := 117
+def SIDC : ℕ := 113
 -- amounts (24-bit low and high limbs)
-def VL : ℕ := 118
-def VH : ℕ := 119
-def INL : ℕ := 120
-def INH : ℕ := 121
-def OUL : ℕ := 122
-def OUH : ℕ := 123
-def CY : ℕ := 124
-def FEL : ℕ := 125
-def FEH : ℕ := 126
-def FCY : ℕ := 127
-def CBL : ℕ := 128
-def CBH : ℕ := 129
+def VL : ℕ := 114
+def VH : ℕ := 115
+def INL : ℕ := 116
+def INH : ℕ := 117
+def OUL : ℕ := 118
+def OUH : ℕ := 119
+def CY : ℕ := 120
+def FEL : ℕ := 121
+def FEH : ℕ := 122
+def FCY : ℕ := 123
+def CBL : ℕ := 124
+def CBH : ℕ := 125
 /-- The transaction's last output row. -/
-def TEND : ℕ := 130
+def TEND : ℕ := 126
 /-- Comparator 1 (`A − B ≥ 0`): low bytes, high bytes, borrow. -/
-def Q1 (i : ℕ) : ℕ := 131 + i
-def H1 (i : ℕ) : ℕ := 134 + i
-def BR1 : ℕ := 138
-def NB (i : ℕ) : ℕ := 139 + i
-def FB (i : ℕ) : ℕ := 142 + i
+def Q1 (i : ℕ) : ℕ := 127 + i
+def H1 (i : ℕ) : ℕ := 130 + i
+def BR1 : ℕ := 134
+def NB (i : ℕ) : ℕ := 135 + i
+def FB (i : ℕ) : ℕ := 138 + i
 /-- Comparator 2 (the block's coinbase): low bytes, high bytes, the low limb's carry `KP − KN`. -/
-def Q2 (i : ℕ) : ℕ := 145 + i
-def H2 (i : ℕ) : ℕ := 148 + i
-def KP : ℕ := 152
-def KN : ℕ := 153
+def Q2 (i : ℕ) : ℕ := 141 + i
+def H2 (i : ℕ) : ℕ := 144 + i
+def KP : ℕ := 148
+def KN : ℕ := 149
 /-- The range checks' multiplicities, as boolean columns: `KI + KO`, `KI + tf`, the last on row. -/
-def MNB : ℕ := 154
-def MC1 : ℕ := 155
-def MLO : ℕ := 156
+def MNB : ℕ := 150
+def MC1 : ℕ := 151
+def MLO : ℕ := 152
 /-- `7 − H1 3` and `7 − H2 3`, range-checked: the comparators' high limbs stay below `2^27 < P`, so their
 equations cannot wrap modulo `P` (as in the fields' value check). -/
-def H1C : ℕ := 157
-def H2C : ℕ := 158
+def H1C : ℕ := 153
+def H2C : ℕ := 154
 /-- Comparator 3 (the block's accumulated fees within `MAX_MONEY`, Core's
 `bad-txns-accumulated-fee-outofrange`): low bytes, high bytes, borrow, the high limb's top-byte bound. -/
-def Q3 (i : ℕ) : ℕ := 159 + i
-def H3 (i : ℕ) : ℕ := 162 + i
-def BR3 : ℕ := 166
-def H3C : ℕ := 167
-def N_MAIN : ℕ := 168
+def Q3 (i : ℕ) : ℕ := 155 + i
+def H3 (i : ℕ) : ℕ := 158 + i
+def BR3 : ℕ := 162
+def H3C : ℕ := 163
+def N_MAIN : ℕ := 164
 
--- public inputs (after the block's 41 and the fingerprint's `γ` at 41–44); `VAMT` is unused (amounts are
--- `VL`, `VH`)
+-- public inputs (after the block's 41 and the fingerprint's `γ` at 41–44)
 def PUB_Z : ℕ := 45
 def W : ℕ := 26
 def PUB_ALPHA (j : ℕ) : ℕ := 49 + 4 * j

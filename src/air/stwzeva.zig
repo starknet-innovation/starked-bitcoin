@@ -499,7 +499,8 @@ fn reencode(allocator: std.mem.Allocator, program: eval.Program) ![]u8 {
 ///   or a native kernel from the C code generator when `native_executor` is set).
 /// - Point (verifier side): `evalAtPoint`, the STWZEVA program interpreted over QM31 against our
 ///   mask. (stwo-zig's own `RuntimeComponent` does the same but requires every column of a span
-///   to be read at least once; `block_coin` has four unread main columns.)
+///   to be read at least once; every block AIR now is: `block_coin`'s four unread columns were
+///   removed.)
 pub const Component = struct {
     reference: *const component_mod.Component,
     captured: *const composition.Component,
@@ -798,6 +799,9 @@ test "stwzeva: lowered AIRs match the interpreter's composition (domain and OODS
             return e;
         };
         std.debug.print("stwzeva parity {s}: {d} constraints, {d} instructions, {d} rows, runtime={}\n", .{ item.name, rep.constraints, rep.instructions, rep.rows, rep.runtime_checked });
+        // Every block AIR reads every main column, so stwo-zig's own runtime (and the resident GPU
+        // geometry built from the programs) checks it too.
+        if (std.mem.startsWith(u8, item.name, "block_") or i >= 4) try testing.expect(rep.runtime_checked);
     }
 }
 
