@@ -8,8 +8,9 @@
 //! reads its own columns from `pre_offset`, `main_offset` and `inter_offset`.
 //!
 //! v0 restrictions, checked in `init`:
-//! - Single trace size: every column has 2^log_size rows and nothing is
-//!   lifted, so `max_log_degree_bound == log_size`.
+//! - Every column of a component has 2^log_size rows. In a system of mixed sizes (D-045) stwo-zig
+//!   lifts the smaller components to the largest, `max_log_degree_bound`: masks step by the
+//!   max domain's generator and the quotient divides by Z_max(p) (= Z_n(π^k p)).
 //! - Preprocessed columns are only read at offset 0. stwo-zig samples
 //!   preprocessed columns at the OODS point alone.
 //! - Constraint degree ≤ 3, so the composition fits in a 2^(log_size+1) domain.
@@ -199,7 +200,7 @@ pub const Component = struct {
         point: CirclePointQM31,
         max_log_degree_bound: u32,
     ) !core_air_components.MaskPoints {
-        if (max_log_degree_bound != self.log_size) return error.LiftingUnsupported;
+        if (max_log_degree_bound < self.log_size) return error.InvalidLogSize;
         const step = canonic.CanonicCoset.new(max_log_degree_bound).coset_value.step;
         const pre = try allocator.alloc([]CirclePointQM31, self.air.n_preprocessed);
         for (pre) |*col| col.* = try allocator.dupe(CirclePointQM31, &.{point});
@@ -254,7 +255,7 @@ pub const Component = struct {
         accumulator: *core_air_accumulation.PointEvaluationAccumulator,
         max_log_degree_bound: u32,
     ) !void {
-        if (max_log_degree_bound != self.log_size) return error.LiftingUnsupported;
+        if (max_log_degree_bound < self.log_size) return error.InvalidLogSize;
         const n_pre = self.air.n_preprocessed;
         const n_main = self.air.n_main;
         const n_inter = 4 * nBatches(self.air);
@@ -276,9 +277,10 @@ pub const Component = struct {
         };
         interp.evalConstraints(QM31, self.air, self.pubs, scratch, &ctx, out);
 
+        // Lifted: Z_n(π^k p) = Z_N(p) for the max size N.
         const denominator_inv = try core_constraints.cosetVanishing(
             QM31,
-            canonic.CanonicCoset.new(self.log_size).coset(),
+            canonic.CanonicCoset.new(max_log_degree_bound).coset(),
             point,
         ).inv();
         for (out) |c| accumulator.accumulate(c.mul(denominator_inv));

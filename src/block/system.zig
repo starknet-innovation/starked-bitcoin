@@ -421,3 +421,32 @@ test "block system: block 0's STWZEVA-composed proof is byte-identical and verif
     const n = try system.checkStwzevaProof(rec.Engine(@import("stwo_cpu_backend").CpuBackend), a, cfg, &ps, &mains, &.{});
     std.debug.print("block 0 (log {d}, {d} components): STWZEVA proof byte-identical ({d} bytes, both proofs + verify {d} ms)\n", .{ b.log_size, N_COMP, n, timer.read() / std.time.ns_per_ms });
 }
+
+/// SHA-256 of the uniform-profile proof bytes (`system.proofBytes`) of each `checks.samples_small`
+/// block, proved by `proof_file.prove` at test strength (10 PoW bits, 3 queries, blowup 1), as
+/// m3a5 (2196ba3) produced them: per-component sizes (D-045) must not change a uniform proof.
+pub const golden_small = [_][]const u8{
+    "b03d4b8a1fc12a64fb44c0b2933dd941fedd220110d2d999185962e2794e24a0", // 0
+    "0b9bb2796927f868ff476b77ea57778b8b89d5ce6b2e129abfa57f93ff4bc7d7", // 170
+    "062de839b0e31810ca2971795336217e8a33486810375a0a07d56a48ce553c13", // 91722
+    "ee1f06d290adf5789f8df283b2c9bf6bdf852d750b4338adcd7980f1fc6e1cab", // 91812
+    "d3bff4057f8dfefb911ed42e76b9612b06d4eaa0ce15ba9b421a8250272d1a14", // 91842
+    "f7273a6d416ed97cabbfc32457f13974fc8862ad1e7f262d1040846c122fa8e3", // 91880
+};
+
+test "block system: uniform proofs of the small samples match the m3a5 golden hashes" {
+    const pf = @import("proof_file.zig");
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const airs = try parseAirs(a);
+    for (checks.samples_small, 0..) |s, i| {
+        const b = try buildU(a, s.raw, s.undo, s.ctx);
+        const proof_bytes = try system.proofBytes(a, try pf.prove(a, &airs, &b, pf.testFri()));
+        var digest: [32]u8 = undefined;
+        std.crypto.hash.sha2.Sha256.hash(proof_bytes, &digest, .{});
+        const hex = std.fmt.bytesToHex(digest, .lower);
+        std.debug.print("golden height {d}: {s}\n", .{ s.ctx.height, hex });
+        try std.testing.expectEqualStrings(golden_small[i], &hex);
+    }
+}
