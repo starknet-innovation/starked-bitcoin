@@ -592,3 +592,31 @@ test "block system: sizesFor picks tiered only when every component fits, else u
     const logs = profileLogs(16, .tiered);
     try std.testing.expectEqualSlices(u32, &.{ 16, 11, 16, 16, 11, 8, 16, 8, 11, 14, 14, 14, 14, 11, 11, 12 }, &logs);
 }
+
+test "tiered real block (STARKED_TIERED_LARGE=height): constraints hold and lookups balance" {
+    const want = std.process.getEnvVarOwned(std.heap.page_allocator, "STARKED_TIERED_LARGE") catch return error.SkipZigTest;
+    const height = try std.fmt.parseInt(u32, want, 10);
+    var air_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer air_arena.deinit();
+    const airs = try parseAirs(air_arena.allocator());
+    for (checks.samples_large) |s| {
+        if (s.ctx.height != height) continue;
+        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer arena.deinit();
+        const a = arena.allocator();
+        var timer = try std.time.Timer.start();
+        const b = try buildFull(a, s.raw, s.undo, s.ctx, .{ .profile = .tiered });
+        std.debug.print("height {d}: profile {s}, L={d}, sizes {any}, witness {d} ms\n", .{ s.ctx.height, @tagName(b.profile), b.log_size, b.logs, timer.lap() / std.time.ns_per_ms });
+        if (try firstViolation(a, &airs, &b)) |v| {
+            std.debug.print("height {d}: {s} row {d} violates constraint {d}\n", .{ s.ctx.height, names[v.comp], v.row, v.constraint });
+            return error.TestUnexpectedResult;
+        }
+        if (try unbalanced(a, &airs, &b)) |rel| {
+            std.debug.print("height {d}: relation {d} unbalanced\n", .{ s.ctx.height, rel });
+            return error.TestUnexpectedResult;
+        }
+        std.debug.print("height {d}: constraints hold, lookups balance ({d} ms)\n", .{ s.ctx.height, timer.read() / std.time.ns_per_ms });
+        return;
+    }
+    return error.NoSuchSample;
+}
