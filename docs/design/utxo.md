@@ -292,7 +292,11 @@ Layers (Lean):
    committed data (D-041; `ClaimAt` and `tl_bytes` pin each claim to the undo bytes, the record
    positions follow from `rows_sound`), which the bad-set reading needs.
 
-**Plan: events are functions of the committed data (D-041 in Lean; scoped 2026-10-12).** The probability
+**Events as functions of the committed data (D-041 in Lean; 2026-10-12).** Steps 1–3 are **done**
+(`Block/CoinRecs.lean`: `rec_starts`, `claim_is_record`, `claim_is_record_at` — every input claim is
+`recAt Ub (J j)`, the stream's record at the coin row's input count; `coin_in_tuple` now exports the
+script length as the record's `TL`). Remaining: `J j` as `insBefore` of the block (step 2's count) and
+the final statement (step 4). The plan as written: The probability
 reading of `epoch_systems_core` needs the events fixed by what the seed hashes. The pieces:
 1. *Record boundaries are the stream's parse:* `rows_sound` (`S₀ = 1`, `Sᵣ₊₁ = Sᵣ + 9 + TLᵣ`) and
    `tl_bytes` (`TLᵣ` from the header bytes) give `Sᵣ = recStart Ub r` for a spec `recStart` reading the
