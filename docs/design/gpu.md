@@ -313,3 +313,44 @@ Projected peak (modelled, dense data):
   - with `compact` + `discard_mains` today: 2^21 (23 GB) fits a 32 GB machine and 2^22 (46 GB) a 64 GB one;
   - 24 GB needs (a1) for 2^21;
   - 2^23 needs (c1) per-component sizes (~25–35 GB), or (c2) splitting.
+
+### (a1) and (a2) results (2026-10-12, `dca6dc6`)
+
+**What changed:**
+- **Recompute the lookup columns instead of keeping the witness.** Under compact storage, the 513 lookup-read columns are recomputed from the committed coefficients, one component at a time. The whole witness is therefore discarded right after its storage-order copy.
+- **No stored fractions.** LogUp fractions are computed per row inside stwo-zig's interaction builder.
+- **New block default (a2).** Block proofs (`proof_file.prove`) now use `.storage = .compact, .discard_mains = true`; `proof_file.proveOpts` keeps the old modes.
+- **Optional row tiles.** `Options.tile_columns` (off by default) makes our interpreter expand coefficient-only columns in stwo-zig row tiles.
+- **Bytes unchanged.** Every mode is byte-identical (tests), as are the per-mode proof hashes below.
+
+Measured lifetime peaks, block 170 padded, compact + discard, CPU, production profile:
+
+| log | pre-STARK before → after | composition (= total) | total, tiled (64 columns) | time before → after |
+|---|---|---|---|---|
+| 15 | 397 → 350 MB | 434 MB | | 4.2 → 4.8 s |
+| 16 | 726 → 634 MB | 809 MB | 729 MB (19.4 s) | 7.3 → 8.8 s |
+| 17 | 1,381 → 1,206 MB | 1,556 MB | 1,411 MB (32.5 s) | 12.0 → 14.9 s |
+| 18 | 2,691 → 2,352 MB | 3,050 MB | | 24.7 → 29.0 s |
+
+**What this means:**
+- **Target met before the STARK, not overall.** Everything up to the STARK dropped 13 %: k ≈ 2.56 k → 2.24 k, which is the ~2.1 k target for those phases. The coefficients alone are 1,879 c.
+- **New overall peak: composition.** The whole proof's peak is now the composition step. Our interpreter extends one whole component's columns to the evaluation domain (b2s: 406 columns × 2 c = 812 c), so the total stays at k ≈ 2.9 k.
+- **Tiling helps, but slowly.**
+  - Row tiles remove that peak, but stwo-zig's tile expansion makes the proof 2.2× slower, so it stays opt-in.
+  - The next peak is then stwo-zig's compact quotient phase (openings), at k ≈ 2.69 k.
+- **Times include a 2²⁶ PoW grind,** which varies by seconds between runs.
+
+**Updated projections**, dense, block default (compact + discard):
+
+| L | Now (k ≈ 2.9 k) | Tiled (k ≈ 2.69 k) | Floor of our phases (k ≈ 2.24 k) |
+|---|---|---|---|
+| 21 | 24 GB | 23 GB | 20 GB |
+| 22 | 49 GB | 45 GB | 38 GB |
+| 23 | 97 GB | 90 GB | 75 GB |
+| 24 | 195 GB | 181 GB | 150 GB |
+
+**Next, to reach the floor:**
+1. A cheap composition split (two or four tiles at near-zero cost), either our own coset split or faster stwo-zig tiles.
+2. Bounding the expansion in stwo-zig's compact quotient phase (b).
+
+After both, 2^23 needs about 75 GB, with no change to the AIRs or the protocol.

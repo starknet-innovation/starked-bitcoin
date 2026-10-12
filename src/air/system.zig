@@ -20,6 +20,9 @@ const stwzeva = @import("stwzeva.zig");
 const prover_component = @import("stwo_prover_engine").air.component_prover;
 const logup_columns = @import("stwo_prover_engine").air.logup_columns;
 const prover_pcs = @import("stwo_prover_engine").pcs;
+const prover_circle = @import("stwo_prover_engine").poly.circle;
+const prover_twiddles = @import("stwo_prover_engine").poly.twiddles;
+const canonic = core.poly.circle.canonic;
 const lookup_transcript = core.channel.lookup_transcript;
 const utils = core.utils;
 const M31 = core.fields.m31.M31;
@@ -110,52 +113,120 @@ pub fn preprocessedRoot(allocator: std.mem.Allocator, cfg: rec.Config, parts: []
     return roots.items[0];
 }
 
-/// Per-row paired fractions of one component, in natural row order.
+/// One component's LogUp fractions, computed per storage row as stwo-zig's interaction builder
+/// asks for them (on its worker threads): nothing per row is stored, so the only memory is the
+/// natural-order columns the lookups read.
 const Fractions = struct {
-    /// `rows × batches`, natural row order.
-    values: []logup_columns.Fraction,
-    batches: usize,
-    /// Storage (bit-reversed circle-domain) index → natural row.
-    natural: []const usize,
-
+    air: ir.Air,
+    reads: LookupReads,
+    pubs: []const M31,
+    log_size: u32,
+    /// Natural-order preprocessed columns (owned).
     pre: [][]M31,
+    /// Natural-order main columns; only `reads.main` ones are read.
+    main: []const []const M31,
+    el: lookup_transcript.LookupElements,
+    batches: usize,
+    /// Storage (bit-reversed circle-domain) index → natural row (owned).
+    natural: []usize,
 
     fn deinit(self: *Fractions, allocator: std.mem.Allocator) void {
-        allocator.free(self.values);
         allocator.free(self.natural);
         for (self.pre) |c| allocator.free(c);
         allocator.free(self.pre);
+        self.reads.deinit(allocator);
+    }
+
+    threadlocal var scratch_tl: []M31 = &.{};
+
+    fn scratch(n: usize) ![]M31 {
+        if (scratch_tl.len < n) {
+            std.heap.smp_allocator.free(scratch_tl);
+            scratch_tl = &.{};
+            scratch_tl = try std.heap.smp_allocator.alloc(M31, n);
+        }
+        return scratch_tl[0..n];
     }
 
     fn fill(self: *const Fractions, storage_row: usize, out: []logup_columns.Fraction) anyerror!void {
-        @memcpy(out, self.values[self.natural[storage_row] * self.batches ..][0..self.batches]);
+        const air = self.air;
+        const values = try scratch(air.exprs.len);
+        const trace = interp.RowTrace{ .log_size = self.log_size, .pubs = self.pubs, .preprocessed = @ptrCast(self.pre), .main = self.main, .row = self.natural[storage_row] };
+        // Only what the lookups read.
+        for (air.exprs, self.reads.exprs, 0..) |e, l, id| {
+            if (!l) continue;
+            values[id] = switch (e) {
+                .col => |c| trace.read(c.tree, c.index, c.offset),
+                .constant => |v| M31.fromCanonical(v),
+                .add => |x| values[x[0]].add(values[x[1]]),
+                .sub => |x| values[x[0]].sub(values[x[1]]),
+                .mul => |x| values[x[0]].mul(values[x[1]]),
+                .neg => |x| values[x].neg(),
+                .@"pub" => |i| self.pubs[i],
+            };
+        }
+        var vals: [component_mod.MAX_LOOKUP_VALS]QM31 = undefined;
+        for (out, 0..) |*o, b| {
+            var fr: [2]logup_columns.Fraction = undefined;
+            const k: usize = if (2 * b + 1 < air.lookups.len) 2 else 1;
+            for (0..k) |t| {
+                const l = air.lookups[2 * b + t];
+                for (l.vals, 0..) |v, i| vals[i] = QM31.fromBase(values[v]);
+                fr[t] = .{ .numerator = QM31.fromBase(values[l.mult]), .denominator = component_mod.denominator(l.rel, vals[0..l.vals.len], self.el.z, self.el.alpha) };
+            }
+            o.* = if (k == 2) .{
+                .numerator = fr[0].numerator.mul(fr[1].denominator).add(fr[1].numerator.mul(fr[0].denominator)),
+                .denominator = fr[0].denominator.mul(fr[1].denominator),
+            } else fr[0];
+        }
     }
 };
 
 fn fractions(allocator: std.mem.Allocator, part: Part, main: []const []const M31, el: lookup_transcript.LookupElements) !Fractions {
     const air = part.air.*;
     const n = @as(usize, 1) << @intCast(part.log_size);
-    const B = component_mod.nBatches(air);
-    const pre = try air.genPreprocessed(allocator, part.log_size);
-    const values = try allocator.alloc(logup_columns.Fraction, n * B);
-    // Rows are independent: split them across threads (scratch allocated up front).
-    const n_threads = @min(std.Thread.getCpuCount() catch 1, 64, @max(n / 1024, 1));
-    const chunk = (n + n_threads - 1) / n_threads;
-    const scratch = try allocator.alloc(M31, n_threads * (air.exprs.len + air.constraints.len));
-    defer allocator.free(scratch);
     const reads = try LookupReads.init(allocator, air);
-    defer reads.deinit(allocator);
-    const job = FractionJob{ .live = reads.exprs, .air = air, .pubs = part.pubs, .log_size = part.log_size, .pre = @ptrCast(pre), .main = main, .el = el, .values = values, .batches = B };
-    var threads: [64]std.Thread = undefined;
-    const per = air.exprs.len + air.constraints.len;
-    for (0..n_threads) |t| {
-        const mine = scratch[t * per ..][0..per];
-        threads[t] = try std.Thread.spawn(.{}, FractionJob.run, .{ &job, mine[0..air.exprs.len], mine[air.exprs.len..], t * chunk, @min((t + 1) * chunk, n) });
-    }
-    for (threads[0..n_threads]) |th| th.join();
+    errdefer reads.deinit(allocator);
+    const pre = try air.genPreprocessed(allocator, part.log_size);
     const natural = try allocator.alloc(usize, n);
     for (0..n) |i| natural[utils.bitReverseIndex(utils.cosetIndexToCircleDomainIndex(i, part.log_size), part.log_size)] = i;
-    return .{ .values = values, .batches = B, .natural = natural, .pre = pre };
+    return .{ .air = air, .reads = reads, .pubs = part.pubs, .log_size = part.log_size, .pre = pre, .main = main, .el = el, .batches = component_mod.nBatches(air), .natural = natural };
+}
+
+/// The natural-order main columns of `part` that its lookups read, recomputed from the committed
+/// (compact) coefficients: the trace domain's evaluations, in storage order, permuted back. The
+/// other entries are empty. Free with `freeColumns`.
+fn lookupColumnsFromCoefficients(
+    a: std.mem.Allocator,
+    coefficients: []const prover_component.Poly,
+    part: Part,
+    reads: []const bool,
+) ![][]M31 {
+    const log_size = part.log_size;
+    const n = @as(usize, 1) << @intCast(log_size);
+    const out = try a.alloc([]M31, reads.len);
+    for (out) |*c| c.* = &.{};
+    const domain = canonic.CanonicCoset.new(log_size).circleDomain();
+    var twiddles = try prover_twiddles.precomputeM31(a, domain.half_coset);
+    defer prover_twiddles.deinitM31(a, &twiddles);
+    const view = prover_twiddles.TwiddleTree([]const M31).init(twiddles.root_coset, twiddles.twiddles, twiddles.itwiddles);
+    const buffer = try a.alloc(M31, n);
+    defer a.free(buffer);
+    for (reads, coefficients, out) |keep, poly, *col| {
+        if (!keep) continue;
+        const coeffs = (poly.coefficients orelse return error.NoCoefficients).coefficients();
+        if (coeffs.len != n) return error.NoCoefficients;
+        @memcpy(buffer, coeffs);
+        try prover_circle.poly.evaluateBuffersWithTwiddles(&.{buffer}, domain, view);
+        col.* = try a.alloc(M31, n);
+        for (col.*, 0..) |*v, i| v.* = buffer[utils.bitReverseIndex(utils.cosetIndexToCircleDomainIndex(i, log_size), log_size)];
+    }
+    return out;
+}
+
+fn freeColumns(a: std.mem.Allocator, cols: [][]M31) void {
+    for (cols) |c| a.free(c);
+    a.free(cols);
 }
 
 /// Expressions the lookups read (their multiplicities and values, transitively), and the main
@@ -201,54 +272,6 @@ pub const LookupReads = struct {
     }
 };
 
-const FractionJob = struct {
-    live: []const bool,
-    air: ir.Air,
-    pubs: []const M31,
-    log_size: u32,
-    pre: []const []const M31,
-    main: []const []const M31,
-    el: lookup_transcript.LookupElements,
-    values: []logup_columns.Fraction,
-    batches: usize,
-
-    fn run(self: *const FractionJob, scratch: []M31, out: []M31, start: usize, end: usize) void {
-        const air = self.air;
-        var trace = interp.RowTrace{ .log_size = self.log_size, .pubs = self.pubs, .preprocessed = self.pre, .main = self.main };
-        var vals: [component_mod.MAX_LOOKUP_VALS]QM31 = undefined;
-        const B = self.batches;
-        _ = out;
-        for (start..end) |r| {
-            trace.row = r;
-            // Only what the lookups read.
-            for (air.exprs, self.live, 0..) |e, l, id| {
-                if (!l) continue;
-                scratch[id] = switch (e) {
-                    .col => |c| trace.read(c.tree, c.index, c.offset),
-                    .constant => |v| M31.fromCanonical(v),
-                    .add => |x| scratch[x[0]].add(scratch[x[1]]),
-                    .sub => |x| scratch[x[0]].sub(scratch[x[1]]),
-                    .mul => |x| scratch[x[0]].mul(scratch[x[1]]),
-                    .neg => |x| scratch[x].neg(),
-                    .@"pub" => |i| self.pubs[i],
-                };
-            }
-            for (0..B) |b| {
-                var fr: [2]logup_columns.Fraction = undefined;
-                const k: usize = if (2 * b + 1 < air.lookups.len) 2 else 1;
-                for (0..k) |t| {
-                    const l = air.lookups[2 * b + t];
-                    for (l.vals, 0..) |v, i| vals[i] = QM31.fromBase(scratch[v]);
-                    fr[t] = .{ .numerator = QM31.fromBase(scratch[l.mult]), .denominator = component_mod.denominator(l.rel, vals[0..l.vals.len], self.el.z, self.el.alpha) };
-                }
-                self.values[r * B + b] = if (k == 2) .{
-                    .numerator = fr[0].numerator.mul(fr[1].denominator).add(fr[1].numerator.mul(fr[0].denominator)),
-                    .denominator = fr[0].denominator.mul(fr[1].denominator),
-                } else fr[0];
-            }
-        }
-    }
-};
 
 /// How the prover evaluates the composition polynomial (the proof bytes are the same).
 pub const Composition = enum {
@@ -287,6 +310,10 @@ pub const Options = struct {
     /// How the commitment scheme keeps committed trees (stwo-zig execution choices; proof bytes
     /// are the same).
     storage: Storage = .default,
+    /// With compact storage and the interpreter, expand about this many columns at a time in the
+    /// composition (stwo-zig's row tiles) instead of a whole component; 0 = whole components.
+    /// Off by default: at 2^17 it cuts the peak 9 % but makes the proof 2.2× slower.
+    tile_columns: usize = 0,
 };
 
 pub const Storage = enum {
@@ -321,6 +348,9 @@ const Phases = struct {
 /// `prove` with options.
 pub fn proveOpts(comptime E: type, caller_allocator: std.mem.Allocator, cfg: rec.Config, parts: []const Part, mains: []const []const []const M31, opts: Options) !Proof {
     const composition = opts.composition;
+    // Compact storage keeps the committed coefficients: the lookups' columns are recomputed from
+    // them, so the witness is not read after its storage-order copy.
+    const recompute = opts.storage == .compact;
     if (opts.device != null and composition == .interpreter) return error.DeviceNeedsStwzeva;
     var phase = Phases.start();
     // Everything the prover builds is freed as soon as it is dead, so all of it comes from a
@@ -358,11 +388,12 @@ pub fn proveOpts(comptime E: type, caller_allocator: std.mem.Allocator, cfg: rec
         const st = try base.toStorage(a, p.log_size, m);
         defer a.free(st);
         try main_cols.appendSlice(a, st);
-        // Witness columns no lookup reads are dead once in storage order.
+        // Witness columns no lookup reads are dead once in storage order; with coefficients
+        // retained (`recompute`), all of them are.
         if (opts.discard_mains) {
             const reads = try LookupReads.init(a, p.air.*);
             defer reads.deinit(a);
-            for (m, reads.main) |col, keep| if (!keep) discardPages(col);
+            for (m, reads.main) |col, keep| if (!keep or recompute) discardPages(col);
         }
     }
     phase.mark("main storage order");
@@ -380,12 +411,21 @@ pub fn proveOpts(comptime E: type, caller_allocator: std.mem.Allocator, cfg: rec
     if (hasLookups(parts)) {
         const el = try lookup_transcript.drawLookupElements(a, &channel);
         var inter_cols = std.ArrayList(prover_pcs.ColumnEvaluation).empty;
+        var committed: ?prover_component.Trace = if (recompute) try scheme.trace(a) else null;
+        defer if (committed) |*t| t.polys.deinitDeep(a);
         for (parts, mains, comps) |p, m, *c| {
             // A component's witness is dead once its fractions are built.
-            defer if (opts.discard_mains) for (m) |col| discardPages(col);
+            defer if (opts.discard_mains and !recompute) for (m) |col| discardPages(col);
             if (p.air.lookups.len == 0) continue;
+            var recomputed: ?[][]M31 = null;
+            defer if (recomputed) |cols| freeColumns(a, cols);
+            if (committed) |t| {
+                const reads = try LookupReads.init(a, p.air.*);
+                defer reads.deinit(a);
+                recomputed = try lookupColumnsFromCoefficients(a, t.polys.items[1][c.main_offset..][0..p.air.n_main], p, reads.main);
+            }
             // One component's fractions at a time.
-            var fr = try fractions(a, p, m, el);
+            var fr = try fractions(a, p, if (recomputed) |cols| @ptrCast(cols) else m, el);
             defer fr.deinit(a);
             phase.mark("  fractions");
             const built = try logup_columns.build(a, p.log_size, fr.batches, &fr, struct {
@@ -405,6 +445,29 @@ pub fn proveOpts(comptime E: type, caller_allocator: std.mem.Allocator, cfg: rec
     } else if (opts.discard_mains) for (mains) |m| for (m) |col| discardPages(col);
     const provers = try a.alloc(prover_component.ComponentProver, comps.len);
     defer a.free(provers);
+    // Compact storage: the interpreter expands columns a row tile at a time (about 64 columns'
+    // worth of evaluations at once), not a whole component.
+    var tile_lowered: []stwzeva.composition.Component = &.{};
+    var tile_sources: []stwzeva.TileSource = &.{};
+    defer {
+        for (tile_lowered) |*l| stwzeva.composition.deinitComponent(a, l);
+        a.free(tile_lowered);
+        a.free(tile_sources);
+    }
+    if (opts.storage == .compact and composition == .interpreter and opts.tile_columns != 0) {
+        tile_lowered = try a.alloc(stwzeva.composition.Component, comps.len);
+        tile_sources = try a.alloc(stwzeva.TileSource, comps.len);
+        for (parts, comps, tile_lowered, tile_sources) |p, *c, *l, *t| {
+            l.* = try stwzeva.lowerComponent(a, p.air.*, p.pubs, .{
+                .log_size = p.log_size,
+                .pre_offset = @intCast(c.pre_offset),
+                .main_offset = @intCast(c.main_offset),
+                .inter_offset = @intCast(c.inter_offset),
+            });
+            t.* = .{ .allocator = a, .captured = l, .budget = opts.tile_columns * (@as(usize, 4) << @intCast(p.log_size + 1)) };
+            c.tiling = t.tiling();
+        }
+    }
     var lowered: []stwzeva.composition.Component = &.{};
     var wrapped: []stwzeva.Component = &.{};
     defer {
@@ -500,6 +563,18 @@ pub fn checkStwzevaProof(comptime E: type, a: std.mem.Allocator, cfg: rec.Config
     const got = try proofBytes(a, proof);
     try std.testing.expectEqualSlices(u8, want, got);
     try std.testing.expectEqualSlices(u8, want, try proofBytes(a, try proveWith(E, a, cfg, parts, mains, .stwzeva_native)));
+    // The block prover's default (compact, witness discarded), on a copy of the witness.
+    {
+        const copies = try a.alloc([]const []const M31, mains.len);
+        for (copies, mains) |*c, m| {
+            const cols = try a.alloc([]const M31, m.len);
+            for (cols, m) |*d, col| d.* = try a.dupe(M31, col);
+            c.* = cols;
+        }
+        try std.testing.expectEqualSlices(u8, want, try proofBytes(a, try proveOpts(E, a, cfg, parts, copies, .{ .storage = .compact, .discard_mains = true })));
+        // Row-tiled composition.
+        try std.testing.expectEqualSlices(u8, want, try proofBytes(a, try proveOpts(E, a, cfg, parts, mains, .{ .storage = .compact, .tile_columns = 4 })));
+    }
     // Storage policies change only memory, never bytes.
     for ([_]Storage{ .evaluations_only, .compact }) |storage| {
         for ([_]Composition{ .interpreter, .stwzeva }) |c|

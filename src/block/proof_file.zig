@@ -84,13 +84,24 @@ pub fn partsOf(airs: *const [bs.N_COMP]ir.Air, log_size: u32, pubs: *const [bs.N
     return out;
 }
 
+/// Block proofs' prover options: compact commitment storage and the witness released as soon as it
+/// is dead (owner decision, 2026-10-12: peak memory first; same proof bytes, somewhat slower).
+pub const default_options = system.Options{ .storage = .compact, .discard_mains = true };
+
+/// Proves block `b`. **Consumes `b.mains`**: with `default_options` their contents are undefined
+/// afterwards (everything else in `b` stays valid).
 pub fn prove(a: std.mem.Allocator, airs: *const [bs.N_COMP]ir.Air, b: *const bs.Built, fri: FriConfigV2) !system.Proof {
+    return proveOpts(a, airs, b, fri, default_options);
+}
+
+/// `prove` with other prover options (e.g. `.{}`: stwo-zig's default storage, witness kept).
+pub fn proveOpts(a: std.mem.Allocator, airs: *const [bs.N_COMP]ir.Air, b: *const bs.Built, fri: FriConfigV2, opts: system.Options) !system.Proof {
     const ps = bs.parts(airs, b);
     const cfg = rec.Config.fromFriAndTraceSize(fri, b.log_size);
     const E = rec.Engine(@import("stwo_cpu_backend").CpuBackend);
     var mains: [bs.N_COMP][]const []const M31 = undefined;
     for (&mains, b.mains) |*m, x| m.* = @ptrCast(x);
-    return system.prove(E, a, cfg, &ps, &mains);
+    return system.proveOpts(E, a, cfg, &ps, &mains, opts);
 }
 
 /// Verifies the STARK under the pinned `fri`: the proof's own configuration must match it.
