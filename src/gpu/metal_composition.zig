@@ -124,7 +124,13 @@ pub const MetalComposition = struct {
         return .{ .context = self, .accepts = accepts, .evaluate = evaluate, .close = close };
     }
 
-    fn close(_: *anyopaque) void {}
+    /// The arena (as large as the largest component's columns) is dead once the stage is done.
+    fn close(context: *anyopaque) void {
+        const self: *MetalComposition = @ptrCast(@alignCast(context));
+        if (self.arena) |*arena| arena.deinit();
+        self.arena = null;
+        self.arena_words = 0;
+    }
 
     fn ensureArena(self: *MetalComposition, runtime: *metal.Runtime, words: usize) ![*]u32 {
         if (self.arena == null or self.arena_words < words) {
