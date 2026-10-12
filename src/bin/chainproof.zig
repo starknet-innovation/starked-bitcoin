@@ -400,7 +400,7 @@ fn proveBlock(gpa: std.mem.Allocator, a: std.mem.Allocator, block_path: []const 
     const hashes = try a.alloc(HT.Words, n);
     for (hashes, all[0..n]) |*h, *hd| h.* = HT.blockHash(hd);
     const window = try PF.bindWindow(a, all, hashes, height);
-    const bytes = try PF.encode(a, &.{ .log_size = b.log_size, .pubs = b.pubs, .proof = proof, .provenance = prov, .chain_len = @intCast(n), .window = window });
+    const bytes = try PF.encode(a, &.{ .log_size = b.log_size, .profile = b.profile, .pubs = b.pubs, .proof = proof, .provenance = prov, .chain_len = @intCast(n), .window = window });
     try S.writeFileAtomic(out, bytes);
     const f = try PF.decode(a, try S.readFile(a, out));
     try PF.verifyStark(a, &airs, &f, fri);
@@ -477,7 +477,7 @@ fn proveEpoch(gpa: std.mem.Allocator, a: std.mem.Allocator, headers_path: []cons
         const b = try BS.buildFull(ba, raws[i], undos[i], ctx, .{ .chal = ch, .ctx = ctxs[i] });
         const proof = try PF.prove(ba, &airs, &b, fri);
         const window = try PF.bindWindow(ba, all, tree, hh);
-        const bytes = try PF.encode(ba, &.{ .log_size = b.log_size, .pubs = b.pubs, .proof = proof, .provenance = "prove-epoch", .chain_len = @intCast(n), .window = window });
+        const bytes = try PF.encode(ba, &.{ .log_size = b.log_size, .profile = b.profile, .pubs = b.pubs, .proof = proof, .provenance = "prove-epoch", .chain_len = @intCast(n), .window = window });
         try S.writeFileAtomic(try pathOf(ba, dir, "proofs", hh, "sbblock"), bytes);
         if (hh % 50 == 0 or hh == to) std.debug.print("block {d}: proved ({d:.0}s so far)\n", .{ hh, secs(timer.read()) });
     }

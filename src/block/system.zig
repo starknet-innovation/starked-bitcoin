@@ -31,8 +31,58 @@ pub const N_PUB = coin.N_PUB;
 pub const PUB_HASH = 25;
 pub const n_pubs = [N_COMP]usize{ 1, 7, 0, 0, 2, 0, 0, 41, 2, 9, 9, 25, 45, 9, N_PUB, 41 };
 
+/// Per-component trace sizes (D-045, docs/design/component-sizes.md). A block's sizes are a
+/// function of (L, profile) only, so a verifying key is keyed by the pair.
+pub const Profile = enum(u8) {
+    /// Every component at 2^L (the system before D-045; its proofs are unchanged).
+    uniform = 0,
+    /// {sha, msg, bytes, walk} at L; {fpwalk, b2s, undo, b2msg} at L−2; ctx and tables at 8;
+    /// anc at 12; the rest at max(L−5, 8). Requires L ≥ 12, so the largest size is L.
+    tiered = 1,
+};
+
+/// Component indices (the order of `jsons`).
+pub const C = struct {
+    pub const bytes = 0;
+    pub const fields = 1;
+    pub const msg = 2;
+    pub const sha = 3;
+    pub const merkle = 4;
+    pub const tables = 5;
+    pub const walk = 6;
+    pub const ctx = 7;
+    pub const wmerkle = 8;
+    pub const undo = 9;
+    pub const b2msg = 10;
+    pub const b2s = 11;
+    pub const fpwalk = 12;
+    pub const urec = 13;
+    pub const coin = 14;
+    pub const anc = 15;
+};
+
+pub const TIERED_MIN_L: u32 = 12;
+
+/// The component log sizes of (L, profile). The largest is L.
+pub fn profileLogs(L: u32, profile: Profile) [N_COMP]u32 {
+    var out: [N_COMP]u32 = @splat(L);
+    if (profile == .uniform) return out;
+    std.debug.assert(L >= TIERED_MIN_L);
+    out = @splat(@max(L - 5, 8));
+    for ([_]usize{ C.sha, C.msg, C.bytes, C.walk }) |i| out[i] = L;
+    for ([_]usize{ C.fpwalk, C.b2s, C.undo, C.b2msg }) |i| out[i] = L - 2;
+    out[C.ctx] = 8;
+    out[C.tables] = 8;
+    out[C.anc] = 12;
+    return out;
+}
+
 pub const Built = struct {
+    /// L: the largest component log size (every component's under `uniform`).
     log_size: u32,
+    profile: Profile = .uniform,
+    /// Each component's log size, `profileLogs(log_size, profile)`.
+    logs: [N_COMP]u32,
     pubs: [N_PUB]M31,
     /// The block commitment `blake2s(undo)` (D-038 as amended).
     commitment_words: [8]u32,
@@ -54,6 +104,8 @@ pub const Opts = struct {
     ctx: ?[]const u32 = null,
     /// Pad the trace to at least 2^min_log rows (benchmarks: a small block at a real block's size).
     min_log: u32 = 0,
+    /// The size profile to try; `tiered` falls back to `uniform` when the block doesn't fit it.
+    profile: Profile = .uniform,
 };
 
 pub fn parseAirs(a: std.mem.Allocator) ![N_COMP]ir.Air {
@@ -165,14 +217,32 @@ pub fn buildFull(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctx
     for (rows) |r| if (r.kind == fields.K_IN or r.kind == fields.K_OUT) {
         tok_rows += 1;
     };
-    const need = @max(@max(msg.rowsNeeded(msgs), raw.len + 1, rows.len + 1, (comps_est + 1) * shaw.PERIOD), @max(nodes.len + 2, wnodes.len + 2, scripts_len + 1, 256), @max(undo.len + 1, commit.rowsNeeded(undo.len)), @max(fp_rows + 1, tok_rows + 1, recs.len + 1), if (ctx.csv()) ancw.MIN_ROWS_CSV else 256);
-    const log_size: u32 = @max(std.math.log2_int_ceil(usize, need), opts.min_log);
+    // Rows each component needs (their maximum is the uniform size).
+    var needs: [N_COMP]usize = @splat(256);
+    needs[C.bytes] = raw.len + 1;
+    needs[C.fields] = rows.len + 1;
+    needs[C.msg] = msg.rowsNeeded(msgs);
+    needs[C.sha] = (comps_est + 1) * shaw.PERIOD;
+    needs[C.merkle] = nodes.len + 2;
+    needs[C.wmerkle] = wnodes.len + 2;
+    needs[C.walk] = scripts_len + 1;
+    needs[C.undo] = undo.len + 1;
+    needs[C.b2msg] = commit.rowsNeeded(undo.len);
+    needs[C.b2s] = commit.rowsNeeded(undo.len);
+    needs[C.fpwalk] = fp_rows + 1;
+    needs[C.urec] = recs.len + 1;
+    needs[C.coin] = tok_rows + 1;
+    needs[C.anc] = if (ctx.csv()) ancw.MIN_ROWS_CSV else 256;
+    for (&needs) |*n| n.* = @max(n.*, 256);
+    const sized = sizesFor(needs, opts.profile, opts.min_log);
+    const log_size = sized.L;
+    const logs = profileLogs(log_size, sized.profile);
 
-    const fm = try fields.generate(a, log_size, raw, rows);
+    const fm = try fields.generate(a, logs[C.fields], raw, rows);
     const chk = try checks.fill(a, fm, raw, rows, ctx);
-    const wk = try walk.generate(a, log_size, raw, chk.scripts);
+    const wk = try walk.generate(a, logs[C.walk], raw, chk.scripts);
     const cid = wmerkle.commitId(wnodes);
-    const cx = try ctxw.generate(a, log_size, .{ .raw = raw, .ctx = ctx, .tx0 = txs[0], .chk = chk, .sigops = wk.sigops, .cid = cid });
+    const cx = try ctxw.generate(a, logs[C.ctx], .{ .raw = raw, .ctx = ctx, .tx0 = txs[0], .chk = chk, .sigops = wk.sigops, .cid = cid });
     if (cx.hc) {
         const cdig = try wmerkle.extendPlan(a, &pl, wnodes, cx.nonce);
         const c = chk.commit.?;
@@ -183,13 +253,13 @@ pub fn buildFull(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctx
     var coin_raw_reads = std.ArrayList(u32).empty;
     var coin_ranges = std.ArrayList(u32).empty;
     const lost = lostHeight(ctx.height);
-    const co = try coin.coinColumns(a, log_size, .{ .raw = raw, .undo = undo, .rows = rows, .height = ctx.height, .txids = txids, .recs = recs, .lost = lost, .chal = opts.chal }, &coin_raw_reads, &coin_ranges);
+    const co = try coin.coinColumns(a, logs[C.coin], .{ .raw = raw, .undo = undo, .rows = rows, .height = ctx.height, .txids = txids, .recs = recs, .lost = lost, .chal = opts.chal }, &coin_raw_reads, &coin_ranges);
     var fp_raw_reads = std.ArrayList(u32).empty;
     var fp_undo_reads = std.ArrayList(u32).empty;
     const allsegs = try std.mem.concat(a, coin.Seg, &.{ osegs, usegs });
-    const fpm = try coin.fpwalkColumns(a, log_size, raw, undo, allsegs, opts.chal.gamma, &fp_raw_reads, &fp_undo_reads);
+    const fpm = try coin.fpwalkColumns(a, logs[C.fpwalk], raw, undo, allsegs, opts.chal.gamma, &fp_raw_reads, &fp_undo_reads);
     var urec_reads = std.ArrayList(u32).empty;
-    const urm = try coin.urecColumns(a, log_size, undo, recs, &urec_reads);
+    const urm = try coin.urecColumns(a, logs[C.urec], undo, recs, &urec_reads);
 
     // Multiplicities. The context reads the header's digest once (the public block hash); the coin
     // component reads each output's txid digest.
@@ -205,12 +275,12 @@ pub fn buildFull(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctx
         break;
     };
     var reads = std.ArrayList(u32).empty;
-    const mm = try msg.generate(a, log_size, raw, msgs, &reads);
+    const mm = try msg.generate(a, logs[C.msg], raw, msgs, &reads);
     msg.setUses(mm);
     merkle.addHeaderUses(mm);
-    const sm = try bsha.generate(a, log_size, pl);
-    const km = try merkle.generate(a, log_size, ntx, nodes, root);
-    const wm = try wmerkle.generate(a, log_size, ntx, wnodes, cx.hc);
+    const sm = try bsha.generate(a, logs[C.sha], pl);
+    const km = try merkle.generate(a, logs[C.merkle], ntx, nodes, root);
+    const wm = try wmerkle.generate(a, logs[C.wmerkle], ntx, wnodes, cx.hc);
     try reads.appendSlice(a, try fields.reads(a, rows));
     try reads.appendSlice(a, chk.reads);
     try reads.appendSlice(a, wk.reads);
@@ -220,18 +290,18 @@ pub fn buildFull(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctx
     var undo_reads = std.ArrayList(u32).empty;
     try undo_reads.appendSlice(a, fp_undo_reads.items);
     try undo_reads.appendSlice(a, urec_reads.items);
-    const b2m = try commit.msgColumns(a, log_size, undo, &undo_reads);
-    const um = try commit.undoColumns(a, log_size, undo, undo_reads.items);
-    const b2sm = try commit.b2sColumns(a, log_size, undo);
-    const bm = try bytes.generate(a, log_size, raw, reads.items);
+    const b2m = try commit.msgColumns(a, logs[C.b2msg], undo, &undo_reads);
+    const um = try commit.undoColumns(a, logs[C.undo], undo, undo_reads.items);
+    const b2sm = try commit.b2sColumns(a, logs[C.b2s], undo);
+    const bm = try bytes.generate(a, logs[C.bytes], raw, reads.items);
     var ranges = std.ArrayList(u32).empty;
     try ranges.appendSlice(a, chk.ranges);
     try ranges.appendSlice(a, wk.ranges);
     try ranges.appendSlice(a, cx.ranges);
     try ranges.appendSlice(a, coin_ranges.items);
-    const tm = try checks.tables(a, log_size, ranges.items, wk.opcodes);
+    const tm = try checks.tables(a, logs[C.tables], ranges.items, wk.opcodes);
 
-    const am = try ancw.generate(a, log_size, raw[0..80], if (ctx.csv()) ctx.anc.? else null, ctx.prev_mtp, ctx.force);
+    const am = try ancw.generate(a, logs[C.anc], raw[0..80], if (ctx.csv()) ctx.anc.? else null, ctx.prev_mtp, ctx.force);
     const cw = try commit.commitment(a, undo);
     var pubs: [N_PUB]M31 = undefined;
     @memcpy(pubs[0..8], &checks.pubs(raw, ntx, ctx));
@@ -241,6 +311,8 @@ pub fn buildFull(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctx
     @memcpy(pubs[41..N_PUB], &coin.pubs(opts.chal, co.sum, co.nin, lost, ctx.height));
     return .{
         .log_size = log_size,
+        .profile = sized.profile,
+        .logs = logs,
         .pubs = pubs,
         .commitment_words = cw,
         .mains = .{ bm, fm, mm, sm, km, tm, wk.cols, cx.cols, wm, um, b2m, b2sm, fpm, urm, co.cols, am },
@@ -278,16 +350,36 @@ pub fn hashLimbsOf(h: [32]u8) [16]M31 {
 }
 
 pub fn parts(airs: *const [N_COMP]ir.Air, b: *const Built) [N_COMP]system.Part {
+    return partsAt(airs, b.logs, &b.pubs);
+}
+
+/// The system's parts at the given component sizes.
+pub fn partsAt(airs: *const [N_COMP]ir.Air, logs: [N_COMP]u32, pubs: *const [N_PUB]M31) [N_COMP]system.Part {
     var out: [N_COMP]system.Part = undefined;
-    for (&out, 0..) |*p, i| p.* = .{ .air = &airs[i], .log_size = b.log_size, .pubs = b.pubs[0..n_pubs[i]] };
+    for (&out, 0..) |*p, i| p.* = .{ .air = &airs[i], .log_size = logs[i], .pubs = pubs[0..n_pubs[i]] };
     return out;
+}
+
+/// (L, profile) for components needing `needs` rows: `tiered` when asked for and every component
+/// fits its tier, else `uniform`; L at least `min_log`.
+pub fn sizesFor(needs: [N_COMP]usize, profile: Profile, min_log: u32) struct { L: u32, profile: Profile } {
+    var max: usize = 0;
+    for (needs) |n| max = @max(max, n);
+    const uniform_L = @max(std.math.log2_int_ceil(usize, max), min_log);
+    if (profile == .uniform) return .{ .L = uniform_L, .profile = .uniform };
+    var top: usize = 0;
+    for ([_]usize{ C.sha, C.msg, C.bytes, C.walk }) |i| top = @max(top, needs[i]);
+    const L = @max(std.math.log2_int_ceil(usize, top), min_log, TIERED_MIN_L);
+    const logs = profileLogs(L, .tiered);
+    for (needs, logs) |n, l| if (n > @as(usize, 1) << @intCast(l)) return .{ .L = uniform_L, .profile = .uniform };
+    return .{ .L = L, .profile = .tiered };
 }
 
 /// The first violated constraint of any component, for diagnostics.
 pub fn firstViolation(a: std.mem.Allocator, airs: *const [N_COMP]ir.Air, b: *const Built) !?struct { comp: usize, row: usize, constraint: usize } {
     const interp = @import("../air/interp.zig");
     for (0..N_COMP) |i| {
-        const tr = interp.RowTrace{ .log_size = b.log_size, .pubs = b.pubs[0..n_pubs[i]], .preprocessed = @ptrCast(try airs[i].genPreprocessed(a, b.log_size)), .main = @ptrCast(b.mains[i]) };
+        const tr = interp.RowTrace{ .log_size = b.logs[i], .pubs = b.pubs[0..n_pubs[i]], .preprocessed = @ptrCast(try airs[i].genPreprocessed(a, b.logs[i])), .main = @ptrCast(b.mains[i]) };
         if (try interp.firstViolation(a, airs[i], tr)) |v| return .{ .comp = i, .row = v.row, .constraint = v.constraint };
     }
     return null;
@@ -304,10 +396,10 @@ pub fn unbalanced(a: std.mem.Allocator, airs: *const [N_COMP]ir.Air, b: *const B
     for (0..N_COMP) |i| {
         const air = airs[i];
         if (air.lookups.len == 0) continue;
-        var t = interp.RowTrace{ .log_size = b.log_size, .pubs = b.pubs[0..n_pubs[i]], .preprocessed = @ptrCast(try air.genPreprocessed(a, b.log_size)), .main = @ptrCast(b.mains[i]) };
+        var t = interp.RowTrace{ .log_size = b.logs[i], .pubs = b.pubs[0..n_pubs[i]], .preprocessed = @ptrCast(try air.genPreprocessed(a, b.logs[i])), .main = @ptrCast(b.mains[i]) };
         const scratch = try a.alloc(M31, air.exprs.len);
         const out = try a.alloc(M31, air.constraints.len);
-        const n = @as(usize, 1) << @intCast(b.log_size);
+        const n = @as(usize, 1) << @intCast(b.logs[i]);
         for (0..n) |row| {
             t.row = row;
             interp.evalConstraints(M31, air, t.pubs, scratch, &t, out);
@@ -449,4 +541,54 @@ test "block system: uniform proofs of the small samples match the m3a5 golden ha
         std.debug.print("golden height {d}: {s}\n", .{ s.ctx.height, hex });
         try std.testing.expectEqualStrings(golden_small[i], &hex);
     }
+}
+
+test "block system: tiered profile (D-045): the small samples satisfy every component, prove and verify through a proof file" {
+    const pf = @import("proof_file.zig");
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const airs = try parseAirs(a);
+    for (checks.samples_small) |s| {
+        const b = try buildFull(a, s.raw, s.undo, s.ctx, .{ .profile = .tiered });
+        try std.testing.expectEqual(Profile.tiered, b.profile);
+        if (try firstViolation(a, &airs, &b)) |v| {
+            std.debug.print("height {d}: {s} row {d} violates constraint {d}\n", .{ s.ctx.height, names[v.comp], v.row, v.constraint });
+            return error.TestUnexpectedResult;
+        }
+        if (try unbalanced(a, &airs, &b)) |rel| {
+            std.debug.print("height {d}: relation {d} unbalanced\n", .{ s.ctx.height, rel });
+            return error.TestUnexpectedResult;
+        }
+        const proof = try pf.prove(a, &airs, &b, pf.testFri());
+        const bytes_ = try pf.encode(a, &.{ .log_size = b.log_size, .profile = b.profile, .pubs = b.pubs, .proof = proof, .provenance = "test" });
+        const f = try pf.decode(a, bytes_);
+        try pf.verifyStark(a, &airs, &f, pf.testFri());
+        // The same proof read as uniform fails.
+        var g = try pf.decode(a, bytes_);
+        g.profile = .uniform;
+        try std.testing.expect(std.meta.isError(pf.verifyStark(a, &airs, &g, pf.testFri())));
+        std.debug.print("height {d}: tiered L={d} sizes {any}: proved, verified ({d} bytes)\n", .{ s.ctx.height, b.log_size, b.logs, bytes_.len });
+    }
+}
+
+test "block system: sizesFor picks tiered only when every component fits, else uniform" {
+    var needs: [N_COMP]usize = @splat(256);
+    needs[C.sha] = 1 << 20;
+    needs[C.b2s] = 1 << 18;
+    needs[C.coin] = 1 << 15;
+    const t = sizesFor(needs, .tiered, 0);
+    try std.testing.expectEqual(Profile.tiered, t.profile);
+    try std.testing.expectEqual(@as(u32, 20), t.L);
+    needs[C.coin] = (1 << 15) + 1; // above L − 5
+    const u = sizesFor(needs, .tiered, 0);
+    try std.testing.expectEqual(Profile.uniform, u.profile);
+    try std.testing.expectEqual(@as(u32, 20), u.L);
+    try std.testing.expectEqual(Profile.uniform, sizesFor(needs, .uniform, 0).profile);
+    // Small blocks: tiered L is at least 12 (anc's size), and min_log pads it.
+    needs = @splat(256);
+    try std.testing.expectEqual(@as(u32, 12), sizesFor(needs, .tiered, 0).L);
+    try std.testing.expectEqual(@as(u32, 16), sizesFor(needs, .tiered, 16).L);
+    const logs = profileLogs(16, .tiered);
+    try std.testing.expectEqualSlices(u32, &.{ 16, 11, 16, 16, 11, 8, 16, 8, 11, 14, 14, 14, 14, 11, 11, 12 }, &logs);
 }

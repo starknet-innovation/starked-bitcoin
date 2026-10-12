@@ -265,7 +265,7 @@ test "block sha: a wrong message word or a message hashed short is rejected" {
         const h1 = spec.compress(pl.compressions[1].input, pl.compressions[1].block);
         @memcpy(pl.compressions[2].block[0..8], &h1);
         var b = b0;
-        b.mains[3] = try generate(a, b.log_size, pl);
+        b.mains[3] = try generate(a, b.logs[3], pl);
         try std.testing.expect(try bsys.unbalanced(a, &airs, &b) != null);
     }
     // The header hashed one block short: its second hash follows block 0, and block 1's words are
@@ -290,7 +290,7 @@ test "block sha: a wrong message word or a message hashed short is rejected" {
         for (mm2, b0.mains[2]) |*d, src| d.* = try a.dupe(M31, src);
         for (64..128) |r| mm2[36][r] = M31.zero(); // WM: block 1's words not read
         b.mains[2] = mm2;
-        b.mains[3] = try generate(a, b.log_size, pl);
+        b.mains[3] = try generate(a, b.logs[3], pl);
         try std.testing.expect(try bsys.unbalanced(a, &airs, &b) != null);
     }
 }

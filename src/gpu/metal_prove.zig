@@ -9,7 +9,8 @@
 //!   processes give separate peak RSS); `host` is the Metal backend with host composition;
 //! - `METAL_PROVE_DISCARD=1` (with `ONLY`): `discard_mains`, the witness is released mid-proof;
 //! - `METAL_PROVE_STORAGE=default|evaluations_only|compact`: the commitment storage policy;
-//! - `METAL_PROVE_COMPOSITION=interpreter|stwzeva|stwzeva_native`: the CPU prover's composition.
+//! - `METAL_PROVE_COMPOSITION=interpreter|stwzeva|stwzeva_native`: the CPU prover's composition;
+//! - `METAL_PROVE_TIERED=1`: the tiered size profile (D-045).
 
 const std = @import("std");
 const sb = @import("starked_bitcoin");
@@ -120,7 +121,7 @@ test "metal: block-system proofs on the Metal backend are byte-identical to CPU 
         defer arena.deinit();
         const a = arena.allocator();
         var timer = try std.time.Timer.start();
-        const b = try bs.buildFull(a, s.raw, s.undo, s.ctx, .{ .min_log = min_log });
+        const b = try bs.buildFull(a, s.raw, s.undo, s.ctx, .{ .min_log = min_log, .profile = if (std.process.hasEnvVarConstant("METAL_PROVE_TIERED")) .tiered else .uniform });
         const t_wit = timer.lap();
         @import("stwo_prover_engine").measurement.process_usage.reportStage("witness built");
         const ps = bs.parts(&airs, &b);

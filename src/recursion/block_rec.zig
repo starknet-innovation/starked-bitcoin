@@ -228,7 +228,7 @@ pub fn proveNode(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const le
 
 /// A block leaf from a block proof file: verified natively (with capture), its leaf circuit built.
 pub fn leafCircuitOf(gpa: std.mem.Allocator, a: std.mem.Allocator, airs: *const [bs.N_COMP]ir.Air, f: *const PF.File, fri: FriConfigV2) !Context(QM31) {
-    const parts = PF.partsOf(airs, f.log_size, &f.pubs);
+    const parts = PF.partsOf(airs, f.log_size, f.profile, &f.pubs);
     const cfg = rec.Config.fromFriAndTraceSize(fri, f.log_size);
     var capture: core.verifier.ProofCapture(rec.Hasher) = undefined;
     try system.verifyCaptureBorrowed(a, cfg, &parts, &.{}, &f.proof, &capture);
