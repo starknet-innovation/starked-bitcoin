@@ -31,6 +31,26 @@ theorem le2_lt (f : ℕ → UInt8) : Spec.Block.le ((List.range 2).map f) < 2 ^ 
   have := UInt8.toNat_lt (f 0); have := UInt8.toNat_lt (f 1)
   simp [Spec.Block.le, List.range_succ]; omega
 
+theorem insBefore_succ (txs : List Spec.Block.Tx) (t : ℕ) (tx : Spec.Block.Tx) (htx : txs[t]? = some tx) :
+    insBefore txs (t + 1) = insBefore txs t + if 1 ≤ t then tx.vin.length else 0 := by
+  unfold insBefore
+  rw [List.range_succ, List.map_append, List.sum_append]
+  simp [htx]
+
+
+/-- The inputs before transaction `t` are at most its parts' rows before it. -/
+theorem insBefore_le {txs : List Spec.Block.Tx} {parts : List (List Spec.Block.Tok)} (hf : List.Forall₂ Spec.Block.IoTx txs parts) :
+    ∀ t ≤ txs.length, insBefore txs t ≤ ((parts.take t).map List.length).sum
+  | 0, _ => by simp [insBefore]
+  | t + 1, ht => by
+    obtain ⟨tx, htx⟩ : ∃ tx, txs[t]? = some tx := ⟨_, List.getElem?_eq_getElem (by omega)⟩
+    obtain ⟨hpl, hpe⟩ := part_len hf htx
+    rw [insBefore_succ _ t tx htx, List.take_add_one, List.map_append, List.sum_append]
+    have ih := insBefore_le hf t (by omega)
+    have : (List.map List.length (parts[t]?.toList)).sum = tx.vin.length + tx.vout.length := by
+      rw [← hpe]; simp [List.getElem?_eq_getElem hpl, List.getD_eq_getElem _ _ hpl]
+    rw [this]; split <;> omega
+
 section System
 
 variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ}
@@ -140,6 +160,95 @@ theorem claim_is_record_at {j : ℕ} {c : Claim} (hc : ClaimAt inst pub L j c) :
   obtain ⟨rj, hrj, honj, hJ, rfl⟩ := claim_is_record hL hsat hL24 hc
   have hLb : 2 ^ L ≤ 2 ^ 23 := Nat.pow_le_pow_right (by norm_num) hL24
   rw [hJ, urec_j hL hsat hL24 hrj honj, ZMod.val_natCast_of_lt (by unfold P; omega)]
+
+/-! ### The record index is the input's position in the block -/
+
+variable (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
+    (hon : ∀ j < 2 ^ L, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
+    (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
+    {parts : List (List Spec.Block.Tok)} (hf : List.Forall₂ Spec.Block.IoTx S.b.txs parts)
+    (htg : Spec.Block.tagged 0 (Fields.toksFrom (inst 1).main (Rb inst pub) S.m 0) = Spec.Block.tagParts 0 parts)
+include he hon hlen hst hf htg
+
+/-- **Input rows before transaction `t`** number the inputs of the non-coinbase transactions before it. -/
+theorem ki_count : ∀ t ≤ S.b.txs.length,
+    ∑ q ∈ Finset.range ((parts.take t).map List.length).sum, (inst 14).main Coin.KI q = ((insBefore S.b.txs t : ℕ) : F)
+  | 0, _ => by simp [insBefore]
+  | t + 1, ht => by
+    have cs := coin_sat hL hsat hL24
+    obtain ⟨tx, htx⟩ : ∃ tx, S.b.txs[t]? = some tx := ⟨_, List.getElem?_eq_getElem (by omega)⟩
+    obtain ⟨hpl, hpe⟩ := part_len hf htx
+    have hft := fields_tagged hL hsat hL24 S
+    rw [htg] at hft
+    have he' : e = (parts.map List.length).sum := by rw [hlen, ← Spec.Block.tagParts_length 0, hft, List.length_map]
+    have hpre1 : ((parts.take (t + 1)).map List.length).sum = ((parts.take t).map List.length).sum +
+        (tx.vin.length + tx.vout.length) := by
+      rw [List.take_add_one, List.map_append, List.sum_append, ← hpe]
+      simp [List.getElem?_eq_getElem hpl, List.getD_eq_getElem _ _ hpl]
+    have hle : ((parts.take (t + 1)).map List.length).sum ≤ e := by
+      rw [he']
+      have := pre_mono parts (t := t + 1) (t' := parts.length) (by omega) le_rfl
+      rwa [List.take_length] at this
+    rw [hpre1, Finset.sum_range_add, ki_count t (by omega), insBefore_succ _ t tx htx]
+    have hrow : ∀ q < tx.vin.length + tx.vout.length,
+        (inst 14).main Coin.KI (((parts.take t).map List.length).sum + q) = if q < tx.vin.length ∧ 1 ≤ t then 1 else 0 := by
+      intro q hq
+      have hj : ((parts.take t).map List.length).sum + q < e := by omega
+      have hk := (coin_kind_pos hL hsat hL24 S he hon hlen hst hf htg hj htx rfl hq).2.1
+      split_ifs with hc
+      · exact hk.mpr hc
+      · rcases Coin.bool_col cs (c := Coin.KI) (r := ((parts.take t).map List.length).sum + q) (by simp)
+          (by omega) with h0 | h1
+        · exact h0
+        · exact absurd (hk.mp h1) hc
+    rw [Finset.sum_congr rfl fun q hq => hrow q (Finset.mem_range.mp hq)]
+    push_cast
+    congr 1
+    by_cases ht1 : 1 ≤ t
+    · simp only [ht1, and_true, if_true]
+      rw [Finset.sum_ite, Finset.sum_const_zero, add_zero, Finset.sum_const, nsmul_eq_mul, mul_one]
+      congr 1
+      rw [show (Finset.range (tx.vin.length + tx.vout.length)).filter (· < tx.vin.length) = Finset.range tx.vin.length by
+        ext x; simp; omega]
+      simp
+    · simp [ht1]
+
+/-- **The claim of input `k` of transaction `t ≥ 1` is the stream's record `insBefore t + k`**: a
+function of the block and the committed undo stream only (D-041, step 4 of utxo.md's plan). -/
+theorem claim_at_input {t k : ℕ} {tx : Spec.Block.Tx} (htx : S.b.txs[t]? = some tx) (ht1 : 1 ≤ t)
+    (hk : k < tx.vin.length) {c : Claim} (hc : ClaimAt inst pub L (((parts.take t).map List.length).sum + k) c) :
+    c = recAt (Ub inst pub) (insBefore S.b.txs t + k) := by
+  have cs := coin_sat hL hsat hL24
+  obtain ⟨hpl, hpe⟩ := part_len hf htx
+  have hft := fields_tagged hL hsat hL24 S
+  rw [htg] at hft
+  have he' : e = (parts.map List.length).sum := by rw [hlen, ← Spec.Block.tagParts_length 0, hft, List.length_map]
+  have hle : ((parts.take (t + 1)).map List.length).sum ≤ e := by
+    rw [he']
+    have := pre_mono parts (t := t + 1) (t' := parts.length) (by omega) le_rfl
+    rwa [List.take_length] at this
+  have hpre1 : ((parts.take (t + 1)).map List.length).sum = ((parts.take t).map List.length).sum +
+      (tx.vin.length + tx.vout.length) := by
+    rw [List.take_add_one, List.map_append, List.sum_append, ← hpe]
+    simp [List.getElem?_eq_getElem hpl, List.getD_eq_getElem _ _ hpl]
+  set j := ((parts.take t).map List.length).sum + k with hj
+  have hjL : j < 2 ^ L := by omega
+  rw [claim_is_record_at hL hsat hL24 hc]
+  congr 1
+  -- J j = KI rows before j = insBefore t + k
+  have hJ := Coin.j_spec cs j hjL
+  rw [hj, Finset.sum_range_add, ki_count hL hsat hL24 S he hon hlen hst hf htg t
+    (by have := (List.getElem?_eq_some_iff.mp htx).1; omega)] at hJ
+  have hrow : ∀ q < k, (inst 14).main Coin.KI (((parts.take t).map List.length).sum + q) = 1 := fun q hq =>
+    (coin_kind_pos hL hsat hL24 S he hon hlen hst hf htg (show _ < e by omega) htx rfl (by omega)).2.1.mpr ⟨by omega, ht1⟩
+  rw [Finset.sum_congr rfl fun q hq => hrow q (Finset.mem_range.mp hq)] at hJ
+  simp only [Finset.sum_const, Finset.card_range, nsmul_eq_mul, mul_one] at hJ
+  rw [hJ]
+  have hib : insBefore S.b.txs t + k < P := by
+    have := insBefore_le hf t (by have := (List.getElem?_eq_some_iff.mp htx).1; omega)
+    have hLb : 2 ^ L ≤ 2 ^ 23 := Nat.pow_le_pow_right (by norm_num) hL24
+    unfold P; omega
+  rw [← Nat.cast_add, ZMod.val_natCast_of_lt hib]
 
 end System
 

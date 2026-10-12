@@ -56,7 +56,8 @@ verify under the new protocol (same `hash_serialized`).
 
 Not yet:
 1. The coin theorem's remaining hypotheses: events well formed (`WFE`: now only for the initial and final
-   sets, the verifier's decoded data — created and spent events proven, `epoch_systems_wf`), distinct
+   sets, the verifier's decoded data — created and spent events proven, `epoch_systems_wf`); the events as
+   functions of the committed data is **proven** (`claim_at_input`, 2026-10-12); distinct
    created outpoints (txid uniqueness, an assumption), and, in Lean, that the events are functions of
    the committed data (D-041; the bad-set reading needs it, and the circuit now enforces it).
 2. ~~The fingerprint's Schwartz–Zippel step~~ (done 2026-10-10).
