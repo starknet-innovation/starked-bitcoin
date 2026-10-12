@@ -21,6 +21,23 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-10-12 (session 11, night) — First real 2^22 block proved tiered; CUDA step 3 started
+Who: Claude (agent, Opus 5.5) with a sub-agent (CUDA resident port, branch `cuda/resident`)
+Roadmap: GPU-CODEGEN step 3 in progress; VL-FRI noted upstream (42653cf)
+Done:
+- Block 400000 (1,660 txs) proved at production strength (70 queries, PoW 26) in the tiered profile,
+  CPU, compact + discard, and verified: L = 22, component logs {22,17,22,22,17,8,22,8,17,20,20,20,20,
+  17,17,12}, 145 s, peak RSS 14.4 GB (estimate was ~17 GB), proof 1.13 MB, deterministic (same proof
+  SHA-256 `cbcf7026134f9a71` on two runs). `METAL_PROVE_LARGE`/`METAL_PROVE_VERIFY` (5f1fdfd).
+- CUDA step 3 item 1 (5f1fdfd): stwo-zig's CUDA codegen emits kernels for all 17 of our AIRs from the
+  template programs (public inputs as base params); built as host C++ they equal the interpreter
+  (`zig build cuda-parity`).
+Evidence:
+- `METAL_PROVE_LARGE=400000 METAL_PROVE_TIERED=1 METAL_PROVE_ONLY=cpu METAL_PROVE_DISCARD=1
+  METAL_PROVE_VERIFY=1 METAL_PROVE_STORAGE=compact zig build metal-prove -Doptimize=ReleaseFast`.
+- `zig build cuda-parity -Doptimize=ReleaseFast`: 17/17 kernels equal.
+Next: production-strength recursion node measurement; CUDA resident port (sub-agent).
+
 ## 2026-10-12 (session 11, evening) — SHA at 2^24: Lean `SizeOk` replaces the L ≤ 23 cap
 Who: Claude (agent, Opus 5.5)
 Roadmap: D-045 follow-up (tiered blocks up to L = 24 covered by the Lean theorems)
