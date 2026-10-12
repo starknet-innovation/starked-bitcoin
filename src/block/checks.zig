@@ -86,6 +86,8 @@ pub const Ctx = struct {
     /// Tests only: build the witness of an invalid block anyway (wrapping arithmetic, values truncated
     /// to their limbs), to check that the AIR rejects it.
     force: bool = false,
+    /// The 11 predecessors' headers, oldest first (D-043 part 3); required at and above the CSV height.
+    anc: ?*const [11][80]u8 = null,
 
     pub fn cutoff(self: Ctx, raw: []const u8) u32 {
         return if (self.height >= CSV_HEIGHT) self.prev_mtp else std.mem.readInt(u32, raw[68..72], .little);
@@ -104,12 +106,19 @@ pub const Ctx = struct {
 /// Public inputs 0–6: length, transaction count, height, prevMtp, and the three activation bits.
 /// The block's public inputs: length, transaction count, height, the previous MTP's low 16 bits, the
 /// activation bits (BIP34, CSV, segwit), and the previous MTP's high 16 bits.
+/// Below the CSV height the MTP is unused and its limbs are 0 (D-043 part 3).
 pub fn pubs(raw: []const u8, ntx: u32, ctx: Ctx) [8]M31 {
+    const m: u32 = if (ctx.csv()) ctx.prev_mtp else 0;
     return .{
         f(raw.len),                    f(ntx),                         f(ctx.height),
-        f(ctx.prev_mtp & 0xffff),      f(@intFromBool(ctx.bip34())),   f(@intFromBool(ctx.csv())),
-        f(@intFromBool(ctx.segwit())), f(ctx.prev_mtp >> 16),
+        f(m & 0xffff),                 f(@intFromBool(ctx.bip34())),   f(@intFromBool(ctx.csv())),
+        f(@intFromBool(ctx.segwit())), f(m >> 16),
     };
+}
+
+/// The 11 predecessors' headers of a sample (testdata, oldest first).
+pub fn ancOf(comptime h: []const u8) *const [11][80]u8 {
+    return @ptrCast(@embedFile("testdata:anc_" ++ h));
 }
 
 fn f(x: anytype) M31 {
@@ -420,10 +429,10 @@ pub const samples_small = [_]Sample{
 };
 pub const samples_large = [_]Sample{
     .{ .raw = @embedFile("testdata:block_400000"), .undo = @embedFile("testdata:undo_400000"), .ctx = .{ .height = 400000, .prev_mtp = 1456414666 } },
-    .{ .raw = @embedFile("testdata:block_481824"), .undo = @embedFile("testdata:undo_481824"), .ctx = .{ .height = 481824, .prev_mtp = 1503536364 } },
-    .{ .raw = @embedFile("testdata:block_709632"), .undo = @embedFile("testdata:undo_709632"), .ctx = .{ .height = 709632, .prev_mtp = 1636860027 } },
-    .{ .raw = @embedFile("testdata:block_970347"), .undo = @embedFile("testdata:undo_970347"), .ctx = .{ .height = 970347, .prev_mtp = 1791376871 } },
-    .{ .raw = @embedFile("testdata:block_774628"), .undo = @embedFile("testdata:undo_774628"), .ctx = .{ .height = 774628, .prev_mtp = 1675281795 } },
+    .{ .raw = @embedFile("testdata:block_481824"), .undo = @embedFile("testdata:undo_481824"), .ctx = .{ .height = 481824, .prev_mtp = 1503536364, .anc = ancOf("481824") } },
+    .{ .raw = @embedFile("testdata:block_709632"), .undo = @embedFile("testdata:undo_709632"), .ctx = .{ .height = 709632, .prev_mtp = 1636860027, .anc = ancOf("709632") } },
+    .{ .raw = @embedFile("testdata:block_970347"), .undo = @embedFile("testdata:undo_970347"), .ctx = .{ .height = 970347, .prev_mtp = 1791376871, .anc = ancOf("970347") } },
+    .{ .raw = @embedFile("testdata:block_774628"), .undo = @embedFile("testdata:undo_774628"), .ctx = .{ .height = 774628, .prev_mtp = 1675281795, .anc = ancOf("774628") } },
 };
 
 test "block checks: the samples satisfy the extended fields AIR" {

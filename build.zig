@@ -87,6 +87,7 @@ pub fn build(b: *std.Build) void {
     lib.addAnonymousImport("air:block_tables", .{ .root_source_file = b.path("airs/block_tables.json") });
     lib.addAnonymousImport("air:block_walk", .{ .root_source_file = b.path("airs/block_walk.json") });
     lib.addAnonymousImport("air:block_ctx", .{ .root_source_file = b.path("airs/block_ctx.json") });
+    lib.addAnonymousImport("air:block_anc", .{ .root_source_file = b.path("airs/block_anc.json") });
     lib.addAnonymousImport("air:block_wmerkle", .{ .root_source_file = b.path("airs/block_wmerkle.json") });
     lib.addAnonymousImport("air:block_undo", .{ .root_source_file = b.path("airs/block_undo.json") });
     lib.addAnonymousImport("air:block_b2msg", .{ .root_source_file = b.path("airs/block_b2msg.json") });
@@ -128,6 +129,11 @@ pub fn build(b: *std.Build) void {
     lib.addAnonymousImport("air:block_urec", .{ .root_source_file = b.path("airs/block_urec.json") });
     lib.addAnonymousImport("air:block_coin", .{ .root_source_file = b.path("airs/block_coin.json") });
     lib.addAnonymousImport("testdata:block_170", .{ .root_source_file = b.path("testdata/blocks/170.bin") });
+    lib.addAnonymousImport("testdata:anc_170", .{ .root_source_file = b.path("testdata/anc/170.bin") });
+    lib.addAnonymousImport("testdata:anc_481824", .{ .root_source_file = b.path("testdata/anc/481824.bin") });
+    lib.addAnonymousImport("testdata:anc_709632", .{ .root_source_file = b.path("testdata/anc/709632.bin") });
+    lib.addAnonymousImport("testdata:anc_970347", .{ .root_source_file = b.path("testdata/anc/970347.bin") });
+    lib.addAnonymousImport("testdata:anc_774628", .{ .root_source_file = b.path("testdata/anc/774628.bin") });
     lib.addAnonymousImport("testdata:block_91722", .{ .root_source_file = b.path("testdata/blocks/91722.bin") });
     lib.addAnonymousImport("testdata:block_91812", .{ .root_source_file = b.path("testdata/blocks/91812.bin") });
     lib.addAnonymousImport("testdata:block_91842", .{ .root_source_file = b.path("testdata/blocks/91842.bin") });

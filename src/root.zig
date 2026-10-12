@@ -18,6 +18,7 @@ pub const block = struct {
     pub const walk = @import("block/walk.zig");
     pub const ctx = @import("block/ctx.zig");
     pub const wmerkle = @import("block/wmerkle.zig");
+    pub const anc = @import("block/anc.zig");
     pub const commit = @import("block/commit.zig");
     pub const proof_file = @import("block/proof_file.zig");
     pub const extsum = @import("block/extsum.zig");

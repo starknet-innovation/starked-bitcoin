@@ -9,8 +9,8 @@
 //! challenge, sums added, both roots folded. Leaves and nodes are padded to one shared shape, as in
 //! the header-chain tree (`node.zig`).
 //!
-//! Not yet: the outer verifier (aligned forest against the seed v3 and the chain's `T`), the
-//! previous-block MTP (D-043 option A).
+//! The outer verifier is `block_forest.zig`. The previous-block MTP is bound inside each block proof
+//! (D-043 part 3, option A: the ancestry component, `block/anc.zig`), so the tree carries no times.
 
 const std = @import("std");
 const core = @import("stwo_core");

@@ -10,8 +10,8 @@
 //! forest file. **Verify** (`verifyForest`): per root, the pinned identity and the expected key
 //! (from the blocks' trace sizes), the circuit proof, its summary's range; the challenge from the
 //! seed over the roots' seed subtrees and both sets' digests; the balance against the final set;
-//! each block-hash subtree against the chain's `T`. The previous-block MTP is not yet bound
-//! (D-043 part 3).
+//! each block-hash subtree against the chain's `T`. The previous-block MTP is bound inside each block
+//! proof (D-043 part 3, the ancestry component).
 
 const std = @import("std");
 const core = @import("stwo_core");

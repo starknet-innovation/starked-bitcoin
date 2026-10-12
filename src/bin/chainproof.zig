@@ -44,7 +44,7 @@
 //!   chainproof verify-epoch-tree <vk> <file.sbchain> <dir> <to> [--from <a> <prev-set.bin>] [--min-work <hex> | --min-work 0]
 //!       Verifies the chain proof, the forest against the block VK (identities, keys, proofs, ranges,
 //!       the challenge from the seed over the roots, the block hashes against the chain's T) and the
-//!       balance against <dir>/set-<to>.bin. The previous-block MTP is not yet bound (D-043).
+//!       balance against <dir>/set-<to>.bin. Each block proof binds its previous MTP (D-043 part 3).
 //!   chainproof rebind-block <in.sbblock> <headers.bin> <file.sbchain> <out.sbblock>
 //!       Rebuilds a block file's header window for another (longer) chain proof, without re-proving.
 //!
@@ -376,7 +376,7 @@ fn proveBlock(gpa: std.mem.Allocator, a: std.mem.Allocator, block_path: []const 
     const all = try loadHeaderFile(a, headers_path);
     if (height >= n or all.len < n) return error.HeightBeyondChain;
     if (raw.len < 80 or !std.mem.eql(u8, raw[0..80], &all[height])) return error.HeaderMismatch;
-    const ctx = sb.block.checks.Ctx{ .height = height, .prev_mtp = PF.prevMtp(all, height) };
+    const ctx = sb.block.checks.Ctx{ .height = height, .prev_mtp = PF.prevMtp(all, height), .anc = PF.ancestors(all, height) };
     var timer = try std.time.Timer.start();
     const airs = try BS.parseAirs(a);
     const b = try BS.buildU(a, raw, undo, ctx);
@@ -473,7 +473,7 @@ fn proveEpoch(gpa: std.mem.Allocator, a: std.mem.Allocator, headers_path: []cons
         defer arena.deinit();
         const ba = arena.allocator();
         const hh: u32 = from.height + @as(u32, @intCast(i));
-        const ctx = sb.block.checks.Ctx{ .height = hh, .prev_mtp = PF.prevMtp(all, hh) };
+        const ctx = sb.block.checks.Ctx{ .height = hh, .prev_mtp = PF.prevMtp(all, hh), .anc = PF.ancestors(all, hh) };
         const b = try BS.buildFull(ba, raws[i], undos[i], ctx, .{ .chal = ch, .ctx = ctxs[i] });
         const proof = try PF.prove(ba, &airs, &b, fri);
         const window = try PF.bindWindow(ba, all, tree, hh);
@@ -599,7 +599,6 @@ fn verifyEpochTree(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []cons
     std.debug.print("VERIFIED epoch {d}..{d} (recursion): the coin set after block {d} is {d} coins ({d} inputs spent)\n", .{ from.height, to, to, set.len, v.nin });
     std.debug.print("  total amount     {d} sat\n", .{EP.totalAmount(set)});
     std.debug.print("  hash_serialized  {x}\n", .{EP.hashSerialized(set)});
-    std.debug.print("  not yet bound in-circuit: the previous-block MTP (D-043 part 3)\n", .{});
 }
 
 fn rebindBlock(gpa: std.mem.Allocator, a: std.mem.Allocator, in_path: []const u8, headers_path: []const u8, chain_path: []const u8, out: []const u8) !void {

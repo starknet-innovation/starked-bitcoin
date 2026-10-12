@@ -283,11 +283,11 @@ test "block negative: segwit commitment cases" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const ctx = checks.Ctx{ .height = 500000, .prev_mtp = 1699999000 };
+    const ctx = checks.Ctx{ .height = 500000, .prev_mtp = 1231715347, .anc = checks.ancOf("170") };
     std.debug.print("valid segwit block\n", .{});
     try std.testing.expectEqual(Verdict.accepted, try judge(a, try segwitBlock(a, 500000, .{}), ctx));
     std.debug.print("segwit block before activation (unexpected witness)\n", .{});
-    try std.testing.expectEqual(Verdict.rejected, try judge(a, try segwitBlock(a, 470000, .{}), .{ .height = 470000, .prev_mtp = 1699999000 }));
+    try std.testing.expectEqual(Verdict.rejected, try judge(a, try segwitBlock(a, 470000, .{}), .{ .height = 470000, .prev_mtp = 1231715347, .anc = checks.ancOf("170") }));
     std.debug.print("no commitment output, witness present\n", .{});
     try std.testing.expectEqual(Verdict.rejected, try judge(a, try segwitBlock(a, 500000, .{ .commit = false }), ctx));
     std.debug.print("tampered witness (txid unchanged)\n", .{});
@@ -296,4 +296,21 @@ test "block negative: segwit commitment cases" {
     try std.testing.expectEqual(Verdict.rejected, try judge(a, try segwitBlock(a, 500000, .{ .decoy = true }), ctx));
     std.debug.print("nonce of 33 bytes\n", .{});
     try std.testing.expectEqual(Verdict.rejected, try judge(a, try segwitBlock(a, 500000, .{ .nonce_len = 33 }), ctx));
+}
+
+test "block negative: a CSV-era block proves and verifies with its ancestry; a wrong MTP fails" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const airs = try bsys.parseAirs(a);
+    const raw = try segwitBlock(a, 500000, .{});
+    const ctx = checks.Ctx{ .height = 500000, .prev_mtp = 1231715347, .anc = checks.ancOf("170") };
+    const b = try bsys.build(a, raw, ctx);
+    try std.testing.expect(b.log_size >= 12);
+    try bsys.proveVerify(a, &airs, &b);
+    std.debug.print("CSV-era block (height 500000, log {d}): proved and verified with its ancestry\n", .{b.log_size});
+    // The MTP's public limb one off, the ancestry trace forced to match: rejected.
+    var c = ctx;
+    c.prev_mtp += 1;
+    try std.testing.expectEqual(Verdict.rejected, try judge(a, raw, c));
 }

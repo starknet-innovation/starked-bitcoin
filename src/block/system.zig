@@ -19,16 +19,17 @@ const ctxw = @import("ctx.zig");
 const wmerkle = @import("wmerkle.zig");
 const commit = @import("commit.zig");
 const coin = @import("coin.zig");
+const ancw = @import("anc.zig");
 
-pub const N_COMP = 15;
-pub const jsons = [N_COMP][]const u8{ bytes.json, fields.json, msg.json, bsha.json, merkle.json, checks.tables_json, walk.json, ctxw.json, wmerkle.json, commit.undo_json, commit.msg_json, commit.b2s_json, coin.fpwalk_json, coin.urec_json, coin.coin_json };
-pub const names = [N_COMP][]const u8{ "bytes", "fields", "msg", "sha", "merkle", "tables", "walk", "ctx", "wmerkle", "undo", "b2msg", "b2s", "fpwalk", "urec", "coin" };
+pub const N_COMP = 16;
+pub const jsons = [N_COMP][]const u8{ bytes.json, fields.json, msg.json, bsha.json, merkle.json, checks.tables_json, walk.json, ctxw.json, wmerkle.json, commit.undo_json, commit.msg_json, commit.b2s_json, coin.fpwalk_json, coin.urec_json, coin.coin_json, ancw.json };
+pub const names = [N_COMP][]const u8{ "bytes", "fields", "msg", "sha", "merkle", "tables", "walk", "ctx", "wmerkle", "undo", "b2msg", "b2s", "fpwalk", "urec", "coin", "anc" };
 /// Public inputs each component's AIR references (a prefix of the block's 159: the eight checks inputs,
 /// the undo length, the commitment's 16 limbs, the block hash's 16 limbs; then M3b's `γ`, `z`, `α`, the
 /// partial sum, the input count and the BIP30-lost bit).
 pub const N_PUB = coin.N_PUB;
 pub const PUB_HASH = 25;
-pub const n_pubs = [N_COMP]usize{ 1, 7, 0, 0, 2, 0, 0, 41, 2, 9, 9, 25, 45, 9, N_PUB };
+pub const n_pubs = [N_COMP]usize{ 1, 7, 0, 0, 2, 0, 0, 41, 2, 9, 9, 25, 45, 9, N_PUB, 41 };
 
 pub const Built = struct {
     log_size: u32,
@@ -127,7 +128,11 @@ pub fn undoStreamOf(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, 
 
 /// `fetched`: the fetched undo stream (`coin.undoStream`), with the creating transactions' indices in
 /// `opts.ctx`.
-pub fn buildFull(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctx: checks.Ctx, opts: Opts) !Built {
+pub fn buildFull(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctx0: checks.Ctx, opts: Opts) !Built {
+    // Below the CSV height the previous MTP is unused and its public limbs are 0 (D-043 part 3).
+    var ctx = ctx0;
+    if (!ctx.csv()) ctx.prev_mtp = 0;
+    if (ctx.csv() and ctx.anc == null) return error.MissingAncestors;
     const rows = try fields.tokenize(a, raw);
     const ntx: u32 = @intCast(rows[0].val);
     const txs = try msg.txRanges(a, rows);
@@ -158,7 +163,7 @@ pub fn buildFull(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctx
     for (rows) |r| if (r.kind == fields.K_IN or r.kind == fields.K_OUT) {
         tok_rows += 1;
     };
-    const need = @max(@max(msg.rowsNeeded(msgs), raw.len + 1, rows.len + 1, (comps_est + 1) * shaw.PERIOD), @max(nodes.len + 2, wnodes.len + 2, scripts_len + 1, 256), @max(undo.len + 1, commit.rowsNeeded(undo.len)), @max(fp_rows + 1, tok_rows + 1, recs.len + 1));
+    const need = @max(@max(msg.rowsNeeded(msgs), raw.len + 1, rows.len + 1, (comps_est + 1) * shaw.PERIOD), @max(nodes.len + 2, wnodes.len + 2, scripts_len + 1, 256), @max(undo.len + 1, commit.rowsNeeded(undo.len)), @max(fp_rows + 1, tok_rows + 1, recs.len + 1), if (ctx.csv()) ancw.MIN_ROWS_CSV else 256);
     const log_size: u32 = std.math.log2_int_ceil(usize, need);
 
     const fm = try fields.generate(a, log_size, raw, rows);
@@ -224,6 +229,7 @@ pub fn buildFull(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctx
     try ranges.appendSlice(a, coin_ranges.items);
     const tm = try checks.tables(a, log_size, ranges.items, wk.opcodes);
 
+    const am = try ancw.generate(a, log_size, raw[0..80], if (ctx.csv()) ctx.anc.? else null, ctx.prev_mtp, ctx.force);
     const cw = try commit.commitment(a, undo);
     var pubs: [N_PUB]M31 = undefined;
     @memcpy(pubs[0..8], &checks.pubs(raw, ntx, ctx));
@@ -235,7 +241,7 @@ pub fn buildFull(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctx
         .log_size = log_size,
         .pubs = pubs,
         .commitment_words = cw,
-        .mains = .{ bm, fm, mm, sm, km, tm, wk.cols, cx.cols, wm, um, b2m, b2sm, fpm, urm, co.cols },
+        .mains = .{ bm, fm, mm, sm, km, tm, wk.cols, cx.cols, wm, um, b2m, b2sm, fpm, urm, co.cols, am },
         .ntx = ntx,
         .sigops = wk.sigops,
         .weight = 4 * @as(u64, raw.len) - 3 * @as(u64, chk.w),

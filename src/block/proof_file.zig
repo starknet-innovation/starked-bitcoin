@@ -193,6 +193,13 @@ pub fn decode(a: std.mem.Allocator, bytes: []const u8) !File {
 
 /// Median time past of the 11 headers below `height` (Core's `GetMedianTimePast` of the previous
 /// block); `headers[i]` is the 80-byte header at height `i`.
+/// The 11 predecessors' headers (oldest first), when the block is at or above the CSV height (D-043
+/// part 3: the block proof derives the previous MTP from them).
+pub fn ancestors(headers: []const [80]u8, height: usize) ?*const [11][80]u8 {
+    if (height < checks.CSV_HEIGHT) return null;
+    return headers[height - 11 ..][0..11];
+}
+
 pub fn prevMtp(headers: []const [80]u8, height: usize) u32 {
     const lo = if (height >= 11) height - 11 else 0;
     return mtpOf(headers[lo..height]);
@@ -253,22 +260,23 @@ test "block proof file: round trip, verify, and the header checks (block 170, te
     var g = try decode(a, bytes);
     g.pubs[bs.PUB_HASH] = g.pubs[bs.PUB_HASH].add(M31.one());
     try std.testing.expect(std.meta.isError(verifyStark(a, &airs, &g, testFri())));
-    // The header checks: block 170's header and a context from the 11 headers below it are not in the
-    // repo, so check the hash binding with a one-header "chain" placed at height 170.
+    // The header checks, with block 170's 11 predecessors (testdata) and its header.
     var hs = try a.alloc([80]u8, 12);
-    @memset(hs, [_]u8{0} ** 80);
+    @memcpy(hs[0..11], checks.ancOf("170"));
     hs[11] = s.raw[0..80].*;
-    try std.testing.expectError(error.ContextMismatch, checkPubs(&f.pubs, hs));
+    const st = try checkPubs(&f.pubs, hs);
+    try std.testing.expectEqual(@as(u32, 170), st.height);
     var hs2 = try a.dupe([80]u8, hs);
     hs2[11][0] ^= 1;
     try std.testing.expectError(error.BlockHashMismatch, checkPubs(&f.pubs, hs2));
     try std.testing.expectError(error.BadWindow, checkPubs(&f.pubs, hs[1..]));
-    // The commitment bytes are D-038's.
-    const st = checkPubs(&f.pubs, hs) catch |e| switch (e) {
-        error.ContextMismatch => null,
-        else => return e,
-    };
-    try std.testing.expect(st == null);
+    // A tampered activation bit, and (below the CSV height) a nonzero MTP limb, mismatch the context.
+    var p4 = f.pubs;
+    p4[4] = M31.one().sub(p4[4]);
+    try std.testing.expectError(error.ContextMismatch, checkPubs(&p4, hs));
+    var p3 = f.pubs;
+    p3[3] = p3[3].add(M31.one());
+    try std.testing.expectError(error.ContextMismatch, checkPubs(&p3, hs));
     var c: [32]u8 = undefined;
     for (0..8) |w| std.mem.writeInt(u32, c[4 * w ..][0..4], b.commitment_words[w], .little);
     var want: [32]u8 = undefined;
