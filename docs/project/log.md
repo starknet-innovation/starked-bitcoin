@@ -21,6 +21,38 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-10-12 (session 11) — D-043 accepted; the previous MTP inside the block proof (option A)
+Who: Claude (agent, Opus 5.5), on the owner's "D-043 part 3: Option A. No need to export the timestamps."
+Roadmap: D-043 accepted and fully implemented; BLOCK-REC open item left: a shipped block VK
+Done:
+- `block_anc`, the block system's 16th component (7b04e43): the header chain's SHA256d, plumbing and
+  linkage over 12 periods (11 predecessors, oldest first, then the block); period 11's hash = public
+  25–40; the MTP limbs (public 3, 7) are the median (at most 5 times above, at most 5 below); a copy of
+  `FIRST` read 2048 rows down forces ≥ 4096 rows with CSV; below CSV the limbs are 0. No lookups, no new
+  preprocessed columns, times private. Witness `src/block/anc.zig`; ancestors of the CSV samples in
+  `testdata/anc`; `chainproof` passes `PF.ancestors`.
+- Lean (4e67e84): `AncSound.anc_sound` (via `chainSat`: the ancestry trace satisfies the header chain's
+  base constraints for trace-read public inputs, so `header_hash`/`header_link` apply unchanged),
+  `median_of_counts`; `BlockAnc.blockSys_sat`, `block_mtp`; `BlockPubOk` is the 16-component system,
+  `BlockPubOk.mtp`; `blockSys_static`.
+- GPU route scoped (docs/design/gpu.md): no generic-AIR CUDA path in stwo-zig; plan IR → STWZEVA, Metal
+  composition, then a generic resident CUDA prover. The owner declined CPU cloud spend.
+Evidence:
+- `lake build` 8864 jobs; `#print axioms` standard for `anc_sound`, `block_mtp`, `BlockPubOk.mtp`,
+  `blockSys_sat`, `blockSys_static`, `epoch_hyps_of_rng`.
+- Full `zig build test -Doptimize=ReleaseFast`: 96/96 passed (35 min, peak 9.5 GB). Large-block test alone:
+  4 samples (log 22–23) hold and balance, 26 min. Tampers (MTP ±1, broken ancestor, other block hash,
+  nonzero limbs below CSV, 2048-row CSV trace) each rejected by their constraint; a CSV-era block (height
+  500000) proves and verifies. Epoch 0–3 re-proved through the forest (`data/epoch-small-anc`): same set
+  `ea4af14d…`; the leaf took 161 s (was 115 s).
+Problems / lessons:
+- The prover does not take preprocessed columns at an offset: the size guard reads a main-column copy.
+- A component without lookups must export as a v1 AIR (`anc.air.toJson`).
+- Debug-mode tests abort on forced invalid witnesses (M31 range asserts); run the suite in ReleaseFast.
+- The epoch proofs on disk (0–170, 171–1000) are stale after the AIR change.
+Next: owner — VL-FRI/VL-NODE trust boundaries; whether to re-prove 0–1000 locally; the GPU plan. Then a
+shipped block VK.
+
 ## 2026-10-11/12 (session 10) — VL-ORACLE; BLOCK-REC built end to end at small scale
 Who: Claude (agent, Opus 5.5), overnight on the owner's "keep going until 9am"
 Roadmap: VL-ORACLE done; BLOCK-REC in progress; D-043 proposed

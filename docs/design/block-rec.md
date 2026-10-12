@@ -75,7 +75,7 @@ changed interface. Before CATCHUP starts, freeze the block proof's public inputs
 the design here fixes what the aggregator needs public, and it is already public (partial sum,
 input count, `C_h`, height, block hash, `z`).
 
-## The block-proof interface for aggregation (proposed, D-043)
+## The block-proof interface for aggregation (D-043, accepted 2026-10-12)
 
 Found 2026-10-11 while specifying BLOCK-REC against what `verify-epoch` checks natively. Everything the
 native epoch verifier checks per block must become a leaf or node obligation; three things in the
@@ -196,7 +196,20 @@ estimated: per-leaf cost is seconds, not the header leaf's 31 s.
   (M4 Pro CPU, peak RSS 17.7 GB), forest file 4.9 MB; verified in 0.6 s after the chain proof (2.1 s):
   the coin set after block 170, 171 coins, `hash_serialized 7105b60f…` — the same as the native
   `verify-epoch`.
-- **Still to build:** the MTP (D-043 part 3, needs the owner's choice); a persisted, pinned block VK
+- **The previous-block MTP (D-043 part 3, option A, 2026-10-12):** a 16th block-system component,
+  `block_anc` (`Block/Anc.lean`, witness `src/block/anc.zig`), reusing the header chain's SHA256d,
+  plumbing and prev-hash linkage over 256-row periods. With the CSV bit: periods 0–10 are the 11
+  predecessors (oldest first), period 11's hash is the block hash (public 25–40), and at most 5 of
+  the 11 times are above the MTP (public 3, 7) and at most 5 below, so it is their median. A copy of
+  `FIRST` read 2048 rows down forces at least 4096 rows. Below CSV the MTP limbs are 0 (the cutoff is
+  the block's own time). No lookups, no new preprocessed columns, no public times; the tree is
+  unchanged. Cost: 125 columns (+~11% of the block system's width), and CSV-era blocks need log ≥ 12;
+  the leaf over blocks 0–3 went from 115 s to 161 s. Lean: `AncSound.anc_sound` (the header chain's
+  `header_hash`/`header_link` reused through `chainSat`: the ancestry trace satisfies the header
+  chain's base constraints for public inputs read from the trace), `median_of_counts`,
+  `BlockAnc.blockSys_sat` (the 16-component system projects onto `hashSys`), `block_mtp`,
+  `BlockPubOk.mtp`. Epoch 0–3 re-proved through the forest: same set.
+- **Still to build:** a persisted, pinned block VK
   shipped like the chain VK (today `blockvk.bin` is written by the prover's setup); the Lean statement
   of the outer verifier's composition is `rng_forest` (BlockTree.lean: linked proven ranges with one
   challenge join into one proven range); the link from the Zig verifier's checks to its hypotheses is

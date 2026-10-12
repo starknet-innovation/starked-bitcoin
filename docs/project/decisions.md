@@ -385,8 +385,9 @@ Why:
   by the 4M-weight consensus constant; the final-set pass and catch-up are segmentable and
   parallel). The constraint is cadence, which the tree fixes.
 
-### D-043 — The block-proof interface for aggregation (proposed)
-Date: 2026-10-11 · By: Claude (agent) · Status: **proposed, needs owner review**
+### D-043 — The block-proof interface for aggregation
+Date: 2026-10-11 · By: Claude (agent) · Status: **accepted** (owner, 2026-10-12: option A for (3); "no
+need to export the timestamps")
 Proposal: before CATCHUP freezes the block interface, (1) the epoch seed becomes tree-shaped (seed v3:
 aligned binary tree of `Blake2s(hash_h ‖ C_h)` leaves), (2) block hashes bind to the chain's `T` per
 aligned subtree, (3) the previous-block MTP is proven inside the block proof from its 11 predecessor
@@ -395,3 +396,8 @@ nodes expose the compact summary listed in block-rec.md.
 Design and the alternatives for (3): [block-rec.md § The block-proof interface](../design/block-rec.md#the-block-proof-interface-for-aggregation-proposed-d-043).
 Why: the v2 seed is a linear stream no recursion node can fold, and the MTP context has no
 aggregator obligation; both change the block proof, which must not change after CATCHUP.
+Implemented (2026-10-12): (1), (2), (4) in the recursion (block-rec.md § Built so far); (3) as a 16th
+block-system component, `block_anc` (`Block/Anc.lean`, `AncSound.anc_sound`, `BlockAnc.block_mtp`):
+the 11 predecessors and the block's header hashed and linked in the header chain's layout, the MTP
+limbs (public 3, 7) pinned to their median; below the CSV height the limbs are 0. The times stay
+private; the tree carries nothing for the MTP.
