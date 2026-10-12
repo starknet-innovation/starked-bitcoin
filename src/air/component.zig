@@ -93,6 +93,8 @@ pub const Component = struct {
     n_trees: usize = 2,
     /// Set once the lookup elements are drawn; required when the AIR has lookups.
     logup: ?Logup = null,
+    /// Row-tiled expansion of coefficient-only columns in the composition (compact storage).
+    tiling: ?Tiling = null,
 
     const Adapter = core_air_derive.ComponentAdapter(
         @This(),
@@ -312,28 +314,6 @@ pub const Component = struct {
         for (lout) |c| accumulator.accumulate(c.mul(denominator_inv));
     }
 
-    const DomainCtx = struct {
-        pre: []const []const M31,
-        main: []const []const M31,
-        log_size: u32,
-        eval_log_size: u32,
-        row: usize = 0,
-
-        pub fn read(self: *const DomainCtx, tree: ir.Tree, index: u32, offset: i32) M31 {
-            return switch (tree) {
-                .preprocessed => self.pre[index][self.row],
-                .main => self.main[index][
-                    if (offset == 0) self.row else utils.offsetBitReversedCircleDomainIndex(
-                        self.row,
-                        self.log_size,
-                        self.eval_log_size,
-                        offset,
-                    )
-                ],
-            };
-        }
-    };
-
     pub fn evaluateConstraintQuotientsOnDomain(
         self: *const @This(),
         trace: *const prover_component.Trace,
@@ -348,22 +328,54 @@ pub const Component = struct {
         const eval_domain = canonic.CanonicCoset.new(eval_log_size).circleDomain();
         const eval_size = eval_domain.size();
 
+        var columns = try accumulator.columns(allocator, &.{.{
+            .log_size = eval_log_size,
+            .n_cols = self.nConstraints(),
+        }});
+        defer allocator.free(columns);
+        const column = &columns[0];
+        const values = try allocator.alloc(QM31, eval_size);
+        defer allocator.free(values);
+        var table = try ReadTable.init(allocator, self);
+        defer table.deinit(allocator);
+
+        // Coefficient-only columns (compact storage) expanded a row tile at a time.
+        if (self.tiling) |tiling| {
+            if (try tiling.plan(tiling.ctx, trace)) |plan| {
+                defer tiling.release(tiling.ctx);
+                for (0..plan.tiles) |tile| {
+                    try tiling.load(tiling.ctx, tile);
+                    try table.resolve(self, .{ .tiling = tiling });
+                    try self.evaluateRows(allocator, &table, column.random_coeff_powers, tile * plan.rows, (tile + 1) * plan.rows, values);
+                }
+                for (values, 0..) |v, row| column.accumulate(row, v);
+                return;
+            }
+        }
+
+        // Whole columns on the evaluation domain (extending coefficient-only ones).
         var buffers = std.ArrayList([]M31).empty;
         defer {
             for (buffers.items) |b| allocator.free(b);
             buffers.deinit(allocator);
         }
-        const pre = try allocator.alloc([]const M31, self.air.n_preprocessed);
-        defer allocator.free(pre);
-        const main = try allocator.alloc([]const M31, self.air.n_main);
-        defer allocator.free(main);
-        const inter = try allocator.alloc([]const M31, n_inter);
-        defer allocator.free(inter);
-        for (trace.polys.items[0][self.pre_offset..][0..self.air.n_preprocessed], pre) |poly, *o| o.* = try onDomain(allocator, poly, self.log_size, eval_log_size, eval_size, &buffers);
-        for (trace.polys.items[1][self.main_offset..][0..self.air.n_main], main) |poly, *o| o.* = try onDomain(allocator, poly, self.log_size, eval_log_size, eval_size, &buffers);
-        if (n_inter != 0) for (trace.polys.items[2][self.inter_offset..][0..n_inter], inter) |poly, *o| {
-            o.* = try onDomain(allocator, poly, self.log_size, eval_log_size, eval_size, &buffers);
+        const n_cols = self.air.n_preprocessed + self.air.n_main + n_inter;
+        const whole = try allocator.alloc([]const M31, n_cols);
+        defer allocator.free(whole);
+        const Span = struct { offset: usize, n: usize };
+        const trees = [3]Span{
+            .{ .offset = self.pre_offset, .n = self.air.n_preprocessed },
+            .{ .offset = self.main_offset, .n = self.air.n_main },
+            .{ .offset = self.inter_offset, .n = n_inter },
         };
+        var k: usize = 0;
+        for (trees, 0..) |t, tree| {
+            if (t.n == 0) continue;
+            for (trace.polys.items[tree][t.offset..][0..t.n]) |poly| {
+                whole[k] = try onDomain(allocator, poly, self.log_size, eval_log_size, eval_size, &buffers);
+                k += 1;
+            }
+        }
         if (buffers.items.len != 0) {
             var twiddles = try prover_twiddles.precomputeM31(allocator, eval_domain.half_coset);
             defer prover_twiddles.deinitM31(allocator, &twiddles);
@@ -374,71 +386,178 @@ pub const Component = struct {
             );
             try prover_circle.poly.evaluateBuffersWithTwiddles(buffers.items, eval_domain, view);
         }
+        try table.resolve(self, .{ .whole = whole });
+        try self.evaluateRows(allocator, &table, column.random_coeff_powers, 0, eval_size, values);
+        for (values, 0..) |v, row| column.accumulate(row, v);
+    }
 
+    /// Evaluates rows `[start, end)` of the evaluation domain into `values` (threads over rows).
+    fn evaluateRows(self: *const @This(), allocator: std.mem.Allocator, table: *const ReadTable, powers: []const QM31, start: usize, end: usize, values: []QM31) !void {
+        const eval_log_size = self.log_size + 1;
+        const n_inter = 4 * nBatches(self.air);
         const trace_coset = canonic.CanonicCoset.new(self.log_size).coset();
+        const eval_domain = canonic.CanonicCoset.new(eval_log_size).circleDomain();
         const denominator_inv = [_]M31{
             try core_constraints.cosetVanishing(M31, trace_coset, eval_domain.at(0)).inv(),
             try core_constraints.cosetVanishing(M31, trace_coset, eval_domain.at(1)).inv(),
         };
-        var columns = try accumulator.columns(allocator, &.{.{
-            .log_size = eval_log_size,
-            .n_cols = self.nConstraints(),
-        }});
-        defer allocator.free(columns);
-        const column = &columns[0];
-
-        // Rows are independent: evaluate in parallel into a buffer, then feed
-        // the (stateful, sequential) accumulator in row order.
-        const values = try allocator.alloc(QM31, eval_size);
-        defer allocator.free(values);
         const job = DomainJob{
             .air = self.air,
             .pubs = self.pubs,
-            .ctx = .{ .pre = pre, .main = main, .log_size = self.log_size, .eval_log_size = eval_log_size },
-            .inter = inter,
+            .table = table,
+            .log_size = self.log_size,
+            .eval_log_size = eval_log_size,
             .logup = if (n_inter != 0) self.logup orelse return error.MissingLookupElements else null,
             .shift = if (n_inter != 0) try self.claimedShift() else QM31.zero(),
-            .powers = column.random_coeff_powers,
+            .powers = powers,
             .denominator_inv = denominator_inv,
-            .log_size = self.log_size,
             .values = values,
         };
-        const n_threads = @min(std.Thread.getCpuCount() catch 1, 64, @max(eval_size / 1024, 1));
+        const rows = end - start;
+        const n_threads = @min(std.Thread.getCpuCount() catch 1, 64, @max(rows / 1024, 1));
         var threads: [64]std.Thread = undefined;
         // Scratch is allocated up front: the caller's allocator need not be thread-safe.
-        const scratch = try allocator.alloc(M31, n_threads * (self.air.exprs.len + self.air.constraints.len));
-        defer allocator.free(scratch);
         const per = self.air.exprs.len + self.air.constraints.len;
+        const scratch = try allocator.alloc(M31, n_threads * per);
+        defer allocator.free(scratch);
         const nl = self.air.lookups.len;
         const per_q = 2 * nl + 2 * nBatches(self.air) + MAX_LOOKUP_VALS;
         const qscratch = try allocator.alloc(QM31, n_threads * per_q);
         defer allocator.free(qscratch);
-        const chunk = (eval_size + n_threads - 1) / n_threads;
+        const chunk = (rows + n_threads - 1) / n_threads;
         for (0..n_threads) |t| {
             const mine = scratch[t * per ..][0..per];
             threads[t] = try std.Thread.spawn(.{}, DomainJob.run, .{
-                &job, mine[0..self.air.exprs.len], mine[self.air.exprs.len..], qscratch[t * per_q ..][0..per_q], t * chunk, @min((t + 1) * chunk, eval_size),
+                &job, mine[0..self.air.exprs.len], mine[self.air.exprs.len..], qscratch[t * per_q ..][0..per_q], start + t * chunk, start + @min((t + 1) * chunk, rows),
             });
         }
         for (threads[0..n_threads]) |th| th.join();
-        for (values, 0..) |v, row| column.accumulate(row, v);
+    }
+};
+
+/// How a column is read on the evaluation domain: row `r` at mask offset `o` reads
+/// `values[((p >> shift) << 1) + (p & 1) - base]` with `p` the offset row, or `values[r - base]`
+/// when `row_indexed` (stwo-zig's `simd_evaluator.ResolvedColumn`).
+pub const Resolved = struct {
+    values: []const M31,
+    shift: u6 = 1,
+    base: usize = 0,
+    row_indexed: bool = false,
+
+    inline fn at(self: Resolved, row: usize, offset: i32, log_size: u32, eval_log_size: u32) M31 {
+        if (self.row_indexed) return self.values[row - self.base];
+        const p = if (offset == 0) row else utils.offsetBitReversedCircleDomainIndex(row, log_size, eval_log_size, offset);
+        return self.values[((p >> self.shift) << 1) + (p & 1) - self.base];
+    }
+};
+
+pub const TilePlan = struct { tiles: usize, rows: usize };
+
+/// Row-tiled reading of coefficient-only columns (`stwzeva.Tiling`).
+pub const Tiling = struct {
+    ctx: *anyopaque,
+    /// Null when nothing needs tiling.
+    plan: *const fn (ctx: *anyopaque, trace: *const prover_component.Trace) anyerror!?TilePlan,
+    load: *const fn (ctx: *anyopaque, tile: usize) anyerror!void,
+    /// `tree` 0/1/2, `local` within the component's span.
+    resolve: *const fn (ctx: *anyopaque, tree: u8, local: u32, offset: i32) anyerror!Resolved,
+    release: *const fn (ctx: *anyopaque) void,
+};
+
+/// Every read site of a component, resolved: main columns at each mask offset, preprocessed at 0,
+/// interaction limbs at 0 and the last batch at −1.
+const ReadTable = struct {
+    pre: []Resolved,
+    main: [][]Resolved,
+    inter: []Resolved,
+    inter_prev: [4]Resolved = undefined,
+    offsets: []const []const i32,
+    /// Preprocessed columns the AIR reads (the others are never resolved).
+    pre_read: []bool,
+
+    fn init(a: std.mem.Allocator, c: *const Component) !ReadTable {
+        const main = try a.alloc([]Resolved, c.air.n_main);
+        for (main, c.main_offsets) |*m, o| m.* = try a.alloc(Resolved, o.len);
+        const pre_read = try a.alloc(bool, c.air.n_preprocessed);
+        @memset(pre_read, false);
+        for (c.air.exprs) |e| switch (e) {
+            .col => |col| if (col.tree == .preprocessed) {
+                pre_read[col.index] = true;
+            },
+            else => {},
+        };
+        return .{
+            .pre_read = pre_read,
+            .pre = try a.alloc(Resolved, c.air.n_preprocessed),
+            .main = main,
+            .inter = try a.alloc(Resolved, 4 * nBatches(c.air)),
+            .offsets = @ptrCast(c.main_offsets),
+        };
+    }
+
+    fn deinit(self: *ReadTable, a: std.mem.Allocator) void {
+        a.free(self.pre);
+        a.free(self.pre_read);
+        for (self.main) |m| a.free(m);
+        a.free(self.main);
+        a.free(self.inter);
+    }
+
+    const Source = union(enum) {
+        /// Whole columns on the evaluation domain, pre ‖ main ‖ inter.
+        whole: []const []const M31,
+        tiling: Tiling,
+    };
+
+    fn get(src: Source, c: *const Component, tree: u8, local: u32, offset: i32) !Resolved {
+        return switch (src) {
+            .whole => |w| .{ .values = w[local + switch (tree) {
+                0 => @as(usize, 0),
+                1 => c.air.n_preprocessed,
+                else => c.air.n_preprocessed + c.air.n_main,
+            }] },
+            .tiling => |t| try t.resolve(t.ctx, tree, local, offset),
+        };
+    }
+
+    fn resolve(self: *ReadTable, c: *const Component, src: Source) !void {
+        for (self.pre, self.pre_read, 0..) |*r, read, i| r.* = if (read) try get(src, c, 0, @intCast(i), 0) else .{ .values = &.{} };
+        for (self.main, self.offsets, 0..) |m, offs, i| for (m, offs) |*r, off| {
+            r.* = try get(src, c, 1, @intCast(i), off);
+        };
+        const n = self.inter.len;
+        for (self.inter, 0..) |*r, k| r.* = try get(src, c, 2, @intCast(k), 0);
+        if (n != 0) for (0..4) |l| {
+            self.inter_prev[l] = try get(src, c, 2, @intCast(n - 4 + l), -1);
+        };
     }
 };
 
 const DomainJob = struct {
     air: ir.Air,
     pubs: []const M31,
-    ctx: Component.DomainCtx,
+    table: *const ReadTable,
+    log_size: u32,
+    eval_log_size: u32,
     powers: []const QM31,
     denominator_inv: [2]M31,
-    log_size: u32,
     values: []QM31,
-    inter: []const []const M31,
     logup: ?Logup,
     shift: QM31,
 
+    const Ctx = struct {
+        job: *const DomainJob,
+        row: usize,
+        pub fn read(self: *const Ctx, tree: ir.Tree, index: u32, offset: i32) M31 {
+            const t = self.job.table;
+            return switch (tree) {
+                .preprocessed => t.pre[index].at(self.row, 0, self.job.log_size, self.job.eval_log_size),
+                .main => t.main[index][std.mem.indexOfScalar(i32, t.offsets[index], offset).?].at(self.row, offset, self.job.log_size, self.job.eval_log_size),
+            };
+        }
+    };
+
     fn run(self: *const DomainJob, scratch: []M31, out: []M31, qscratch: []QM31, start: usize, end: usize) void {
-        var ctx = self.ctx;
         const n_base = self.air.constraints.len;
         const nl = self.air.lookups.len;
         const B = nBatches(self.air);
@@ -448,8 +567,9 @@ const DomainJob = struct {
         const S = qscratch[2 * nl ..][0..B];
         const lout = qscratch[2 * nl + B ..][0..B];
         const vals = qscratch[2 * nl + 2 * B ..][0..MAX_LOOKUP_VALS];
+        const t = self.table;
         for (start..end) |row| {
-            ctx.row = row;
+            const ctx = Ctx{ .job = self, .row = row };
             interp.evalConstraints(M31, self.air, self.pubs, scratch, &ctx, out);
             var combined = QM31.zero();
             for (out, 0..) |c, i| combined = combined.add(self.powers[n - 1 - i].mulM31(c));
@@ -459,11 +579,14 @@ const DomainJob = struct {
                     for (l.vals, 0..) |v, i| vals[i] = QM31.fromBase(scratch[v]);
                     d.* = denominator(l.rel, vals[0..l.vals.len], lu.z, lu.alpha);
                 }
-                for (S, 0..) |*sv, b| sv.* = QM31.fromM31Array(.{ self.inter[4 * b][row], self.inter[4 * b + 1][row], self.inter[4 * b + 2][row], self.inter[4 * b + 3][row] });
-                const prev = utils.offsetBitReversedCircleDomainIndex(row, self.log_size, self.ctx.eval_log_size, -1);
-                const last = 4 * (B - 1);
-                const s_prev = QM31.fromM31Array(.{ self.inter[last][prev], self.inter[last + 1][prev], self.inter[last + 2][prev], self.inter[last + 3][prev] });
-                logupConstraintValues(mults, dens, S, s_prev, self.shift, lout);
+                for (S, 0..) |*sv, b| {
+                    var limbs: [4]M31 = undefined;
+                    for (&limbs, 0..) |*x, l| x.* = t.inter[4 * b + l].at(row, 0, self.log_size, self.eval_log_size);
+                    sv.* = QM31.fromM31Array(limbs);
+                }
+                var prev: [4]M31 = undefined;
+                for (&prev, 0..) |*x, l| x.* = t.inter_prev[l].at(row, -1, self.log_size, self.eval_log_size);
+                logupConstraintValues(mults, dens, S, QM31.fromM31Array(prev), self.shift, lout);
                 for (lout, 0..) |c, b| combined = combined.add(self.powers[n - 1 - (n_base + b)].mul(c));
             }
             self.values[row] = combined.mulM31(self.denominator_inv[row >> @intCast(self.log_size)]);

@@ -890,3 +890,63 @@ test "stwzeva: stwo-zig's C code generator's kernels match the interpreter's com
         }
     }
 }
+
+// ------------------------------------------------------------- row tiles
+
+pub const trace_lease = device_stage.trace_lease;
+
+/// Row tiles of a component's coefficient-only columns for our interpreter's composition
+/// (`component.Tiling`), planned by stwo-zig's `trace_lease.Tiles` from the lowered program's read
+/// sites: the composition then holds about `budget` bytes of expanded columns instead of every
+/// column of the component on the whole evaluation domain.
+pub const TileSource = struct {
+    allocator: std.mem.Allocator,
+    captured: *const composition.Component,
+    budget: usize,
+    trace: ?*const prover_component.Trace = null,
+    tiles: ?trace_lease.Tiles = null,
+
+    pub fn tiling(self: *TileSource) component_mod.Tiling {
+        return .{ .ctx = self, .plan = plan, .load = load, .resolve = resolve, .release = release };
+    }
+
+    fn cast(ctx: *anyopaque) *TileSource {
+        return @ptrCast(@alignCast(ctx));
+    }
+
+    fn plan(ctx: *anyopaque, trace: *const prover_component.Trace) anyerror!?component_mod.TilePlan {
+        const self = cast(ctx);
+        if (trace.polys.items.len < 3) return null;
+        self.trace = trace;
+        self.tiles = try trace_lease.Tiles.plan(self.allocator, trace, self.captured, self.budget, self.budget);
+        const t = &(self.tiles orelse return null);
+        return .{ .tiles = t.tileCount(), .rows = t.tileRows() };
+    }
+
+    fn load(ctx: *anyopaque, tile: usize) anyerror!void {
+        try cast(ctx).tiles.?.load(tile);
+    }
+
+    fn resolve(ctx: *anyopaque, tree: u8, local: u32, offset: i32) anyerror!component_mod.Resolved {
+        const self = cast(ctx);
+        const eval_log = self.captured.evaluation_log_size;
+        const key = try trace_lease.address(self.trace.?, self.captured, tree, local);
+        if (self.tiles.?.view(key, offset)) |v| return .{
+            .values = v.values,
+            .shift = @intCast(eval_log - v.coset_log + 1),
+            .base = v.base,
+            .row_indexed = v.row_indexed,
+        };
+        // Read in place: a column already on its evaluation domain.
+        const column = self.trace.?.polys.items[key.tree][key.column];
+        if (column.values.len == 0) return error.InvalidTraceShape;
+        return .{ .values = column.values, .shift = @intCast(eval_log - column.log_size + 1) };
+    }
+
+    fn release(ctx: *anyopaque) void {
+        const self = cast(ctx);
+        if (self.tiles) |*t| t.deinit();
+        self.tiles = null;
+        self.trace = null;
+    }
+};

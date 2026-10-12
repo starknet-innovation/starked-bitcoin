@@ -8,7 +8,8 @@
 //! - `METAL_PROVE_ONLY=cpu|metal|host`: one prover only, printing the proof's SHA-256 (separate
 //!   processes give separate peak RSS); `host` is the Metal backend with host composition;
 //! - `METAL_PROVE_DISCARD=1` (with `ONLY`): `discard_mains`, the witness is released mid-proof;
-//! - `METAL_PROVE_STORAGE=default|evaluations_only|compact`: the commitment storage policy.
+//! - `METAL_PROVE_STORAGE=default|evaluations_only|compact`: the commitment storage policy;
+//! - `METAL_PROVE_COMPOSITION=interpreter|stwzeva|stwzeva_native`: the CPU prover's composition.
 
 const std = @import("std");
 const sb = @import("starked_bitcoin");
@@ -91,7 +92,7 @@ fn proveOne(mode: Mode, out: std.mem.Allocator, mc: *MetalComposition, cfg: rec.
     var timer = try std.time.Timer.start();
     var counts: sb.air.stwzeva.DeviceCounts = .{};
     const proof = switch (mode) {
-        .cpu => try system.proveOpts(rec.Engine(CpuBackend), a, cfg, ps, mains, .{ .discard_mains = discard, .storage = storage }),
+        .cpu => try system.proveOpts(rec.Engine(CpuBackend), a, cfg, ps, mains, .{ .tile_columns = if (std.process.getEnvVarOwned(std.heap.page_allocator, "METAL_PROVE_TILE_COLUMNS")) |v| try std.fmt.parseInt(usize, v, 10) else |_| 0, .discard_mains = discard, .storage = storage, .composition = if (std.process.getEnvVarOwned(std.heap.page_allocator, "METAL_PROVE_COMPOSITION")) |v| std.meta.stringToEnum(system.Composition, v) orelse .interpreter else |_| .interpreter }),
         .host => try system.proveOpts(rec.Engine(metal_backend.MetalCommitBackend), a, cfg, ps, mains, .{ .discard_mains = discard, .storage = storage }),
         .metal => try system.proveOpts(rec.Engine(metal_backend.MetalCommitBackend), a, cfg, ps, mains, .{ .work_allocator = if (std.process.hasEnvVarConstant("METAL_PROVE_PAGE_ALLOC")) std.heap.page_allocator else null, .composition = .stwzeva, .device = mc.device(ps), .counts = &counts, .discard_mains = discard, .storage = storage }),
     };
