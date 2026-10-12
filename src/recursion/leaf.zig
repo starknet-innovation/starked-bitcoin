@@ -200,10 +200,7 @@ pub fn buildLeafCircuit(
         }
     };
     var proof_vars: pv.PlainProof(Var) = undefined;
-    const res = try glue.run(QM31, &ctx, &prog, ext, Hooks{ .ctx = &ctx, .values = values, .config = config, .airs = airs, .digests = digests, .pre_root = pre_root, .k = k, .proof_vars = &proof_vars, .comp = &comp, .bal = &bal, .stm = &stm, .lh = &lhp, .deep = &deep, .shifts = &shifts, .mnode = &mnode, .channel = &channel, .transcript = transcript });
-    var digest: HashValue(Var) = undefined;
-    for (&digest.words, res) |*w, v| w.* = .newUnsafe(v);
-    try finish(QM31, &ctx, digest);
+    try glue.runOutputs(QM31, &ctx, &prog, ext, Hooks{ .ctx = &ctx, .values = values, .config = config, .airs = airs, .digests = digests, .pre_root = pre_root, .k = k, .proof_vars = &proof_vars, .comp = &comp, .bal = &bal, .stm = &stm, .lh = &lhp, .deep = &deep, .shifts = &shifts, .mnode = &mnode, .channel = &channel, .transcript = transcript });
     return ctx;
 }
 

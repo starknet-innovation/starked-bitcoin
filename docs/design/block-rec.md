@@ -165,8 +165,8 @@ estimated: per-leaf cost is seconds, not the header leaf's 31 s.
   the flat run's 63.8 s; same set (998 coins, `29a42ec2…`, Core's HASH_SERIALIZED).
 - **Block leaf** (`block_rec.zig` `buildLeafCircuit`): the plain verifier over the block system, the
   Lean leaf checks (`Circuit/BlockLeaf.lean`: `αₖ = α₁ᵏ`, BIP30 flag, the seed leaf by the header
-  tree's proven node gadget), `lt30` on the height and input count (`block_leaf_sum`), and the digest of
-  the 51-limb summary.
+  tree's proven node gadget), `lt30` on the height and input count, and the digest of the 51-limb summary
+  (Lean-first since 2026-10-12: `blockLeafOut`, `leafOut_vec`).
 - **Block node** (`block_rec.zig` `buildNodeCircuit`): two children verified in-circuit (stwo-zig's
   recursive verifier, as the header node) and the Lean glue `blockNodeProgram`
   (`Circuit/BlockNode.lean`, `node_sound`): equal sizes, linked heights, equal challenges, summed `s`
@@ -210,17 +210,18 @@ estimated: per-leaf cost is seconds, not the header leaf's 31 s.
   `BlockAnc.blockSys_sat` (the 16-component system projects onto `hashSys`), `block_mtp`,
   `BlockPubOk.mtp`. Epoch 0–3 re-proved through the forest: same set.
 - **Still to build:** a persisted, pinned block VK
-  shipped like the chain VK (today `blockvk.bin` is written by the prover's setup); the Lean statement
-  of the outer verifier's composition is `rng_forest` (BlockTree.lean: linked proven ranges with one
-  challenge join into one proven range); the link from the Zig verifier's checks to its hypotheses is
-  by inspection, as for the header chain's root verifier.
+  shipped like the chain VK (today `blockvk.bin` is written by the prover's setup); the outer verifier's
+  composition is proven end to end, modulo named hypotheses (`forest_sound`, Circuit/BlockRec.lean,
+  VL-NODE, 2026-10-12); the link from `verifyForest`'s checks to its premises is by inspection, as for
+  the header chain's root verifier.
 - **Lean, the tree's semantics** (`Circuit/BlockTree.lean`, standard axioms): `SumOk v` (the 51 limbs
   describe a proven range of `2^ℓ` blocks whose hash and seed roots are the perfect trees over its
   blocks' hashes and seed leaves); `sumOk_leaf` (a proven block whose leaf checks hold, with 16-bit
   hash limbs, has a proven summary), `sumOk_node` (the node glue's facts, `node_sound`, take two proven
   children to a proven output), `epoch_hyps_of_sum` (a proven root summary gives `epoch_systems_core`'s
-  block hypotheses with its partial sum). Trusted wiring: the Zig assembly of the leaf summary from
-  the block's public inputs (`block_rec.zig` `buildLeafCircuit`), as for the header leaf.
+  block hypotheses with its partial sum). The leaf summary's assembly is Lean-first (`blockLeafOut`, 2026-10-12);
+  the tree and the outer verifier are composed end to end in `Circuit/BlockRec.lean` (`tree_sound`,
+  `forest_sound`, VL-NODE, verifier-formalization.md).
 
 ## Following the tip
 

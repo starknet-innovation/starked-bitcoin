@@ -177,12 +177,6 @@ def bDigest : Out (List ℕ) := pubsDigest bKey.next bKey.res bJoin.res
 def blockNodeProgram : Program :=
   ⟨"block_node_glue", bC0.ops ++ bC1.ops ++ bJoin.ops ++ bKey.ops ++ bDigest.ops, bDigest.res⟩
 
-/-- The block leaf's summary checks: hook 0 binds the height and the input count; both below `2^30`;
-the result is the constant 1 (the leaf's block count). -/
-def leafSumOps : List Op := [.hook 0 [] [0, 1]] ++ lt30 2 0 ++ lt30 11 1 ++ [.const 20 1 0 0 0]
-
 def nodeJson : String := blockNodeProgram.toJson
-def leafSumJson : String :=
-  s!"\{\"schema\":\"starked-glue-v1\",\"ops\":[{",".intercalate (leafSumOps.map Op.toJson)}],\"results\":[20]}"
 
 end StarkedAir.Circuit.BlockNode

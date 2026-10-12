@@ -4,10 +4,12 @@
 //! runs the leaf's own checks (`Circuit/BlockLeaf.lean`: `αₖ = α₁ᵏ`, the BIP30 flag; the seed leaf),
 //! and outputs the digest of its range summary (51 limbs, `Circuit/BlockNode.lean`): height, count 1,
 //! partial sum, input count, `(γ, z, α)`, the block hash (a leaf of the header tree) and the seed
-//! leaf `Blake2s(hash ‖ C_h)`. A **block node** verifies two child circuit proofs in-circuit and runs
-//! the Lean node glue (`blockNodeProgram`, `node_sound`): adjacent equal-size ranges with one
-//! challenge, sums added, both roots folded. Leaves and nodes are padded to one shared shape, as in
-//! the header-chain tree (`node.zig`).
+//! leaf `Blake2s(hash ‖ C_h)`; the summary and its digest are the Lean program `blockLeafOut`
+//! (`Circuit/BlockRec.lean`, `leafOut_vec`). A **block node** is the Lean node glue (`blockNodeProgram`)
+//! replayed with stwo-zig's recursive verifier at its two hooks (`node.RecHook`): adjacent equal-size
+//! ranges with one challenge, sums added, both roots folded, child digests recomputed and bound, the key
+//! formed; `block_node_sound`, and end to end `tree_sound`/`forest_sound` (VL-NODE). Leaves and nodes
+//! are padded to one shared shape, as in the header-chain tree (`node.zig`).
 //!
 //! The outer verifier is `block_forest.zig`. The previous-block MTP is bound inside each block proof
 //! (D-043 part 3, option A: the ancestry component, `block/anc.zig`), so the tree carries no times.
@@ -17,6 +19,7 @@ const core = @import("stwo_core");
 const circuit = @import("stwo_circuit_frontend");
 const circuit_cpu = @import("stwo_circuit_cpu_integration");
 const leaf = @import("leaf.zig");
+const node_mod = @import("node.zig");
 const pv = @import("plain_verifier.zig");
 const glue = @import("glue.zig");
 const bl = @import("block_leaf.zig");
@@ -32,13 +35,10 @@ const builder = circuit.builder;
 const finalize = circuit.common.finalize;
 const component_list = circuit.common.component_list;
 const multiverifier = circuit.statements.multiverifier;
-const circuit_statement = circuit.statements.circuit_statement;
 const stark_proof = circuit.stark_verifier.proof;
-const verify_mod = circuit.stark_verifier.verify;
 const Var = builder.Var;
 const Context = builder.Context;
 const NoValue = builder.NoValue;
-const U32Wrapper = builder.wrappers.U32Wrapper;
 const HashValue = builder.blake.HashValue;
 const M31 = core.fields.m31.M31;
 const QM31 = core.fields.qm31.QM31;
@@ -105,20 +105,14 @@ pub fn buildLeafCircuit(gpa: std.mem.Allocator, values: *const pv.PlainProof(QM3
     try bl.leafChecks(&ctx, &pub_vars);
     try bl.leafCtx(&ctx, &pub_vars);
     const seed = try bl.seedLeafVars(&ctx, &pub_vars);
-    const sum_prog = try glue.parse(ctx.scratch(), @embedFile("air:block_leaf_sum"));
-    const one = (try glue.run(QM31, &ctx, &sum_prog, &.{}, InputHooks{ .inputs = &.{ pub_vars[2], pub_vars[coin.PUB_NIN] } }))[0];
-    var s: [NS]Var = undefined;
-    s[0] = pub_vars[2];
-    s[1] = one;
-    @memcpy(s[2..6], pub_vars[coin.PUB_S..][0..4]);
-    s[6] = pub_vars[coin.PUB_NIN];
-    @memcpy(s[7..15], pub_vars[coin.PUB_G..][0..8]);
-    @memcpy(s[15..19], pub_vars[coin.PUB_ALPHA + 4 ..][0..4]);
-    @memcpy(s[HR..][0..16], pub_vars[bs.PUB_HASH..][0..16]);
-    @memcpy(s[SR..][0..16], &seed);
-    var key: [8]U32Wrapper(Var) = undefined;
-    for (&key) |*k| k.* = try builder.wrappers.constU32(QM31, &ctx, 0);
-    try leaf.finish(QM31, &ctx, try leaf.pubsDigestVars(QM31, &ctx, key, &s));
+    // The summary and its digest: the Lean program `blockLeafOut` (Circuit/BlockRec.lean, `leafOut_vec`).
+    // Its hook 0 returns the block's public inputs (the variables the plain verifier bound), then the
+    // seed leaf's 16 limbs.
+    const out_prog = try glue.parse(ctx.scratch(), @embedFile("air:block_leaf_out"));
+    var ins: [bs.N_PUB + 16]Var = undefined;
+    @memcpy(ins[0..bs.N_PUB], &pub_vars);
+    @memcpy(ins[bs.N_PUB..], &seed);
+    try glue.runOutputs(QM31, &ctx, &out_prog, &.{}, InputHooks{ .inputs = &ins });
     return ctx;
 }
 
@@ -145,32 +139,7 @@ pub fn buildNodeCircuit(comptime V: type, gpa: std.mem.Allocator, table: *const 
         for (child.key.words, 0..) |w, k| ext[per * i + NS + k] = w.get();
         for (child.preprocessed_root.words, 0..) |w, k| ext[per * i + NS + 8 + k] = w.get();
     }
-    const Hooks = struct {
-        ctx: *Context(V),
-        table: *const circuit.air_eval.component_table.Table,
-        children: [2]ChildInput(V),
-        shared: *const multiverifier.SharedConfig,
-        pub fn call(self: @This(), id: u32, args: []const Var) ![]const Var {
-            const config: circuit_statement.CircuitConfig = .{
-                .config = self.shared.pcs_config,
-                .preprocessed_column_log_sizes = self.shared.preprocessed_column_log_sizes,
-            };
-            var root: HashValue(Var) = undefined;
-            var digest: HashValue(Var) = undefined;
-            for (&root.words, args[0..8]) |*w, v| w.* = .newUnsafe(v);
-            for (&digest.words, args[8..16]) |*w, v| w.* = .newUnsafe(v);
-            const statement = try circuit_statement.CircuitStatement(V).init(self.ctx, self.table, &config, root, digest);
-            const proof_vars = try stark_proof.guess(V, self.ctx, self.children[id].proof);
-            try verify_mod.verify(V, self.ctx, &proof_vars, self.shared.proof_config, &statement, verify_mod.NoStages{});
-            const out = try self.ctx.scratch().alloc(Var, 8);
-            for (out, statement.circuit_hash.words) |*o, w| o.* = w.get();
-            return out;
-        }
-    };
-    const res = try glue.run(V, &ctx, &prog, ext, Hooks{ .ctx = &ctx, .table = table, .children = children, .shared = shared });
-    var digest: HashValue(Var) = undefined;
-    for (&digest.words, res) |*w, v| w.* = .newUnsafe(v);
-    try leaf.finish(V, &ctx, digest);
+    try glue.runOutputs(V, &ctx, &prog, ext, node_mod.RecHook(V){ .ctx = &ctx, .table = table, .proofs = .{ children[0].proof, children[1].proof }, .shared = shared });
     return ctx;
 }
 
@@ -249,7 +218,7 @@ pub fn proveNode(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const le
     errdefer cp.deinit();
     const node: Proved = .{
         .proof = cp,
-        .key = @import("node.zig").nodeKey(left.proof.circuit_hash, left.key, right.proof.circuit_hash, right.key),
+        .key = node_mod.nodeKey(left.proof.circuit_hash, left.key, right.proof.circuit_hash, right.key),
         .sum = joinSummary(left.sum, right.sum),
     };
     const out = try leaf.verifyCircuit(gpa, tables, &cp);
@@ -319,6 +288,25 @@ pub fn demo(gpa: std.mem.Allocator, dir: []const u8, h: u32) !void {
     std.debug.print("2 block leaves proved and verified in {d:.1}s ({d} + {d} bytes)\n", .{ secs(timer.lap()), leaves[0].proof.bytes.len, leaves[1].proof.bytes.len });
     var node = try proveNode(gpa, a, tables, &shape, &leaves[0], &leaves[1]);
     defer node.proof.deinit();
+    // Tamper (VL-NODE): a wrong child key, or a child summary limb the link checks leave free (the input
+    // count), changes the digest the hook verifies the child proof against: the node circuit is unsatisfied.
+    {
+        var scratch = std.heap.ArenaAllocator.init(gpa);
+        defer scratch.deinit();
+        var values: [2]stark_proof.Proof(QM31) = undefined;
+        const honest = try childInputs(scratch.allocator(), .{ &leaves[0], &leaves[1] }, &values);
+        var bad_key = leaf.zero_key;
+        bad_key[0] ^= 1;
+        var tampered = [_][2]ChildInput(QM31){ honest, honest };
+        tampered[0][1].key = builder.blake.hashValue(QM31, bad_key);
+        tampered[1][0].sum[6] = tampered[1][0].sum[6].add(QM31.one());
+        for (tampered, [_][]const u8{ "a wrong child key", "a wrong child summary limb (input count)" }) |inputs, what| {
+            var c = try buildNodeCircuit(QM31, gpa, &tables.table, inputs, &shape.shared);
+            defer c.deinit();
+            if (try c.isCircuitValid()) return error.TamperAccepted;
+            std.debug.print("node with {s}: circuit unsatisfied (rejected)\n", .{what});
+        }
+    }
     for (&leaves) |*l| l.proof.deinit();
     std.debug.print("node proved and verified in {d:.1}s: blocks {d}..{d}, inputs {d}, proof {d} bytes\n", .{
         secs(timer.lap()), node.sum[0].toU32(), node.sum[0].toU32() + node.sum[1].toU32() - 1, node.sum[6].toU32(), node.proof.bytes.len,

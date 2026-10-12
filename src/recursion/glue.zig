@@ -226,6 +226,15 @@ pub fn run(comptime V: type, ctx: *Context(V), prog: *const Program, ext: []cons
     return res;
 }
 
+/// Replays `prog` as a whole circuit: `run`, then the circuit's outputs are the program's results (the
+/// builder's `setOutputs`: one `out = result + 0` gate per reserved output wire), then `finalize`. This is
+/// how the Lean semantics reads a program (`Program.results` are the circuit's outputs).
+pub fn runOutputs(comptime V: type, ctx: *Context(V), prog: *const Program, ext: []const V, hooks: anytype) !void {
+    const res = try run(V, ctx, prog, ext, hooks);
+    try ctx.setOutputs(res);
+    try ctx.finalize(false);
+}
+
 fn hintValue(comptime V: type, ctx: anytype, rr: anytype, ext: []const V, h: *const Hint) !V {
     if (V != QM31) return .{};
     return switch (h.*) {

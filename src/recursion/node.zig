@@ -9,8 +9,10 @@
 //! circuit hashes), so the root's key commits to the circuit identity of every proof in the
 //! tree; the outer verifier recomputes it from the tree shape (`expectedKey`).
 //!
-//! The link checks are exactly `PubLink` in lean/StarkedAir/Gadgets/Aggregate.lean, and
-//! `combine` is its `combine`; `pub_compose` proves that they preserve validity.
+//! The circuit is the Lean glue program `nodeProgram` (Circuit/Gadgets.lean) replayed by `glue.zig`,
+//! with `RecHook` (the trusted stwo-zig verifier call) at its two hooks: the link checks are exactly
+//! `PubLink` (Aggregate.lean), `combine` is its `combine`, and `node_sound`/`node_compose` prove that
+//! they preserve validity; `HeaderRec.htree_sound` composes the tree end to end (VL-NODE).
 
 const std = @import("std");
 const core = @import("stwo_core");
@@ -175,6 +177,39 @@ pub fn buildNodeCircuitRef(
     return ctx;
 }
 
+/// **The node's verifier hook** (the trusted call, `RecVerifies` in Circuit/BlockRec.lean): hook `i`
+/// of a node glue program (`nodeProgram`, `blockNodeProgram`) has args `root ‖ digest` (8 + 8 u32 wires:
+/// child `i`'s guessed preprocessed root and its recomputed output digest) and outputs child `i`'s
+/// circuit hash (8 u32 wires). It builds stwo-zig's `CircuitStatement` for the shared child config
+/// (its circuit hash is computed in-circuit from that config and the root), guesses child `i`'s proof
+/// and runs `verify`. Everything else in a node circuit is the replayed Lean program.
+pub fn RecHook(comptime V: type) type {
+    return struct {
+        ctx: *Context(V),
+        table: *const circuit.air_eval.component_table.Table,
+        proofs: [2]*const stark_proof.Proof(V),
+        shared: *const multiverifier.SharedConfig,
+
+        pub fn call(self: @This(), id: u32, args: []const Var) ![]const Var {
+            if (id >= self.proofs.len or args.len != 16) return error.GlueHookArity;
+            const config: circuit_statement.CircuitConfig = .{
+                .config = self.shared.pcs_config,
+                .preprocessed_column_log_sizes = self.shared.preprocessed_column_log_sizes,
+            };
+            var root: HashValue(Var) = undefined;
+            var digest: HashValue(Var) = undefined;
+            for (&root.words, args[0..8]) |*w, v| w.* = .newUnsafe(v);
+            for (&digest.words, args[8..16]) |*w, v| w.* = .newUnsafe(v);
+            const statement = try circuit_statement.CircuitStatement(V).init(self.ctx, self.table, &config, root, digest);
+            const proof_vars = try stark_proof.guess(V, self.ctx, self.proofs[id]);
+            try verify_mod.verify(V, self.ctx, &proof_vars, self.shared.proof_config, &statement, verify_mod.NoStages{});
+            const out = try self.ctx.scratch().alloc(Var, 8);
+            for (out, statement.circuit_hash.words) |*o, w| o.* = w.get();
+            return out;
+        }
+    };
+}
+
 /// The finalized (unpadded) node circuit over `children`, whose proofs share `shared`: the
 /// Lean-defined glue program (`nodeProgram`, Circuit/Gadgets.lean) with the children's
 /// verifiers at its hooks.
@@ -196,33 +231,7 @@ pub fn buildNodeCircuit(
         for (child.key.words, 0..) |w, k| ext[per * i + N_PUB + k] = w.get();
         for (child.preprocessed_root.words, 0..) |w, k| ext[per * i + N_PUB + 8 + k] = w.get();
     }
-    const Hooks = struct {
-        ctx: *Context(V),
-        table: *const circuit.air_eval.component_table.Table,
-        children: [2]ChildInput(V),
-        shared: *const multiverifier.SharedConfig,
-        /// Hook `i`: verify child `i` against (preprocessed root, digest); returns its circuit hash.
-        pub fn call(self: @This(), id: u32, args: []const Var) ![]const Var {
-            const config: circuit_statement.CircuitConfig = .{
-                .config = self.shared.pcs_config,
-                .preprocessed_column_log_sizes = self.shared.preprocessed_column_log_sizes,
-            };
-            var root: HashValue(Var) = undefined;
-            var digest: HashValue(Var) = undefined;
-            for (&root.words, args[0..8]) |*w, v| w.* = .newUnsafe(v);
-            for (&digest.words, args[8..16]) |*w, v| w.* = .newUnsafe(v);
-            const statement = try circuit_statement.CircuitStatement(V).init(self.ctx, self.table, &config, root, digest);
-            const proof_vars = try stark_proof.guess(V, self.ctx, self.children[id].proof);
-            try verify_mod.verify(V, self.ctx, &proof_vars, self.shared.proof_config, &statement, verify_mod.NoStages{});
-            const out = try self.ctx.scratch().alloc(Var, 8);
-            for (out, statement.circuit_hash.words) |*o, w| o.* = w.get();
-            return out;
-        }
-    };
-    const res = try glue.run(V, &ctx, &prog, ext, Hooks{ .ctx = &ctx, .table = table, .children = children, .shared = shared });
-    var digest: HashValue(Var) = undefined;
-    for (&digest.words, res) |*w, v| w.* = .newUnsafe(v);
-    try leaf.finish(V, &ctx, digest);
+    try glue.runOutputs(V, &ctx, &prog, ext, RecHook(V){ .ctx = &ctx, .table = table, .proofs = .{ children[0].proof, children[1].proof }, .shared = shared });
     return ctx;
 }
 
@@ -505,6 +514,29 @@ test "two chained segments fold into one node proof; a non-chained pair is rejec
         defer ref.deinit();
         try glue.expectSameCircuit(&ref.circuit, &new.circuit);
         try std.testing.expectEqualSlices(QM31, ref.values(), new.values());
+    }
+
+    // Tamper (VL-NODE): a node whose child key or child public inputs differ from what the child proof
+    // committed to recomputes another digest than the child's output, so the in-circuit verifier at the
+    // hook rejects: the circuit is unsatisfied. (pubs[100] is chainwork, not constrained by the link
+    // checks: only the digest binding catches it.)
+    {
+        var values: [2]stark_proof.Proof(QM31) = undefined;
+        const honest = try childInputs(a, .{ &p0, &p1 }, &values);
+        var bad_key = leaf.zero_key;
+        bad_key[3] ^= 1;
+        var tampered = [_][2]ChildInput(QM31){ honest, honest, honest };
+        tampered[0][0].key = builder.blake.hashValue(QM31, bad_key);
+        tampered[1][1].key = builder.blake.hashValue(QM31, bad_key);
+        tampered[2][1].pubs[100] = tampered[2][1].pubs[100].add(QM31.one());
+        for (&tampered) |inputs| {
+            var c = try buildNodeCircuit(QM31, gpa, &tables.table, inputs, &shape.shared);
+            defer c.deinit();
+            try std.testing.expect(!try c.isCircuitValid());
+        }
+        var c = try buildNodeCircuit(QM31, gpa, &tables.table, honest, &shape.shared);
+        defer c.deinit();
+        try std.testing.expect(try c.isCircuitValid());
     }
 
     var timer = try std.time.Timer.start();
