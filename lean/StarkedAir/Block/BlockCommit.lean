@@ -14,11 +14,11 @@ open Fields (blockBytes slice toksFrom tokOf prefOf locks TxAt)
 
 section System
 
-variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ}
-  (hL : ∀ i < 15, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : L ≤ 23)
+variable {inst : ℕ → Inst} {pub : ℕ → F} {Ls : ℕ → ℕ}
+  (hL : ∀ i < 15, (inst i).logSize = Ls i) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : ∀ i < 15, Ls i ≤ 23)
 include hL hsat hL24
 
-theorem zt_of_locks {r : ℕ} (hr : r < 2 ^ L) (h : locks (inst 1).main r = 0) : (inst 1).main Fields.ZT r = 1 := by
+theorem zt_of_locks {r : ℕ} (hr : r < 2 ^ Ls 1) (h : locks (inst 1).main r = 0) : (inst 1).main Fields.ZT r = 1 := by
   have fs := hash_fields_sat' hL hsat
   have hti : (inst 1).main Fields.TXI r = 0 := by rw [Fields.txi_count fs r hr, h]; simp
   have := Fields.sat fs (Fields.mem_chk (c := .mul (Fields.oneMinus (Fields.k Fields.ZT))
@@ -27,9 +27,9 @@ theorem zt_of_locks {r : ℕ} (hr : r < 2 ^ L) (h : locks (inst 1).main r = 0) :
     Nat.cast_one, zero_sub, mul_neg, mul_one, neg_eq_zero, sub_eq_zero] at this
   exact this.symm
 
-theorem locks_of_zt {r : ℕ} (hr : r < 2 ^ L) (h : (inst 1).main Fields.ZT r = 1) : locks (inst 1).main r = 0 := by
+theorem locks_of_zt {r : ℕ} (hr : r < 2 ^ Ls 1) (h : (inst 1).main Fields.ZT r = 1) : locks (inst 1).main r = 0 := by
   have fs := hash_fields_sat' hL hsat
-  have hP : 2 ^ L < P := by have := hash_rows_lt_P hL24; omega
+  have hP : 2 ^ Ls 1 < P := by have := rows_lt_P hL24 (i := 1) (by decide); omega
   have := Fields.sat fs (Fields.mem_chk (c := .mul (Fields.k Fields.ZT) (Fields.k Fields.TXI))
     (by simp [Fields.chkC, Fields.prevoutC])) hr
   simp only [Expr.eval, Fields.ev_k hr, h, one_mul] at this
@@ -92,7 +92,7 @@ theorem isCommit_iff {cb : Spec.Block.Tx} {o : ℕ} {out : Spec.Block.TxOut} (hg
       interval_cases j <;> rfl
 
 /-- A transaction without the segwit flag has its witness start at its lock time. -/
-theorem wst_noseg (S : Setup inst pub L) {ρ : ℕ} {t : Spec.Block.Tx} (hat : TxAt (inst 1).main (Rb inst pub) S.m ρ t)
+theorem wst_noseg (S : Setup inst pub (Ls 1)) {ρ : ℕ} {t : Spec.Block.Tx} (hat : TxAt (inst 1).main (Rb inst pub) S.m ρ t)
     (hρ : ρ < S.m) (hs : (inst 1).main Fields.SEG ρ ≠ 1) : (inst 1).main Fields.WST ρ = (inst 1).main Fields.START ρ := by
   have fs := hash_fields_sat' hL hsat
   obtain ⟨rh, hrh, ht, hnt, htx⟩ := hat
@@ -106,19 +106,18 @@ theorem wst_noseg (S : Setup inst pub L) {ρ : ℕ} {t : Spec.Block.Tx} (hat : T
 
 /-- **The coinbase's outputs**: output `o` is row `rh + 2 + nI + o`, an output row of transaction 0 whose
 script starts at `SSC`; and every output row of transaction 0 is one of them. -/
-theorem cb_outputs (S : Setup inst pub L) {ρ : ℕ} {t : Spec.Block.Tx} (hρ : ρ < S.m)
+theorem cb_outputs (S : Setup inst pub (Ls 1)) {ρ : ℕ} {t : Spec.Block.Tx} (hρ : ρ < S.m)
     (hl : (inst 1).main Fields.K_LOCK ρ = 1) (hlk : locks (inst 1).main ρ = 0)
     (hat : TxAt (inst 1).main (Rb inst pub) S.m ρ t) :
     ∃ b0, (∀ o < t.vout.length, ∃ out, t.vout[o]? = some out ∧ b0 + o < S.m ∧
         (inst 1).main Fields.K_OUT (b0 + o) = 1 ∧ (inst 1).main Fields.ZT (b0 + o) = 1 ∧
         out.scriptPubKey = slice (Rb inst pub) ((inst 1).main Fields.SSC (b0 + o)).val ((inst 1).main Fields.VAL (b0 + o)).val ∧
         (∀ r < b0 + o, (inst 1).main Fields.ISC r = 1 → ∃ o' < o, r = b0 + o')) ∧
-      ∀ r < 2 ^ L, (inst 1).main Fields.K_OUT r = 1 → (inst 1).main Fields.ZT r = 1 → ∃ o < t.vout.length, r = b0 + o := by
+      ∀ r < 2 ^ Ls 1, (inst 1).main Fields.K_OUT r = 1 → (inst 1).main Fields.ZT r = 1 → ∃ o < t.vout.length, r = b0 + o := by
   have fs := hash_fields_sat' hL hsat
-  have hn0 : 0 < 2 ^ L := by positivity
+  have hn0 : 0 < 2 ^ Ls 1 := by positivity
   have hmn := S.hmn
-  have h24 := rows_le hL hsat hL24
-  norm_num at h24
+  obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
   obtain ⟨rh, hrh, ht, hnt, hvl, h1, hins, hno, hnv, houts, hwit, -, -, hle, hlks⟩ :=
     Fields.tx_rows' fs (Rb inst pub) S.hcs S.hmn S.hpad S.hfit (by norm_num; omega) hat hρ
   set nI := t.vin.length
@@ -141,7 +140,7 @@ theorem cb_outputs (S : Setup inst pub L) {ρ : ℕ} {t : Spec.Block.Tx} (hρ : 
     have := Fields.locks_mono (M := (inst 1).main) hr'rh hl'
     rw [hlks rh le_rfl (by omega), hlk] at this; omega
   subst hrh1
-  have hall : ∀ r < 2 ^ L, (inst 1).main Fields.K_OUT r = 1 → (inst 1).main Fields.ZT r = 1 →
+  have hall : ∀ r < 2 ^ Ls 1, (inst 1).main Fields.K_OUT r = 1 → (inst 1).main Fields.ZT r = 1 →
       ∃ o < nO, r = 1 + 2 + nI + o := by
     intro r hr hk hz
     have hl0 := locks_of_zt hL hsat hL24 hr hz
@@ -190,7 +189,7 @@ theorem cb_outputs (S : Setup inst pub L) {ρ : ℕ} {t : Spec.Block.Tx} (hρ : 
     exact ⟨o', by omega, rfl⟩
 
 /-- The witness start is a row start. -/
-theorem wst_lt (S : Setup inst pub L) {ρ : ℕ} {t : Spec.Block.Tx} (hat : TxAt (inst 1).main (Rb inst pub) S.m ρ t)
+theorem wst_lt (S : Setup inst pub (Ls 1)) {ρ : ℕ} {t : Spec.Block.Tx} (hat : TxAt (inst 1).main (Rb inst pub) S.m ρ t)
     (hρ : ρ < S.m) : ((inst 1).main Fields.WST ρ).val < 2 ^ 25 := by
   have fs := hash_fields_sat' hL hsat
   obtain ⟨rh, hrh, ht, hnt, htx⟩ := hat
@@ -200,10 +199,10 @@ theorem wst_lt (S : Setup inst pub L) {ρ : ℕ} {t : Spec.Block.Tx} (hat : TxAt
   simp only [Option.some.injEq, Prod.mk.injEq] at htx'
   obtain rfl : ρ = r' := by
     have := congrArg List.length htx'.2; simp only [Fields.toksFrom_length] at this; omega
-  rw [hws]; exact Fields.start_lt fs (show rw < 2 ^ L by have := S.hmn; omega)
+  rw [hws]; exact Fields.start_lt fs (show rw < 2 ^ Ls 1 by have := S.hmn; omega)
 
 /-- An output's script lies in the block. -/
-theorem out_fit (S : Setup inst pub L) {r : ℕ} (hr : r < S.m) (hk : (inst 1).main Fields.K_OUT r = 1) :
+theorem out_fit (S : Setup inst pub (Ls 1)) {r : ℕ} (hr : r < S.m) (hk : (inst 1).main Fields.K_OUT r = 1) :
     ((inst 1).main Fields.SSC r).val + ((inst 1).main Fields.VAL r).val ≤ (Rb inst pub).length := by
   have fs := hash_fields_sat' hL hsat
   have hssc := Fields.ssc_val fs (Rb inst pub) S.hcs S.hmn S.hpad S.hfit hr (a := Fields.K_OUT) (Or.inr rfl) hk
@@ -214,8 +213,8 @@ theorem out_fit (S : Setup inst pub L) {r : ℕ} (hr : r < S.m) (hk : (inst 1).m
   omega
 
 /-- The marked rows below `r`, when there is exactly one, at `rs`. -/
-theorem iscN_one {r rs : ℕ} (hr : r ≤ 2 ^ L) (hrs : rs < r) (h1 : (inst 1).main Fields.ISC rs = 1)
-    (hu : ∀ j < 2 ^ L, (inst 1).main Fields.ISC j = 1 → j = rs) : Fields.iscN (inst 1).main r = 1 := by
+theorem iscN_one {r rs : ℕ} (hr : r ≤ 2 ^ Ls 1) (hrs : rs < r) (h1 : (inst 1).main Fields.ISC rs = 1)
+    (hu : ∀ j < 2 ^ Ls 1, (inst 1).main Fields.ISC j = 1 → j = rs) : Fields.iscN (inst 1).main r = 1 := by
   have fs := hash_fields_sat' hL hsat
   unfold Fields.iscN
   rw [Finset.sum_eq_single rs]
@@ -246,7 +245,7 @@ theorem state_of_reg {o : Spec.Sha256.State} {R : Spec.Block.Bytes} {a r : ℕ} 
   ring_nf
 
 /-- **The witness commitment.** -/
-theorem commit_ok (hL8 : 8 ≤ L) (S : Setup inst pub L) {c : Spec.Block.Ctx}
+theorem commit_ok (hL8 : 8 ≤ Ls 7) (S : Setup inst pub (Ls 1)) {c : Spec.Block.Ctx}
     (p6 : pub 6 = if Spec.Block.SEGWIT_HEIGHT ≤ c.height then 1 else 0) :
     (match Spec.Block.commitOf c S.b with
       | some pos => Spec.Block.witCheck S.b pos = none
@@ -254,10 +253,10 @@ theorem commit_ok (hL8 : 8 ≤ L) (S : Setup inst pub L) {c : Spec.Block.Ctx}
   classical
   have fs := hash_fields_sat' hL hsat
   have cs := hash_ctx_sat' hL hsat
-  have h24 := rows_le hL hsat hL24
-  norm_num at h24
+  obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
   have h256 := ctx_sat8 hL hsat hL24 hL8
-  have hn0 : 0 < 2 ^ L := by positivity
+  have hn0 : 0 < 2 ^ Ls 1 := by positivity
+  have hn7 : 0 < 2 ^ Ls 7 := by positivity
   have hmn := S.hmn
   have hlenR := len_R hL hsat hL24 (inst := inst) (pub := pub)
   obtain ⟨ρ0, t0, inp, hρ0, hl0, hlk0, hget0, hat0, hta, hsg, hws, hst, hv0, -⟩ := cb_facts hL hsat hL24 hL8 S
@@ -266,7 +265,7 @@ theorem commit_ok (hL8 : 8 ≤ L) (S : Setup inst pub L) {c : Spec.Block.Ctx}
     match h : S.b.txs, hget0 with
     | a :: _, hg => simp at hg; simp [hg]
   obtain ⟨b0, hout, hall⟩ := cb_outputs hL hsat hL24 S hρ0 hl0 hlk0 hat0
-  obtain ⟨g1, g2, g3, -⟩ := Ctx.glob_eqs cs hn0
+  obtain ⟨g1, g2, g3, -⟩ := Ctx.glob_eqs cs hn7
   obtain ⟨-, hnseg, hhasc⟩ := tot_link hL hsat hL24
   obtain ⟨hb01, hconst, hiff⟩ := Fields.hasc_iff fs hn0 (by omega)
   have hhc : (inst 7).main Ctx.HC 0 = pub 6 * (inst 1).main Fields.HASC 0 := by
@@ -304,7 +303,7 @@ theorem commit_ok (hL8 : 8 ≤ L) (S : Setup inst pub L) {c : Spec.Block.Ctx}
     rw [if_pos (show c.height ≥ Spec.Block.SEGWIT_HEIGHT from hsw)]
     rcases hb01 with h0 | h1
     · -- no marked output: no commitment, and no witness
-      have hno : ∀ r < 2 ^ L, (inst 1).main Fields.ISC r = 0 := by
+      have hno : ∀ r < 2 ^ Ls 1, (inst 1).main Fields.ISC r = 0 := by
         intro r hr
         rcases Fields.isc_bool fs hr with g | g
         · exact g
@@ -326,7 +325,7 @@ theorem commit_ok (hL8 : 8 ≤ L) (S : Setup inst pub L) {c : Spec.Block.Ctx}
       obtain ⟨rs, hrs, hisc⟩ := hiff.mp h1
       obtain ⟨hk, hz, -⟩ := Fields.isc_out fs hrs hisc
       obtain ⟨os, hos, rfl⟩ := hall _ hrs hk hz
-      have hu : ∀ j < 2 ^ L, (inst 1).main Fields.ISC j = 1 → j = b0 + os := fun j hj g =>
+      have hu : ∀ j < 2 ^ Ls 1, (inst 1).main Fields.ISC j = 1 → j = b0 + os := fun j hj g =>
         Fields.isc_unique fs hn0 (by omega) hj hrs g hisc
       obtain ⟨out, hget, hrm, -, -, hsc, -⟩ := hout os hos
       have hfit' := out_fit hL hsat hL24 S hrm hk

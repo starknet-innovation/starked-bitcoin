@@ -17,12 +17,12 @@ theorem sumSig_toksFrom (M : ℕ → ℕ → F) (R : Spec.Block.Bytes) (m : ℕ)
 
 section System
 
-variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ}
-  (hL : ∀ i < 15, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : L ≤ 23)
+variable {inst : ℕ → Inst} {pub : ℕ → F} {Ls : ℕ → ℕ}
+  (hL : ∀ i < 15, (inst i).logSize = Ls i) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : ∀ i < 15, Ls i ≤ 23)
 include hL hsat hL24
 
 /-- The rows' tokens serialize to the block's bytes. -/
-theorem toks_bytes (S : Setup inst pub L) : Spec.Block.toksBytes (toksFrom (inst 1).main (Rb inst pub) S.m 0) = Rb inst pub := by
+theorem toks_bytes (S : Setup inst pub (Ls 1)) : Spec.Block.toksBytes (toksFrom (inst 1).main (Rb inst pub) S.m 0) = Rb inst pub := by
   have := S.cat S.m le_rfl
   rw [S.hSm, Fields.slice_zero] at this
   simpa [toksFrom, Spec.Block.toksBytes, List.flatMap_map] using this
@@ -30,21 +30,20 @@ theorem toks_bytes (S : Setup inst pub L) : Spec.Block.toksBytes (toksFrom (inst
 theorem len_pub : pub 0 = (((Rb inst pub).length : ℕ) : F) := by
   rw [Fields.blockBytes_length, ZMod.natCast_zmod_val]
 
-theorem ctx_seg_a0 (S : Setup inst pub L) :
+theorem ctx_seg_a0 (S : Setup inst pub (Ls 1)) :
     ((inst 7).main Ctx.SEG0 0 = 0 ∨ (inst 7).main Ctx.SEG0 0 = 1) ∧ ((inst 7).main Ctx.A0 0).val < 2 ^ 25 := by
   have fs := hash_fields_sat' hL hsat
   obtain ⟨ρ, t, hρ, -, -, -, hat, hta, hsg, -⟩ := tx0 hL hsat hL24 S
   obtain ⟨rh, hrh, ht, hnt, -⟩ := Fields.tx_rows fs (Rb inst pub) S.hcs S.hmn S.hpad S.hfit hat hρ
   obtain ⟨hta', -⟩ := Fields.head_cols fs (Rb inst pub) S.hcs S.hmn S.hpad S.hfit S.hnp (hmk_R hL hsat hL24) hat hρ hrh ht hnt
-  refine ⟨by rw [← hsg]; exact Fields.seg_bool fs (show ρ < 2 ^ L by have := S.hmn; omega), ?_⟩
-  rw [← hta, hta']; exact Fields.start_lt fs (show rh < 2 ^ L by have := S.hmn; omega)
+  refine ⟨by rw [← hsg]; exact Fields.seg_bool fs (show ρ < 2 ^ Ls 1 by have := S.hmn; omega), ?_⟩
+  rw [← hta, hta']; exact Fields.start_lt fs (show rh < 2 ^ Ls 1 by have := S.hmn; omega)
 
 /-- **The weight limit.** -/
-theorem weight_ok (hL8 : 8 ≤ L) (S : Setup inst pub L) : Spec.Block.weight S.b ≤ Spec.Block.MAX_BLOCK_WEIGHT := by
+theorem weight_ok (hL8 : 8 ≤ Ls 7) (S : Setup inst pub (Ls 1)) : Spec.Block.weight S.b ≤ Spec.Block.MAX_BLOCK_WEIGHT := by
   have fs := hash_fields_sat' hL hsat
   have cs := hash_ctx_sat' hL hsat
-  have h24 := rows_le hL hsat hL24
-  norm_num at h24
+  obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
   have h256 := ctx_sat8 hL hsat hL24 hL8
   obtain ⟨hsw, hw⟩ := Spec.Block.toksBlock_weight S.htok
   rw [toks_bytes hL hsat hL24 S] at hsw hw
@@ -60,33 +59,32 @@ theorem weight_ok (hL8 : 8 ≤ L) (S : Setup inst pub L) : Spec.Block.weight S.b
   unfold Spec.Block.MAX_BLOCK_WEIGHT; omega
 
 /-- **Walker scripts are the fields' scripts**: a first row's remaining length is 1 to `2^25`. -/
-theorem walk_rem (S : Setup inst pub L) : ∀ r < 2 ^ L, (inst 6).main Walk.FS r = 1 →
+theorem walk_rem (S : Setup inst pub (Ls 1)) : ∀ r < 2 ^ Ls 6, (inst 6).main Walk.FS r = 1 →
     1 ≤ ((inst 6).main Walk.REM r).val ∧ ((inst 6).main Walk.REM r).val ≤ 2 ^ 25 := by
   intro r hr hf
   have fs := hash_fields_sat' hL hsat
   have hs := site_mem hL (i := 6) (by decide) hr (k := 0) (by simp [hashSys, Walk.walk, Walk.lookups])
-  have hm : siteMult hashSys inst pub (6, r, 0) = -1 := by rw [(script_mults hL hsat hL24 hr).2, hf]
+  have hm : siteMult hashSys inst pub (6, r, 0) = -1 := by rw [script_mult6 hL hsat hL24 hr, hf]
   obtain ⟨i', r', k', hr', hy, hsm, hsv⟩ := link hL hsat hL24 hs rfl hm
   have e : siteRel hashSys (6, r, 0) = 11 := rfl
   rw [e, yt] at hy
   obtain ⟨rfl, rfl⟩ : i' = 1 ∧ k' = 30 := by omega
-  rw [(script_mults hL hsat hL24 hr').1] at hsm
-  rw [(script_vals hL hsat hL24 hr').1, (script_vals hL hsat hL24 hr).2] at hsv
+  rw [script_mult1 hL hsat hL24 hr'] at hsm
+  rw [script_vals1 hL hsat hL24 hr', script_vals6 hL hsat hL24 hr] at hsv
   simp only [List.cons.injEq, and_true] at hsv
   rw [← hsv.2]
   have := Fields.script_val fs (Rb inst pub) S.hcs S.hmn S.hpad S.hfit hr' hsm
   unfold Fields.MAXS at this; omega
 
 /-- **The sigop limit.** -/
-theorem sigops_ok (hL8 : 8 ≤ L) (S : Setup inst pub L) :
+theorem sigops_ok (hL8 : 8 ≤ Ls 7) (S : Setup inst pub (Ls 1)) :
     (S.b.txs.map Spec.Block.legacySigOps).sum * 4 ≤ Spec.Block.MAX_BLOCK_SIGOPS_COST := by
   classical
   have fs := hash_fields_sat' hL hsat
   have cs := hash_ctx_sat' hL hsat
-  have ws : ∀ r < 2 ^ L, ∀ c ∈ Walk.constraints, c.eval (2 ^ L) Walk.preCols pub (inst 6).main r = 0 := by
+  have ws : ∀ r < 2 ^ Ls 6, ∀ c ∈ Walk.constraints, c.eval (2 ^ Ls 6) Walk.preCols pub (inst 6).main r = 0 := by
     have := hsat.1 6 (by decide); rw [hL 6 (by decide)] at this; exact this
-  have h24 := rows_le hL hsat hL24
-  norm_num at h24
+  obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
   have h256 := ctx_sat8 hL hsat hL24 hL8
   have hlen := len_R hL hsat hL24 (inst := inst) (pub := pub)
   set R := Rb inst pub
@@ -97,11 +95,11 @@ theorem sigops_ok (hL8 : 8 ≤ L) (S : Setup inst pub L) :
   have hss := script_sum hL hsat hL24 (fun v => Spec.Block.sigOps (slice R (v.getD 0 0).val (v.getD 1 0).val))
   simp only [List.getD_cons_zero, List.getD_cons_succ] at hss
   -- the fields' sum is the tokens'
-  have hfs : ∑ r ∈ (Finset.range (2 ^ L)).filter (fun r => Fields.smult (inst 1).main r = 1),
+  have hfs : ∑ r ∈ (Finset.range (2 ^ Ls 1)).filter (fun r => Fields.smult (inst 1).main r = 1),
       Spec.Block.sigOps (slice R ((inst 1).main Fields.SSC r).val ((inst 1).main Fields.VAL r).val) =
       Spec.Block.sumSig (toksFrom (inst 1).main R S.m 0) := by
-    rw [Finset.sum_filter, sumSig_toksFrom, ← Finset.sum_range_add_sum_Ico _ (show S.m ≤ 2 ^ L by have := S.hmn; omega)]
-    have hz : ∑ r ∈ Finset.Ico S.m (2 ^ L), (if Fields.smult (inst 1).main r = 1 then
+    rw [Finset.sum_filter, sumSig_toksFrom, ← Finset.sum_range_add_sum_Ico _ (show S.m ≤ 2 ^ Ls 1 by have := S.hmn; omega)]
+    have hz : ∑ r ∈ Finset.Ico S.m (2 ^ Ls 1), (if Fields.smult (inst 1).main r = 1 then
         Spec.Block.sigOps (slice R ((inst 1).main Fields.SSC r).val ((inst 1).main Fields.VAL r).val) else 0) = 0 := by
       apply Finset.sum_eq_zero
       intro r hr

@@ -36,13 +36,13 @@ theorem max_money_eq : (Spec.Block.MAX_MONEY : ℤ) = ((Fields.MAXHI * 2 ^ 24 + 
 
 section System
 
-variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ}
-  (hL : ∀ i < 15, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : L ≤ 23)
+variable {inst : ℕ → Inst} {pub : ℕ → F} {Ls : ℕ → ℕ}
+  (hL : ∀ i < 15, (inst i).logSize = Ls i) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : ∀ i < 15, Ls i ≤ 23)
 include hL hsat hL24
 
 /-- **An output row's amount is its output's value.** -/
-theorem out_amount (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
-    (hon : ∀ j < 2 ^ L, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
+theorem out_amount (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
+    (hon : ∀ j < 2 ^ Ls 14, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
     (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
     {parts : List (List Spec.Block.Tok)} (hf : List.Forall₂ Spec.Block.IoTx S.b.txs parts)
     (htg : Spec.Block.tagged 0 (Fields.toksFrom (inst 1).main (Rb inst pub) S.m 0) = Spec.Block.tagParts 0 parts)
@@ -53,8 +53,8 @@ theorem out_amount (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
       0 ≤ o.value ∧ o.value < 2 ^ 51 ∧
       ((((inst 14).main Coin.VH j).val * 2 ^ 24 + ((inst 14).main Coin.VL j).val : ℕ) : ℤ) = o.value := by
   have fs := fields_sat' hL hsat hL24
-  have hj2 : j < 2 ^ L := by omega
-  have hLb : 2 ^ L ≤ 2 ^ 23 := Nat.pow_le_pow_right (by norm_num) hL24
+  have hj2 : j < 2 ^ Ls 14 := by omega
+  obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
   obtain ⟨t0, q0, tx0, htx0, -, hjq0, hq0, hko0, -⟩ := coin_row_tx hL hsat hL24 S he hon hlen hst hf htg hj
   obtain ⟨hpl, hpe⟩ := part_len hf htx
   obtain ⟨hpl0, hpe0⟩ := part_len hf htx0
@@ -65,12 +65,12 @@ theorem out_amount (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
   set ρ := (ioRows inst S.m).getD j 0 with hρdef
   have hρ : ρ ∈ ioRows inst S.m := by rw [hρdef, List.getD_eq_getElem _ _ (by omega)]; exact List.getElem_mem _
   obtain ⟨hρm, -⟩ := mem_ioRows.mp hρ
-  have hρn : ρ < 2 ^ L := by have := S.hmn; omega
+  have hρn : ρ < 2 ^ Ls 1 := by have := S.hmn; omega
   obtain ⟨hkout, hT⟩ := (coin_row_tok hL hsat hL24 S he hon hlen hst hj).1 hko
-  have hVL : (inst 14).main Coin.VL j = Fields.vlo.eval (2 ^ L) Fields.preCols pub (inst 1).main ρ := by
+  have hVL : (inst 14).main Coin.VL j = Fields.vlo.eval (2 ^ Ls 1) Fields.preCols pub (inst 1).main ρ := by
     have := congrArg (fun l => l.getD 5 0) hT
     rw [hρdef, List.getD_eq_getElem?_getD]; simpa [cOut, fOut] using this
-  have hVH : (inst 14).main Coin.VH j = Fields.vhi.eval (2 ^ L) Fields.preCols pub (inst 1).main ρ := by
+  have hVH : (inst 14).main Coin.VH j = Fields.vhi.eval (2 ^ Ls 1) Fields.preCols pub (inst 1).main ρ := by
     have := congrArg (fun l => l.getD 6 0) hT
     rw [hρdef, List.getD_eq_getElem?_getD]; simpa [cOut, fOut] using this
   obtain ⟨hv51, hlo, hhi, hvsum⟩ := Fields.out_value fs (Rb inst pub) (hby_R hL hsat hL24 S)
@@ -113,7 +113,7 @@ theorem amount_bytes {b : ℕ → ℕ} (hb : ∀ i, b i < 256)
 /-- **An input row's amount is its claim's.** For input row `j` with claim `c` (its undo record), the
 amount limbs are the claim's first seven `serTxOut` bytes; with the claimed amount (the first 8 bytes)
 within `MAX_MONEY`, they are in range and sum to it. -/
-theorem in_amount {j : ℕ} (hj : j < 2 ^ L) {c : Claim} (hc : ClaimAt inst pub L j c) (h8 : 8 ≤ c.ser.length)
+theorem in_amount {j : ℕ} (hj : j < 2 ^ Ls 14) {c : Claim} (hc : ClaimAt inst pub (Ls 13) j c) (h8 : 8 ≤ c.ser.length)
     (hmax : Spec.Block.le (c.ser.take 8) ≤ Fields.MAXHI * 2 ^ 24 + Fields.MAXLO) :
     ((inst 14).main Coin.VL j).val < 2 ^ 24 ∧ ((inst 14).main Coin.VH j).val < 2 ^ 27 ∧
       ((inst 14).main Coin.VH j).val * 2 ^ 24 + ((inst 14).main Coin.VL j).val = Spec.Block.le (c.ser.take 8) := by
@@ -158,13 +158,13 @@ theorem in_amount {j : ℕ} (hj : j < 2 ^ L) {c : Claim} (hc : ClaimAt inst pub 
 
 /-- **An input's claim is mature.** With the claimed code `code` (below `2^30`, as for any real coin),
 a coinbase claim (`code` odd) was created at least 100 blocks before height `h`. -/
-theorem in_maturity {j : ℕ} (hj : j < 2 ^ L) (hki : (inst 14).main Coin.KI j = 1) {h code : ℕ}
+theorem in_maturity {j : ℕ} (hj : j < 2 ^ Ls 14) (hki : (inst 14).main Coin.KI j = 1) {h code : ℕ}
     (hp2 : pub 2 = (h : F)) (hh : h < 2 ^ 23)
     (hcode : (inst 14).main Coin.CLO j + 65536 * (inst 14).main Coin.CHI j = (code : F)) (hc : code < 2 ^ 30) :
     ¬ (code % 2 = 1 ∧ h < code / 2 + Spec.Coins.COINBASE_MATURITY) := by
   have cs := coin_sat hL hsat hL24
   obtain ⟨e1, e2, -, -, e5, -⟩ := Coin.in_spec cs hj hki
-  have ek : (Coin.k Coin.KI).eval (2 ^ L) Coin.preCols pub (inst 14).main j = 1 := by rw [Coin.ev_k hj]; exact hki
+  have ek : (Coin.k Coin.KI).eval (2 ^ Ls 14) Coin.preCols pub (inst 14).main j = 1 := by rw [Coin.ev_k hj]; exact hki
   have hb : ∀ i < 3, ((inst 14).main (Coin.HB i) j).val < 256 := by
     intro i hi
     interval_cases i
@@ -188,7 +188,7 @@ theorem in_maturity {j : ℕ} (hj : j < 2 ^ L) (hki : (inst 14).main Coin.KI j =
     · rw [hsplit, h0] at hodd; simp at hodd
     · exact h1
   rw [hsplit, if_pos hc1] at hlt
-  have ek2 : (Expr.mul (Coin.k Coin.KI) (Coin.k Coin.CBC)).eval (2 ^ L) Coin.preCols pub (inst 14).main j = 1 := by
+  have ek2 : (Expr.mul (Coin.k Coin.KI) (Coin.k Coin.CBC)).eval (2 ^ Ls 14) Coin.preCols pub (inst 14).main j = 1 := by
     simp [Expr.eval, Coin.ev_k hj, hki, hc1]
   have hm : ∀ i < 3, ((inst 14).main (Coin.MB i) j).val < 256 := by
     intro i hi
@@ -208,8 +208,8 @@ theorem in_maturity {j : ℕ} (hj : j < 2 ^ L) (hki : (inst 14).main Coin.KI j =
 /-- **A transaction's coin rows.** For transaction `t ≥ 1`, its rows `pre t + q` (`q` below its token
 count) are in use, inputs first then outputs; with every transaction's inputs and outputs nonempty, the
 row before is not an input and the row after is not an output. -/
-theorem tx_rows (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
-    (hon : ∀ j < 2 ^ L, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
+theorem tx_rows (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
+    (hon : ∀ j < 2 ^ Ls 14, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
     (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
     {parts : List (List Spec.Block.Tok)} (hf : List.Forall₂ Spec.Block.IoTx S.b.txs parts)
     (htg : Spec.Block.tagged 0 (Fields.toksFrom (inst 1).main (Rb inst pub) S.m 0) = Spec.Block.tagParts 0 parts)
@@ -220,7 +220,7 @@ theorem tx_rows (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
       ((inst 14).main Coin.KI (j0 + q) = 1 ↔ q < tx.vin.length) ∧
       ((inst 14).main Coin.KO (j0 + q) = 1 ↔ tx.vin.length ≤ q)) ∧
     1 ≤ j0 ∧ (inst 14).main Coin.KI (j0 - 1) = 0 ∧
-    j0 + (tx.vin.length + tx.vout.length) < 2 ^ L ∧
+    j0 + (tx.vin.length + tx.vout.length) < 2 ^ Ls 14 ∧
       (inst 14).main Coin.KO (j0 + (tx.vin.length + tx.vout.length)) = 0 := by
   intro j0
   have cs := coin_sat hL hsat hL24
@@ -261,7 +261,7 @@ theorem tx_rows (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
       omega
     have hq : txp.vin.length + txp.vout.length - 1 < txp.vin.length + txp.vout.length := by omega
     have hk := (coin_kind_pos hL hsat hL24 S he hon hlen hst hf htg (j := j0 - 1) (by omega) htxp hjp hq).2.1
-    have hb := Coin.bool_col cs (c := Coin.KI) (by simp) (show j0 - 1 < 2 ^ L by omega)
+    have hb := Coin.bool_col cs (c := Coin.KI) (by simp) (show j0 - 1 < 2 ^ Ls 14 by omega)
     rcases hb with h0 | h1
     · exact h0
     · exact absurd (hk.mp h1).1 (by omega)
@@ -276,11 +276,11 @@ theorem tx_rows (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
       have hvi : 0 < txn.vin.length := List.length_pos_iff.mpr (hne _ _ htxn).1
       have hk := (coin_kind_pos hL hsat hL24 S he hon hlen hst hf htg (j := j0 + (tx.vin.length + tx.vout.length))
         hlast htxn (by omega) (q := 0) (by omega)).1
-      have hb := Coin.bool_col cs (c := Coin.KO) (by simp) (show j0 + (tx.vin.length + tx.vout.length) < 2 ^ L by omega)
+      have hb := Coin.bool_col cs (c := Coin.KO) (by simp) (show j0 + (tx.vin.length + tx.vout.length) < 2 ^ Ls 14 by omega)
       rcases hb with h0 | h1
       · exact h0
       · exact absurd (hk.mp h1) (by omega)
-    · have hr : j0 + (tx.vin.length + tx.vout.length) < 2 ^ L := by omega
+    · have hr : j0 + (tx.vin.length + tx.vout.length) < 2 ^ Ls 14 := by omega
       have hoff : Coin.onV (inst 14).main (j0 + (tx.vin.length + tx.vout.length)) ≠ 1 := fun h => hlast ((hon _ hr).mp h)
       rcases Coin.kinds cs hr with ⟨-, -, -, h⟩ | ⟨-, -, -, h⟩ | ⟨-, -, -, h⟩ | ⟨h, -⟩
       · exact absurd h hoff
@@ -289,11 +289,11 @@ theorem tx_rows (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
       · exact h
 
 /-- An input row's range-checked bytes: the normalized sum's and the `MAX_MONEY` comparator's. -/
-theorem in_row_bytes {r : ℕ} (hr : r + 1 < 2 ^ L) (hki : (inst 14).main Coin.KI r = 1) :
+theorem in_row_bytes {r : ℕ} (hr : r + 1 < 2 ^ Ls 14) (hki : (inst 14).main Coin.KI r = 1) :
     (∀ i < 3, ((inst 14).main (Coin.NB i) r).val < 256) ∧ (∀ i < 3, ((inst 14).main (Coin.Q1 i) r).val < 256) ∧
       (∀ i < 4, ((inst 14).main (Coin.H1 i) r).val < 256) ∧ ((inst 14).main Coin.H1C r).val < 256 := by
   have cs := coin_sat hL hsat hL24
-  have hr' : r < 2 ^ L := by omega
+  have hr' : r < 2 ^ Ls 14 := by omega
   have hko : (inst 14).main Coin.KO r = 0 := by
     rcases Coin.kinds cs hr' with h | h | h | h <;> simp_all
   have e1 := Coin.sat cs (Coin.mem_amount (c := .sub (Coin.k Coin.MNB) (.add (Coin.k Coin.KI) (Coin.k Coin.KO)))
@@ -313,7 +313,7 @@ theorem in_row_bytes {r : ℕ} (hr : r + 1 < 2 ^ L) (hki : (inst 14).main Coin.K
 
 /-- **A transaction's input sums.** Over its input rows `j0 + k` (the row before not an input), the running
 input sum is the claimed amounts' prefix sum, normalized and within `MAX_MONEY`. -/
-theorem in_sums {j0 nin : ℕ} (hj0 : 1 ≤ j0) (hn : j0 + nin < 2 ^ L)
+theorem in_sums {j0 nin : ℕ} (hj0 : 1 ≤ j0) (hn : j0 + nin < 2 ^ Ls 14)
     (hki : ∀ k < nin, (inst 14).main Coin.KI (j0 + k) = 1) (hprev : (inst 14).main Coin.KI (j0 - 1) = 0)
     (a : ℕ → ℕ) (ha : ∀ k < nin, ((inst 14).main Coin.VL (j0 + k)).val < 2 ^ 24 ∧
       ((inst 14).main Coin.VH (j0 + k)).val < 2 ^ 27 ∧
@@ -329,7 +329,7 @@ theorem in_sums {j0 nin : ℕ} (hj0 : 1 ≤ j0) (hn : j0 + nin < 2 ^ L)
     intro hk
     obtain ⟨nb, q1, h1, h1c⟩ := in_row_bytes hL hsat hL24 (r := j0 + 0) (by omega) (hki 0 hk)
     obtain ⟨vl, vh, vs⟩ := ha 0 hk
-    have hpv : Coin.prevV (inst 14).main (2 ^ L) Coin.KI (j0 + 0) = 0 := by
+    have hpv : Coin.prevV (inst 14).main (2 ^ Ls 14) Coin.KI (j0 + 0) = 0 := by
       unfold Coin.prevV; rw [if_neg (by omega)]; simpa using hprev
     obtain ⟨i1, i2, i3, i4⟩ := Coin.in_nat cs (by omega) (hki 0 hk) (by rw [hpv]; simp) nb q1 h1 h1c vl vh
     rw [hpv, if_neg (by simp)] at i3
@@ -342,9 +342,9 @@ theorem in_sums {j0 nin : ℕ} (hj0 : 1 ≤ j0) (hn : j0 + nin < 2 ^ L)
     obtain ⟨p1, p2, p3, -⟩ := ih (by omega)
     obtain ⟨nb, q1, h1, h1c⟩ := in_row_bytes hL hsat hL24 (r := j0 + (k + 1)) (by omega) (hki (k + 1) hk)
     obtain ⟨vl, vh, vs⟩ := ha (k + 1) hk
-    have hpk : ∀ c, Coin.prevV (inst 14).main (2 ^ L) c (j0 + (k + 1)) = (inst 14).main c (j0 + k) := by
+    have hpk : ∀ c, Coin.prevV (inst 14).main (2 ^ Ls 14) c (j0 + (k + 1)) = (inst 14).main c (j0 + k) := by
       intro c; unfold Coin.prevV; rw [if_neg (by omega)]; rfl
-    have hpv : Coin.prevV (inst 14).main (2 ^ L) Coin.KI (j0 + (k + 1)) = 1 := by rw [hpk]; exact hki k (by omega)
+    have hpv : Coin.prevV (inst 14).main (2 ^ Ls 14) Coin.KI (j0 + (k + 1)) = 1 := by rw [hpk]; exact hki k (by omega)
     obtain ⟨i1, i2, i3, i4⟩ := Coin.in_nat cs (by omega) (hki (k + 1) hk)
       (fun _ => by rw [hpk, hpk]; exact ⟨p1, p2⟩) nb q1 h1 h1c vl vh
     rw [if_pos hpv, hpk, hpk] at i3
@@ -353,7 +353,7 @@ theorem in_sums {j0 nin : ℕ} (hj0 : 1 ≤ j0) (hn : j0 + nin < 2 ^ L)
     · rw [Finset.sum_range_succ _ (k + 1), ← vs, ← p3, ← i3]; exact i4
 
 /-- An output row's normalized output sum is range-checked. -/
-theorem out_row_bytes {r : ℕ} (hr : r < 2 ^ L) (hko : (inst 14).main Coin.KO r = 1) :
+theorem out_row_bytes {r : ℕ} (hr : r < 2 ^ Ls 14) (hko : (inst 14).main Coin.KO r = 1) :
     ∀ i < 3, ((inst 14).main (Coin.NB i) r).val < 256 := by
   have cs := coin_sat hL hsat hL24
   have hki : (inst 14).main Coin.KI r = 0 := by
@@ -374,7 +374,7 @@ theorem hi_le_of {hi lo : ℕ} (h : hi * 2 ^ 24 + lo ≤ Fields.MAXHI * 2 ^ 24 +
 
 /-- **A transaction's output sums.** Over its output rows `j1 + q` (the row before not an output), the
 input sum is carried, and the running output sum is the outputs' prefix sum, normalized. -/
-theorem out_sums {j1 nout : ℕ} (hj1 : 1 ≤ j1) (hn : j1 + nout < 2 ^ L)
+theorem out_sums {j1 nout : ℕ} (hj1 : 1 ≤ j1) (hn : j1 + nout < 2 ^ Ls 14)
     (hko : ∀ q < nout, (inst 14).main Coin.KO (j1 + q) = 1) (hprev : (inst 14).main Coin.KO (j1 - 1) = 0)
     (v : ℕ → ℕ) (hv : ∀ q < nout, ((inst 14).main Coin.VL (j1 + q)).val < 2 ^ 24 ∧
       ((inst 14).main Coin.VH (j1 + q)).val < 2 ^ 27 ∧
@@ -393,9 +393,9 @@ theorem out_sums {j1 nout : ℕ} (hj1 : 1 ≤ j1) (hn : j1 + nout < 2 ^ L)
   | zero =>
     intro hq
     obtain ⟨vl, vh, vs⟩ := hv 0 hq
-    have hpk : ∀ c, Coin.prevV (inst 14).main (2 ^ L) c (j1 + 0) = (inst 14).main c (j1 - 1) := by
+    have hpk : ∀ c, Coin.prevV (inst 14).main (2 ^ Ls 14) c (j1 + 0) = (inst 14).main c (j1 - 1) := by
       intro c; unfold Coin.prevV; rw [if_neg (by omega)]; rfl
-    have hpv : Coin.prevV (inst 14).main (2 ^ L) Coin.KO (j1 + 0) = 0 := by rw [hpk]; exact hprev
+    have hpv : Coin.prevV (inst 14).main (2 ^ Ls 14) Coin.KO (j1 + 0) = 0 := by rw [hpk]; exact hprev
     obtain ⟨o1, o2, o3, o4⟩ := Coin.out_nat cs (by omega) (hko 0 hq) (by rw [hpv]; simp)
       (out_row_bytes hL hsat hL24 (by omega) (hko 0 hq)) vl vh
     rw [hpv, if_neg (by simp), zero_add] at o4
@@ -406,9 +406,9 @@ theorem out_sums {j1 nout : ℕ} (hj1 : 1 ≤ j1) (hn : j1 + nout < 2 ^ L)
     intro hq
     obtain ⟨p1, p2, p3, p4, p5⟩ := ih (by omega)
     obtain ⟨vl, vh, vs⟩ := hv (q + 1) hq
-    have hpk : ∀ c, Coin.prevV (inst 14).main (2 ^ L) c (j1 + (q + 1)) = (inst 14).main c (j1 + q) := by
+    have hpk : ∀ c, Coin.prevV (inst 14).main (2 ^ Ls 14) c (j1 + (q + 1)) = (inst 14).main c (j1 + q) := by
       intro c; unfold Coin.prevV; rw [if_neg (by omega)]; rfl
-    have hpv : Coin.prevV (inst 14).main (2 ^ L) Coin.KO (j1 + (q + 1)) = 1 := by rw [hpk]; exact hko q (by omega)
+    have hpv : Coin.prevV (inst 14).main (2 ^ Ls 14) Coin.KO (j1 + (q + 1)) = 1 := by rw [hpk]; exact hko q (by omega)
     obtain ⟨o1, o2, o3, o4⟩ := Coin.out_nat cs (by omega) (hko (q + 1) hq) (fun _ => by rw [hpk, hpk]; exact ⟨p1, p2⟩)
       (out_row_bytes hL hsat hL24 (by omega) (hko (q + 1) hq)) vl vh
     rw [if_pos hpv, hpk, hpk] at o4
@@ -421,8 +421,8 @@ theorem out_sums {j1 nout : ℕ} (hj1 : 1 ≤ j1) (hn : j1 + nout < 2 ^ L)
 /-- **A transaction's amounts.** For transaction `t ≥ 1` with its input rows' amounts `a` and output rows'
 amounts `v` (the outputs within `MAX_MONEY` in total), the outputs are at most the inputs and the inputs
 within `MAX_MONEY`. -/
-theorem tx_amounts (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
-    (hon : ∀ j < 2 ^ L, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
+theorem tx_amounts (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
+    (hon : ∀ j < 2 ^ Ls 14, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
     (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
     {parts : List (List Spec.Block.Tok)} (hf : List.Forall₂ Spec.Block.IoTx S.b.txs parts)
     (htg : Spec.Block.tagged 0 (Fields.toksFrom (inst 1).main (Rb inst pub) S.m 0) = Spec.Block.tagParts 0 parts)
@@ -456,7 +456,7 @@ theorem tx_amounts (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
   have hpko : (inst 14).main Coin.KO (j0 + nin - 1) = 0 := by
     have h := (hrows (nin - 1) (by omega)).2.2
     rw [show j0 + nin - 1 = j0 + (nin - 1) by omega]
-    rcases Coin.bool_col cs (c := Coin.KO) (by simp) (show j0 + (nin - 1) < 2 ^ L by omega) with h0 | h1
+    rcases Coin.bool_col cs (c := Coin.KO) (by simp) (show j0 + (nin - 1) < 2 ^ Ls 14 by omega) with h0 | h1
     · exact h0
     · exact absurd (h.mp h1) (by omega)
   have houts := out_sums hL hsat hL24 (j1 := j0 + nin) (nout := nout) (by omega) (by omega) hko hpko v
@@ -464,8 +464,8 @@ theorem tx_amounts (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
   obtain ⟨o1, o2, o3, o4, o5⟩ := houts (nout - 1) (by omega)
   rw [show nout - 1 + 1 = nout by omega] at o3
   set rE := j0 + nin + (nout - 1) with hrE
-  have hrE1 : rE + 1 < 2 ^ L := by omega
-  have hrE : rE < 2 ^ L := by omega
+  have hrE1 : rE + 1 < 2 ^ Ls 14 := by omega
+  have hrE : rE < 2 ^ Ls 14 := by omega
   -- the last output row ends the transaction
   have htend : (inst 14).main Coin.TEND rE = 1 := by
     have ht := Coin.tend_spec cs hrE1
@@ -479,7 +479,7 @@ theorem tx_amounts (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
     obtain ⟨hpl0, hpe0⟩ := part_len hf htx0
     obtain ⟨rfl, rfl⟩ := decomp_unique parts hpl hpl0 (by omega) (by omega)
       ((show j0 + (nin + (nout - 1)) = rE by omega).trans hjq0)
-    have hLb : 2 ^ L ≤ 2 ^ 23 := Nat.pow_le_pow_right (by norm_num) hL24
+    obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
     have htN : t < 2 ^ 25 := by have := (List.getElem?_eq_some_iff.mp htx).1; have := S.hN25; omega
     obtain ⟨hc1, hcb, -, -⟩ := Coin.cbo_spec cs hrE
     rcases hcb with h0 | h1
@@ -517,15 +517,15 @@ input rows' undo records (each a real coin's: at least 8 bytes, its amount withi
 below `2^30`), with every transaction's inputs and outputs nonempty and this one's outputs within
 `MAX_MONEY`: every claim is mature, the outputs are at most the claimed inputs, and those are within
 `MAX_MONEY`. -/
-theorem tx_claims_ok (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
-    (hon : ∀ j < 2 ^ L, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
+theorem tx_claims_ok (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
+    (hon : ∀ j < 2 ^ Ls 14, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
     (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
     {parts : List (List Spec.Block.Tok)} (hf : List.Forall₂ Spec.Block.IoTx S.b.txs parts)
     (htg : Spec.Block.tagged 0 (Fields.toksFrom (inst 1).main (Rb inst pub) S.m 0) = Spec.Block.tagParts 0 parts)
     (hne : ∀ (t' : ℕ) (tx' : Spec.Block.Tx), S.b.txs[t']? = some tx' → tx'.vin ≠ [] ∧ tx'.vout ≠ [])
     {h : ℕ} (hp2 : pub 2 = (h : F)) (hh : h < 2 ^ 23) (N : ℕ → ℕ) (B : BlockC) (hBh : B.h = h)
     {t : ℕ} {tx : Spec.Block.Tx} (htx : S.b.txs[t]? = some tx) (ht1 : 1 ≤ t)
-    (hcl : ∀ k < tx.vin.length, ClaimAt inst pub L (((parts.take t).map List.length).sum + k) (B.claim t k))
+    (hcl : ∀ k < tx.vin.length, ClaimAt inst pub (Ls 13) (((parts.take t).map List.length).sum + k) (B.claim t k))
     (hcv : ∀ k < tx.vin.length, 8 ≤ (B.claim t k).ser.length ∧
       Spec.Block.le ((B.claim t k).ser.take 8) ≤ Fields.MAXHI * 2 ^ 24 + Fields.MAXLO ∧ (B.claim t k).code < 2 ^ 30)
     (hout : Spec.Coins.outSum tx ≤ Spec.Block.MAX_MONEY) :
@@ -601,7 +601,7 @@ weights `αᵏ`) has a claim function such that, for the block `⟨h, txs, lost,
 `N`: its public partial sum is its events' sum at `(α, z)`; each spend's claim passes the circuit's order
 check; and each non-coinbase transaction whose claims are real coins and whose outputs are within
 `MAX_MONEY` passes `ClaimsOK`. -/
-theorem block_facts (S : Setup inst pub L) {h : ℕ} (hp2 : pub 2 = (h : F)) (hh : h < 2 ^ 23) {lost : Bool}
+theorem block_facts (S : Setup inst pub (Ls 1)) {h : ℕ} (hp2 : pub 2 = (h : F)) (hh : h < 2 ^ 23) {lost : Bool}
     (hlost : pub Coin.PUB_LOST = if lost then 1 else 0) {α : QM}
     (hα : ∀ k < Coin.W, RunSum.pQ pub (Coin.PUB_ALPHA k) = α ^ k)
     (hne : ∀ (t' : ℕ) (tx' : Spec.Block.Tx), S.b.txs[t']? = some tx' → tx'.vin ≠ [] ∧ tx'.vout ≠ []) :

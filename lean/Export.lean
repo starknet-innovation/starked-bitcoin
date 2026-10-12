@@ -54,6 +54,9 @@ def main (args : List String) : IO Unit := do
   | ["deep_leaf"] => IO.println (StarkedAir.Circuit.Deep.deepJson
       [StarkedAir.Circuit.Composition.compShape StarkedAir.HeaderTree.headers 108,
        StarkedAir.Circuit.Composition.compShape StarkedAir.HeaderTree.tree 0])
+  | ["deep_leaf_per"] => IO.println (StarkedAir.Circuit.Deep.deepJsonPer
+      [StarkedAir.Circuit.Composition.compShape StarkedAir.HeaderTree.headers 108,
+       StarkedAir.Circuit.Composition.compShape StarkedAir.HeaderTree.tree 0])
   | "channel" :: rest => match StarkedAir.Circuit.Channel.channelJson rest with
       | some j => IO.println j
       | none => IO.eprintln "unknown channel op"

@@ -1679,15 +1679,15 @@ theorem rows_lt_P' {L : ℕ} (hL : L ≤ 25) : 2 ^ L < P :=
 
 section Reads
 
-variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ} (hL : L ≤ 25)
+variable {inst : ℕ → Inst} {pub : ℕ → F} {L L0 : ℕ} (hL0 : L0 ≤ 25)
   (fs : ∀ r < 2 ^ L, ∀ c ∈ constraints, c.eval (2 ^ L) preCols pub (inst 1).main r = 0)
-  (hb0 : bytes.air.Satisfied L pub (inst 0).main)
+  (hb0 : bytes.air.Satisfied L0 pub (inst 0).main)
   (hread : ∀ {r : ℕ}, r < 2 ^ L → ∀ {kk : ℕ}, kk < 7 →
     (lookups.getD kk ⟨0, .const 0, []⟩).mult.eval (2 ^ L) preCols pub (inst 1).main r = -1 →
     ∃ r0, r0 < (pub 0).val ∧
       ((lookups.getD kk ⟨0, .const 0, []⟩).vals.map (Expr.eval (2 ^ L) preCols pub (inst 1).main r)) =
         [(r0 : F), (inst 0).main BYTE r0])
-include hL fs hb0 hread
+include hL0 fs hb0 hread
 
 /-- **CompactSize bytes are the block's.** On a row with a CompactSize at offset `o`, byte `j`
 of the form is the block byte at `START + o + j`. -/
@@ -1710,12 +1710,12 @@ theorem compact_read {r : ℕ} (hr : r < 2 ^ L)
     interval_cases j <;> simpa [lookups, Expr.eval, ev_k hr, eval_cst] using hv
   have hpos : ((inst 1).main START r).val + o + j = r0 := by
     refine natCast_inj_of_lt (lt_P (by omega)) (lt_P (by
-      have := (rows_lt_P' hL)
-      have : (pub 0).val ≤ 2 ^ L := by
-        have hb := bytes_rows (n := 2 ^ L) (pub := pub) (main := (inst 0).main)
+      have := (rows_lt_P' hL0)
+      have : (pub 0).val ≤ 2 ^ L0 := by
+        have hb := bytes_rows (n := 2 ^ L0) (pub := pub) (main := (inst 0).main)
           (by have := hb0; exact this) this (by positivity)
         exact hb.2.1
-      have : 2 ^ L ≤ 2 ^ 25 := Nat.pow_le_pow_right (by norm_num) hL
+      have : 2 ^ L0 ≤ 2 ^ 25 := Nat.pow_le_pow_right (by norm_num) hL0
       omega)) ?_
     push_cast
     rw [← e.1, ho, ZMod.natCast_zmod_val]
@@ -1729,10 +1729,10 @@ theorem marker_read {r : ℕ} (hr : r < 2 ^ L) (hT : (inst 1).main K_TXH r = 1) 
       (inst 0).main BYTE (((inst 1).main START r).val + 5) = 1 := by
   have hst := start_lt fs hr
   have hLb : (pub 0).val ≤ 2 ^ 25 := by
-    have := (rows_lt_P' hL)
-    have hb := bytes_rows (n := 2 ^ L) (pub := pub) (main := (inst 0).main)
+    have := (rows_lt_P' hL0)
+    have hb := bytes_rows (n := 2 ^ L0) (pub := pub) (main := (inst 0).main)
       (by have := hb0; exact this) this (by positivity)
-    have : 2 ^ L ≤ 2 ^ 25 := Nat.pow_le_pow_right (by norm_num) hL
+    have : 2 ^ L0 ≤ 2 ^ 25 := Nat.pow_le_pow_right (by norm_num) hL0
     omega
   have rd : ∀ kk (hk : kk < 7), kk = 5 ∨ kk = 6 → ∃ r0, r0 < (pub 0).val ∧
       ((lookups.getD kk ⟨0, .const 0, []⟩).vals.map (Expr.eval (2 ^ L) preCols pub (inst 1).main r)) =
@@ -1748,10 +1748,10 @@ theorem marker_read {r : ℕ} (hr : r < 2 ^ L) (hT : (inst 1).main K_TXH r = 1) 
   refine ⟨by omega, by rw [p4]; exact v4.2.symm, by rw [p5]; exact v5.2.symm⟩
 
 theorem len_le : (pub 0).val ≤ 2 ^ 25 := by
-  have := (rows_lt_P' hL)
-  have hb := bytes_rows (n := 2 ^ L) (pub := pub) (main := (inst 0).main)
+  have := (rows_lt_P' hL0)
+  have hb := bytes_rows (n := 2 ^ L0) (pub := pub) (main := (inst 0).main)
     (by have := hb0; exact this) this (by positivity)
-  have : 2 ^ L ≤ 2 ^ 25 := Nat.pow_le_pow_right (by norm_num) hL
+  have : 2 ^ L0 ≤ 2 ^ 25 := Nat.pow_le_pow_right (by norm_num) hL0
   omega
 
 /-- **A row's CompactSize is the block's bytes at its offset.** -/
@@ -1762,12 +1762,12 @@ theorem compact_slice {r : ℕ} (hr : r < 2 ^ L)
       ((inst 1).main VAL r).val ≤ MAXS ∧
       Spec.Block.serCompact ((inst 1).main VAL r).val =
         slice (blockBytes (inst 0).main (pub 0).val) (((inst 1).main START r).val + o) (prefOf (inst 1).main r) := by
-  have rd := fun j (hj : j < prefOf (inst 1).main r) => compact_read hL fs hb0 hread hr hLP ho hoP hj
+  have rd := fun j (hj : j < prefOf (inst 1).main r) => compact_read hL0 fs hb0 hread hr hLP ho hoP hj
   have hp1 : 1 ≤ prefOf (inst 1).main r := by unfold prefOf; split_ifs <;> omega
   have bnd : ((inst 1).main START r).val + o + prefOf (inst 1).main r ≤ (pub 0).val := by
     have := (rd (prefOf (inst 1).main r - 1) (by omega)).1; omega
-  have hbytes := bytes_rows (n := 2 ^ L) (pub := pub) (main := (inst 0).main)
-    (by have := hb0; exact this) ((rows_lt_P' hL)) (by positivity)
+  have hbytes := bytes_rows (n := 2 ^ L0) (pub := pub) (main := (inst 0).main)
+    (by have := hb0; exact this) ((rows_lt_P' hL0)) (by positivity)
   have b256 : ∀ j < prefOf (inst 1).main r, ((inst 1).main (CB j) r).val < 256 := fun j hj => by
     rw [(rd j hj).2]
     exact (hbytes.1 _ (by have := (rd j hj).1; have := hbytes.2.1; omega)).2
@@ -1785,13 +1785,13 @@ theorem compact_slice {r : ℕ} (hr : r < 2 ^ L)
   have hj' := List.mem_range.mp hj
   rw [blockBytes_get (by have := (rd j hj').1; omega), ← (rd j hj').2]
 
-omit hL fs hb0 hread in
+omit hL0 fs hb0 hread in
 theorem u8_get_eq {Mb : ℕ → ℕ → F} {len i : ℕ} (h : i < len) {b : ℕ} (hb : Mb BYTE i = (b : F)) (b256 : b < 256) :
     (blockBytes Mb len).getD i 0 = UInt8.ofNat b := by
   rw [blockBytes_get h, hb, ZMod.val_natCast, Nat.mod_eq_of_lt (lt_P (by omega))]
 
-/-- **Block fields soundness (M3a.2).** If the (bytes, fields) system with `2^L` rows per component
-(`L ≤ 25`) is satisfied and its lookups balance, the block's bytes (`LEN = pub 0` bytes, read from
+/-- **Block fields soundness (M3a.2).** If the (bytes, fields) system with `2^L` rows of fields and `2^L0` of
+bytes (`L0 ≤ 25`) is satisfied and its lookups balance, the block's bytes (`LEN = pub 0` bytes, read from
 the byte table) are a canonically serialized block: Core's deserializer reads them as some `b`,
 consuming all of them. -/
 theorem fields_sound_gen : ∃ b, Spec.Block.parseBlock (blockBytes (inst 0).main (pub 0).val) = some b := by
@@ -1802,14 +1802,14 @@ theorem fields_sound_gen : ∃ b, Spec.Block.parseBlock (blockBytes (inst 0).mai
       Spec.Block.serCompact ((inst 1).main VAL r).val =
         slice (blockBytes (inst 0).main (pub 0).val) (((inst 1).main START r).val + o) (prefOf (inst 1).main r) :=
     fun r hr hLP o ho hoP => by
-      obtain ⟨a, b, c⟩ := compact_slice hL fs hb0 hread hr hLP ho hoP
+      obtain ⟨a, b, c⟩ := compact_slice hL0 fs hb0 hread hr hLP ho hoP
       exact ⟨by rw [hRl]; exact a, b, c⟩
   have hmk : ∀ r < 2 ^ L, (inst 1).main K_TXH r = 1 → (inst 1).main SEG r = 1 →
       ((inst 1).main START r).val + 5 < (blockBytes (inst 0).main (pub 0).val).length ∧
       (blockBytes (inst 0).main (pub 0).val).getD (((inst 1).main START r).val + 4) 0 = 0 ∧
       (blockBytes (inst 0).main (pub 0).val).getD (((inst 1).main START r).val + 5) 0 = 1 :=
     fun r hr ht hs => by
-      obtain ⟨a, b, c⟩ := marker_read hL fs hb0 hread hr ht hs
+      obtain ⟨a, b, c⟩ := marker_read hL0 fs hb0 hread hr ht hs
       refine ⟨by rw [hRl]; exact a, ?_, ?_⟩
       · rw [blockBytes_get (by omega), b]; rfl
       · rw [blockBytes_get (by omega), c, ZMod.val_one]; rfl

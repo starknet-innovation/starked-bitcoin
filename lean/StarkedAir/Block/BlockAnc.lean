@@ -71,14 +71,17 @@ theorem blockSys_sat {inst : ℕ → Inst} {pub : ℕ → F} (h : blockSys.Satis
 
 section System
 
-variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ}
-  (hL : ∀ i < 16, (inst i).logSize = L) (hsat : blockSys.SatisfiedExt inst pub []) (hL24 : L ≤ 23)
+variable {inst : ℕ → Inst} {pub : ℕ → F} {Ls : ℕ → ℕ}
+  (hL : ∀ i < 16, (inst i).logSize = Ls i) (hsat : blockSys.SatisfiedExt inst pub []) (hL24 : ∀ i < 16, Ls i ≤ 23)
 include hL hsat hL24
 
-theorem hL15 : ∀ i < 15, (inst i).logSize = L := fun i hi => hL i (by omega)
+theorem hL15 : ∀ i < 15, (inst i).logSize = Ls i := fun i hi => hL i (by omega)
 
-/-- **The previous MTP.** -/
-theorem block_mtp (hL8 : 8 ≤ L) :
+omit hL hsat in
+theorem hL24_15 : ∀ i < 15, Ls i ≤ 23 := fun i hi => hL24 i (by omega)
+
+/-- **The previous MTP** (the ancestry component has `2^(Ls 15) ≥ 2^8` rows). -/
+theorem block_mtp (hL8 : 8 ≤ Ls 15) :
     (pub Anc.PUB_CSV = 0 ∧ pub Anc.PUB_MLO = 0 ∧ pub Anc.PUB_MHI = 0) ∨
     (pub Anc.PUB_CSV = 1 ∧ ∃ (b : Spec.Block.Blk) (hw : ℕ → ℕ → Spec.Sha256.Word),
       Spec.Block.parseBlock (Rb inst pub) = some b ∧
@@ -92,7 +95,7 @@ theorem block_mtp (hL8 : 8 ≤ L) :
   rcases Anc.anc_sound ha hL8 with h0 | ⟨h1, -, hhash, hlink, hout, hlim, hmed⟩
   · exact Or.inl h0
   right
-  obtain ⟨b, hp, S, hS, hpub⟩ := hash_pub (hL15 hL hsat hL24) hh hL24
+  obtain ⟨b, hp, S, hS, hpub⟩ := hash_pub (hL15 hL hsat hL24) hh (hL24_15 hL24)
   have hSw : ∀ w < 8, Spec.Bitcoin.stateWord S w = Spec.Bitcoin.stateWord (HeaderChain.hashAt (inst 15).main Anc.NANC) w := by
     intro w hw
     apply HeaderChain.half16_inj <;>

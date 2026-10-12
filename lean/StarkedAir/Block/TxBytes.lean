@@ -39,15 +39,15 @@ theorem toksFrom_append_bytes (A B : List Spec.Block.Tok) :
 
 section Reads
 
-variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ} (hL : L ≤ 25)
+variable {inst : ℕ → Inst} {pub : ℕ → F} {L L0 : ℕ} (hL0 : L0 ≤ 25)
   (fs : ∀ r < 2 ^ L, ∀ c ∈ constraints, c.eval (2 ^ L) preCols pub (inst 1).main r = 0)
-  (hb0 : bytes.air.Satisfied L pub (inst 0).main)
+  (hb0 : bytes.air.Satisfied L0 pub (inst 0).main)
   (hread : ∀ {r : ℕ}, r < 2 ^ L → ∀ {kk : ℕ}, kk < 7 →
     (lookups.getD kk ⟨0, .const 0, []⟩).mult.eval (2 ^ L) preCols pub (inst 1).main r = -1 →
     ∃ r0, r0 < (pub 0).val ∧
       ((lookups.getD kk ⟨0, .const 0, []⟩).vals.map (Expr.eval (2 ^ L) preCols pub (inst 1).main r)) =
         [(r0 : F), (inst 0).main BYTE r0])
-include hL fs hb0 hread
+include hL0 fs hb0 hread
 
 /-- The grammar context: the first padding row `m`, the rows' fit, the CompactSize facts, and row
 `k`'s start as the length of the block's prefix serialized by rows `< k`. -/
@@ -70,14 +70,14 @@ theorem block_ctx :
       Spec.Block.serCompact ((inst 1).main VAL r).val =
         slice (blockBytes (inst 0).main (pub 0).val) (((inst 1).main START r).val + o) (prefOf (inst 1).main r) :=
     fun r hr hLP o ho hoP => by
-      obtain ⟨a, b, c⟩ := compact_slice hL fs hb0 hread hr hLP ho hoP
+      obtain ⟨a, b, c⟩ := compact_slice hL0 fs hb0 hread hr hLP ho hoP
       exact ⟨by rw [hRl]; exact a, b, c⟩
   have hmk : ∀ r < 2 ^ L, (inst 1).main K_TXH r = 1 → (inst 1).main SEG r = 1 →
       ((inst 1).main START r).val + 5 < (blockBytes (inst 0).main (pub 0).val).length ∧
       (blockBytes (inst 0).main (pub 0).val).getD (((inst 1).main START r).val + 4) 0 = 0 ∧
       (blockBytes (inst 0).main (pub 0).val).getD (((inst 1).main START r).val + 5) 0 = 1 :=
     fun r hr ht hs => by
-      obtain ⟨a, b, c⟩ := marker_read hL fs hb0 hread hr ht hs
+      obtain ⟨a, b, c⟩ := marker_read hL0 fs hb0 hread hr ht hs
       refine ⟨by rw [hRl]; exact a, ?_, ?_⟩
       · rw [blockBytes_get (by omega), b]; rfl
       · rw [blockBytes_get (by omega), c, ZMod.val_one]; rfl
@@ -216,7 +216,7 @@ theorem lock_tx {m : ℕ} (hmn : m < 2 ^ L) (hnp : ∀ r < m, (inst 1).main K_PA
   have hrhle : rh ≤ ρ := Nat.findGreatest_le ρ
   have hgr : ∀ j, rh < j → j ≤ ρ → (inst 1).main K_TXH j ≠ 1 := fun j a b => Nat.findGreatest_is_greatest a b
   obtain ⟨tx, r', hr', hrr', htx, hlr', notxh, nolock, hw, hnw, hnn⟩ :=
-    tx_bytes hL fs hb0 hread hmn hnp hpad hfit hcs cat mono hSm (by omega) hrht
+    tx_bytes hL0 fs hb0 hread hmn hnp hpad hfit hcs cat mono hSm (by omega) hrht
   have heq : r' = ρ := by
     rcases lt_trichotomy ρ r' with h | h | h
     · have := nolock ρ hrhle h; rw [hl] at this; exact absurd this one_ne_zero
@@ -241,7 +241,7 @@ theorem lock_tx {m : ℕ} (hmn : m < 2 ^ L) (hnp : ∀ r < m, (inst 1).main K_PA
   subst heq
   exact ⟨tx, ⟨rh, hrr', hrht, notxh, htx⟩, hw, hnw, hnn⟩
 
-omit hL fs hb0 hread in
+omit hL0 fs hb0 hread in
 /-- `TxAt` is functional. -/
 theorem txAt_unique {M : ℕ → ℕ → F} {R : Spec.Block.Bytes} {m ρ : ℕ} {t1 t2 : Spec.Block.Tx}
     (h1 : TxAt M R m ρ t1) (h2 : TxAt M R m ρ t2) : t1 = t2 := by

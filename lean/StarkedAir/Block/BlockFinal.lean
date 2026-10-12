@@ -38,24 +38,23 @@ theorem le4_slice {R : Spec.Block.Bytes} {a : ℕ} (h : a + 4 ≤ R.length) :
 
 section System
 
-variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ}
-  (hL : ∀ i < 15, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : L ≤ 23)
+variable {inst : ℕ → Inst} {pub : ℕ → F} {Ls : ℕ → ℕ}
+  (hL : ∀ i < 15, (inst i).logSize = Ls i) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : ∀ i < 15, Ls i ≤ 23)
 include hL hsat hL24
 
 /-- **Finality.** -/
-theorem final_ok (hL8 : 8 ≤ L) (S : Setup inst pub L) {c : Spec.Block.Ctx} (hh : c.height < 2 ^ 23)
+theorem final_ok (hL8 : 8 ≤ Ls 7) (S : Setup inst pub (Ls 1)) {c : Spec.Block.Ctx} (hh : c.height < 2 ^ 23)
     (hmtp : c.prevMtp < 2 ^ 32) (p2 : pub 2 = (c.height : F)) (p3 : pub 3 = ((c.prevMtp % 65536 : ℕ) : F))
     (p5 : pub 5 = if Spec.Block.CSV_HEIGHT ≤ c.height then 1 else 0) (p7 : pub 7 = ((c.prevMtp / 65536 : ℕ) : F)) :
     ∀ t ∈ S.b.txs, Spec.Block.isFinal t c.height (Spec.Block.cutoffOf c S.b) = true := by
   intro t ht
   have fs := hash_fields_sat' hL hsat
   have cs := hash_ctx_sat' hL hsat
-  have h24 := rows_le hL hsat hL24
-  norm_num at h24
+  obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
   have h256 := ctx_sat8 hL hsat hL24 hL8
-  have h25 : 2 ^ L ≤ 2 ^ 25 := Nat.pow_le_pow_right (by norm_num) (by omega)
+  have h25 : 2 ^ Ls 1 ≤ 2 ^ 25 := Nat.pow_le_pow_right (by norm_num) (by have := hL24 1 (by decide); omega)
   obtain ⟨j, ρ, -, -, hρ, hl, -, hat⟩ := tx_at hL hsat hL24 S ht
-  have hρn : ρ < 2 ^ L := by have := S.hmn; omega
+  have hρn : ρ < 2 ^ Ls 1 := by have := S.hmn; omega
   -- the cutoff's limbs on the lock-time row are the context's
   have hclo : (inst 1).main Fields.CLO ρ = (inst 7).main Ctx.CLO 0 := by
     rw [Fields.same_const fs (X := Fields.CLO) (by simp [Fields.chkC, Fields.finalC]) ρ hρn, (cutoff_link hL hsat hL24).1]
@@ -93,7 +92,7 @@ theorem final_ok (hL8 : 8 ≤ L) (S : Setup inst pub L) {c : Spec.Block.Ctx} (hh
     (fun r hr j hj => fields_rg_lt hL hsat hL24 hr hj) h25 hat hρ hl p2 hh ⟨hco.1, hco.2.1⟩ hco.2.2
 
 /-- **BIP34.** -/
-theorem bip34_ok (hL8 : 8 ≤ L) (S : Setup inst pub L) {c : Spec.Block.Ctx} (hh : c.height < 2 ^ 23)
+theorem bip34_ok (hL8 : 8 ≤ Ls 7) (S : Setup inst pub (Ls 1)) {c : Spec.Block.Ctx} (hh : c.height < 2 ^ 23)
     (p2 : pub 2 = (c.height : F)) (p4 : pub 4 = if Spec.Block.BIP34_HEIGHT ≤ c.height then 1 else 0) :
     c.height ≥ Spec.Block.BIP34_HEIGHT →
       (Spec.Block.ssOf S.b).take (Spec.Block.pushHeight c.height).length = Spec.Block.pushHeight c.height := by

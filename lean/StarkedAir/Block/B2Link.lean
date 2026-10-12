@@ -20,17 +20,17 @@ abbrev Ub (inst : ℕ → Inst) (pub : ℕ → F) : Spec.Block.Bytes := Fields.b
 
 section System
 
-variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ}
-  (hL : ∀ i < 15, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : L ≤ 23)
+variable {inst : ℕ → Inst} {pub : ℕ → F} {Ls : ℕ → ℕ}
+  (hL : ∀ i < 15, (inst i).logSize = Ls i) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : ∀ i < 15, Ls i ≤ 23)
 include hL hsat hL24
 
-theorem undo_bytes_sat : ∀ r < 2 ^ L, ∀ c ∈ Block.constraints,
-    c.eval (2 ^ L) Block.preCols (pub ∘ Undo.remap) (inst 9).main r = 0 :=
+theorem undo_bytes_sat : ∀ r < 2 ^ Ls 9, ∀ c ∈ Block.constraints,
+    c.eval (2 ^ Ls 9) Block.preCols (pub ∘ Undo.remap) (inst 9).main r = 0 :=
   Undo.bytes_sat (hash_undo_sat hL hsat)
 
-theorem undo_len : (pub 8).val ≤ 2 ^ L := by
-  have hP : 2 ^ L < P := by have := hash_rows_lt_P hL24; omega
-  have := (Block.bytes_rows (n := 2 ^ L) (pub := pub ∘ Undo.remap) (main := (inst 9).main) (undo_bytes_sat hL hsat hL24)
+theorem undo_len : (pub 8).val ≤ 2 ^ Ls 9 := by
+  have hP : 2 ^ Ls 9 < P := by have := rows_lt_P hL24 (i := 9) (by decide); omega
+  have := (Block.bytes_rows (n := 2 ^ Ls 9) (pub := pub ∘ Undo.remap) (main := (inst 9).main) (undo_bytes_sat hL hsat hL24)
     hP (by positivity)).2.1
   simpa [Undo.remap, Undo.PUB_LEN] using this
 
@@ -42,11 +42,11 @@ theorem undo_read {i r k : ℕ} (hs0 : ((i, r, k) : Site) ∈ sites hashSys inst
   obtain ⟨i', r', k', hr', hy, hsm, hsv⟩ := link hL hsat hL24 hs0 huse hm
   rw [hrel, show Undo.REL_UBYTE = 17 from rfl, yt] at hy
   obtain ⟨rfl, rfl⟩ : i' = 9 ∧ k' = 0 := by omega
-  have hP : 2 ^ L < P := by have := hash_rows_lt_P hL24; omega
+  have hP : 2 ^ Ls 9 < P := by have := rows_lt_P hL24 (i := 9) (by decide); omega
   have ub := undo_bytes_sat hL hsat hL24
-  have hm' : (Expr.mul (StarkedAir.Sha256.col ACTIVE) (StarkedAir.Sha256.col MULT)).eval (2 ^ L) preCols
+  have hm' : (Expr.mul (StarkedAir.Sha256.col ACTIVE) (StarkedAir.Sha256.col MULT)).eval (2 ^ Ls 9) preCols
       (pub ∘ Undo.remap) (inst 9).main r' ≠ 0 := by
-    have e1 : ∀ pb : ℕ → F, (Expr.mul (StarkedAir.Sha256.col ACTIVE) (StarkedAir.Sha256.col MULT)).eval (2 ^ L) preCols pb
+    have e1 : ∀ pb : ℕ → F, (Expr.mul (StarkedAir.Sha256.col ACTIVE) (StarkedAir.Sha256.col MULT)).eval (2 ^ Ls 9) preCols pb
         (inst 9).main r' = (inst 9).main ACTIVE r' * (inst 9).main MULT r' := fun pb => by
       simp [Expr.eval, StarkedAir.Sha256.eval_col, wrap_zero hr']
     rw [e1]
@@ -57,14 +57,14 @@ theorem undo_read {i r k : ℕ} (hs0 : ((i, r, k) : Site) ∈ sites hashSys inst
   obtain ⟨hlt, hvals⟩ := yield_sound ub hP hr' hm'
   have e : siteVals hashSys inst pub (9, r', 0) = [(r' : F), (inst 9).main BYTE r'] := by
     have : siteVals hashSys inst pub (9, r', 0) =
-        [StarkedAir.Sha256.col POS, StarkedAir.Sha256.col BYTE].map (Expr.eval (2 ^ L) preCols (pub ∘ Undo.remap) (inst 9).main r') := by
+        [StarkedAir.Sha256.col POS, StarkedAir.Sha256.col BYTE].map (Expr.eval (2 ^ Ls 9) preCols (pub ∘ Undo.remap) (inst 9).main r') := by
       simp [siteVals, siteEval, siteLookup, hashSys, hL 9 (by decide), Undo.undo, StarkedAir.Sha256.eval_col]
     rw [this, hvals]
   rw [e, hv] at hsv
   simp only [List.cons.injEq, and_true] at hsv
   have hlt8 : r' < (pub 8).val := by simpa [Undo.remap, Undo.PUB_LEN] using hlt
   refine ⟨r', hlt8, hsv.1.symm, ?_⟩
-  have hb := (Block.bytes_rows (n := 2 ^ L) (pub := pub ∘ Undo.remap) (main := (inst 9).main) ub hP (by positivity)).1 r' hr'
+  have hb := (Block.bytes_rows (n := 2 ^ Ls 9) (pub := pub ∘ Undo.remap) (main := (inst 9).main) ub hP (by positivity)).1 r' hr'
   rw [← hsv.2, Fields.blockBytes_get hlt8, UInt8.toNat_ofNat', Nat.mod_eq_of_lt hb.2]
 
 omit hL hsat hL24 in
@@ -72,11 +72,11 @@ theorem rb_len : (Rb inst pub).length = (pub 0).val := Fields.blockBytes_length 
 omit hL hsat hL24 in
 theorem ub_len : (Ub inst pub).length = (pub 8).val := Fields.blockBytes_length _ _
 
-theorem walker_site {r k : ℕ} (hr : r < 2 ^ L) (hk : k < 6) : ((10, r, k) : Site) ∈ sites hashSys inst :=
+theorem walker_site {r k : ℕ} (hr : r < 2 ^ Ls 10) (hk : k < 6) : ((10, r, k) : Site) ∈ sites hashSys inst :=
   site_mem hL (i := 10) (by decide) hr (by simp [hashSys, B2Msg.b2msg, B2Msg.lookups]; omega)
 
 /-- **The walker's rows**, in the system: words of the undo bytes. -/
-theorem walker_fact : ∀ r < 2 ^ L, (inst 10).main B2Msg.ON r = 1 → ∃ b : ℕ,
+theorem walker_fact : ∀ r < 2 ^ Ls 10, (inst 10).main B2Msg.ON r = 1 → ∃ b : ℕ,
     (inst 10).main B2Msg.BLK r = (b : F) ∧ b < B2Msg.nbOf (Ub inst pub).length ∧
     (∀ j < 4, ((inst 10).main (B2Msg.B j) r).val = B2Msg.sbyte (Ub inst pub) (64 * b + 4 * (r % 16) + j)) ∧
     (r % 16 = 0 → ((inst 10).main B2Msg.LASTF r = 1 ↔ b + 1 = B2Msg.nbOf (Ub inst pub).length) ∧
@@ -84,13 +84,12 @@ theorem walker_fact : ∀ r < 2 ^ L, (inst 10).main B2Msg.ON r = 1 → ∃ b : �
       (inst 10).main B2Msg.T r = ((if b + 1 = B2Msg.nbOf (Ub inst pub).length then (Ub inst pub).length
         else 64 * (b + 1) : ℕ) : F)) := by
   have ws := hash_b2msg_sat hL hsat
-  have h24 := rows_le hL hsat hL24
-  norm_num at h24
+  obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
   have hlen1 := undo_len hL hsat hL24
   apply B2Msg.walker_sound ws (by positivity) (by omega) (Ub inst pub)
     (by rw [ub_len, ZMod.natCast_zmod_val]; rfl) (by rw [ub_len]; exact Fields.lt_P (by omega))
   intro r hr j hj ha
-  have ev : ∀ c, (B2Msg.k c).eval (2 ^ L) B2Msg.preCols pub (inst 10).main r = (inst 10).main c r := fun c =>
+  have ev : ∀ c, (B2Msg.k c).eval (2 ^ Ls 10) B2Msg.preCols pub (inst 10).main r = (inst 10).main c r := fun c =>
     B2Msg.ev_k (pub := pub) (M := (inst 10).main) hr
   have hm : siteMult hashSys inst pub (10, r, j) = -1 := by
     interval_cases j <;> simp [siteMult, siteEval, siteLookup, hashSys, hL 10 (by decide), B2Msg.b2msg, B2Msg.lookups,
@@ -102,14 +101,14 @@ theorem walker_fact : ∀ r < 2 ^ L, (inst 10).main B2Msg.ON r = 1 → ∃ b : �
     (by simp [isUse]; omega) (by simp only [siteRel, siteLookup, hashSys]; interval_cases j <;> rfl) hm hv
   exact ⟨q, hp, by rw [ub_len]; exact hq, by rw [hb]; rfl⟩
 
-theorem b2s_site {r k : ℕ} (hr : r < 2 ^ L) (hk : k < 11) : ((11, r, k) : Site) ∈ sites hashSys inst :=
+theorem b2s_site {r k : ℕ} (hr : r < 2 ^ Ls 11) (hk : k < 11) : ((11, r, k) : Site) ∈ sites hashSys inst :=
   site_mem hL (i := 11) (by decide) hr (by simp [hashSys, B2s.b2s, B2s.lookups]; omega)
 
-theorem ub_len_le : (Ub inst pub).length ≤ 2 ^ L := by rw [ub_len]; exact undo_len hL hsat hL24
+theorem ub_len_le : (Ub inst pub).length ≤ 2 ^ Ls 9 := by rw [ub_len]; exact undo_len hL hsat hL24
 
 /-- **A used period's block.** A period that hashes a stream block (`USEW`) reads its 16 message words
 from the walker: they are the stream's words of its block, and its counter and last flag are Blake2s's. -/
-theorem period_block {s : ℕ} (hs : s % 88 = 0) (hsn : s + 88 ≤ 2 ^ L) (hu : (inst 11).main B2s.USEW s = 1) :
+theorem period_block {s : ℕ} (hs : s % 88 = 0) (hsn : s + 88 ≤ 2 ^ Ls 11) (hu : (inst 11).main B2s.USEW s = 1) :
     ∃ b : ℕ, (inst 11).main B2s.BLKI s = (b : F) ∧ b < B2Msg.nbOf (Ub inst pub).length ∧
       (∀ kk < 16, Blake2s.msgWord (inst 11).main kk s = Spec.Blake2s.wordAt (Ub inst pub) b kk ∧
         ∀ h ≤ 1, ((inst 11).main (Blake2s.ML kk h) s).val < 65536) ∧
@@ -118,19 +117,18 @@ theorem period_block {s : ℕ} (hs : s % 88 = 0) (hsn : s + 88 ≤ 2 ^ L) (hu : 
       (inst 11).main B2s.T s = ((if b + 1 = B2Msg.nbOf (Ub inst pub).length then (Ub inst pub).length
         else 64 * (b + 1) : ℕ) : F) := by
   have bs := hash_b2s_sat hL hsat
-  have h24 := rows_le hL hsat hL24
-  norm_num at h24
-  have hsr : s < 2 ^ L := by omega
+  obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
+  have hsr : s < 2 ^ Ls 11 := by omega
   have usew : ∀ q < 88, (inst 11).main B2s.USEW (s + q) = 1 := by
     intro q hq
-    have e := B2s.defn bs (a := B2s.USEW) (e := B2s.om (B2s.k B2s.NIL)) (by simp [B2s.flagC]) (show s + q < 2 ^ L by omega)
+    have e := B2s.defn bs (a := B2s.USEW) (e := B2s.om (B2s.k B2s.NIL)) (by simp [B2s.flagC]) (show s + q < 2 ^ Ls 11 by omega)
     have e0 := B2s.defn bs (a := B2s.USEW) (e := B2s.om (B2s.k B2s.NIL)) (by simp [B2s.flagC]) hsr
-    simp only [Expr.eval, B2s.om, B2s.one, StarkedAir.Sha256.eval_cst, Nat.cast_one, B2s.ev_k (show s + q < 2 ^ L by omega),
+    simp only [Expr.eval, B2s.om, B2s.one, StarkedAir.Sha256.eval_cst, Nat.cast_one, B2s.ev_k (show s + q < 2 ^ Ls 11 by omega),
       B2s.ev_k hsr] at e e0
     rw [e, B2s.per_const bs (X := B2s.NIL) (by simp [B2s.perConst]) hs q hq (by omega), ← e0, hu]
-  have ev : ∀ {r c}, r < 2 ^ L → (B2s.k c).eval (2 ^ L) B2s.preCols pub (inst 11).main r = (inst 11).main c r :=
+  have ev : ∀ {r c}, r < 2 ^ Ls 11 → (B2s.k c).eval (2 ^ Ls 11) B2s.preCols pub (inst 11).main r = (inst 11).main c r :=
     fun hr => B2s.ev_k (pub := pub) (M := (inst 11).main) hr
-  have evw : ∀ {r c}, r < 2 ^ L → (B2Msg.k c).eval (2 ^ L) B2Msg.preCols pub (inst 10).main r = (inst 10).main c r :=
+  have evw : ∀ {r c}, r < 2 ^ Ls 10 → (B2Msg.k c).eval (2 ^ Ls 10) B2Msg.preCols pub (inst 10).main r = (inst 10).main c r :=
     fun hr => B2Msg.ev_k (pub := pub) (M := (inst 10).main) hr
   -- the block read (row `s`)
   have hmu1 : (inst 11).main B2s.MU1 s = 1 := by
@@ -143,7 +141,7 @@ theorem period_block {s : ℕ} (hs : s % 88 = 0) (hsn : s + 88 ≤ 2 ^ L) (hu : 
   have e19 : siteRel hashSys (11, s, 1) = 19 := rfl
   rw [e19, yt] at hy
   obtain ⟨rfl, rfl⟩ : i' = 10 ∧ k' = 5 := by omega
-  have hsm' : (inst 10).main B2Msg.ON r2 * (B2Msg.p B2Msg.P_K0).eval (2 ^ L) B2Msg.preCols pub (inst 10).main r2 ≠ 0 := by
+  have hsm' : (inst 10).main B2Msg.ON r2 * (B2Msg.p B2Msg.P_K0).eval (2 ^ Ls 10) B2Msg.preCols pub (inst 10).main r2 ≠ 0 := by
     simpa [siteMult, siteEval, siteLookup, hashSys, hL 10 (by decide), B2Msg.b2msg, B2Msg.lookups, Expr.eval, evw hr2]
       using hsm
   rw [B2Msg.ev_K0 hr2] at hsm'
@@ -166,7 +164,7 @@ theorem period_block {s : ℕ} (hs : s % 88 = 0) (hsn : s + 88 ≤ 2 ^ L) (hu : 
   refine ⟨b, by rw [← eb, hblk], hb, fun kk hkk => ?_, by rw [← el]; exact hlast,
     by rw [← el]; exact hlb, by rw [← et, ht]⟩
   -- the words (rows `s + kk`)
-  have hrk : s + kk < 2 ^ L := by omega
+  have hrk : s + kk < 2 ^ Ls 11 := by omega
   have hmu0 : (inst 11).main B2s.MU0 (s + kk) = 1 := by
     rw [B2s.defn bs (a := B2s.MU0) (e := .mul (B2s.k B2s.USEW) (B2s.p B2s.P_LT16)) (by simp [B2s.flagC]) hrk]
     simp only [Expr.eval, ev hrk, B2s.ev_lt16 (pub := pub) (M := (inst 11).main) hrk,
@@ -188,13 +186,13 @@ theorem period_block {s : ℕ} (hs : s % 88 = 0) (hsn : s + 88 ≤ 2 ^ L) (hu : 
     have hK := B2Msg.ev_K (pub := pub) (M := (inst 10).main) hr1
     simp [siteVals, siteEval, siteLookup, hashSys, hL 10 (by decide), B2Msg.b2msg, B2Msg.lookups, evw hr1, B2Msg.lo,
       B2Msg.hi, Expr.eval, StarkedAir.Sha256.eval_cst, hK]
-  have hKR : (B2s.p B2s.P_KR).eval (2 ^ L) B2s.preCols pub (inst 11).main (s + kk) = ((kk : ℕ) : F) := by
+  have hKR : (B2s.p B2s.P_KR).eval (2 ^ Ls 11) B2s.preCols pub (inst 11).main (s + kk) = ((kk : ℕ) : F) := by
     rw [B2s.p, B2s.ev_per88 (f := fun r => if r < 16 then r else 0) (by simp [B2s.preCols, B2s.P_KR, Blake2s.preCols]) hrk,
       show (s + kk) % 88 = kk by omega, if_pos hkk]
   have hv0 : siteVals hashSys inst pub (11, s + kk, 0) = [(inst 11).main B2s.BLKI (s + kk),
       ((kk : ℕ) : F), (inst 11).main B2s.WLO (s + kk), (inst 11).main B2s.WHI (s + kk)] := by
     have : siteVals hashSys inst pub (11, s + kk, 0) = [B2s.k B2s.BLKI, B2s.p B2s.P_KR, B2s.k B2s.WLO,
-        B2s.k B2s.WHI].map (Expr.eval (2 ^ L) B2s.preCols pub (inst 11).main (s + kk)) := by
+        B2s.k B2s.WHI].map (Expr.eval (2 ^ Ls 11) B2s.preCols pub (inst 11).main (s + kk)) := by
       simp [siteVals, siteEval, siteLookup, hashSys, hL 11 (by decide), B2s.b2s, B2s.lookups]
     rw [this]; simp [ev hrk, hKR]
   rw [hv1, hv0] at hsv
@@ -233,26 +231,26 @@ theorem period_block {s : ℕ} (hs : s % 88 = 0) (hsn : s + 88 ≤ 2 ^ L) (hu : 
   congr 1; ring
 
 /-- A continuing period is not period 0. -/
-theorem chn_pos {s : ℕ} (hs : s % 88 = 0) (hsn : s + 88 ≤ 2 ^ L) (hc : (inst 11).main B2s.CHN s = 1) : 88 ≤ s := by
+theorem chn_pos {s : ℕ} (hs : s % 88 = 0) (hsn : s + 88 ≤ 2 ^ Ls 11) (hc : (inst 11).main B2s.CHN s = 1) : 88 ≤ s := by
   have bs := hash_b2s_sat hL hsat
-  have hsr : s < 2 ^ L := by omega
+  have hsr : s < 2 ^ Ls 11 := by omega
   have := B2s.sat bs (B2s.mem_chain (c := .mul (B2s.p B2s.P_OUT8) (B2s.k B2s.CHN)) (by simp [B2s.chainC])) hsr
   simp only [Expr.eval, B2s.ev_out8 (pub := pub) (M := (inst 11).main) hsr, B2s.ev_k hsr, hc, mul_one] at this
   by_contra h
   rw [if_pos (by omega)] at this; exact one_ne_zero this
 
 /-- **A continuing period's predecessor** is a used period, one block earlier. -/
-theorem prev_period {s : ℕ} (hs : s % 88 = 0) (hsn : s + 88 ≤ 2 ^ L) (hc : (inst 11).main B2s.CHN s = 1) :
+theorem prev_period {s : ℕ} (hs : s % 88 = 0) (hsn : s + 88 ≤ 2 ^ Ls 11) (hc : (inst 11).main B2s.CHN s = 1) :
     88 ≤ s ∧ (inst 11).main B2s.USEW (s - 88) = 1 ∧
       (inst 11).main B2s.BLKI s = (inst 11).main B2s.BLKI (s - 88) + 1 := by
   have bs := hash_b2s_sat hL hsat
   have h88 := chn_pos hL hsat hL24 hs hsn hc
-  have hsr : s < 2 ^ L := by omega
-  have hq : wrap (2 ^ L) s (-88) = s - 88 := by
+  have hsr : s < 2 ^ Ls 11 := by omega
+  have hq : wrap (2 ^ Ls 11) s (-88) = s - 88 := by
     rw [show (-88 : ℤ) = -((88 : ℕ) : ℤ) by simp, StarkedAir.Sha256.wrap_back h88 hsr]
-  have kq : ∀ c, (B2s.kq c).eval (2 ^ L) B2s.preCols pub (inst 11).main s = (inst 11).main c (s - 88) := by
+  have kq : ∀ c, (B2s.kq c).eval (2 ^ Ls 11) B2s.preCols pub (inst 11).main s = (inst 11).main c (s - 88) := by
     intro c; simp [B2s.kq, StarkedAir.Sha256.eval_col, hq]
-  have hr0 : (B2s.p B2s.P_R0).eval (2 ^ L) B2s.preCols pub (inst 11).main s = 1 := by
+  have hr0 : (B2s.p B2s.P_R0).eval (2 ^ Ls 11) B2s.preCols pub (inst 11).main s = 1 := by
     rw [B2s.ev_r0 (pub := pub) (M := (inst 11).main) hsr, if_pos hs]
   have c := fun (e : Expr) (h : e ∈ B2s.chainC) => B2s.sat bs (B2s.mem_chain h) hsr
   have c2 := c (.mul (B2s.p B2s.P_R0) (.mul (B2s.k B2s.CHN) (.sub (.sub (B2s.k B2s.BLKI) (B2s.kq B2s.BLKI)) B2s.one)))
@@ -260,17 +258,17 @@ theorem prev_period {s : ℕ} (hs : s % 88 = 0) (hsn : s + 88 ≤ 2 ^ L) (hc : (
   have c3 := c (.mul (B2s.p B2s.P_R0) (.mul (B2s.k B2s.CHN) (B2s.kq B2s.NIL))) (by simp [B2s.chainC])
   simp only [Expr.eval, hr0, one_mul, B2s.ev_k hsr, hc, kq, B2s.one, StarkedAir.Sha256.eval_cst, Nat.cast_one,
     sub_eq_zero] at c2 c3
-  have hs' : s - 88 < 2 ^ L := by omega
+  have hs' : s - 88 < 2 ^ Ls 11 := by omega
   refine ⟨h88, ?_, by linear_combination c2⟩
   rw [B2s.defn bs (a := B2s.USEW) (e := B2s.om (B2s.k B2s.NIL)) (by simp [B2s.flagC]) hs']
   simp only [Expr.eval, B2s.om, B2s.one, StarkedAir.Sha256.eval_cst, Nat.cast_one, B2s.ev_k hs', c3]
   ring
 
 /-- A used period: not unused, and it continues unless it is a first block. -/
-theorem usew_facts {s : ℕ} (hsn : s + 88 ≤ 2 ^ L) (hu : (inst 11).main B2s.USEW s = 1) :
+theorem usew_facts {s : ℕ} (hsn : s + 88 ≤ 2 ^ Ls 11) (hu : (inst 11).main B2s.USEW s = 1) :
     (inst 11).main B2s.NIL s = 0 ∧ ((inst 11).main B2s.CHN s = 1 - (inst 11).main B2s.FST s) := by
   have bs := hash_b2s_sat hL hsat
-  have hsr : s < 2 ^ L := by omega
+  have hsr : s < 2 ^ Ls 11 := by omega
   have e := B2s.defn bs (a := B2s.USEW) (e := B2s.om (B2s.k B2s.NIL)) (by simp [B2s.flagC]) hsr
   simp only [Expr.eval, B2s.om, B2s.one, StarkedAir.Sha256.eval_cst, Nat.cast_one, B2s.ev_k hsr] at e
   rw [hu] at e
@@ -281,19 +279,18 @@ theorem usew_facts {s : ℕ} (hsn : s + 88 ≤ 2 ^ L) (hu : (inst 11).main B2s.U
   ring
 
 /-- **The chain.** A used period hashing block `b` starts from the spec's chaining value after `b` blocks. -/
-theorem chain_state : ∀ b : ℕ, b + 1 < P → ∀ s, s % 88 = 0 → s + 88 ≤ 2 ^ L → (inst 11).main B2s.USEW s = 1 →
+theorem chain_state : ∀ b : ℕ, b + 1 < P → ∀ s, s % 88 = 0 → s + 88 ≤ 2 ^ Ls 11 → (inst 11).main B2s.USEW s = 1 →
     (inst 11).main B2s.BLKI s = (b : F) →
     ∀ i < 8, Blake2s.diagSlot (inst 11).main s i = Spec.Blake2s.chainS Spec.Blake2s.h0 0 (Ub inst pub) b i := by
   have bs := hash_b2s_sat hL hsat
-  have h24 := rows_le hL hsat hL24
-  norm_num at h24
+  obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
   have hlen := ub_len_le hL hsat hL24 (inst := inst) (pub := pub)
   intro b
   induction b with
   | zero =>
     intro _ s hs hsn hu hblk i hi
     obtain ⟨hnil, hchn⟩ := usew_facts hL hsat hL24 hsn hu
-    rcases B2s.bool_flag bs (c := B2s.FST) (by simp) (show s < 2 ^ L by omega) with f0 | f1
+    rcases B2s.bool_flag bs (c := B2s.FST) (by simp) (show s < 2 ^ Ls 11 by omega) with f0 | f1
     · exfalso
       rw [f0, sub_zero] at hchn
       obtain ⟨h88, hu', hblk'⟩ := prev_period hL hsat hL24 hs hsn hchn
@@ -310,9 +307,9 @@ theorem chain_state : ∀ b : ℕ, b + 1 < P → ∀ s, s % 88 = 0 → s + 88 �
     obtain ⟨hnil, hchn⟩ := usew_facts hL hsat hL24 hsn hu
     have f0 : (inst 11).main B2s.FST s = 0 := by
       have := B2s.sat bs (B2s.mem_chain (c := .mul (B2s.p B2s.P_R0) (.mul (B2s.k B2s.FST) (B2s.k B2s.BLKI)))
-        (by simp [B2s.chainC])) (show s < 2 ^ L by omega)
-      simp only [Expr.eval, B2s.ev_r0 (pub := pub) (M := (inst 11).main) (show s < 2 ^ L by omega), if_pos hs, one_mul,
-        B2s.ev_k (show s < 2 ^ L by omega), hblk] at this
+        (by simp [B2s.chainC])) (show s < 2 ^ Ls 11 by omega)
+      simp only [Expr.eval, B2s.ev_r0 (pub := pub) (M := (inst 11).main) (show s < 2 ^ Ls 11 by omega), if_pos hs, one_mul,
+        B2s.ev_k (show s < 2 ^ Ls 11 by omega), hblk] at this
       rcases mul_eq_zero.mp this with h | h
       · exact h
       · exfalso
@@ -321,7 +318,7 @@ theorem chain_state : ∀ b : ℕ, b + 1 < P → ∀ s, s % 88 = 0 → s + 88 �
     rw [f0, sub_zero] at hchn
     obtain ⟨h88, hu', hblk'⟩ := prev_period hL hsat hL24 hs hsn hchn
     have hs' : (s - 88) % 88 = 0 := by omega
-    have hsn' : s - 88 + 88 ≤ 2 ^ L := by omega
+    have hsn' : s - 88 + 88 ≤ 2 ^ Ls 11 := by omega
     obtain ⟨b2, hblk2, hlt2, hwords2, hlast2, hlb2, ht2⟩ := period_block hL hsat hL24 hs' hsn' hu'
     obtain ⟨b1, hblk1, hlt1, -, -, -, -⟩ := period_block hL hsat hL24 hs hsn hu
     have eb1 : b + 1 = b1 := natCast_inj_of_lt (by omega)
@@ -355,12 +352,11 @@ theorem chain_state : ∀ b : ℕ, b + 1 < P → ∀ s, s % 88 = 0 → s + 88 �
     exact Spec.Blake2s.compress_congr ihs (fun kk hkk => (hwords2 kk hkk).1) _ _ i hi
 
 /-- **The last block outputs the stream's Blake2s hash** (as chaining words). -/
-theorem last_digest {s : ℕ} (hs : s % 88 = 0) (hsn : s + 88 ≤ 2 ^ L) (hu : (inst 11).main B2s.USEW s = 1)
+theorem last_digest {s : ℕ} (hs : s % 88 = 0) (hsn : s + 88 ≤ 2 ^ Ls 11) (hu : (inst 11).main B2s.USEW s = 1)
     (hl : (inst 11).main B2s.LASTF s = 1) :
     ∀ i < 8, Blake2s.outWord (inst 11).main s i = Spec.Blake2s.hashBlocks Spec.Blake2s.h0 0 (Ub inst pub) i := by
   have bs := hash_b2s_sat hL hsat
-  have h24 := rows_le hL hsat hL24
-  norm_num at h24
+  obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
   obtain ⟨b, hblk, hlt, hwords, hlast, -, ht⟩ := period_block hL hsat hL24 hs hsn hu
   have hlen := ub_len_le hL hsat hL24 (inst := inst) (pub := pub)
   have hb : b + 1 = B2Msg.nbOf (Ub inst pub).length := hlast.mp hl
@@ -394,13 +390,13 @@ theorem pow2_mod88 : ∀ L : ℕ, 2 ^ L % 88 ≤ 80 := by
 
 omit hsat hL24 in
 /-- A row at a period's final rows lies in a full period. -/
-theorem full_period {r : ℕ} (hr : r < 2 ^ L) (h84 : 84 ≤ r % 88) : r - r % 88 + 88 ≤ 2 ^ L := by
-  have := pow2_mod88 L
+theorem full_period {r : ℕ} (hr : r < 2 ^ Ls 11) (h84 : 84 ≤ r % 88) : r - r % 88 + 88 ≤ 2 ^ Ls 11 := by
+  have := pow2_mod88 (Ls 11)
   by_contra hc
-  have h1 : 2 ^ L - (r - r % 88) < 88 := by omega
+  have h1 : 2 ^ Ls 11 - (r - r % 88) < 88 := by omega
   have h2 : (r - r % 88) % 88 = 0 := by omega
-  have h3 : 2 ^ L % 88 = 2 ^ L - (r - r % 88) := by
-    have : 2 ^ L = (r - r % 88) + (2 ^ L - (r - r % 88)) := by omega
+  have h3 : 2 ^ Ls 11 % 88 = 2 ^ Ls 11 - (r - r % 88) := by
+    have : 2 ^ Ls 11 = (r - r % 88) + (2 ^ Ls 11 - (r - r % 88)) := by omega
     rw [this, Nat.add_mod, h2, zero_add, Nat.mod_mod, Nat.mod_eq_of_lt h1]
     omega
   omega
@@ -413,13 +409,13 @@ abbrev hwords (inst : ℕ → Inst) (pub : ℕ → F) : ℕ → Spec.Blake2s.Wor
   Spec.Blake2s.hashBlocks Spec.Blake2s.h0 0 (Ub inst pub)
 
 omit hsat hL24 in
-theorem yd_site {r k : ℕ} (hr : r < 2 ^ L) (hk3 : 3 ≤ k) (hk10 : k ≤ 10) :
+theorem yd_site {r k : ℕ} (hr : r < 2 ^ Ls 11) (hk3 : 3 ≤ k) (hk10 : k ≤ 10) :
     siteMult hashSys inst pub (11, r, k) = (inst 11).main B2s.YD r *
-      (B2s.p (Blake2s.P_FIN ((k - 3) / 2))).eval (2 ^ L) B2s.preCols pub (inst 11).main r ∧
+      (B2s.p (Blake2s.P_FIN ((k - 3) / 2))).eval (2 ^ Ls 11) B2s.preCols pub (inst 11).main r ∧
     siteVals hashSys inst pub (11, r, k) = [((widx k : ℕ) : F),
-      (Blake2s.limb (if (k - 3) % 2 = 0 then 0 else 1) 0).eval (2 ^ L) B2s.preCols pub (inst 11).main r,
-      (Blake2s.limb (if (k - 3) % 2 = 0 then 0 else 1) 1).eval (2 ^ L) B2s.preCols pub (inst 11).main r] := by
-  have ev : ∀ c, (B2s.k c).eval (2 ^ L) B2s.preCols pub (inst 11).main r = (inst 11).main c r := fun c =>
+      (Blake2s.limb (if (k - 3) % 2 = 0 then 0 else 1) 0).eval (2 ^ Ls 11) B2s.preCols pub (inst 11).main r,
+      (Blake2s.limb (if (k - 3) % 2 = 0 then 0 else 1) 1).eval (2 ^ Ls 11) B2s.preCols pub (inst 11).main r] := by
+  have ev : ∀ c, (B2s.k c).eval (2 ^ Ls 11) B2s.preCols pub (inst 11).main r = (inst 11).main c r := fun c =>
     B2s.ev_k (pub := pub) (M := (inst 11).main) hr
   interval_cases k <;>
     simp [siteMult, siteVals, siteEval, siteLookup, hashSys, hL 11 (by decide), B2s.b2s, B2s.lookups, Expr.eval, ev,
@@ -427,7 +423,7 @@ theorem yd_site {r k : ℕ} (hr : r < 2 ^ L) (hk3 : 3 ≤ k) (hk10 : k ≤ 10) :
 
 /-- **A digest yield** is a full period's last block, and carries the undo stream's Blake2s chaining word
 `widx k`, as limbs. -/
-theorem digest_yield {r k : ℕ} (hr : r < 2 ^ L) (hk3 : 3 ≤ k) (hk10 : k ≤ 10)
+theorem digest_yield {r k : ℕ} (hr : r < 2 ^ Ls 11) (hk3 : 3 ≤ k) (hk10 : k ≤ 10)
     (hm : siteMult hashSys inst pub (11, r, k) ≠ 0) :
     siteVals hashSys inst pub (11, r, k) = [((widx k : ℕ) : F),
       ((Sha256.half16 (hwords inst pub (widx k)) 0 : ℕ) : F), ((Sha256.half16 (hwords inst pub (widx k)) 1 : ℕ) : F)] := by
@@ -438,7 +434,7 @@ theorem digest_yield {r k : ℕ} (hr : r < 2 ^ L) (hk3 : 3 ≤ k) (hk10 : k ≤ 
   set s' := r - r % 88 with hs'
   have hp : r % 88 < 88 := Nat.mod_lt _ (by norm_num)
   have hrs : r = s' + r % 88 := by omega
-  have hfin : (B2s.p (Blake2s.P_FIN j)).eval (2 ^ L) B2s.preCols pub (inst 11).main r =
+  have hfin : (B2s.p (Blake2s.P_FIN j)).eval (2 ^ Ls 11) B2s.preCols pub (inst 11).main r =
       if r % 88 = 84 + j then 1 else 0 := by
     rw [B2s.p, B2s.eval_pre_gadget (by simp [Blake2s.P_FIN]; omega)]
     conv_lhs => rw [hrs]
@@ -468,15 +464,15 @@ theorem digest_yield {r k : ℕ} (hr : r < 2 ^ L) (hk3 : 3 ≤ k) (hk10 : k ≤ 
     intro X hX; rw [hrow]; exact B2s.per_const bs hX hs88 (84 + j) (by omega) (by omega)
   have husew : (inst 11).main B2s.USEW s' = 1 := by
     have e0 := B2s.defn bs (a := B2s.USEW) (e := B2s.om (B2s.k B2s.NIL)) (by simp [B2s.flagC])
-      (show s' < 2 ^ L by omega)
-    simp only [Expr.eval, B2s.om, B2s.one, StarkedAir.Sha256.eval_cst, Nat.cast_one, B2s.ev_k (show s' < 2 ^ L by omega)] at e0
+      (show s' < 2 ^ Ls 11 by omega)
+    simp only [Expr.eval, B2s.om, B2s.one, StarkedAir.Sha256.eval_cst, Nat.cast_one, B2s.ev_k (show s' < 2 ^ Ls 11 by omega)] at e0
     rw [e0, ← hq B2s.NIL (by simp [B2s.perConst]), ← hus, hu1.1]
   have hl' : (inst 11).main B2s.LASTF s' = 1 := by rw [← hq B2s.LASTF (by simp [B2s.perConst]), hu1.2]
   have hdig := last_digest hL hsat hL24 hs88 hfull husew hl'
   rw [ev]
   have hbits : ∀ w < 8, ∀ i < 32, ((inst 11).main (32 * w + i) r).val ≤ 1 := fun w hw =>
     B2s.bits4 bs hr w hw
-  have lim : ∀ w < 2, ∀ h ≤ 1, (Blake2s.limb w h).eval (2 ^ L) B2s.preCols pub (inst 11).main r =
+  have lim : ∀ w < 2, ∀ h ≤ 1, (Blake2s.limb w h).eval (2 ^ Ls 11) B2s.preCols pub (inst 11).main r =
       ((Sha256.half16 (Sha256.word (inst 11).main (32 * w) r) h : ℕ) : F) := by
     intro w hw h hh
     exact StarkedAir.Sha256.eval_limb (wrap_zero hr) (hbits w (by omega)) hh
@@ -499,30 +495,30 @@ theorem blockCommit_eq : Spec.Block.blockCommit (Ub inst pub) = Spec.Blake2s.dig
 
 /-- **Block commitment soundness (M3a.6, D-038 as amended).** Public inputs 9–24 are the 16-bit limbs of the
 undo stream's Blake2s words: `blockCommit undo = digest C` and `pub (9 + 2i + h) = half16 (C i) h`. -/
-theorem commit_sound (hL8 : 8 ≤ L) :
+theorem commit_sound (hL8 : 8 ≤ Ls 11) :
     ∀ i < 8, ∀ h ≤ 1, pub (9 + 2 * i + h) = ((Sha256.half16 (hwords inst pub i) h : ℕ) : F) := by
-  have h256 : 256 ≤ 2 ^ L := le_trans (by norm_num) (Nat.pow_le_pow_right (by norm_num) hL8)
+  have h256 : 256 ≤ 2 ^ Ls 11 := le_trans (by norm_num) (Nat.pow_le_pow_right (by norm_num) hL8)
   intro i hi h hh
-  have hr : i < 2 ^ L := by omega
+  have hr : i < 2 ^ Ls 11 := by omega
   have hm : siteMult hashSys inst pub (11, i, 2) = -1 := by
-    have e : siteMult hashSys inst pub (11, i, 2) = -((B2s.p B2s.P_OUT8).eval (2 ^ L) B2s.preCols pub (inst 11).main i) := by
+    have e : siteMult hashSys inst pub (11, i, 2) = -((B2s.p B2s.P_OUT8).eval (2 ^ Ls 11) B2s.preCols pub (inst 11).main i) := by
       simp only [siteMult, siteEval, siteLookup, hashSys, hL 11 (by decide)]; rfl
     rw [e, B2s.ev_out8 (pub := pub) (M := (inst 11).main) hr, if_pos hi]
   -- the use's tuple: `(i, pub (9 + 2i), pub (10 + 2i))`
-  have rk : ∀ j < 8, (B2s.p (B2s.P_RK j)).eval (2 ^ L) B2s.preCols pub (inst 11).main i = if i = j then 1 else 0 := by
+  have rk : ∀ j < 8, (B2s.p (B2s.P_RK j)).eval (2 ^ Ls 11) B2s.preCols pub (inst 11).main i = if i = j then 1 else 0 := by
     intro j hj; rw [B2s.ev_rk (by omega) hr, Nat.mod_eq_of_lt (show i < 88 by omega)]
-  have pl : ∀ hh' ≤ 1, (B2s.pubLimb hh').eval (2 ^ L) B2s.preCols pub (inst 11).main i = pub (9 + 2 * i + hh') := by
+  have pl : ∀ hh' ≤ 1, (B2s.pubLimb hh').eval (2 ^ Ls 11) B2s.preCols pub (inst 11).main i = pub (9 + 2 * i + hh') := by
     intro hh' _
     simp only [B2s.pubLimb, List.range_succ, List.range_zero, List.nil_append, List.foldl_append, List.foldl_cons,
       List.foldl_nil, Expr.eval, StarkedAir.Sha256.eval_cst, rk 0 (by norm_num), rk 1 (by norm_num), rk 2 (by norm_num),
       rk 3 (by norm_num), rk 4 (by norm_num), rk 5 (by norm_num), rk 6 (by norm_num), rk 7 (by norm_num), B2s.PUB_OUT]
     interval_cases i <;> simp
-  have hKR : (B2s.p B2s.P_KR).eval (2 ^ L) B2s.preCols pub (inst 11).main i = ((i : ℕ) : F) := by
+  have hKR : (B2s.p B2s.P_KR).eval (2 ^ Ls 11) B2s.preCols pub (inst 11).main i = ((i : ℕ) : F) := by
     rw [B2s.p, B2s.ev_per88 (f := fun r => if r < 16 then r else 0) (by simp [B2s.preCols, B2s.P_KR, Blake2s.preCols]) hr,
       Nat.mod_eq_of_lt (show i < 88 by omega), if_pos (by omega)]
   have hvu : siteVals hashSys inst pub (11, i, 2) = [((i : ℕ) : F), pub (9 + 2 * i + 0), pub (9 + 2 * i + 1)] := by
     have : siteVals hashSys inst pub (11, i, 2) = [B2s.p B2s.P_KR, B2s.pubLimb 0, B2s.pubLimb 1].map
-        (Expr.eval (2 ^ L) B2s.preCols pub (inst 11).main i) := by
+        (Expr.eval (2 ^ Ls 11) B2s.preCols pub (inst 11).main i) := by
       simp [siteVals, siteEval, siteLookup, hashSys, hL 11 (by decide), B2s.b2s, B2s.lookups]
     rw [this]; simp only [List.map_cons, List.map_nil, hKR, pl 0 (by norm_num), pl 1 le_rfl]
   obtain ⟨i', r', k', hr', hy, hsm, hsv⟩ := link hL hsat hL24 (b2s_site hL hsat hL24 hr (by norm_num)) rfl hm

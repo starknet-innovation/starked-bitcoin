@@ -11,8 +11,8 @@ open StarkedAir.Sha256 (pre cst)
 
 section System
 
-variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ}
-  (hL : ∀ i < 15, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : L ≤ 23)
+variable {inst : ℕ → Inst} {pub : ℕ → F} {Ls : ℕ → ℕ}
+  (hL : ∀ i < 15, (inst i).logSize = Ls i) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : ∀ i < 15, Ls i ≤ 23)
 include hL hsat hL24
 
 /-- **Range uses are bytes.** A use of the range table with multiplicity `−1` looks up a value below 256. -/
@@ -31,7 +31,7 @@ theorem r8_lt {i r k : ℕ} (hs : ((i, r, k) : Site) ∈ sites hashSys inst) (hu
   omega
 
 /-- The fields site of check lookup `j` (`chkLookups` index `j`). -/
-theorem fields_chk_site {r j : ℕ} (hr : r < 2 ^ L) (hj : j < 26) :
+theorem fields_chk_site {r j : ℕ} (hr : r < 2 ^ Ls 1) (hj : j < 26) :
     ((1, r, 8 + j) : Site) ∈ sites hashSys inst ∧
     siteLookup hashSys ((1, r, 8 + j) : Site) = Fields.chkLookups.getD j ⟨0, .const 0, []⟩ := by
   refine ⟨site_mem hL (by decide) hr (by simp [hashSys, Fields.fields, Fields.lookups, Fields.chkLookups]; omega), ?_⟩
@@ -40,7 +40,7 @@ theorem fields_chk_site {r j : ℕ} (hr : r < 2 ^ L) (hj : j < 26) :
     show Fields.lookups.length = 8 from rfl, Nat.add_sub_cancel_left]
 
 /-- **Fields range slots hold bytes.** -/
-theorem fields_rg_lt {r j : ℕ} (hr : r < 2 ^ L) (hj : j < 13) : ((inst 1).main (Fields.RG j) r).val < 256 := by
+theorem fields_rg_lt {r j : ℕ} (hr : r < 2 ^ Ls 1) (hj : j < 13) : ((inst 1).main (Fields.RG j) r).val < 256 := by
   obtain ⟨hs, hl⟩ := fields_chk_site hL hsat hL24 hr (j := 9 + j) (by omega)
   have g : Fields.chkLookups.getD (9 + j) ⟨0, .const 0, []⟩ = ⟨Tables.REL_R8, .neg Fields.one, [Fields.rg j]⟩ := by
     interval_cases j <;> rfl
@@ -51,8 +51,8 @@ theorem fields_rg_lt {r j : ℕ} (hr : r < 2 ^ L) (hj : j < 13) : ((inst 1).main
 
 /-- **Fields byte slots read the block.** Byte slot `j` of fields row `r`, when its multiplicity is `−1`,
 reads the block byte at `BASEC + j`. -/
-theorem fields_by_read {r j : ℕ} (hr : r < 2 ^ L) (hj : j < 8)
-    (hm : (Fields.chkLookups.getD j ⟨0, .const 0, []⟩).mult.eval (2 ^ L) Fields.preCols pub (inst 1).main r = -1) :
+theorem fields_by_read {r j : ℕ} (hr : r < 2 ^ Ls 1) (hj : j < 8)
+    (hm : (Fields.chkLookups.getD j ⟨0, .const 0, []⟩).mult.eval (2 ^ Ls 1) Fields.preCols pub (inst 1).main r = -1) :
     ∃ r0, r0 < (pub 0).val ∧ (inst 1).main Fields.BASEC r + (j : F) = (r0 : F) ∧
       (inst 1).main (Fields.BY j) r = (inst 0).main BYTE r0 := by
   obtain ⟨hs, hl⟩ := fields_chk_site hL hsat hL24 hr (j := j) (by omega)
@@ -69,7 +69,7 @@ theorem fields_by_read {r j : ℕ} (hr : r < 2 ^ L) (hj : j < 8)
   exact ⟨r0, hr0, hp, hb⟩
 
 /-- **The auxiliary read** (prevout or commitment-pattern byte) reads the block at `AQ`. -/
-theorem fields_bq_read {r : ℕ} (hr : r < 2 ^ L) (hm : (inst 1).main Fields.GIN r + (inst 1).main Fields.MMB r = 1) :
+theorem fields_bq_read {r : ℕ} (hr : r < 2 ^ Ls 1) (hm : (inst 1).main Fields.GIN r + (inst 1).main Fields.MMB r = 1) :
     ∃ r0, r0 < (pub 0).val ∧ (inst 1).main Fields.AQ r = (r0 : F) ∧ (inst 1).main Fields.BQ r = (inst 0).main BYTE r0 := by
   obtain ⟨hs, hl⟩ := fields_chk_site hL hsat hL24 hr (j := 8) (by omega)
   have g : Fields.chkLookups.getD 8 ⟨0, .const 0, []⟩ =

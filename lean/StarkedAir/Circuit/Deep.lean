@@ -214,6 +214,70 @@ theorem deep_complete (tc : List (ℕ × List (List ℤ))) :
 
 /-! ### Export -/
 
+/-! ### Periodicity flags (D-045, per-component sizes)
+
+A two-sample column's responses are `[last, first, last]` (`colResps`): the first is the periodicity
+copy of the last sample. Its point is the last sample's point at one size, and that point plus
+`2^(L i)·g_N` for a lifted component (stwo-zig `samples.zig`); the label and the value index are the
+same. `deepPer` flags those responses, so the host can pick the point; the table itself is unchanged. -/
+
+/-- A column's periodicity flags, aligned with `colResps`. -/
+def colPer (offs : List ℤ) : List Bool := if offs.length = 2 then [true, false, false] else offs.map fun _ => false
+
+def treePer : List (List ℤ) → List Bool
+  | [] => []
+  | offs :: cols => colPer offs ++ treePer cols
+
+def deepPerFrom : List (ℕ × List (List ℤ)) → List Bool
+  | [] => []
+  | (_, cols) :: rest => treePer cols ++ deepPerFrom rest
+
+/-- The periodicity flags of the response table. -/
+def deepPer (tc : List (ℕ × List (List ℤ))) : List Bool := deepPerFrom tc
+
+theorem colPer_length (t c base : ℕ) (offs : List ℤ) : (colPer offs).length = (colResps t c base offs).length := by
+  unfold colPer colResps
+  split_ifs with h
+  · obtain ⟨a, b, rfl⟩ : ∃ a b, offs = [a, b] := by
+      match offs, h with
+      | [a, b], _ => exact ⟨a, b, rfl⟩
+    simp [List.zipIdx]
+  · simp
+
+theorem treePer_length (t : ℕ) : ∀ (cols : List (List ℤ)) (c base : ℕ),
+    (treePer cols).length = (treeResps t cols c base).length
+  | [], _, _ => rfl
+  | offs :: cols, c, base => by
+    simp only [treePer, treeResps, List.length_append, colPer_length t c base, treePer_length t cols (c + 1) (base + offs.length)]
+
+theorem deepPerFrom_length : ∀ (tc : List (ℕ × List (List ℤ))) (base : ℕ),
+    (deepPerFrom tc).length = (deepFrom tc base).length
+  | [], _ => rfl
+  | (t, cols) :: rest, base => by
+    simp only [deepPerFrom, deepFrom, List.length_append, treePer_length t cols 0 base,
+      deepPerFrom_length rest (base + (cols.map List.length).sum)]
+
+/-- One flag per response. -/
+theorem deepPer_length (tc : List (ℕ × List (List ℤ))) : (deepPer tc).length = (deepList tc).length :=
+  deepPerFrom_length tc 0
+
+/-- **A flagged response is the periodicity copy**: in a two-sample column, the flagged first response is
+the column's last response (same label, same value index). -/
+theorem colResps_per {t c base : ℕ} {offs : List ℤ} (h : offs.length = 2) :
+    (colPer offs)[0]? = some true ∧ (colResps t c base offs)[0]? = (colResps t c base offs)[2]? := by
+  obtain ⟨a, b, rfl⟩ : ∃ a b, offs = [a, b] := by
+    match offs, h with
+    | [a, b], _ => exact ⟨a, b, rfl⟩
+  simp [colPer, colResps, List.zipIdx]
+
+/-- The table with its periodicity flags (`[tree, col, off, idx, per]`). At one size `per` is ignored:
+the flagged point is the last sample's point. -/
+def deepJsonPer (shapes : List PartShape) : String :=
+  let tc := treeCols shapes (shapes.any (·.lookups))
+  let rs := ((deepList tc).zip (deepPer tc)).map fun (r, f) =>
+    s!"[{r.tree},{r.col},{r.off},{r.idx},{if f then 1 else 0}]"
+  s!"\{\"schema\":\"starked-deep-v1\",\"n_samples\":{(samples tc).length},\"responses\":[{",".intercalate rs}]}"
+
 def deepJson (shapes : List PartShape) : String :=
   let tc := treeCols shapes (shapes.any (·.lookups))
   let rs := (deepList tc).map fun r => s!"[{r.tree},{r.col},{r.off},{r.idx}]"

@@ -50,10 +50,31 @@ def SumOk (v : ℕ → F) : Prop :=
     (∀ j < 16, v (19 + j) = (HeaderTree.limbsOf (rootFrom (fun i => hashOf (P i)) ℓ 0)).getD j 0) ∧
     (∀ j < 16, v (35 + j) = (HeaderTree.limbsOf (rootFrom (fun i => seedOf (P i)) ℓ 0)).getD j 0)
 
-/-- A proven summary's range is proven. -/
-theorem SumOk.rng {v : ℕ → F} (h : SumOk v) : ∃ ℓ, (v 1).val = 2 ^ ℓ ∧ RngOk (rngOf v ℓ) := by
+/-- `SumOk` for any per-block statement `ok` (`SumOk = SumOkP BlockPubOk`; `SumOkP BlockPubOk'` for
+per-component sizes, D-045). -/
+def SumOkP (ok : (ℕ → F) → Prop) (v : ℕ → F) : Prop :=
+  ∃ (ℓ : ℕ) (P : ℕ → ℕ → F), (v 1).val = 2 ^ ℓ ∧ (v 0).val < 2 ^ 30 ∧ (v 1).val < 2 ^ 30 ∧ (v 6).val < 2 ^ 30 ∧
+    (∀ i < 2 ^ ℓ, BlockAtP ok (rngOf v ℓ) ((v 0).val + i) (P i)) ∧
+    RunSum.pQ v 2 = ∑ i ∈ Finset.range (2 ^ ℓ), RunSum.pQ (P i) Coin.PUB_S ∧
+    (v 6).val = ∑ i ∈ Finset.range (2 ^ ℓ), (P i Coin.PUB_NIN).val ∧
+    (∀ j < 16, v (19 + j) = (HeaderTree.limbsOf (rootFrom (fun i => hashOf (P i)) ℓ 0)).getD j 0) ∧
+    (∀ j < 16, v (35 + j) = (HeaderTree.limbsOf (rootFrom (fun i => seedOf (P i)) ℓ 0)).getD j 0)
+
+theorem sumOk_iff {v : ℕ → F} : SumOk v ↔ SumOkP BlockPubOk v := Iff.rfl
+
+theorem SumOkP.mono {ok ok' : (ℕ → F) → Prop} (hm : ∀ p, ok p → ok' p) {v : ℕ → F} (h : SumOkP ok v) :
+    SumOkP ok' v := by
+  obtain ⟨ℓ, P, a, b, c, d, hb, rest⟩ := h
+  exact ⟨ℓ, P, a, b, c, d, fun i hi => (hb i hi).mono hm, rest⟩
+
+/-- A proven summary's range is proven (any `ok`). -/
+theorem SumOkP.rng {ok : (ℕ → F) → Prop}  {v : ℕ → F} (h : SumOkP ok v) : ∃ ℓ, (v 1).val = 2 ^ ℓ ∧ RngOkP ok (rngOf v ℓ) := by
   obtain ⟨ℓ, P, hn, -, -, -, hb, hs, hni, -, -⟩ := h
   exact ⟨ℓ, hn, P, hb, hs, hni⟩
+
+/-- A proven summary's range is proven. -/
+theorem SumOk.rng {v : ℕ → F} (h : SumOk v) : ∃ ℓ, (v 1).val = 2 ^ ℓ ∧ RngOk (rngOf v ℓ) :=
+  SumOkP.rng h
 
 /-! ### Helpers -/
 
@@ -84,10 +105,15 @@ theorem out_getD {pl pr : ℕ → ℕ} {b : ℕ} (i : ℕ) (hi : i < BlockNode.N
     (BlockNode.nodeOut pl pr b).res.getD i 0 = BlockNode.outReg pl pr b i := by
   simp [BlockNode.nodeOut, List.getD_eq_getElem?_getD, List.getElem?_map, List.getElem?_range hi]
 
-theorem blockAt_congr {r r' : Rng} {h : ℕ} {p : ℕ → F} (hγ : r'.γ = r.γ) (hz : r'.z = r.z) (hα : r'.α = r.α)
-    (hb : BlockAt r h p) : BlockAt r' h p := by
+/-- `blockAt_congr` for any `ok`. -/
+theorem blockAt_congrP {ok : (ℕ → F) → Prop}  {r r' : Rng} {h : ℕ} {p : ℕ → F} (hγ : r'.γ = r.γ) (hz : r'.z = r.z) (hα : r'.α = r.α)
+    (hb : BlockAtP ok r h p) : BlockAtP ok r' h p := by
   obtain ⟨a, b, c, d, e, f⟩ := hb
   exact ⟨a, b, c, d.trans hγ.symm, e.trans hz.symm, fun k hk => (f k hk).trans (by rw [hα])⟩
+
+theorem blockAt_congr {r r' : Rng} {h : ℕ} {p : ℕ → F} (hγ : r'.γ = r.γ) (hz : r'.z = r.z) (hα : r'.α = r.α)
+    (hb : BlockAt r h p) : BlockAt r' h p :=
+  blockAt_congrP hγ hz hα hb
 
 theorem pQ_congr {v w : ℕ → F} {i : ℕ} (h : ∀ j < 4, v (i + j) = w (i + j)) : RunSum.pQ v i = RunSum.pQ w i := by
   unfold RunSum.pQ
@@ -106,11 +132,10 @@ theorem root_join (g : (ℕ → F) → Spec.Sha256.State) (PL PR : ℕ → ℕ �
 
 variable {ρ : ℕ → Q}
 
-/-- **Nodes keep summaries proven.** If the node glue holds over two proven children, its output
-summary is proven: the joined range of `2^(ℓ+1)` blocks, with both roots folded. -/
-theorem sumOk_node {pl pr : ℕ → ℕ} {b : ℕ} (h : Holds ρ (BlockNode.nodeOut pl pr b).ops)
-    (hL : SumOk (fun i => (ρ (pl i)).a)) (hR : SumOk (fun i => (ρ (pr i)).a)) :
-    SumOk (fun i => (ρ (BlockNode.outReg pl pr b i)).a) := by
+/-- **Nodes keep summaries proven**, for any per-block statement `ok`. -/
+theorem sumOk_nodeP {ok : (ℕ → F) → Prop}  {pl pr : ℕ → ℕ} {b : ℕ} (h : Holds ρ (BlockNode.nodeOut pl pr b).ops)
+    (hL : SumOkP ok (fun i => (ρ (pl i)).a)) (hR : SumOkP ok (fun i => (ρ (pr i)).a)) :
+    SumOkP ok (fun i => (ρ (BlockNode.outReg pl pr b i)).a) := by
   obtain ⟨eN, eLo, eCh, eN2, eS, eNin, ⟨-, lLo⟩, ⟨-, lN⟩, ⟨-, lNin⟩, hH, hSd⟩ := BlockNode.node_sound h
   obtain ⟨ℓ, PL, hnL, hloL, hnLb, hniL, hbL, hsL, hnnL, hhL, hsdL⟩ := hL
   obtain ⟨ℓR, PR, hnR, hloR, hnRb, hniR, hbR, hsR, hnnR, hhR, hsdR⟩ := hR
@@ -173,15 +198,15 @@ theorem sumOk_node {pl pr : ℕ → ℕ} {b : ℕ} (h : Holds ρ (BlockNode.node
   · exact lN
   · exact lNin
   · intro i hi
-    show BlockAt (rngOf _ (ℓ + 1)) ((ρ (BlockNode.outReg pl pr b 0)).a.val + i) _
+    show BlockAtP ok (rngOf _ (ℓ + 1)) ((ρ (BlockNode.outReg pl pr b 0)).a.val + i) _
     rw [v0]
     by_cases hil : i < 2 ^ ℓ
     · simp only [if_pos hil]
-      exact blockAt_congr (r := rngOf (fun i => (ρ (pl i)).a) ℓ) (cL 7 (by simp)) (cL 11 (by simp)) (cL 15 (by simp)) (hbL i hil)
+      exact blockAt_congrP (r := rngOf (fun i => (ρ (pl i)).a) ℓ) (cL 7 (by simp)) (cL 11 (by simp)) (cL 15 (by simp)) (hbL i hil)
     · simp only [if_neg hil]
       have := hbR (i - 2 ^ ℓ) (by rw [pow_succ] at hi; omega)
       rw [loR, show (ρ (pl 0)).a.val + 2 ^ ℓ + (i - 2 ^ ℓ) = (ρ (pl 0)).a.val + i by omega] at this
-      exact blockAt_congr (r := rngOf (fun i => (ρ (pr i)).a) ℓ) ((cL 7 (by simp)).trans (cR 7 (by simp)).symm) ((cL 11 (by simp)).trans (cR 11 (by simp)).symm)
+      exact blockAt_congrP (r := rngOf (fun i => (ρ (pr i)).a) ℓ) ((cL 7 (by simp)).trans (cR 7 (by simp)).symm) ((cL 11 (by simp)).trans (cR 11 (by simp)).symm)
         ((cL 15 (by simp)).trans (cR 15 (by simp)).symm) this
   · have hv : RunSum.pQ (fun i => (ρ (BlockNode.outReg pl pr b i)).a) 2 =
         RunSum.pQ (fun i => (ρ (pl i)).a) 2 + RunSum.pQ (fun i => (ρ (pr i)).a) 2 := by
@@ -215,6 +240,13 @@ theorem sumOk_node {pl pr : ℕ → ℕ} {b : ℕ} (h : Holds ρ (BlockNode.node
     rw [vSd j hj, root_join seedOf PL PR ℓ]
     exact hSd (limbs_ext (g := fun j => (ρ (pl (BlockNode.SR + j))).a) hsdL)
       (limbs_ext (g := fun j => (ρ (pr (BlockNode.SR + j))).a) hsdR) j hj
+
+/-- **Nodes keep summaries proven.** If the node glue holds over two proven children, its output
+summary is proven: the joined range of `2^(ℓ+1)` blocks, with both roots folded. -/
+theorem sumOk_node {pl pr : ℕ → ℕ} {b : ℕ} (h : Holds ρ (BlockNode.nodeOut pl pr b).ops)
+    (hL : SumOk (fun i => (ρ (pl i)).a)) (hR : SumOk (fun i => (ρ (pr i)).a)) :
+    SumOk (fun i => (ρ (BlockNode.outReg pl pr b i)).a) :=
+  sumOk_nodeP h hL hR
 
 /-! ### Leaves -/
 
@@ -250,13 +282,12 @@ noncomputable def leafVec (p : ℕ → F) (i : ℕ) : F :=
   else if i < 15 then p (41 + (i - 7)) else if i < 19 then p (Coin.PUB_ALPHA 1 + (i - 15))
   else if i < 35 then p (25 + (i - 19)) else (HeaderTree.limbsOf (seedOf p)).getD (i - 35) 0
 
-/-- **Leaves.** A proven block at height `H < 2^30` whose leaf checks hold (its BIP30 flag, `αₖ = α₁ᵏ`,
-the input count below `2^30`), with 16-bit hash limbs, has a proven summary. -/
-theorem sumOk_leaf {p : ℕ → F} (hp : BlockPubOk p) {H : ℕ} (hH : H < 2 ^ 30) (h2 : p 2 = (H : F))
+/-- **Leaves**, for any per-block statement `ok` (`BlockPubOk'` for a lifted block leaf). -/
+theorem sumOk_leafP {ok : (ℕ → F) → Prop}  {p : ℕ → F} (hp : ok p) {H : ℕ} (hH : H < 2 ^ 30) (h2 : p 2 = (H : F))
     (hlost : p Coin.PUB_LOST = if Spec.Coins.bip30Lost H then 1 else 0)
     (hα : ∀ k < Coin.W, RunSum.pQ p (Coin.PUB_ALPHA k) = RunSum.pQ p (Coin.PUB_ALPHA 1) ^ k)
     (hnin : (p Coin.PUB_NIN).val < 2 ^ 30) (hlimbs : ∀ j < 16, (p (25 + j)).val < 65536) :
-    SumOk (leafVec p) := by
+    SumOkP ok (leafVec p) := by
   have hHP : H < P := by unfold P; omega
   have v0 : (leafVec p 0).val = H := by
     simp only [leafVec, if_true]; rw [h2, ZMod.val_natCast_of_lt hHP]
@@ -303,6 +334,15 @@ theorem sumOk_leaf {p : ℕ → F} (hp : BlockPubOk p) {H : ℕ} (hH : H < 2 ^ 3
       if_neg (show 35 + j ≠ 6 by omega), if_neg (show ¬ (35 + j < 15) by omega), if_neg (show ¬ (35 + j < 19) by omega),
       if_neg (show ¬ (35 + j < 35) by omega), rootFrom, Nat.add_sub_cancel_left]
 
+/-- **Leaves.** A proven block at height `H < 2^30` whose leaf checks hold (its BIP30 flag, `αₖ = α₁ᵏ`,
+the input count below `2^30`), with 16-bit hash limbs, has a proven summary. -/
+theorem sumOk_leaf {p : ℕ → F} (hp : BlockPubOk p) {H : ℕ} (hH : H < 2 ^ 30) (h2 : p 2 = (H : F))
+    (hlost : p Coin.PUB_LOST = if Spec.Coins.bip30Lost H then 1 else 0)
+    (hα : ∀ k < Coin.W, RunSum.pQ p (Coin.PUB_ALPHA k) = RunSum.pQ p (Coin.PUB_ALPHA 1) ^ k)
+    (hnin : (p Coin.PUB_NIN).val < 2 ^ 30) (hlimbs : ∀ j < 16, (p (25 + j)).val < 65536) :
+    SumOk (leafVec p) :=
+  sumOk_leafP hp hH h2 hlost hα hnin hlimbs
+
 /-- **The root.** A proven summary gives `epoch_systems_core`'s block hypotheses over its `2^ℓ` blocks,
 with its partial sum (`epoch_hyps_of_rng`). -/
 theorem epoch_hyps_of_sum {v : ℕ → F} (h : SumOk v) : ∃ ℓ, (v 1).val = 2 ^ ℓ ∧
@@ -315,6 +355,19 @@ theorem epoch_hyps_of_sum {v : ℕ → F} (h : SumOk v) : ∃ ℓ, (v 1).val = 2
       ∑ i ∈ Finset.range (2 ^ ℓ), RunSum.pQ (pub i) Coin.PUB_S = RunSum.pQ v 2 := by
   obtain ⟨ℓ, hn, hr⟩ := h.rng
   exact ⟨ℓ, hn, epoch_hyps_of_rng hr (by show 0 < 2 ^ ℓ; positivity)⟩
+
+/-- **The root, per-component sizes.** A proven summary (`SumOkP BlockPubOk'`) gives `epoch_systems_core`'s
+block hypotheses with a size per block and component (`epoch_hyps_of_rng'`). -/
+theorem epoch_hyps_of_sumV {v : ℕ → F} (h : SumOkP BlockPubOk' v) : ∃ ℓ, (v 1).val = 2 ^ ℓ ∧
+    ∃ (pub : ℕ → ℕ → F) (inst : ℕ → ℕ → Inst) (L : ℕ → ℕ → ℕ) (_ : ∀ i, Setup (inst i) (pub i) (L i 1)),
+      (∀ i < 2 ^ ℓ, ∀ c < 15, (inst i c).logSize = L i c) ∧ (∀ i < 2 ^ ℓ, hashSys.SatisfiedExt (inst i) (pub i) []) ∧
+      (∀ i < 2 ^ ℓ, ∀ c < 15, L i c ≤ 23) ∧ (∀ i < 2 ^ ℓ, pub i 2 = (((v 0).val + i : ℕ) : F)) ∧
+      (∀ i < 2 ^ ℓ, pub i Coin.PUB_LOST = if Spec.Coins.bip30Lost ((v 0).val + i) then 1 else 0) ∧
+      (∀ i < 2 ^ ℓ, FpWalk.gQ (pub i) = RunSum.pQ v 7) ∧ (∀ i < 2 ^ ℓ, RunSum.pQ (pub i) Coin.PUB_Z = RunSum.pQ v 11) ∧
+      (∀ i < 2 ^ ℓ, ∀ k < Coin.W, RunSum.pQ (pub i) (Coin.PUB_ALPHA k) = RunSum.pQ v 15 ^ k) ∧
+      ∑ i ∈ Finset.range (2 ^ ℓ), RunSum.pQ (pub i) Coin.PUB_S = RunSum.pQ v 2 := by
+  obtain ⟨ℓ, hn, hr⟩ := h.rng
+  exact ⟨ℓ, hn, epoch_hyps_of_rng' hr (by show 0 < 2 ^ ℓ; positivity)⟩
 
 /-! ### The forest (the outer verifier) -/
 
@@ -330,17 +383,16 @@ theorem linked_join {l r : Rng} {rs : List Rng} (hl : r.lo = l.lo + l.n) (h : Li
     obtain ⟨h1, h2⟩ := h
     exact ⟨by simp only [joinRng]; rw [h1, hl]; ring, h2⟩
 
-/-- **The forest.** A list of proven ranges, each starting where the previous one ends, with one
-challenge, joins into one proven range (`rng_node` folded from the left). -/
-theorem rng_forest : ∀ (rs : List Rng) (r0 : Rng), RngOk r0 → (∀ r ∈ rs, RngOk r) → Linked r0 rs →
+/-- **The forest**, for any per-block statement `ok`. -/
+theorem rng_forestP {ok : (ℕ → F) → Prop}  : ∀ (rs : List Rng) (r0 : Rng), RngOkP ok r0 → (∀ r ∈ rs, RngOkP ok r) → Linked r0 rs →
     (∀ r ∈ rs, r.γ = r0.γ ∧ r.z = r0.z ∧ r.α = r0.α) →
-    RngOk ⟨r0.lo, r0.n + (rs.map (·.n)).sum, r0.s + (rs.map (·.s)).sum, r0.nin + (rs.map (·.nin)).sum, r0.γ, r0.z, r0.α⟩
+    RngOkP ok ⟨r0.lo, r0.n + (rs.map (·.n)).sum, r0.s + (rs.map (·.s)).sum, r0.nin + (rs.map (·.nin)).sum, r0.γ, r0.z, r0.α⟩
   | [], r0, h0, _, _, _ => by simpa using h0
   | r :: rs, r0, h0, hrs, hch, hcg => by
     obtain ⟨hlink, htail⟩ := hch
     obtain ⟨g, z, a⟩ := hcg r List.mem_cons_self
-    have hj := rng_node h0 (hrs r List.mem_cons_self) hlink g z a
-    have := rng_forest rs (joinRng r0 r) hj (fun x hx => hrs x (List.mem_cons_of_mem _ hx)) (linked_join hlink htail)
+    have hj := rng_nodeP h0 (hrs r List.mem_cons_self) hlink g z a
+    have := rng_forestP rs (joinRng r0 r) hj (fun x hx => hrs x (List.mem_cons_of_mem _ hx)) (linked_join hlink htail)
       (fun x hx => hcg x (List.mem_cons_of_mem _ hx))
     simp only [joinRng, List.map_cons, List.sum_cons] at this ⊢
     have e1 : r0.n + r.n + (rs.map (·.n)).sum = r0.n + (r.n + (rs.map (·.n)).sum) := by ring
@@ -348,6 +400,13 @@ theorem rng_forest : ∀ (rs : List Rng) (r0 : Rng), RngOk r0 → (∀ r ∈ rs,
     have e3 : r0.nin + r.nin + (rs.map (·.nin)).sum = r0.nin + (r.nin + (rs.map (·.nin)).sum) := by ring
     rw [e1, e2, e3] at this
     exact this
+
+/-- **The forest.** A list of proven ranges, each starting where the previous one ends, with one
+challenge, joins into one proven range (`rng_node` folded from the left). -/
+theorem rng_forest : ∀ (rs : List Rng) (r0 : Rng), RngOk r0 → (∀ r ∈ rs, RngOk r) → Linked r0 rs →
+    (∀ r ∈ rs, r.γ = r0.γ ∧ r.z = r0.z ∧ r.α = r0.α) →
+    RngOk ⟨r0.lo, r0.n + (rs.map (·.n)).sum, r0.s + (rs.map (·.s)).sum, r0.nin + (rs.map (·.nin)).sum, r0.γ, r0.z, r0.α⟩ :=
+  rng_forestP
 
 /-- Linking as the verifier checks it, on the summaries' limbs. -/
 def Linked' : (ℕ → F) → List (ℕ → F) → Prop
@@ -362,18 +421,15 @@ theorem linked_of : ∀ (vs : List (ℕ → F)) (v0 : ℕ → F) (ℓ0 : ℕ), (
     refine ⟨by simp only [rngOf]; rw [h1, hn0], ?_⟩
     exact linked_of vs v (ℓs v) (hℓ v List.mem_cons_self) h2 (fun w hw => hℓ w (List.mem_cons_of_mem _ hw))
 
-/-- **What the outer verifier checks, composed.** Root summaries `v₀, v₁, …` (proven: `SumOk`), each
-starting where the previous ends (`(v j 0).val` and `(v j 1).val` as `verifyForest` reads them), with
-equal challenge limbs, describe one proven range from `(v₀ 0).val` covering all their blocks, whose
-partial sum is the sum of theirs: so `epoch_hyps_of_rng` applies to the whole epoch. -/
-theorem forest_rng (vs : List (ℕ → F)) (v0 : ℕ → F) (h0 : SumOk v0) (hs : ∀ v ∈ vs, SumOk v)
+/-- **What the outer verifier checks, composed**, for any per-block statement `ok`. -/
+theorem forest_rngP {ok : (ℕ → F) → Prop}  (vs : List (ℕ → F)) (v0 : ℕ → F) (h0 : SumOkP ok v0) (hs : ∀ v ∈ vs, SumOkP ok v)
     (hlink : Linked' v0 vs) (hch : ∀ v ∈ vs, ∀ i < 12, v (7 + i) = v0 (7 + i)) :
-    ∃ n, RngOk ⟨(v0 0).val, n, RunSum.pQ v0 2 + (vs.map fun v => RunSum.pQ v 2).sum,
+    ∃ n, RngOkP ok ⟨(v0 0).val, n, RunSum.pQ v0 2 + (vs.map fun v => RunSum.pQ v 2).sum,
       (v0 6).val + (vs.map fun v => (v 6).val).sum, RunSum.pQ v0 7, RunSum.pQ v0 11, RunSum.pQ v0 15⟩ := by
   obtain ⟨ℓ0, hn0, hr0⟩ := h0.rng
-  have hrs : ∀ v ∈ vs, ∃ ℓ, (v 1).val = 2 ^ ℓ ∧ RngOk (rngOf v ℓ) := fun v hv => (hs v hv).rng
+  have hrs : ∀ v ∈ vs, ∃ ℓ, (v 1).val = 2 ^ ℓ ∧ RngOkP ok (rngOf v ℓ) := fun v hv => (hs v hv).rng
   choose! ℓs hℓs using hrs
-  have key := rng_forest (vs.map fun v => rngOf v (ℓs v)) (rngOf v0 ℓ0) hr0
+  have key := rng_forestP (vs.map fun v => rngOf v (ℓs v)) (rngOf v0 ℓ0) hr0
     (fun r hr => by obtain ⟨v, hv, rfl⟩ := List.mem_map.mp hr; exact (hℓs v hv).2)
     (linked_of vs v0 ℓ0 hn0 hlink fun v hv => (hℓs v hv).1)
     (fun r hr => by
@@ -385,5 +441,15 @@ theorem forest_rng (vs : List (ℕ → F)) (v0 : ℕ → F) (h0 : SumOk v0) (hs 
       exact ⟨q 7 (by simp), q 11 (by simp), q 15 (by simp)⟩)
   rw [List.map_map, List.map_map, List.map_map] at key
   exact ⟨_, key⟩
+
+/-- **What the outer verifier checks, composed.** Root summaries `v₀, v₁, …` (proven: `SumOk`), each
+starting where the previous ends (`(v j 0).val` and `(v j 1).val` as `verifyForest` reads them), with
+equal challenge limbs, describe one proven range from `(v₀ 0).val` covering all their blocks, whose
+partial sum is the sum of theirs: so `epoch_hyps_of_rng` applies to the whole epoch. -/
+theorem forest_rng (vs : List (ℕ → F)) (v0 : ℕ → F) (h0 : SumOk v0) (hs : ∀ v ∈ vs, SumOk v)
+    (hlink : Linked' v0 vs) (hch : ∀ v ∈ vs, ∀ i < 12, v (7 + i) = v0 (7 + i)) :
+    ∃ n, RngOk ⟨(v0 0).val, n, RunSum.pQ v0 2 + (vs.map fun v => RunSum.pQ v 2).sum,
+      (v0 6).val + (vs.map fun v => (v 6).val).sum, RunSum.pQ v0 7, RunSum.pQ v0 11, RunSum.pQ v0 15⟩ :=
+  forest_rngP vs v0 h0 hs hlink hch
 
 end StarkedAir.Circuit.BlockTree

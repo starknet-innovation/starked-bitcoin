@@ -27,12 +27,12 @@ def BlockPubs (c : Spec.Block.Ctx) (pub : ℕ → F) : Prop :=
 
 section System
 
-variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ}
-  (hL : ∀ i < 15, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : L ≤ 23)
+variable {inst : ℕ → Inst} {pub : ℕ → F} {Ls : ℕ → ℕ}
+  (hL : ∀ i < 15, (inst i).logSize = Ls i) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : ∀ i < 15, Ls i ≤ 23)
 include hL hsat hL24
 
 /-- **Block soundness.** -/
-theorem block_sound (hL8 : 8 ≤ L) {c : Spec.Block.Ctx} (hh : c.height < 2 ^ 23) (hmtp : c.prevMtp < 2 ^ 32)
+theorem block_sound (hL8 : 8 ≤ Ls 7) {c : Spec.Block.Ctx} (hh : c.height < 2 ^ 23) (hmtp : c.prevMtp < 2 ^ 32)
     (hpub : BlockPubs c pub) :
     ∃ b, Spec.Block.parseBlock (Rb inst pub) = some b ∧
       ((∀ t ∈ b.txs, Spec.Block.nodupBy (t.vin.map (·.prevout)) = true) →

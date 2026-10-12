@@ -441,7 +441,166 @@ theorem rD_site (sys : System) (L : ℕ) (pub : ℕ → F) (main : ℕ → ℕ �
   rw [fingerprint_poly]
   rfl
 
+/-! ### Per-component trace sizes (D-045) -/
+
+/-- Component traces of per-component log sizes: component `i` has `2^(Ls i)` rows. -/
+def instOfV (Ls : ℕ → ℕ) (main : ℕ → ℕ → ℕ → F) : ℕ → Inst := fun i => ⟨Ls i, main i⟩
+
+theorem instOfV_const (L : ℕ) (main : ℕ → ℕ → ℕ → F) : instOfV (fun _ => L) main = instOf L main := rfl
+
+/-- **STARK soundness with lifted components, row form (assumed).** As `StarkSound`, with component `i`'s
+terms vanishing at every row of its own `2^(Ls i)`-row trace (its valuation at that size).
+
+This stands for stwo's soundness for a proof whose trees are committed at the largest size `N` with
+component `i`'s columns lifted (`f ∘ π^(N − Ls i)`, `π` the circle doubling; `vcs_lifted`): the
+composition's quotient by `Z_N` is low-degree only if each component's terms, evaluated on the lifted
+columns, vanish on the size-`2^N` domain; `π^(N − Ls i)` maps that domain onto component `i`'s own
+size-`2^(Ls i)` domain (`Z_(Ls i)(π^k p) = Z_N(p)`, mask offsets at `g_N` map to offsets at `g_(Ls i)`),
+so the terms vanish at every row of component `i`'s trace. It also covers the samples' points (OODS,
+shifts at `g_N`, periodicity points `pt + 2^(Ls i)·g_N` for two-sample columns), as `StarkSound` does
+for its points. Like `StarkSound` it is not proven here, and it **needs review against stwo's lifting
+soundness argument before anything relies on it**. At one size it is `StarkSound` (`starkSoundV_const`). -/
+def StarkSoundV (Ls : ℕ → ℕ) (pub : ℕ → F) (α z coeff invZ C : QM) (cs : List (Comp × QM × Val)) : Prop :=
+  horner coeff 0 (cs.flatMap fun x => terms x.1 α z x.2.1 (fun j => emb (pub j)) x.2.2) * invZ = C →
+  ∃ main I : ℕ → ℕ → ℕ → F, ∀ i (hi : i < cs.length), ∀ r < 2 ^ Ls i,
+    ∀ t ∈ terms cs[i].1 α z cs[i].2.1 (fun j => emb (pub j)) (rowVal (2 ^ Ls i) cs[i].1.air.pre (main i) (I i) r),
+      t = 0
+
+/-- **At one size, `StarkSoundV` is `StarkSound`.** -/
+theorem starkSoundV_const (L : ℕ) (pub : ℕ → F) (α z coeff invZ C : QM) (cs : List (Comp × QM × Val)) :
+    StarkSoundV (fun _ => L) pub α z coeff invZ C cs ↔ StarkSound L pub α z coeff invZ C cs := Iff.rfl
+
+theorem fracSum_sitesV (sys : System) (Ls : ℕ → ℕ) (pub : ℕ → F) (main : ℕ → ℕ → ℕ → F) (α z : QM) :
+    fracSum ((siteRaw sys (instOfV Ls main) pub).map (toEntry (K := QM))) α z =
+      ∑ i ∈ Finset.range sys.m, ∑ r ∈ Finset.range (2 ^ Ls i), ∑ j ∈ Finset.range (sys.comp i).lookups.length,
+        rM (sys.comp i) (Ls i) (sys.comp i).air.pre pub (main i) r j /
+          rD (sys.comp i) (Ls i) (sys.comp i).air.pre pub (main i) α z r j := by
+  unfold fracSum siteRaw sites
+  rw [List.map_map, List.map_map, sum_flatMap_range]
+  apply Finset.sum_congr rfl
+  intro i _
+  rw [sum_flatMap_range]
+  apply Finset.sum_congr rfl
+  intro r _
+  rw [List.map_map, list_sum_range]
+  apply Finset.sum_congr rfl
+  intro j _
+  simp only [Function.comp, toEntry, rM, rD, siteRel, siteVals, siteMult, siteEval, siteLookup, instOfV, lk]
+  rw [fingerprint_poly]
+  rfl
+
+theorem rD_siteV (sys : System) (Ls : ℕ → ℕ) (pub : ℕ → F) (main : ℕ → ℕ → ℕ → F) (α z : QM) (i r j : ℕ) :
+    rD (sys.comp i) (Ls i) (sys.comp i).air.pre pub (main i) α z r j =
+      (toEntry (K := QM) (siteRel sys (i, r, j), siteVals sys (instOfV Ls main) pub (i, r, j),
+        siteMult sys (instOfV Ls main) pub (i, r, j))).2.eval α - z := by
+  simp only [toEntry, rD, siteRel, siteVals, siteLookup, lk]
+  rw [fingerprint_poly]
+  rfl
+
+theorem flatMap_mapIdx {α β γ : Type} (l : List α) (g : ℕ → α → β) (h : β → List γ) :
+    (l.mapIdx g).flatMap h = (l.mapIdx fun i a => h (g i a)).flatten := by
+  rw [List.flatMap_def]
+  congr 1
+  apply List.ext_getElem (by simp)
+  intro i h1 h2
+  simp [List.getElem_mapIdx]
+
+theorem flatten_mapIdx_congr {α β : Type} (l : List α) (f g : ℕ → α → List β)
+    (h : ∀ i (hi : i < l.length), f i l[i] = g i l[i]) : (l.mapIdx f).flatten = (l.mapIdx g).flatten := by
+  congr 1
+  apply List.ext_getElem (by simp)
+  intro i h1 h2
+  simp only [List.getElem_mapIdx]
+  exact h i (by simpa using h1)
+
+/-- The components' STARK inputs, part `i` sharing its claimed sum over `2^(Ls i)` rows. -/
+noncomputable def starkParts (ρ : ℕ → Q) (Ls : ℕ → ℕ) (parts : List (Comp × PartRegs)) : List (Comp × QM × Val) :=
+  parts.mapIdx fun i p => (p.1, val ρ p.2.claimed * emb (ninv (Ls i) : F), oodsVal ρ p.1 p.2)
+
+theorem starkParts_const (ρ : ℕ → Q) (L : ℕ) (parts : List (Comp × PartRegs)) :
+    starkParts ρ (fun _ => L) parts = parts.map fun p => (p.1, val ρ p.2.claimed * emb (ninv L : F), oodsVal ρ p.1 p.2) :=
+  Composition.mapIdx_const _ parts
+
 variable {ρ : ℕ → Q}
+
+/-- **The plain verifier, end to end, per-component sizes.** As `plain_sound`, for a proof whose
+component `i` has `2^(Ls i)` rows: the host's hook 2 gives part `i` the share `1/2^(Ls i)` (`HookOk`),
+and under `StarkSoundV` there are main columns on which component `i`'s AIR holds at size `Ls i`; for
+good `(α, z)` the system with those per-component sizes is satisfied with the public entries. -/
+theorem plain_soundV [DecidableEq QM] (sys : System) (parts : List (Comp × PartRegs)) (sh : Shared) (Ls : ℕ → ℕ)
+    (nIn oodsX nB : ℕ) (xs : List ExtE) (pub : ℕ → F) (C : QM)
+    (hm : parts.length = sys.m) (hcomp : ∀ i (hi : i < parts.length), parts[i].1 = sys.comp i)
+    (hlk : ∀ i < sys.m, (sys.comp i).lookups ≠ [])
+    (hstatic : StaticOk sys = true) (hshape : ∀ e ∈ extRaw ρ xs, (e.1, e.2.1.length) ∈ shapes sys)
+    (hpub : ∀ p ∈ parts, ∀ j, val ρ (p.2.ci.pub j) = emb (pub j))
+    (hxb : ∀ e ∈ xs, ∀ r ∈ e.vals, val ρ r = emb (ρ r).a)
+    (hw : ∀ p ∈ parts, WF (pNodes p.1) ∧ ∀ id ∈ pIds p.1, id < (pNodes p.1).size)
+    (hk : HookOk ρ sh Ls parts ([], nIn, nIn + 1))
+    (hsys : Holds ρ (sysProg parts sh nIn oodsX).1)
+    (hoods : val ρ (sysProg parts sh nIn oodsX).2 = C)
+    (hbal : Holds ρ (balanceProg nB (parts.map (·.2.claimed)) xs sh.z sh.alpha))
+    (hstark : StarkSoundV Ls pub (val ρ sh.alpha) (val ρ sh.z) (val ρ sh.coeff)
+      (val ρ (partFold sh parts ([], nIn, nIn + 1)).2.2) C (starkParts ρ Ls parts)) :
+    ∃ main : ℕ → ℕ → ℕ → F,
+      (∀ i < sys.m, (sys.comp i).air.Satisfied (Ls i) pub (main i)) ∧
+      (SZGood ((siteRaw sys (instOfV Ls main) pub ++ extRaw ρ xs).map (toEntry (K := QM)))
+          (val ρ sh.alpha) (val ρ sh.z) →
+        sys.SatisfiedExt (instOfV Ls main) pub (extRaw ρ xs)) := by
+  -- The composition value is the Horner combination of `terms` at the OODS samples.
+  have hcomb : horner (val ρ sh.coeff) 0 ((starkParts ρ Ls parts).flatMap
+        fun x => terms x.1 (val ρ sh.alpha) (val ρ sh.z) x.2.1 (fun j => emb (pub j)) x.2.2) *
+      val ρ (partFold sh parts ([], nIn, nIn + 1)).2.2 = C := by
+    rw [← hoods, sys_soundV Ls hw hk hsys, starkParts, flatMap_mapIdx, termsV]
+    congr 2
+    apply flatten_mapIdx_congr
+    intro i hi
+    rw [partTerms_eq]
+    have : pubQ ρ parts[i].2.ci = fun j => emb (pub j) := funext (hpub _ (List.getElem_mem hi))
+    rw [this]; rfl
+  obtain ⟨main, I, hrows⟩ := hstark hcomb
+  have hrow : ∀ i (hi : i < parts.length), ∀ r < 2 ^ Ls i, ∀ t ∈ terms (sys.comp i) (val ρ sh.alpha) (val ρ sh.z)
+      (val ρ parts[i].2.claimed * emb (ninv (Ls i) : F)) (fun j => emb (pub j))
+      (rowVal (2 ^ Ls i) (sys.comp i).air.pre (main i) (I i) r), t = 0 := by
+    intro i hi r hr t ht
+    have := hrows i (by simpa [starkParts] using hi) r hr t
+    simp only [starkParts, List.getElem_mapIdx] at this
+    rw [hcomp i hi] at this
+    exact this ht
+  -- Constraints.
+  have hair : ∀ i < sys.m, (sys.comp i).air.Satisfied (Ls i) pub (main i) := by
+    intro i hi r hr e he
+    have h0 := hrow i (by omega) r hr _ (by
+      unfold terms
+      exact List.mem_append_left _ (List.mem_map.mpr ⟨e, he, rfl⟩))
+    rw [evalR_row] at h0
+    exact emb_inj (h0.trans (map_zero embHom).symm)
+  refine ⟨main, hair, fun hsz => ⟨fun i hi => hair i hi, ?_⟩⟩
+  -- Denominators.
+  have hd : ∀ i < sys.m, ∀ r < 2 ^ Ls i, ∀ j < (sys.comp i).lookups.length,
+      rD (sys.comp i) (Ls i) (sys.comp i).air.pre pub (main i) (val ρ sh.alpha) (val ρ sh.z) r j ≠ 0 := by
+    intro i hi r hr j hj h
+    rw [rD_siteV] at h
+    apply hsz.1 _ (List.mem_map.mpr ⟨_, List.mem_append_left _ (List.mem_map.mpr ⟨(i, r, j), ?_, rfl⟩), rfl⟩)
+    · exact sub_eq_zero.mp h
+    · simp only [sites, List.mem_flatMap, List.mem_range, List.mem_map, instOfV]
+      exact ⟨i, hi, r, hr, j, hj, rfl⟩
+  -- Each component's fractions sum to its claimed sum.
+  have hsites : fracSum ((siteRaw sys (instOfV Ls main) pub).map (toEntry (K := QM))) (val ρ sh.alpha) (val ρ sh.z) =
+      ((parts.map (·.2.claimed)).map (val ρ)).sum := by
+    rw [fracSum_sitesV, list_sum_getD, List.length_map, List.length_map, hm]
+    apply Finset.sum_congr rfl
+    intro i hi
+    have hi' : i < parts.length := by rw [hm]; exact Finset.mem_range.mp hi
+    rw [List.getD_eq_getElem _ _ (by simpa using hi'), List.getElem_map, List.getElem_map]
+    exact comp_frac_sum (sys.comp i) (Ls i) (sys.comp i).air.pre pub (main i) (I i) _ _ _
+      (hlk i (by omega)) (hrow i hi') (hd i (by omega))
+  -- The balance check closes the sum.
+  have htot : fracSum ((siteRaw sys (instOfV Ls main) pub ++ extRaw ρ xs).map (toEntry (K := QM)))
+      (val ρ sh.alpha) (val ρ sh.z) = 0 := by
+    rw [List.map_append, fracSum_append, hsites, fracSum_ext ρ xs sh.z sh.alpha hxb]
+    exact balance_sound hbal
+  obtain ⟨har, hrs⟩ := static_ext (inst := instOfV Ls main) (pub := pub) hstatic hshape
+  exact balancedExt_of_poly sys (instOfV Ls main) pub (extRaw ρ xs) har hrs (hsz.2 htot)
 
 /-- **The plain verifier, end to end.** Suppose the leaf circuit's composition program (`sysProg`, over
 the components `parts` of `sys`, in order, each with lookups) and its balance program (the claimed
@@ -470,63 +629,11 @@ theorem plain_sound [DecidableEq QM] (sys : System) (parts : List (Comp × PartR
       (SZGood ((siteRaw sys (instOf sh.logSize main) pub ++ extRaw ρ xs).map (toEntry (K := QM)))
           (val ρ sh.alpha) (val ρ sh.z) →
         sys.SatisfiedExt (instOf sh.logSize main) pub (extRaw ρ xs)) := by
-  set L := sh.logSize with hL
-  -- The composition value is the Horner combination of `terms` at the OODS samples.
-  have hcomb : horner (val ρ sh.coeff) 0
-      ((parts.map fun p => (p.1, val ρ p.2.claimed * emb (ninv L : F), oodsVal ρ p.1 p.2)).flatMap
-        fun x => terms x.1 (val ρ sh.alpha) (val ρ sh.z) x.2.1 (fun j => emb (pub j)) x.2.2) *
-      val ρ (partFold sh parts ([], nIn, nIn + 1)).2.2 = C := by
-    rw [← hoods, sys_sound hw hninv hsys, flatMap_map']
-    congr 2
-    apply flatMap_congr'
-    intro p hp
-    rw [partTerms_eq]
-    have : pubQ ρ p.2.ci = fun j => emb (pub j) := funext (hpub p hp)
-    rw [this]
-  obtain ⟨main, I, hrows⟩ := hstark hcomb
-  have hrow : ∀ i (hi : i < parts.length), ∀ r < 2 ^ L, ∀ t ∈ terms (sys.comp i) (val ρ sh.alpha) (val ρ sh.z)
-      (val ρ parts[i].2.claimed * emb (ninv L : F)) (fun j => emb (pub j))
-      (rowVal (2 ^ L) (sys.comp i).air.pre (main i) (I i) r), t = 0 := by
-    intro i hi r hr t ht
-    have := hrows i (by simpa using hi) r hr t
-    simp only [List.getElem_map] at this
-    rw [hcomp i hi] at this
-    exact this ht
-  -- Constraints.
-  have hair : ∀ i < sys.m, (sys.comp i).air.Satisfied L pub (main i) := by
-    intro i hi r hr e he
-    have h0 := hrow i (by omega) r hr _ (by
-      unfold terms
-      exact List.mem_append_left _ (List.mem_map.mpr ⟨e, he, rfl⟩))
-    rw [evalR_row] at h0
-    exact emb_inj (h0.trans (map_zero embHom).symm)
-  refine ⟨main, hair, fun hsz => ⟨fun i hi => hair i hi, ?_⟩⟩
-  -- Denominators.
-  have hd : ∀ i < sys.m, ∀ r < 2 ^ L, ∀ j < (sys.comp i).lookups.length,
-      rD (sys.comp i) L (sys.comp i).air.pre pub (main i) (val ρ sh.alpha) (val ρ sh.z) r j ≠ 0 := by
-    intro i hi r hr j hj h
-    rw [rD_site] at h
-    apply hsz.1 _ (List.mem_map.mpr ⟨_, List.mem_append_left _ (List.mem_map.mpr ⟨(i, r, j), ?_, rfl⟩), rfl⟩)
-    · exact sub_eq_zero.mp h
-    · simp only [sites, List.mem_flatMap, List.mem_range, List.mem_map, instOf]
-      exact ⟨i, hi, r, hr, j, hj, rfl⟩
-  -- Each component's fractions sum to its claimed sum.
-  have hsites : fracSum ((siteRaw sys (instOf L main) pub).map (toEntry (K := QM))) (val ρ sh.alpha) (val ρ sh.z) =
-      ((parts.map (·.2.claimed)).map (val ρ)).sum := by
-    rw [fracSum_sites, list_sum_getD, List.length_map, List.length_map, hm]
-    apply Finset.sum_congr rfl
-    intro i hi
-    have hi' : i < parts.length := by rw [hm]; exact Finset.mem_range.mp hi
-    rw [List.getD_eq_getElem _ _ (by simpa using hi'), List.getElem_map, List.getElem_map]
-    exact comp_frac_sum (sys.comp i) L (sys.comp i).air.pre pub (main i) (I i) _ _ _
-      (hlk i (by omega)) (hrow i hi') (hd i (by omega))
-  -- The balance check closes the sum.
-  have htot : fracSum ((siteRaw sys (instOf L main) pub ++ extRaw ρ xs).map (toEntry (K := QM)))
-      (val ρ sh.alpha) (val ρ sh.z) = 0 := by
-    rw [List.map_append, fracSum_append, hsites, fracSum_ext ρ xs sh.z sh.alpha hxb]
-    exact balance_sound hbal
-  obtain ⟨har, hrs⟩ := static_ext (inst := instOf L main) (pub := pub) hstatic hshape
-  exact balancedExt_of_poly sys (instOf L main) pub (extRaw ρ xs) har hrs (hsz.2 htot)
+  -- One size: `plain_soundV` at the constant vector.
+  have hk : HookOk ρ sh (fun _ => sh.logSize) parts ([], nIn, nIn + 1) :=
+    hookOk_of_const sh parts _ (fun q hq => hninv q (List.mem_append_left _ (List.mem_append_right _ hq)))
+  exact plain_soundV sys parts sh (fun _ => sh.logSize) nIn oodsX nB xs pub C hm hcomp hlk hstatic hshape hpub hxb hw
+    hk hsys hoods hbal (by rw [starkParts_const]; exact hstark)
 
 /-! ### The header-chain leaf -/
 

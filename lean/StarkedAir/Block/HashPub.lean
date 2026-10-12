@@ -13,17 +13,16 @@ open StarkedAir.Sha256 (pre cst outputAt)
 
 section System
 
-variable {inst : ℕ → Inst} {pub : ℕ → F} {L : ℕ}
-  (hL : ∀ i < 15, (inst i).logSize = L) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : L ≤ 23)
+variable {inst : ℕ → Inst} {pub : ℕ → F} {Ls : ℕ → ℕ}
+  (hL : ∀ i < 15, (inst i).logSize = Ls i) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : ∀ i < 15, Ls i ≤ 23)
 include hL hsat hL24
 
 /-- A message start with id 0 is the header message. -/
-theorem mid_zero_hdr {r0 : ℕ} (h0 : r0 < 2 ^ L) (f0 : (inst 2).main Msg.FIRSTM r0 = 1)
+theorem mid_zero_hdr {r0 : ℕ} (h0 : r0 < 2 ^ Ls 2) (f0 : (inst 2).main Msg.FIRSTM r0 = 1)
     (hz : (inst 2).main Msg.MID r0 = 0) : (inst 2).main Msg.HDR r0 = 1 := by
   have ms := hash_msg_sat hL hsat
   have fs := hash_fields_sat' hL hsat
-  have h25 : 2 ^ L ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (le_trans hL24 (by norm_num))
-  norm_num at h25
+  obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
   rcases Msg.bool_col ms (e := Msg.HDR) (by simp) h0 with h | h
   · exfalso
     rw [Msg.mid_eq ms h0] at hz
@@ -44,7 +43,7 @@ theorem hash_pub :
       ∃ S, Spec.Block.stateBytes S = Spec.Block.sha256d b.header ∧
         ∀ j < 16, pub (Ctx.PUB_HASH + j) = ((Sha256.half16 (Spec.Bitcoin.stateWord S (j / 2)) (j % 2) : ℕ) : F) := by
   have ss := hash_sha_sat hL hsat
-  have hn0 : 0 < 2 ^ L := by positivity
+  have hn0 : 0 < 2 ^ Ls 7 := by positivity
   have hm : siteMult hashSys inst pub (7, 0, 11) = -1 := by
     simp only [siteMult, siteEval, siteLookup, hashSys, hL 7 (by decide)]
     simp [Ctx.ctx, Ctx.lookups, Expr.eval, Ctx.ev_first (M := (inst 7).main) (pub := pub) hn0]

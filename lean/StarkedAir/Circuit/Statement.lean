@@ -155,6 +155,85 @@ theorem partsFold_words {L : ℕ} (hL : L < 2 ^ 32) : ∀ (parts : List PartSt) 
     rw [mixArgs_append, List.map_append, hw]
     simp [stmtSpec, List.append_assoc]
 
+/-! ### Per-component sizes (D-045)
+
+The program is unchanged: hook 4 is the host's, and with per-component sizes it returns part `i`'s own
+log size (`Hook4Ok`); the words are then the native encoding with a size per component (`stmtWordsV`). -/
+
+/-- **The native statement words, per-component sizes**: the count (systems), per component
+`[Ls i, digest, n_pubs]`, then each public input's value. -/
+def stmtWordsV (system : Bool) (Ls : ℕ → ℕ) (parts : List (List ℕ × List ℕ)) : List (List ℕ) :=
+  (if system then [[parts.length]] else []) ++
+  (parts.mapIdx fun i p => (Ls i :: p.1 ++ [p.2.length]) :: p.2.map fun v => [v]).flatten
+
+theorem mapIdx_const' {α β : Type} (f : α → β) : ∀ l : List α, l.mapIdx (fun _ a => f a) = l.map f
+  | [] => rfl
+  | a :: l => by rw [List.mapIdx_cons, List.map_cons, mapIdx_const' f l]
+
+theorem stmtWordsV_const (system : Bool) (L : ℕ) (parts : List (List ℕ × List ℕ)) :
+    stmtWordsV system (fun _ => L) parts = stmtWords system L parts := by
+  unfold stmtWordsV stmtWords
+  rw [mapIdx_const' (fun p : List ℕ × List ℕ => (L :: p.1 ++ [p.2.length]) :: p.2.map fun v => [v]) parts,
+    List.flatMap_def]
+
+/-- **The host's hook 4, per part**: along the fold from state `s`, part `i`'s size word is `Ls i`. -/
+def Hook4Ok (ρ : ℕ → Q) : (ℕ → ℕ) → List PartSt → List Op × ℕ → Prop
+  | _, [], _ => True
+  | Ls, p :: ps, s => (∀ r, Op.hook 4 [] [r] ∈ partOps s.2 p → wv ρ r = Ls 0) ∧
+      Hook4Ok ρ (fun j => Ls (j + 1)) ps (s.1 ++ partOps s.2 p, s.2 + partSize p)
+
+theorem hook4Ok_of_const {L : ℕ} : ∀ (parts : List PartSt) (s : List Op × ℕ),
+    (∀ r, Op.hook 4 [] [r] ∈ (partsFold parts s).1 → wv ρ r = L) → Hook4Ok ρ (fun _ => L) parts s
+  | [], _, _ => trivial
+  | p :: ps, s, h4 => by
+    have e : partsFold (p :: ps) s = partsFold ps (s.1 ++ partOps s.2 p, s.2 + partSize p) := by simp [partsFold]
+    rw [e] at h4
+    obtain ⟨r, hr⟩ := partsFold_ops ps (s.1 ++ partOps s.2 p, s.2 + partSize p)
+    refine ⟨fun q hq => h4 q ?_, hook4Ok_of_const ps _ h4⟩
+    rw [hr]; exact List.mem_append_left _ (List.mem_append_right _ hq)
+
+theorem partsFold_wordsV : ∀ (Ls : ℕ → ℕ) (parts : List PartSt) (s : List Op × ℕ), (∀ i, Ls i < 2 ^ 32) →
+    (∀ p ∈ parts, (∀ w ∈ p.digest, w < 2 ^ 32) ∧ p.digest.length = 8 ∧ p.pubs.length < 2 ^ 32) →
+    Hook4Ok ρ Ls parts s →
+    Holds ρ (partsFold parts s).1 →
+    (mixArgs (partsFold parts s).1).map (List.map (wv ρ)) =
+      (mixArgs s.1).map (List.map (wv ρ)) ++
+        ((stmtSpec ρ parts).mapIdx fun i p => (Ls i :: p.1 ++ [p.2.length]) :: p.2.map fun v => [v]).flatten
+  | _, [], s, _, _, _, _ => by simp [partsFold, stmtSpec]
+  | Ls, p :: ps, s, hL, hp, h4, h => by
+    have e : partsFold (p :: ps) s = partsFold ps (s.1 ++ partOps s.2 p, s.2 + partSize p) := by simp [partsFold]
+    rw [e] at h ⊢
+    obtain ⟨h4p, h4s⟩ := h4
+    obtain ⟨r, hr⟩ := partsFold_ops ps (s.1 ++ partOps s.2 p, s.2 + partSize p)
+    have hin : ∀ x ∈ partOps s.2 p, x ∈ (partsFold ps (s.1 ++ partOps s.2 p, s.2 + partSize p)).1 := by
+      intro x hx; rw [hr]; exact List.mem_append_left _ (List.mem_append_right _ hx)
+    obtain ⟨hd, hdl, hn⟩ := hp p (by simp)
+    have hw := part_words (hL 0) hd hdl hn h4p (fun x hx => h x (hin x hx))
+    rw [partsFold_wordsV (fun j => Ls (j + 1)) ps _ (fun j => hL (j + 1)) (fun q hq => hp q (by simp [hq])) h4s h]
+    simp only
+    rw [mixArgs_append, List.map_append, hw]
+    simp [stmtSpec, List.mapIdx_cons, List.append_assoc]
+
+/-- **The statement mixing is sound, per-component sizes.** As `statement_sound`, with hook 4 returning
+part `i`'s own size: the words absorbed are `stmtWordsV`. -/
+theorem statement_soundV {n : ℕ} {system : Bool} {parts : List PartSt} (Ls : ℕ → ℕ) (hL : ∀ i, Ls i < 2 ^ 32)
+    (hp : ∀ p ∈ parts, (∀ w ∈ p.digest, w < 2 ^ 32) ∧ p.digest.length = 8 ∧ p.pubs.length < 2 ^ 32)
+    (hcount : parts.length < 2 ^ 32)
+    (h4 : Hook4Ok ρ Ls parts ([], n + 1)) (h : Holds ρ (stmtOps n system parts)) :
+    (mixArgs (stmtOps n system parts)).map (List.map (wv ρ)) = stmtWordsV system Ls (stmtSpec ρ parts) := by
+  have e : stmtOps n system parts = (if system then [constU32 n parts.length, .hook 3 [n] []] else []) ++
+      (partsFold parts ([], n + 1)).1 := rfl
+  rw [e] at h ⊢
+  rw [holds_append] at h
+  rw [mixArgs_append, List.map_append, partsFold_wordsV Ls parts ([], n + 1) hL hp h4 h.2]
+  unfold stmtWordsV
+  simp only [mixArgs, List.map_nil, List.nil_append, stmtSpec, List.length_map]
+  congr 1
+  cases system
+  · simp; rfl
+  · have hc := wv_const hcount (h.1 _ (List.Mem.head _))
+    simp [mixArgs, constU32, hc]
+
 /-- **The statement mixing is sound.** If the ops hold, hook 4 returns `L`, and the constants fit in
 32 bits, the words the transcript absorbs (hook 3's arguments, in order) are exactly the native
 statement encoding: the component count (systems), then per component `[L, digest, n_pubs]` and each
@@ -164,19 +243,9 @@ theorem statement_sound {n : ℕ} {system : Bool} {parts : List PartSt} {L : ℕ
     (hcount : parts.length < 2 ^ 32)
     (h4 : ∀ r, Op.hook 4 [] [r] ∈ stmtOps n system parts → wv ρ r = L) (h : Holds ρ (stmtOps n system parts)) :
     (mixArgs (stmtOps n system parts)).map (List.map (wv ρ)) = stmtWords system L (stmtSpec ρ parts) := by
-  have e : stmtOps n system parts = (if system then [constU32 n parts.length, .hook 3 [n] []] else []) ++
-      (partsFold parts ([], n + 1)).1 := rfl
-  rw [e] at h h4 ⊢
-  rw [holds_append] at h
-  rw [mixArgs_append, List.map_append, partsFold_words hL parts ([], n + 1) hp
-    (fun r hr => h4 r (List.mem_append_right _ hr)) h.2]
-  unfold stmtWords
-  simp only [mixArgs, List.map_nil, List.nil_append, stmtSpec, List.length_map]
-  congr 1
-  cases system
-  · simp; rfl
-  · have hc := wv_const hcount (h.1 _ (List.Mem.head _))
-    simp [mixArgs, constU32, hc]
+  rw [← stmtWordsV_const]
+  exact statement_soundV (fun _ => L) (fun _ => hL) hp hcount
+    (hook4Ok_of_const parts ([], n + 1) (fun r hr => h4 r (List.mem_append_right _ hr))) h
 
 /-! ### The production form: the header words from the host -/
 
