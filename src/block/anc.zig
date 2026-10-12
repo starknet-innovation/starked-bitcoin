@@ -177,3 +177,24 @@ test "block anc: block 170's predecessors give its MTP; tampers are rejected" {
     try std.testing.expect(try violation(a, air, 11, &testPubs(own, false, mtp), off) != null);
     try std.testing.expect(try violation(a, air, 11, &testPubs(own, true, mtp), off) != null);
 }
+
+test "block anc: the STWZEVA-composed proof is byte-identical under the production profile" {
+    const ir = @import("../air/ir.zig");
+    const system = @import("../air/system.zig");
+    const rec = @import("../air/prove_rec.zig");
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const air = (try ir.Air.parseJson(a, json)).value;
+    const own: *const Header = @embedFile("testdata:block_170")[0..80];
+    const anc: *const [NANC]Header = @import("checks.zig").ancOf("170");
+    const mtp = median(anc);
+    const log_size: u32 = 12;
+    const pubs = testPubs(own, true, mtp);
+    const main = try generate(a, log_size, own, anc, mtp, false);
+    const parts = [_]system.Part{.{ .air = &air, .log_size = log_size, .pubs = &pubs }};
+    const mains = [_][]const []const M31{@ptrCast(main)};
+    // 70 queries, 26-bit PoW, blowup 1, fold step 1.
+    const n = try system.checkStwzevaProof(rec.Engine(@import("stwo_cpu_backend").CpuBackend), a, try rec.config(log_size), &parts, &mains, &.{});
+    std.debug.print("block_anc (log {d}, production profile): STWZEVA proof byte-identical ({d} bytes)\n", .{ log_size, n });
+}

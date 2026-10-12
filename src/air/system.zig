@@ -16,6 +16,7 @@ const base = @import("prove.zig");
 const rec = @import("prove_rec.zig");
 const interp = @import("interp.zig");
 const component_mod = @import("component.zig");
+const stwzeva = @import("stwzeva.zig");
 const prover_component = @import("stwo_prover_engine").air.component_prover;
 const logup_columns = @import("stwo_prover_engine").air.logup_columns;
 const prover_pcs = @import("stwo_prover_engine").pcs;
@@ -154,9 +155,22 @@ fn fractions(allocator: std.mem.Allocator, part: Part, main: []const []const M31
     return .{ .values = values, .batches = B, .natural = natural };
 }
 
+/// How the prover evaluates the composition polynomial (the proof bytes are the same).
+pub const Composition = enum {
+    /// Our IR interpreter (`component.zig`).
+    interpreter,
+    /// stwo-zig's captured-AIR runtime over the lowered STWZEVA programs (`stwzeva.zig`).
+    stwzeva,
+};
+
 /// Proves the system. `mains[i]` are part `i`'s main columns in natural row order.
 /// `a` should be an arena (intermediate buffers are not freed individually).
 pub fn prove(comptime E: type, caller_allocator: std.mem.Allocator, cfg: rec.Config, parts: []const Part, mains: []const []const []const M31) !Proof {
+    return proveWith(E, caller_allocator, cfg, parts, mains, .interpreter);
+}
+
+/// `prove` with a choice of composition evaluator.
+pub fn proveWith(comptime E: type, caller_allocator: std.mem.Allocator, cfg: rec.Config, parts: []const Part, mains: []const []const []const M31, composition: Composition) !Proof {
     // With several components the prover evaluates them on concurrent threads, and each
     // evaluator allocates from this allocator: callers may pass an arena, so serialize it.
     var thread_safe = std.heap.ThreadSafeAllocator{ .child_allocator = caller_allocator };
@@ -200,11 +214,58 @@ pub fn prove(comptime E: type, caller_allocator: std.mem.Allocator, cfg: rec.Con
         try E.commit(&scheme, a, try inter_cols.toOwnedSlice(a), null, &channel);
     }
     const provers = try a.alloc(prover_component.ComponentProver, comps.len);
-    for (comps, provers) |*c, *p| p.* = c.asProverComponent();
+    switch (composition) {
+        .interpreter => for (comps, provers) |*c, *p| {
+            p.* = c.asProverComponent();
+        },
+        .stwzeva => {
+            const lowered = try a.alloc(stwzeva.composition.Component, comps.len);
+            const wrapped = try a.alloc(stwzeva.Component, comps.len);
+            var n_pre: usize = 0;
+            for (parts) |p| n_pre += p.air.n_preprocessed;
+            var rc_offset: u32 = 0;
+            for (parts, comps, lowered, wrapped, provers) |p, *c, *l, *w, *out| {
+                l.* = try stwzeva.lowerComponent(a, p.air.*, p.pubs, .{
+                    .log_size = p.log_size,
+                    .pre_offset = @intCast(c.pre_offset),
+                    .main_offset = @intCast(c.main_offset),
+                    .inter_offset = @intCast(c.inter_offset),
+                    .rc_offset = rc_offset,
+                });
+                rc_offset += l.n_constraints;
+                w.* = try stwzeva.Component.init(a, c, l, n_pre);
+                out.* = w.asProverComponent();
+            }
+        },
+    }
     scheme_owned = false;
     var extended = try E.prove(a, provers, &channel, scheme, .{});
     extended.aux.deinit(a);
     return .{ .stark = extended.proof, .claimed_sums = try sums.toOwnedSlice(a) };
+}
+
+/// The proof's bytes: claimed sums, then the STARK proof in stwo's postcard encoding.
+pub fn proofBytes(a: std.mem.Allocator, proof: Proof) ![]u8 {
+    var out = std.ArrayList(u8).empty;
+    for (proof.claimed_sums) |sum| for (sum.toM31Array()) |x| {
+        var w: [4]u8 = undefined;
+        std.mem.writeInt(u32, &w, x.toU32(), .little);
+        try out.appendSlice(a, &w);
+    };
+    try @import("stwo_postcard").serializeProof(rec.Hasher, out.writer(a), proof.stark);
+    return out.toOwnedSlice(a);
+}
+
+/// Parity (b): the system proved with the interpreter's composition and with stwo-zig's
+/// STWZEVA runtime gives byte-identical proofs, and the STWZEVA one passes `verifyExt`.
+/// Returns the proof size in bytes.
+pub fn checkStwzevaProof(comptime E: type, a: std.mem.Allocator, cfg: rec.Config, parts: []const Part, mains: []const []const []const M31, ext: []const PubEntry) !usize {
+    const want = try proofBytes(a, try proveWith(E, a, cfg, parts, mains, .interpreter));
+    const proof = try proveWith(E, a, cfg, parts, mains, .stwzeva);
+    const got = try proofBytes(a, proof);
+    try std.testing.expectEqualSlices(u8, want, got);
+    try verifyExt(a, cfg, parts, ext, proof);
+    return got.len;
 }
 
 /// Verifies a system proof. `a` should be an arena.
@@ -344,4 +405,26 @@ test "LogUp system: a byte range check proves and verifies; out-of-range values 
     var forged = try prove(E, a, cfg, &parts, &bad_mains);
     forged.claimed_sums[1] = forged.claimed_sums[0].neg();
     try std.testing.expect(std.meta.isError(verify(a, cfg, &parts, forged)));
+}
+
+test "LogUp system: the byte system's STWZEVA-composed proof is byte-identical and verifies" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const airs = try byteSystem(a);
+    const log_size: u32 = 8;
+    const parts = [_]Part{ .{ .air = &airs[0], .log_size = log_size }, .{ .air = &airs[1], .log_size = log_size } };
+    const cfg = rec.Config.fromFriAndTraceSize(try core.pcs.config_v2.FriConfigV2.init(10, 0, 1, 3, 1), log_size);
+    var prng = std.Random.DefaultPrng.init(7);
+    const x = try a.alloc(M31, 256);
+    const mult = try a.alloc(M31, 256);
+    @memset(mult, M31.zero());
+    for (x) |*v| {
+        const b = prng.random().int(u8);
+        v.* = M31.fromCanonical(b);
+        mult[b] = mult[b].add(M31.one());
+    }
+    const mains = [_][]const []const M31{ &.{mult}, &.{x} };
+    const n = try checkStwzevaProof(rec.Engine(@import("stwo_cpu_backend").CpuBackend), a, cfg, &parts, &mains, &.{});
+    std.debug.print("byte system: STWZEVA proof byte-identical ({d} bytes)\n", .{n});
 }

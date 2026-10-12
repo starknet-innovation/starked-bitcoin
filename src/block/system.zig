@@ -402,3 +402,20 @@ test "block system: the block hash is public (limbs of SHA256d(header)); a tampe
     b.pubs[PUB_HASH + 3] = b.pubs[PUB_HASH + 3].add(M31.one());
     try std.testing.expect(try unbalanced(a, &airs, &b) != null);
 }
+
+test "block system: block 0's STWZEVA-composed proof is byte-identical and verifies" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const rec = @import("../air/prove_rec.zig");
+    const airs = try parseAirs(a);
+    const s = checks.samples_small[0];
+    const b = try buildU(a, s.raw, s.undo, s.ctx);
+    const ps = parts(&airs, &b);
+    const cfg = rec.Config.fromFriAndTraceSize(try @import("stwo_core").pcs.config_v2.FriConfigV2.init(10, 0, 1, 3, 1), b.log_size);
+    var mains: [N_COMP][]const []const M31 = undefined;
+    for (&mains, b.mains) |*m, x| m.* = @ptrCast(x);
+    var timer = try std.time.Timer.start();
+    const n = try system.checkStwzevaProof(rec.Engine(@import("stwo_cpu_backend").CpuBackend), a, cfg, &ps, &mains, &.{});
+    std.debug.print("block 0 (log {d}, {d} components): STWZEVA proof byte-identical ({d} bytes, both proofs + verify {d} ms)\n", .{ b.log_size, N_COMP, n, timer.read() / std.time.ns_per_ms });
+}
