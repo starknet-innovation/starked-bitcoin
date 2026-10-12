@@ -44,6 +44,7 @@ pub const air = struct {
     pub const prove = @import("air/prove.zig");
     pub const prove_rec = @import("air/prove_rec.zig");
     pub const system = @import("air/system.zig");
+    pub const stwzeva = @import("air/stwzeva.zig");
     pub const add32_chain = @import("air/gadgets/add32_chain.zig");
 };
 

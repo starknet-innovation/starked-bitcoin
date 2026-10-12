@@ -48,6 +48,8 @@ pub fn build(b: *std.Build) void {
             .{ .name = "stwo_circuit_frontend", .module = b.dependency("stwo_circuit_frontend", .{ .target = target, .optimize = optimize }).module("stwo_circuit_frontend") },
             .{ .name = "stwo_circuit_cpu_integration", .module = stwo_circuit_cpu },
             .{ .name = "stwo_circuit_recursion_wire", .module = stwo_wire },
+            // The Cairo frontend's STWZEVA programs, bundles and captured-AIR runtime (src/air/stwzeva.zig).
+            .{ .name = "stwo_cairo_frontend", .module = stwo_circuit_cpu.import_table.get("stwo_cairo_frontend") orelse @panic("circuit CPU integration is missing the Cairo frontend") },
         },
     });
 
