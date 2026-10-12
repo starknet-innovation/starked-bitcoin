@@ -174,6 +174,22 @@ pub fn prove(comptime E: type, caller_allocator: std.mem.Allocator, cfg: rec.Con
 
 /// `prove` with a choice of composition evaluator.
 pub fn proveWith(comptime E: type, caller_allocator: std.mem.Allocator, cfg: rec.Config, parts: []const Part, mains: []const []const []const M31, composition: Composition) !Proof {
+    return proveOpts(E, caller_allocator, cfg, parts, mains, .{ .composition = composition });
+}
+
+pub const Options = struct {
+    composition: Composition = .interpreter,
+    /// A device composition stage over the lowered programs (requires a `stwzeva` composition),
+    /// e.g. `gpu/metal_composition.zig`. Components it declines run on the host.
+    device: ?stwzeva.Device = null,
+    /// Filled with the stage's counts when `device` is set.
+    counts: ?*stwzeva.DeviceCounts = null,
+};
+
+/// `prove` with options.
+pub fn proveOpts(comptime E: type, caller_allocator: std.mem.Allocator, cfg: rec.Config, parts: []const Part, mains: []const []const []const M31, opts: Options) !Proof {
+    const composition = opts.composition;
+    if (opts.device != null and composition == .interpreter) return error.DeviceNeedsStwzeva;
     // With several components the prover evaluates them on concurrent threads, and each
     // evaluator allocates from this allocator: callers may pass an arena, so serialize it.
     var thread_safe = std.heap.ThreadSafeAllocator{ .child_allocator = caller_allocator };
@@ -217,13 +233,15 @@ pub fn proveWith(comptime E: type, caller_allocator: std.mem.Allocator, cfg: rec
         try E.commit(&scheme, a, try inter_cols.toOwnedSlice(a), null, &channel);
     }
     const provers = try a.alloc(prover_component.ComponentProver, comps.len);
+    var lowered: []stwzeva.composition.Component = &.{};
+    var wrapped: []stwzeva.Component = &.{};
     switch (composition) {
         .interpreter => for (comps, provers) |*c, *p| {
             p.* = c.asProverComponent();
         },
         .stwzeva, .stwzeva_native => {
-            const lowered = try a.alloc(stwzeva.composition.Component, comps.len);
-            const wrapped = try a.alloc(stwzeva.Component, comps.len);
+            lowered = try a.alloc(stwzeva.composition.Component, comps.len);
+            wrapped = try a.alloc(stwzeva.Component, comps.len);
             var n_pre: usize = 0;
             for (parts) |p| n_pre += p.air.n_preprocessed;
             var rc_offset: u32 = 0;
@@ -242,9 +260,21 @@ pub fn proveWith(comptime E: type, caller_allocator: std.mem.Allocator, cfg: rec
             }
         },
     }
+    var bound: ?stwzeva.DeviceBound = null;
+    defer if (bound) |*b| b.close();
+    if (opts.device) |device| {
+        if (try device.open(device.context, a, lowered, &.{})) |session| {
+            const captured = try a.alloc(stwzeva.Captured, wrapped.len);
+            for (captured, wrapped) |*c, w| c.* = w.prover;
+            bound = .{ .allocator = a, .components = captured, .captured = lowered, .session = session, .recorder = null };
+        }
+    }
     scheme_owned = false;
-    var extended = try E.prove(a, provers, &channel, scheme, .{});
+    var extended = try E.prove(a, provers, &channel, scheme, .{
+        .composition_stage = if (bound) |*b| b.asStage() else null,
+    });
     extended.aux.deinit(a);
+    if (opts.counts) |out| out.* = if (bound) |b| b.counts else .{};
     return .{ .stark = extended.proof, .claimed_sums = try sums.toOwnedSlice(a) };
 }
 

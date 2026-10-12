@@ -257,6 +257,26 @@ pub fn build(b: *std.Build) void {
         metal_parity.linkFramework("Metal");
         metal_parity.linkSystemLibrary("objc");
         b.step("metal-parity", "STWZEVA programs of our AIRs as Metal kernels vs the interpreter").dependOn(&b.addRunArtifact(metal_parity).step);
+        // GPU plan step 2: whole block-system proofs on the Metal backend (src/gpu/metal_prove.zig).
+        const metal_prove = b.addTest(.{
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/gpu/metal_prove.zig"),
+                .target = target,
+                .optimize = optimize,
+                .imports = &.{
+                    .{ .name = "starked_bitcoin", .module = lib },
+                    .{ .name = "stwo_core", .module = stwo_core },
+                    .{ .name = "stwo_cpu_backend", .module = stwo_cpu_backend },
+                    .{ .name = "stwo_metal_backend", .module = b.dependency("stwo_metal_backend", dep_opts).module("stwo_metal_backend") },
+                    .{ .name = "cairo_metal_eval_codegen", .module = metal_codegen },
+                },
+            }),
+        });
+        metal_prove.linkLibC();
+        metal_prove.linkFramework("Foundation");
+        metal_prove.linkFramework("Metal");
+        metal_prove.linkSystemLibrary("objc");
+        b.step("metal-prove", "Block-system proofs on the Metal backend vs CPU (byte-identical)").dependOn(&b.addRunArtifact(metal_prove).step);
     }
     // `chainproof`: the chain proof as a file (PROOF-STORE). Provenance: the commits it was built from.
     {

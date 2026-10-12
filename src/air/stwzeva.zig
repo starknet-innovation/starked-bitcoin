@@ -46,6 +46,11 @@ pub const composition = cairo.witness.composition_bundle;
 pub const Captured = cairo.proving.air.component.Component;
 pub const RuntimeComponent = cairo.witness.resident_verifier.RuntimeComponent;
 pub const Native = cairo.proving.air.native_evaluator.Executor;
+/// stwo-zig's whole-stage device composition hook over captured components.
+pub const device_stage = cairo.proving.air.device_stage;
+pub const Device = device_stage.Device;
+pub const DeviceBound = device_stage.Bound;
+pub const DeviceCounts = device_stage.Counts;
 
 /// Where a component sits in the shared trees (as `system.components` wires it).
 pub const Geometry = struct {
@@ -146,8 +151,32 @@ const ProgramBuilder = struct {
 /// Lowers one AIR to its STWZEVA program, as the bytes stwo-zig parses (`eval.Program.parse`).
 /// `pubs` are baked in as literals. The caller owns the result.
 pub fn lowerProgram(allocator: std.mem.Allocator, air: ir.Air, pubs: []const M31, log_size: u32) ![]u8 {
+    return lowerProgramMode(allocator, air, .{ .literal = pubs }, log_size);
+}
+
+/// How public inputs enter a program.
+pub const PubMode = union(enum) {
+    /// As base `constant` literals (one program per statement). Every stwo-zig evaluator accepts it.
+    literal: []const M31,
+    /// As base `param` k (`n_base_params = n_pub`): one program per AIR, the values bound at
+    /// dispatch. stwo-zig's CPU evaluators reject base params; its Metal code generator reads
+    /// them from `args.base_params`.
+    param,
+};
+
+/// The program with public inputs as base parameters (see `PubMode.param`).
+pub fn lowerTemplate(allocator: std.mem.Allocator, air: ir.Air, log_size: u32) !eval.Program {
+    const bytes = try lowerProgramMode(allocator, air, .param, log_size);
+    defer allocator.free(bytes);
+    return eval.Program.parse(allocator, bytes);
+}
+
+fn lowerProgramMode(allocator: std.mem.Allocator, air: ir.Air, mode: PubMode, log_size: u32) ![]u8 {
     var b = ProgramBuilder{ .allocator = allocator };
     defer b.deinit();
+    const pub_regs = try allocator.alloc(?u16, air.n_pub);
+    defer allocator.free(pub_regs);
+    @memset(pub_regs, null);
 
     // Live expressions: reachable from a constraint or a lookup.
     const live = try allocator.alloc(bool, air.exprs.len);
@@ -221,7 +250,14 @@ pub fn lowerProgram(allocator: std.mem.Allocator, air: ir.Air, pubs: []const M31
                 .preprocessed => pre_regs[c.index].?,
             },
             .constant => |v| try b.constant(v),
-            .@"pub" => |p| try b.constant(pubs[p].toU32()),
+            .@"pub" => |p| switch (mode) {
+                .literal => |pubs| try b.constant(pubs[p].toU32()),
+                .param => pub_regs[p] orelse blk: {
+                    const r = try b.baseInst(.param, 0, p, 0, 0);
+                    pub_regs[p] = r;
+                    break :blk r;
+                },
+            },
             .add => |a| try b.baseInst(.add, 0, regs[a[0]], regs[a[1]], 0),
             .sub => |a| try b.baseInst(.sub, 0, regs[a[0]], regs[a[1]], 0),
             .mul => |a| try b.baseInst(.mul, 0, regs[a[0]], regs[a[1]], 0),
@@ -280,7 +316,7 @@ pub fn lowerProgram(allocator: std.mem.Allocator, air: ir.Air, pubs: []const M31
         .semantic_hash = 0,
         .capability_bits = eval.Capability.ext_mul | eval.Capability.prefinalized_logup,
         .n_interactions = 3,
-        .n_base_params = 0,
+        .n_base_params = if (mode == .param) air.n_pub else 0,
         .n_ext_params = n_params,
         .n_constraints = @intCast(b.roots.items.len),
         .max_base_regs = @max(b.n_base, 1),
