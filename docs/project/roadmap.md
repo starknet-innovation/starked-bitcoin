@@ -107,6 +107,6 @@ history module · browser/phone verifier.
 | LOGUP-SZ | LogUp's Schwartz–Zippel step in Lean | **done (2026-10-10)**: `LogUpSZ.lean` (`logup_sz`, `balancedExt_of_poly`); side conditions discharged per system by `decide` (`LogUpSZSystems.lean`) |
 | MMR-LEAN | The MMR and inclusion proofs in Lean | **done (2026-10-10)**: `Spec/Mmr.lean` (`mmr_inclusion`, `fold_eq_mmr`), Zig sides cross-checked; genesis checks from Lean (`Gadgets/RootChecks.lean`) |
 | DRIFT-CI | Automate the JSON drift check and the sorry/axiom check in CI | Manual commands are in status.md for now |
-| LICENSE | Choose a license | Needs an owner decision (possibly legal) |
+| LICENSE | Choose a license | **done (2026-10-12):** Apache-2.0 (owner) |
 | SIMP-LINT | Clean up unused-simp-argument warnings in the Lean files | Cosmetic |
 | LEAF-ONE-PROOF | Prove each segment once (borrowed native capture) | **done (2026-10-10)**: same circuits and VK; log-19 leaf peak RSS 12.8 GB, from 17.5 GB |

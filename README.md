@@ -177,4 +177,4 @@ project owner's approval (decision D-016).
 
 ## License
 
-None chosen yet (roadmap backlog: `LICENSE`).
+Apache License 2.0 ([LICENSE](LICENSE)). Third-party code under `third_party/` keeps its own license.
