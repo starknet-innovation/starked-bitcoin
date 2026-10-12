@@ -310,3 +310,27 @@ pub fn verifyForest(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const
     if (!qm(s0, 7).eql(ch.gamma) or !qm(s0, 11).eql(ch.z) or !qm(s0, 15).eql(ch.alpha[1])) return error.ChallengeMismatch;
     return .{ .sum = total, .nin = nin, .challenge = ch };
 }
+
+test "block VK round trip; expected keys fold as the nodes do" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var vk: Vk = .{ .fri = circuitFri(), .trace_log = 21, .leaf = @splat(null), .node = .{ .root = @splat(7), .hash = @splat(8) } };
+    vk.leaf[11] = .{ .root = @splat(1), .hash = @splat(2) };
+    vk.leaf[12] = .{ .root = @splat(3), .hash = @splat(4) };
+    const back = try Vk.decode(try vk.encode(a));
+    try std.testing.expect(std.meta.eql(back, vk));
+    // Two leaves of sizes 11 and 12, then their node: the node's key is nodeKey over both.
+    const logs = [_]u8{ 11, 12, 12, 11 };
+    const l0 = try expected(&vk, &logs, 0, 0);
+    try std.testing.expectEqualSlices(u32, &vk.leaf[11].?.hash, &l0.hash);
+    try std.testing.expectEqualSlices(u32, &leaf.zero_key, &l0.key);
+    const n01 = try expected(&vk, &logs, 0, 1);
+    try std.testing.expectEqualSlices(u32, &node.nodeKey(vk.leaf[11].?.hash, leaf.zero_key, vk.leaf[12].?.hash, leaf.zero_key), &n01.key);
+    const n23 = try expected(&vk, &logs, 2, 1);
+    const root = try expected(&vk, &logs, 0, 2);
+    try std.testing.expectEqualSlices(u32, &node.nodeKey(vk.node.hash, n01.key, vk.node.hash, n23.key), &root.key);
+    // A size not set up is refused.
+    const bad = [_]u8{ 13, 11 };
+    try std.testing.expectError(error.LeafSizeNotSetUp, expected(&vk, &bad, 0, 1));
+}
