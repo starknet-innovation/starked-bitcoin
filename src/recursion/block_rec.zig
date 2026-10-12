@@ -232,7 +232,7 @@ pub fn leafCircuitOf(gpa: std.mem.Allocator, a: std.mem.Allocator, airs: *const 
     const cfg = rec.Config.fromFriAndTraceSize(fri, f.log_size);
     var capture: core.verifier.ProofCapture(rec.Hasher) = undefined;
     try system.verifyCaptureBorrowed(a, cfg, &parts, &.{}, &f.proof, &capture);
-    const pc = try bl.config(a, airs, f.log_size, fri);
+    const pc = try bl.configOf(a, airs, f.log_size, f.profile, fri);
     const pre_root: [32]u8 = std.mem.toBytes(try system.preprocessedRoot(a, cfg, &parts));
     const values = try pv.fromCapture(a, rec.Hasher, &f.proof.stark, &capture, pc, f.proof.claimed_sums);
     var digests: [bs.N_COMP][32]u8 = undefined;
