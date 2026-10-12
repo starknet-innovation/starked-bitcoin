@@ -262,7 +262,7 @@ theorem coin_in_tuple (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
       ∃ (code : ℕ) (ser : Spec.Block.Bytes) (ctx : ℕ),
         rowTuple inst pub L j = tupleOf (FpWalk.gQ pub) i.prevout.hash i.prevout.n code ser ctx ∧
         (inst 14).main Coin.CLO j + 65536 * (inst 14).main Coin.CHI j = (code : F) ∧
-        (inst 14).main Coin.CTX j = (ctx : F) ∧
+        (inst 14).main Coin.CTX j = (ctx : F) ∧ (inst 13).main URec.TL rj = (ser.length : F) ∧
         (∃ u0 : ℕ, (inst 13).main URec.S rj + 9 = (u0 : F) ∧ 9 ≤ u0 ∧ u0 + ser.length ≤ (pub 8).val ∧
           ser = (List.range ser.length).map (fun k => (Ub inst pub).getD (u0 + k) 0) ∧
           code = Spec.Block.le ((List.range 4).map fun k => (Ub inst pub).getD (u0 - 9 + k) 0) ∧
@@ -362,7 +362,7 @@ theorem coin_in_tuple (S : Setup inst pub L) {e : ℕ} (he : e < 2 ^ L)
         (List.range len).map fun k => emb ((((Ub inst pub).getD (u0 + k) 0).toNat : ℕ) : F) := by
       simp [hser, List.map_map, Function.comp]
     rw [hl, ← hfp, coordsOf_toQ]
-  refine ⟨rj, hrj, honj, hJ, code, ser, ctxv, ?_, ?_, hctxF,
+  refine ⟨rj, hrj, honj, hJ, code, ser, ctxv, ?_, ?_, hctxF, by rw [hserlen]; exact htl,
     u0, hu0, hu04, by rw [hserlen]; exact hu0len, by rw [hserlen], rfl, rfl⟩
   · rw [rowTuple_eq hL hsat hL24 hj2, tupleOf]
     simp only [← hFH]

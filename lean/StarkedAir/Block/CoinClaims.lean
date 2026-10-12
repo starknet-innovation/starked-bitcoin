@@ -117,7 +117,7 @@ theorem in_amount {j : ℕ} (hj : j < 2 ^ L) {c : Claim} (hc : ClaimAt inst pub 
     (hmax : Spec.Block.le (c.ser.take 8) ≤ Fields.MAXHI * 2 ^ 24 + Fields.MAXLO) :
     ((inst 14).main Coin.VL j).val < 2 ^ 24 ∧ ((inst 14).main Coin.VH j).val < 2 ^ 27 ∧
       ((inst 14).main Coin.VH j).val * 2 ^ 24 + ((inst 14).main Coin.VL j).val = Spec.Block.le (c.ser.take 8) := by
-  obtain ⟨hki, -, rj, hrj, honj, hJ, u0, hu0, -, hu0l, hser, -, -⟩ := hc
+  obtain ⟨hki, -, rj, hrj, honj, hJ, -, u0, hu0, -, hu0l, hser, -, -⟩ := hc
   obtain ⟨rj', hrj', hon', hJ', -, -, hvl, hvh, -⟩ := coin_urec hL hsat hL24 hj hki
   have hrr : rj' = rj := urec_j_inj hL hsat hL24 hrj' hrj hon' honj (by rw [← hJ', hJ])
   rw [hrr] at hvl hvh
@@ -634,7 +634,7 @@ theorem block_facts (S : Setup inst pub L) {h : ℕ} (hp2 : pub 2 = (h : F)) (hh
       have hk := List.mem_zipIdx' hp
       have hi : tx.vin[p.2]? = some p.1 := by rw [hk.2]; exact List.getElem?_eq_getElem hk.1
       obtain ⟨-, hlex, hctx, hat⟩ := hcl t tx htx (by omega) p.2 p.1 hi
-      obtain ⟨-, -, rj, -, -, -, u0, -, h9, hlen8, -, hcode, -⟩ := hat
+      obtain ⟨-, -, rj, -, -, -, -, u0, -, h9, hlen8, -, hcode, -⟩ := hat
       refine ⟨claim t p.2, rfl, hlex, ?_, hctx, ?_⟩
       · rw [hcode]; exact le4_lt' _
       · have hv : (pub 8).val < P := ZMod.val_lt _
