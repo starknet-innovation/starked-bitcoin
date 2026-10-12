@@ -128,32 +128,58 @@ fn fractions(allocator: std.mem.Allocator, part: Part, main: []const []const M31
     const n = @as(usize, 1) << @intCast(part.log_size);
     const B = component_mod.nBatches(air);
     const pre = try air.genPreprocessed(allocator, part.log_size);
-    var trace = interp.RowTrace{ .log_size = part.log_size, .pubs = part.pubs, .preprocessed = @ptrCast(pre), .main = main };
-    const scratch = try allocator.alloc(M31, air.exprs.len);
-    const out = try allocator.alloc(M31, air.constraints.len);
     const values = try allocator.alloc(logup_columns.Fraction, n * B);
-    var vals: [component_mod.MAX_LOOKUP_VALS]QM31 = undefined;
-    for (0..n) |r| {
-        trace.row = r;
-        interp.evalConstraints(M31, air, part.pubs, scratch, &trace, out);
-        for (0..B) |b| {
-            var fr: [2]logup_columns.Fraction = undefined;
-            const k: usize = if (2 * b + 1 < air.lookups.len) 2 else 1;
-            for (0..k) |t| {
-                const l = air.lookups[2 * b + t];
-                for (l.vals, 0..) |v, i| vals[i] = QM31.fromBase(scratch[v]);
-                fr[t] = .{ .numerator = QM31.fromBase(scratch[l.mult]), .denominator = component_mod.denominator(l.rel, vals[0..l.vals.len], el.z, el.alpha) };
-            }
-            values[r * B + b] = if (k == 2) .{
-                .numerator = fr[0].numerator.mul(fr[1].denominator).add(fr[1].numerator.mul(fr[0].denominator)),
-                .denominator = fr[0].denominator.mul(fr[1].denominator),
-            } else fr[0];
-        }
+    // Rows are independent: split them across threads (scratch allocated up front).
+    const n_threads = @min(std.Thread.getCpuCount() catch 1, 64, @max(n / 1024, 1));
+    const chunk = (n + n_threads - 1) / n_threads;
+    const scratch = try allocator.alloc(M31, n_threads * (air.exprs.len + air.constraints.len));
+    const job = FractionJob{ .air = air, .pubs = part.pubs, .log_size = part.log_size, .pre = @ptrCast(pre), .main = main, .el = el, .values = values, .batches = B };
+    var threads: [64]std.Thread = undefined;
+    const per = air.exprs.len + air.constraints.len;
+    for (0..n_threads) |t| {
+        const mine = scratch[t * per ..][0..per];
+        threads[t] = try std.Thread.spawn(.{}, FractionJob.run, .{ &job, mine[0..air.exprs.len], mine[air.exprs.len..], t * chunk, @min((t + 1) * chunk, n) });
     }
+    for (threads[0..n_threads]) |th| th.join();
     const natural = try allocator.alloc(usize, n);
     for (0..n) |i| natural[utils.bitReverseIndex(utils.cosetIndexToCircleDomainIndex(i, part.log_size), part.log_size)] = i;
     return .{ .values = values, .batches = B, .natural = natural };
 }
+
+const FractionJob = struct {
+    air: ir.Air,
+    pubs: []const M31,
+    log_size: u32,
+    pre: []const []const M31,
+    main: []const []const M31,
+    el: lookup_transcript.LookupElements,
+    values: []logup_columns.Fraction,
+    batches: usize,
+
+    fn run(self: *const FractionJob, scratch: []M31, out: []M31, start: usize, end: usize) void {
+        const air = self.air;
+        var trace = interp.RowTrace{ .log_size = self.log_size, .pubs = self.pubs, .preprocessed = self.pre, .main = self.main };
+        var vals: [component_mod.MAX_LOOKUP_VALS]QM31 = undefined;
+        const B = self.batches;
+        for (start..end) |r| {
+            trace.row = r;
+            interp.evalConstraints(M31, air, self.pubs, scratch, &trace, out);
+            for (0..B) |b| {
+                var fr: [2]logup_columns.Fraction = undefined;
+                const k: usize = if (2 * b + 1 < air.lookups.len) 2 else 1;
+                for (0..k) |t| {
+                    const l = air.lookups[2 * b + t];
+                    for (l.vals, 0..) |v, i| vals[i] = QM31.fromBase(scratch[v]);
+                    fr[t] = .{ .numerator = QM31.fromBase(scratch[l.mult]), .denominator = component_mod.denominator(l.rel, vals[0..l.vals.len], self.el.z, self.el.alpha) };
+                }
+                self.values[r * B + b] = if (k == 2) .{
+                    .numerator = fr[0].numerator.mul(fr[1].denominator).add(fr[1].numerator.mul(fr[0].denominator)),
+                    .denominator = fr[0].denominator.mul(fr[1].denominator),
+                } else fr[0];
+            }
+        }
+    }
+};
 
 /// How the prover evaluates the composition polynomial (the proof bytes are the same).
 pub const Composition = enum {
@@ -186,10 +212,27 @@ pub const Options = struct {
     counts: ?*stwzeva.DeviceCounts = null,
 };
 
+/// `STARKED_PHASES=1` prints the prover's phase times (benchmarks).
+const Phases = struct {
+    on: bool,
+    timer: ?std.time.Timer,
+
+    fn start() Phases {
+        const on = std.process.hasEnvVarConstant("STARKED_PHASES");
+        return .{ .on = on, .timer = if (on) std.time.Timer.start() catch null else null };
+    }
+
+    fn mark(self: *Phases, name: []const u8) void {
+        if (!self.on) return;
+        if (self.timer) |*t| std.debug.print("  phase {s}: {d} ms\n", .{ name, t.lap() / std.time.ns_per_ms });
+    }
+};
+
 /// `prove` with options.
 pub fn proveOpts(comptime E: type, caller_allocator: std.mem.Allocator, cfg: rec.Config, parts: []const Part, mains: []const []const []const M31, opts: Options) !Proof {
     const composition = opts.composition;
     if (opts.device != null and composition == .interpreter) return error.DeviceNeedsStwzeva;
+    var phase = Phases.start();
     // With several components the prover evaluates them on concurrent threads, and each
     // evaluator allocates from this allocator: callers may pass an arena, so serialize it.
     var thread_safe = std.heap.ThreadSafeAllocator{ .child_allocator = caller_allocator };
@@ -203,6 +246,7 @@ pub fn proveOpts(comptime E: type, caller_allocator: std.mem.Allocator, cfg: rec
 
     try E.commit(&scheme, a, try preprocessedStorage(a, parts), null, &channel);
     try E.flushPendingCommit(&scheme, a, &channel);
+    phase.mark("preprocessed commit");
     try mixStatements(&channel, a, parts);
     var main_cols = std.ArrayList(prover_pcs.ColumnEvaluation).empty;
     for (parts, mains) |p, m| {
@@ -211,6 +255,7 @@ pub fn proveOpts(comptime E: type, caller_allocator: std.mem.Allocator, cfg: rec
     }
     try E.commit(&scheme, a, try main_cols.toOwnedSlice(a), null, &channel);
     try E.flushPendingCommit(&scheme, a, &channel);
+    phase.mark("main commit");
 
     const comps = try components(a, parts);
     var sums = std.ArrayList(QM31).empty;
@@ -220,6 +265,7 @@ pub fn proveOpts(comptime E: type, caller_allocator: std.mem.Allocator, cfg: rec
         for (parts, mains, comps) |p, m, *c| {
             if (p.air.lookups.len == 0) continue;
             const fr = try fractions(a, p, m, el);
+            phase.mark("  fractions");
             const built = try logup_columns.build(a, p.log_size, fr.batches, &fr, struct {
                 fn f(ctx: *const Fractions, row: usize, out: []logup_columns.Fraction) anyerror!void {
                     return ctx.fill(row, out);
@@ -229,8 +275,10 @@ pub fn proveOpts(comptime E: type, caller_allocator: std.mem.Allocator, cfg: rec
             try sums.append(a, built.claimed_sum);
             c.logup = .{ .z = el.z, .alpha = el.alpha, .claimed_sum = built.claimed_sum };
         }
+        phase.mark("interaction trace (host)");
         lookup_transcript.mixInteractionClaim(&channel, sums.items);
         try E.commit(&scheme, a, try inter_cols.toOwnedSlice(a), null, &channel);
+        phase.mark("interaction commit");
     }
     const provers = try a.alloc(prover_component.ComponentProver, comps.len);
     var lowered: []stwzeva.composition.Component = &.{};
@@ -274,6 +322,7 @@ pub fn proveOpts(comptime E: type, caller_allocator: std.mem.Allocator, cfg: rec
         .composition_stage = if (bound) |*b| b.asStage() else null,
     });
     extended.aux.deinit(a);
+    phase.mark("lowering + STARK (composition, quotients, FRI, PoW, decommit)");
     if (opts.counts) |out| out.* = if (bound) |b| b.counts else .{};
     return .{ .stark = extended.proof, .claimed_sums = try sums.toOwnedSlice(a) };
 }
