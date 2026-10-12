@@ -1,6 +1,6 @@
 # Formalizing our circuits in Lean (resumed 2026-10-10)
 
-Status: in progress · Updated: 2026-10-11
+Status: in progress · Updated: 2026-10-12
 
 Parked by the owner on 2026-10-08; resumed on the owner's request on 2026-10-10 ("the in-circuit
 plain verifier proof"). Steps 1–4 below are done (the glue, `glue-circuits.md`).
@@ -240,3 +240,81 @@ the trace's values), `comp_frac_sum` (vanishing batch terms with nonzero denomin
   (and for the header leaf, the one entry is `node(L − 8, 0, pubT)` with multiplicity −1); hook 2 is
   `1/2^L`; the composition value is compared with the sampled `C`; one trace size for all components
   (true until `LIFT`).
+
+### Done (2026-10-12): the node wiring, end to end (VL-NODE)
+
+Trust boundary (owner, 2026-10-12): stwo-zig's in-circuit recursive verifier (`verify`, `CircuitStatement`)
+stays trusted; it is being formalized upstream. Everything around it is ours and is now Lean-first.
+
+**Inventory: our gates in a node circuit.** Before this step the node glue programs (`nodeProgram`,
+`blockNodeProgram`) already emitted, Lean-first: the guessed child public inputs/summaries and keys,
+the recomputed child digests `pubsDigest(key, pubs)`, the guessed preprocessed roots, the hook ops
+(args `root ‖ digest`, outputs the child's circuit hash), the link checks and sums, the node key
+`Blake2s(hL ‖ kL ‖ hR ‖ kR)` and the output digest. Not covered by a theorem: the block node's digests
+and key; how hook outputs, keys and digests compose up the tree; the outer verifier. Zig-only code:
+the hook body (duplicated in `node.zig` and `block_rec.zig`), `leaf.finish` (outputs and finalize), and
+in the block leaf the 51-limb summary assembly and its digest.
+
+**Now:**
+- **One hook, one replay.** `node.RecHook` is the only hand-written code in either node circuit: it
+  checks the arity (16 args, 8 outputs), builds `CircuitStatement` for the shared child config from the
+  root and digest args (no gates of ours), guesses child `i`'s proof, calls `verify`, and returns the
+  statement's circuit hash. `glue.runOutputs` replays a program and sets the circuit's outputs to its
+  results (`setOutputs`, then `finalize`); both nodes and both leaves use it.
+- **The block leaf's output is Lean-first:** `blockLeafOut` (`airs/block_leaf_out.json`, replacing
+  `block_leaf_sum.json`): `lt30` on the height and input count, the count 1, the zero key, the digest of
+  the 51 summary registers. `leafOut_vec`: if hook 0 returns the public inputs `p` and the seed leaf's
+  limbs, the output is `sumDigest 0 (leafVec p)`.
+- **Circuits unchanged:** the block leaf (block 0 of the v3 epoch) and the block node topology are
+  gate-identical and value-identical to before (fingerprints of every gate list); a fresh block setup over
+  blocks 0–3 reproduces the stored `blockvk.bin` exactly, so existing forests stay valid; the header
+  node and leaf parity tests and the pinned mainnet VK test pass. Block proofs are untouched.
+
+**Proven** (`Circuit/BlockRec.lean`, `Circuit/HeaderRec.lean`; standard axioms):
+- `bchild_digest`, `bnode_key`, `bnode_digest`: what each hook checks (`pubsDigest` of the child's key
+  and summary), the node key and the output digest, as Blake2s words.
+- `block_node_sound`: a satisfied block node program over two `SumOk` children outputs
+  `sumDigest(keyOf(hL, kL, hR, kR), out)` with `SumOk out`.
+- `tree_sound` (block), `htree_sound` (header): for any tree shape `t` (`Tree.hash`, `Tree.key`, the
+  outer verifier's `expected`/`expectedRoot`), a satisfied circuit with hash `t.hash` and output
+  `pubsDigest(t.key, v)` has `SumOk v` (resp. `PubValidT v`), **or there is a Blake2s collision**.
+  Collision resistance is not assumed: `Collision` is an explicit pair of distinct word-aligned messages
+  with one digest.
+- `forest_sound`, `forest_epoch`: the outer verifier's per-root checks (native acceptance with the
+  expected hash and digest, linked ranges, one challenge) give `RngOk` over all the epoch's blocks
+  (`rng_forest`) and `epoch_hyps_of_rng`'s conclusion, or a collision. `header_root_sound`: `verifyRoot`'s
+  checks and the Lean genesis checks give `chain_from_genesis_T`'s conclusion, or a collision.
+
+**Named hypotheses** (fields of `Trust`, never axioms; `VGates` is the abstract predicate "the gates
+`CircuitStatement.init` and `verify` emit at that hook hold"):
+- `stwoSound` (Stwo soundness): the native circuit verifier accepting a proof with circuit hash `h` and
+  output `d` under the pinned config means a satisfied circuit with hash `h` outputs `d`.
+- `nodeCircuit` (the circuit AIR's soundness and the replay's faithfulness, `Op.holds` per gate): a
+  satisfied circuit with the node's hash satisfies the program's ops, its outputs are the results, and
+  `VGates` holds at each hook.
+- `recVerifies` (**RecVerifies**): `VGates` at a hook with args `root ‖ digest` and outputs `ch` means a
+  satisfied circuit with hash `ch` outputs `digest`.
+- `leafSound`: the leaf guarantee. Header tree: `plain_leaf_valid` (with `StarkSound`, `SZGood`) and
+  `leaf_digest`. Block tree (**BlockLeafSound**): `LeafOut`, i.e. `plain_sound` for the block system
+  (`StarkSound`, `SZGood` and its wiring facts), `checks_sound`, `ctx_sound`, `seedLeaf_sound`,
+  `leafOut_vec`, and the leaf hooks returning the verified public-input variables.
+
+**Zig matched by inspection** (unchanged code, stated in the theorems' premises):
+- `node.RecHook`: args 0–7 are the root, 8–15 the digest, the outputs the statement's circuit hash; the
+  child config is the shape's shared config.
+- `leaf.pubsDigest` ≡ `sumDigest`/`pubDigest` (Blake2s of little-endian words), `node.nodeKey` ≡ `keyOf`,
+  `block_forest.expected` and `node.expectedRoot` ≡ `Tree.hash`/`Tree.key`.
+- `verifyForest`: per root the preprocessed root and circuit hash are the expected ones and the PCS
+  config is pinned (`Acc`); the output equals `pubsDigest(expected key, sum)`; `sum[0] = x`,
+  `sum[1] = 2^k` with `x` advancing by `2^k` (`Linked'`); limbs 7–18 equal the first root's. The seed
+  challenge, the block-hash paths against `T` and the final-set balance are the epoch statement's other
+  hypotheses, by inspection as before.
+- `verifyRoot`: the root and config pinned (which fix the circuit hash), the digest under
+  `expectedRoot`'s key, `genesisChecksOk` ≡ `genesisChecks`.
+
+**Tests:** the header node test now also builds nodes with a wrong child key (either child) or a wrong
+child public input that the link checks leave free (chainwork): each circuit is unsatisfied, the honest
+one satisfied. `zig build blockrec` (blocks 0–1 of the v3 epoch) builds block nodes with a wrong child
+key and a wrong child input count: both unsatisfied; the honest node proves and verifies natively with
+the native `joinSummary` digest.
+
