@@ -1,6 +1,7 @@
 # GPU proving: scope (2026-10-12)
 
-Status: **scoping only**, nothing built. Read from the vendored stwo-zig source (`third_party/stwo-zig`,
+Status: scoped; **step 1 (IR → STWZEVA, CPU parity) done** on branch `gpu/stwzeva-lowering`, see
+[Step 1 results](#step-1-results-2026-10-12). Read from the vendored stwo-zig source (`third_party/stwo-zig`,
 4afa09dbf), not its READMEs. Owner's direction: no CPU cloud spend now; scope the GPU route.
 
 ## What stwo-zig has
@@ -51,7 +52,87 @@ Status: **scoping only**, nothing built. Read from the vendored stwo-zig source 
 - **Fold step 1** is unqualified on CUDA.
 - **Kernel churn:** strict AOT pinning means every AIR change (e.g. `block_anc`) regenerates and re-pins
   kernels.
-- **LogUp mapping:** our IR's LogUp onto STWZEVA's prefinalized layout is unconfirmed.
+- **LogUp mapping:** confirmed (step 1): our pairs-of-lookups layout is STWZEVA's prefinalized layout.
 - **Product status:** the CUDA products are staged, not released.
 - The recursion leaves (8.3 M-variable circuits) are probably as costly as the block proofs and are
   already a `circuit_cuda`-shaped workload.
+
+## Step 1 results (2026-10-12)
+
+`src/air/stwzeva.zig` lowers an `ir.Air` and its lookups to a stwo-zig `composition_bundle.Component`
+(one STWZEVA/1 program part). stwo-zig's `Program.parse` and `Bundle.parse` re-read every program and bundle,
+checking the semantic hash and validating them. Nothing in `third_party/stwo-zig` was changed: our build
+imports its Cairo frontend, C generator and Metal code generator by path.
+
+### Evidence
+
+All commands use `-Doptimize=ReleaseFast`.
+
+| Check | Command | Result |
+|---|---|---|
+| (a) Composition parity, random traces and OODS points | `zig build test -Dtest-filter="stwzeva"` | header_chain, byte_table/user, block_reader and all 16 block AIRs: our interpreter equals stwo-zig's SIMD STWZEVA interpreter on the domain, and our STWZEVA point evaluator at the OODS point. stwo-zig's `RuntimeComponent` also agrees, except on block_coin (see gaps). |
+| (a′) C code generator | same filter | stwo-zig's `bundle_main` turns `testdata/stwzeva/pubfree.bin` (7 AIRs without public inputs) into C at build time. The kernels equal the interpreter at logs 6 and 10. |
+| (b) Byte-identical proofs | `zig build test -Dtest-filter="byte-identical"` | `system.proveWith(.stwzeva)` and `.stwzeva_native` give the same postcard bytes as `.interpreter`, and our verifier accepts them: **block_anc** at log 12 under the production profile (70 queries, PoW 26, blowup 1, fold 1; 175,953 B); the **byte LogUp system**; the **16-component block system on block 0** (log 11; 121,814 B). |
+| Metal kernels on this Mac | `zig build metal-parity` (`METAL_PARITY_LOG=14` optional) | For header_chain and all 16 block AIRs, `cairo_metal/eval_codegen` generates MSL, the Metal runtime compiles it from source and dispatches it, and the result equals the interpreter. At log 14: header_chain 13.6 ms GPU vs 93 ms CPU interpreter; b2s 17.9 vs 79 ms. The first MSL compile takes up to 7.7 s (header_chain), then the OS shader cache serves it. |
+
+A mutation (one sign in the lowering) makes both the parity test and the proof test fail.
+
+### Mapping
+
+| IR | STWZEVA |
+|---|---|
+| `col{main,i,off}` | `trace_col`, interaction 1, `a=i` local to the component's tree-1 span, `imm=off` |
+| `col{pre,i,0}` | `trace_col`, interaction 0, `a=i`; `preprocessed_indices[i]` = global column |
+| `const c`, `pub k` | base `constant` (public inputs become literals) |
+| add/sub/mul/neg | base add/sub/mul/neg |
+| constraint root | ext `secure_col(r,0,0,0)`, in IR order, then the LogUp batches |
+| lookup tuple `(rel, vals)` | `const(rel) + Σ secure_col(vᵢ)·param(αⁱ⁺¹) − param(z)` |
+
+- **Header:** flags `prefinalized_logup`; caps `ext_mul|prefinalized_logup`; `n_interactions=3`; `n_base_params=0`; `domain_log_size=reserved[0]=log`.
+- **Bundle component:** `evaluation_log = log+1`. Denominators are `denominatorInverses(log, log+1)`. Spans are `{1: main}` and `{2: interaction}`; the interaction span is empty without lookups.
+- **Mask:** stwo-zig derives a component's mask from the first appearance of each (column, offset) read. The lowering therefore reads every column once, in a prologue, in our mask order: main offsets ascending; on the interaction tree, −1 then 0.
+- **Evaluator:** the composition is evaluated by stwo-zig. The mask geometry stays ours (`component.zig`).
+
+### LogUp layout
+
+- **"Prefinalized" is plain ext arithmetic.** It means the program reads interaction columns the host has already built and constrains them. STWZEVA has no LogUp opcode. Generating the interaction trace is outside STWZEVA.
+- **Same scheme as stwo.** Our scheme (pairs, `logupConstraintValues`) is stwo's `finalize_logup_in_pairs`, which the Rust recorder emits (`tools/stwo-eval-program-abi/src/recording.rs`):
+  - batch k < B−1: `(S_k − S_{k−1})·D − N`;
+  - last batch: `(S_last − S_last[−1] − S_{B−2} + claimed_sum/2^log)·D − N`.
+- **Ext params:** `[lookup_z, lookup_alpha_power 1..w, claimed_sum_scaled]`, resolved by `RuntimeComponent.extensionParameters`.
+- **Composition:** `Σᵢ ext[rootᵢ]·rc[rc_base+i]`, then multiplied by `denominator_inverses[row >> log]`.
+  - The `rc` are the accumulator's powers reversed (`orderedCoefficients`), so constraint i gets `α^(n−1−i)`: our order.
+  - The OODS side is Horner `acc·α + c/Z(p)`.
+
+### Gaps (no STWZEVA equivalent, or not yet handled)
+
+1. **Public inputs.** STWZEVA has a base `param` opcode, but every consumer rejects it: the SIMD/C evaluators, the C writer and `RuntimeComponent` all require `n_base_params=0`. Literals therefore make one program per statement.
+   - CUDA: the parametric normaliser (`circuit_cuda/air_aot.zig`) passes every base literal as a session constant, so this is fine.
+   - C and Metal AOT: we need a kernel per statement, a parametric C/MSL path, or public inputs as `ExtSource.constant` (which costs QM31 arithmetic).
+2. **Unread main columns (block_coin has 4).** Our proof gives them no sample. stwo-zig's program-derived mask geometry (`resident_geometry.componentOffsets`) rejects a span column that is never read. That geometry feeds `RuntimeComponent`, `sampleShape` and the resident CUDA/Metal pipelines. The proofs above still work only because our wrapper keeps our `maskPoints`.
+   - Fix in Lean (drop the columns), or accept a proof-shape change (dummy reads).
+3. **Preprocessed reads at offset ≠ 0:** unsupported, as in `component.zig`; no AIR uses them.
+4. **Mixed sizes and lifting:** STWZEVA supports them (per-component `trace_log_size`, lifted reads); our system and mask do not yet.
+5. **One part per component.** The largest programs are header_chain (15k instructions) and b2s (10.9k). Metal's device stage fuses and splits at 512–4096 instructions; we could emit several parts (`rc_base`), which the format already supports.
+
+### What steps 2 and 3 need
+
+- **Metal (step 2).**
+  - `circuit_metal`'s device stage (`cairo_metal/composition_stage.zig`) loads kernels only from a metallib file whose digest it checks. The diagnostic `device()` accepts a pinned digest via `STWO_ZIG_COMPOSITION_METALLIB(_SHA256)`.
+  - Producing that metallib needs the `stored_domain`/`bounded` MSL from `tools/cairo_metal_codegen/eval_source` and Xcode's `metal`/`metallib`. This Mac has only CommandLineTools: `xcrun --find metal` fails.
+  - Alternative without Xcode: our own `device_stage.Device` that compiles MSL at runtime, as `metal-parity` does.
+  - Either way, `system.prove` must pass `composition_stage` to `Engine.prove`, and run under `MetalCommitBackend`.
+  - On-device interaction-trace generation is a separate piece.
+- **CUDA (step 3).**
+  - Feed `circuit_cuda`'s resident pipeline our bundle, generalised from the 11 circuit components (geometry, memory plan, ingress, composition controller).
+  - Write a generic LogUp interaction kernel from the IR lookups (circuit's `resident_interaction` is circuit-specific).
+  - Resolve gap 2 (unread columns) and gap 5 (part splitting).
+  - Add the AOT catalog / `product_sets.json` entry and qualify fold step 1.
+
+### Revised effort
+
+| Step | Estimate |
+|---|---|
+| Step 1 | Done (≈1 day, not 1–2 weeks) |
+| Step 2 (Metal composition in real proofs) | ≈1 week with a runtime-compiled `Device`; a few more days for the pinned-metallib route, which needs Xcode |
+| Step 3 (CUDA) | 4–6 weeks plus H100/H200 time. The lowering risk is retired; the remainder is the resident pipeline and interaction kernels |
