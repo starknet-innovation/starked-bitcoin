@@ -42,14 +42,36 @@ pub const FOREST_MAGIC = "SBFOREST";
 /// A circuit's identity: preprocessed root and circuit hash.
 pub const Id = struct { root: [8]u32, hash: [8]u32 };
 
+/// A block's size key in a forest's `logs` (D-045): its L in the low 7 bits, the tiered profile as
+/// bit 7 (uniform blocks keep the plain L, as before).
+pub fn sizeKey(log_size: u32, profile: bs.Profile) u8 {
+    return @as(u8, @intCast(log_size)) | (@as(u8, @intFromEnum(profile)) << 7);
+}
+
 /// The block tree's verifying key.
 pub const Vk = struct {
     /// The circuits' FRI configuration, and their (shared) padded trace size.
     fri: FriConfigV2,
     trace_log: u32,
-    /// The block leaf's identity per block trace size (null: not set up).
+    /// The block leaf's identity per block trace size, uniform profile (null: not set up).
     leaf: [25]?Id,
     node: Id,
+    /// The tiered profile's leaf identities (D-045). Encoded only when one is set, so a uniform-only
+    /// key keeps its bytes.
+    leaf_tiered: [25]?Id = @splat(null),
+
+    /// The leaf identity for a forest `logs` entry.
+    pub fn leafFor(self: *const Vk, key: u8) !Id {
+        const log = key & 0x7f;
+        if (log >= 25) return error.BadLogs;
+        const table = if (key & 0x80 != 0) &self.leaf_tiered else &self.leaf;
+        return table[log] orelse error.LeafSizeNotSetUp;
+    }
+
+    fn hasTiered(self: *const Vk) bool {
+        for (self.leaf_tiered) |l| if (l != null) return true;
+        return false;
+    }
 
     pub fn encode(self: *const Vk, a: std.mem.Allocator) ![]u8 {
         var e: store.Enc = .{ .a = a };
@@ -66,6 +88,13 @@ pub const Vk = struct {
         }
         try e.words(&self.node.root);
         try e.words(&self.node.hash);
+        if (self.hasTiered()) for (self.leaf_tiered) |l| {
+            try e.int(u8, @intFromBool(l != null));
+            if (l) |id| {
+                try e.words(&id.root);
+                try e.words(&id.hash);
+            }
+        };
         return store.seal(&e);
     }
 
@@ -81,6 +110,14 @@ pub const Vk = struct {
             else => return error.BadVk,
         };
         vk.node = .{ .root = try d.words(8), .hash = try d.words(8) };
+        vk.leaf_tiered = @splat(null);
+        if (d.pos != d.bytes.len) for (&vk.leaf_tiered) |*l| {
+            l.* = switch (try d.int(u8)) {
+                0 => null,
+                1 => .{ .root = try d.words(8), .hash = try d.words(8) },
+                else => return error.BadVk,
+            };
+        };
         if (d.pos != d.bytes.len) return error.TrailingBytes;
         return vk;
     }
@@ -108,10 +145,12 @@ pub fn circuitFri() FriConfigV2 {
 /// Setup from an epoch's block proofs: the shared shape (the leaves of every trace size present, the
 /// node) and the identities.
 pub fn setup(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const leaf.Tables, airs: *const [bs.N_COMP]ir.Air, files: []const PF.File, bfri: FriConfigV2) !struct { shape: br.Shape, vk: Vk } {
-    var first: [25]?usize = @splat(null);
+    // The first block of each (L, profile).
+    var first: [256]?usize = @splat(null);
     for (files, 0..) |f, i| {
         if (f.log_size >= 25) return error.LogSizeOutOfRange;
-        if (first[f.log_size] == null) first[f.log_size] = i;
+        const key = sizeKey(f.log_size, f.profile);
+        if (first[key] == null) first[key] = i;
     }
     var start: ?ComponentSizes = null;
     for (first) |fi| if (fi) |i| {
@@ -124,11 +163,11 @@ pub fn setup(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const leaf.T
     var shape = try br.Shape.init(gpa, &tables.table, start orelse return error.NoBlocks, fri);
     errdefer shape.deinit(gpa);
     var vk: Vk = .{ .fri = fri, .trace_log = 0, .leaf = @splat(null), .node = undefined };
-    for (first, 0..) |fi, log| if (fi) |i| {
+    for (first, 0..) |fi, key| if (fi) |i| {
         var ctx = try br.leafCircuitOf(gpa, a, airs, &files[i], bfri);
         defer ctx.deinit();
         const r = try identityOf(gpa, QM31, &ctx, shape.target, fri.log_blowup_factor);
-        vk.leaf[log] = r.id;
+        if (key & 0x80 != 0) vk.leaf_tiered[key & 0x7f] = r.id else vk.leaf[key] = r.id;
         vk.trace_log = r.trace_log;
     };
     var topo = try br.topology(gpa, &tables.table, &shape.shared);
@@ -160,7 +199,7 @@ pub const Root = struct { x: u32, k: u32, proved: br.Proved, path: []const HT.St
 pub const Forest = struct {
     from: u32,
     to: u32,
-    /// Each block's trace log size (the leaf identities the keys commit to).
+    /// Each block's size key, `sizeKey(L, profile)` (the leaf identities the keys commit to).
     logs: []const u8,
     roots: []Root,
 
@@ -224,7 +263,7 @@ pub fn proveForest(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const 
     const sizes = EP.alignedSizes(from, files.len, &sizes_buf);
     const roots = try a.alloc(Root, sizes.len);
     const logs = try a.alloc(u8, files.len);
-    for (logs, files) |*l, f| l.* = @intCast(f.log_size);
+    for (logs, files) |*l, f| l.* = sizeKey(f.log_size, f.profile);
     var at: usize = 0;
     var progress: usize = 0;
     for (sizes, roots) |k, *r| {
@@ -240,8 +279,8 @@ pub fn proveForest(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const 
 /// The expected circuit hash and key of the aligned subtree of `2^k` blocks from index `i`.
 fn expected(vk: *const Vk, logs: []const u8, i: usize, k: u32) !struct { hash: [8]u32, key: leaf.Key } {
     if (k == 0) {
-        if (i >= logs.len or logs[i] >= 25) return error.BadLogs;
-        const id = vk.leaf[logs[i]] orelse return error.LeafSizeNotSetUp;
+        if (i >= logs.len) return error.BadLogs;
+        const id = try vk.leafFor(logs[i]);
         return .{ .hash = id.hash, .key = leaf.zero_key };
     }
     const l = try expected(vk, logs, i, k - 1);
@@ -283,7 +322,7 @@ pub fn verifyForest(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const
         const x: u32 = f.from + @as(u32, @intCast(at));
         if (r.x != x or r.k != k) return error.WrongForest;
         const want = try expected(vk, f.logs, at, k);
-        const id = if (k == 0) (vk.leaf[f.logs[at]] orelse return error.LeafSizeNotSetUp) else vk.node;
+        const id = if (k == 0) try vk.leafFor(f.logs[at]) else vk.node;
         const p = &r.proved;
         if (!std.mem.eql(u32, &p.proof.request.preprocessed_root, &id.root)) return error.WrongCircuit;
         if (!std.mem.eql(u32, &p.proof.circuit_hash, &want.hash)) return error.WrongCircuit;
@@ -333,4 +372,50 @@ test "block VK round trip; expected keys fold as the nodes do" {
     // A size not set up is refused.
     const bad = [_]u8{ 13, 11 };
     try std.testing.expectError(error.LeafSizeNotSetUp, expected(&vk, &bad, 0, 1));
+    // Tiered keys (D-045): a uniform-only VK encodes as before; a tiered table round-trips and is
+    // keyed by the profile bit.
+    const uniform_bytes = try vk.encode(a);
+    try std.testing.expectEqual(@as(u32, 22), sizeKey(22, .uniform));
+    try std.testing.expectEqual(@as(u32, 0x80 | 22), sizeKey(22, .tiered));
+    try std.testing.expectError(error.LeafSizeNotSetUp, expected(&vk, &.{sizeKey(12, .tiered)}, 0, 0));
+    vk.leaf_tiered[12] = .{ .root = @splat(5), .hash = @splat(6) };
+    const both = try vk.encode(a);
+    try std.testing.expect(both.len > uniform_bytes.len);
+    const back2 = try Vk.decode(both);
+    try std.testing.expect(std.meta.eql(back2, vk));
+    const mixed = [_]u8{ sizeKey(12, .uniform), sizeKey(12, .tiered) };
+    const t = try expected(&vk, &mixed, 1, 0);
+    try std.testing.expectEqualSlices(u32, &vk.leaf_tiered[12].?.hash, &t.hash);
+    const n = try expected(&vk, &mixed, 0, 1);
+    try std.testing.expectEqualSlices(u32, &node.nodeKey(vk.leaf[12].?.hash, leaf.zero_key, vk.leaf_tiered[12].?.hash, leaf.zero_key), &n.key);
+}
+
+/// SHA-256 of the uniform block VK set up (`setup`) from the test-strength proofs of blocks 0 and 170
+/// (block sizes 2^11 and 2^12), as m3a5 (2196ba3) computed it: D-045 must not change a uniform key.
+pub const golden_vk_0_170 = "dc0661443658274e9d278072f5118a5c7a1d91d04616c2ce02650a3090c695f8";
+
+test "block VK golden: the uniform key of blocks 0 and 170 is m3a5's" {
+    const gpa = std.heap.page_allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const airs = try bs.parseAirs(a);
+    const tables = try leaf.Tables.init(gpa);
+    defer tables.deinit(gpa);
+    const bfri = PF.testFri();
+    const ck = @import("../block/checks.zig");
+    var files: [2]PF.File = undefined;
+    for (&files, [_]usize{ 0, 1 }) |*f, si| {
+        const s = ck.samples_small[si];
+        const b = try bs.buildU(a, s.raw, s.undo, s.ctx);
+        f.* = .{ .log_size = b.log_size, .pubs = b.pubs, .proof = try PF.prove(a, &airs, &b, bfri), .provenance = "test" };
+    }
+    var su = try setup(gpa, a, tables, &airs, &files, bfri);
+    defer su.shape.deinit(gpa);
+    const bytes = try su.vk.encode(a);
+    var digest: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(bytes, &digest, .{});
+    const hex = std.fmt.bytesToHex(digest, .lower);
+    std.debug.print("block VK golden: {s} ({d} bytes)\n", .{ hex, bytes.len });
+    try std.testing.expectEqualStrings(golden_vk_0_170, &hex);
 }

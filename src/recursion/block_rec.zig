@@ -19,6 +19,7 @@ const core = @import("stwo_core");
 const circuit = @import("stwo_circuit_frontend");
 const circuit_cpu = @import("stwo_circuit_cpu_integration");
 const leaf = @import("leaf.zig");
+const checks = @import("../block/checks.zig");
 const node_mod = @import("node.zig");
 const pv = @import("plain_verifier.zig");
 const glue = @import("glue.zig");
@@ -311,4 +312,36 @@ pub fn demo(gpa: std.mem.Allocator, dir: []const u8, h: u32) !void {
     std.debug.print("node proved and verified in {d:.1}s: blocks {d}..{d}, inputs {d}, proof {d} bytes\n", .{
         secs(timer.lap()), node.sum[0].toU32(), node.sum[0].toU32() + node.sum[1].toU32() - 1, node.sum[6].toU32(), node.proof.bytes.len,
     });
+}
+
+test "block leaf (tiered, D-045): blocks 0 and 170 — leaf circuits proved and verified natively; a wrong profile is refused" {
+    const gpa = std.heap.page_allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const airs = try bs.parseAirs(a);
+    const tables = try leaf.Tables.init(gpa);
+    defer tables.deinit(gpa);
+    const bfri = PF.testFri();
+    const cfri = try FriConfigV2.init(10, 0, 1, 3, 1);
+    for ([_]usize{ 0, 1 }) |si| {
+        const s = checks.samples_small[si];
+        var timer = try std.time.Timer.start();
+        const b = try bs.buildFull(a, s.raw, s.undo, s.ctx, .{ .profile = .tiered });
+        try std.testing.expectEqual(bs.Profile.tiered, b.profile);
+        const f = PF.File{ .log_size = b.log_size, .profile = b.profile, .pubs = b.pubs, .proof = try PF.prove(a, &airs, &b, bfri), .provenance = "test" };
+        var ctx = try leafCircuitOf(gpa, a, &airs, &f, bfri);
+        defer ctx.deinit();
+        const n_vars = ctx.circuit.n_vars;
+        var cp = try leaf.proveCircuit(gpa, a, &ctx, null, cfri);
+        defer cp.deinit();
+        const out = try leaf.verifyCircuit(gpa, tables, &cp);
+        const want: Proved = .{ .proof = cp, .key = leaf.zero_key, .sum = leafSummary(&f.pubs) };
+        try std.testing.expectEqualSlices(u32, &want.digest(), &out);
+        std.debug.print("height {d}: tiered block leaf ({d} vars) proved and verified ({d} ms)\n", .{ s.ctx.height, n_vars, timer.read() / std.time.ns_per_ms });
+        // The same block proof claimed as uniform does not verify natively.
+        var g = f;
+        g.profile = .uniform;
+        try std.testing.expect(std.meta.isError(leafCircuitOf(gpa, a, &airs, &g, bfri)));
+    }
 }
