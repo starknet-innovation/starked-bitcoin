@@ -193,6 +193,8 @@ Per-mode runs (`METAL_PROVE_ONLY=cpu|metal`) are separate processes, so peak RSS
 
 ### Step 3 (CUDA) notes, updated
 
+The port itself is designed and tracked in [gpu-cuda.md](gpu-cuda.md).
+
 - **Public inputs:** the template program (base params) is the natural CUDA input too. Alternatively, use the parametric literal normaliser.
 - **Composition:** the device-stage pattern above maps directly onto `circuit_cuda`'s resident composition controller.
 - **Biggest remaining items:**
