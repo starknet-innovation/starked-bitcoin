@@ -292,6 +292,20 @@ Layers (Lean):
    committed data (D-041; `ClaimAt` and `tl_bytes` pin each claim to the undo bytes, the record
    positions follow from `rows_sound`), which the bad-set reading needs.
 
+**Plan: events are functions of the committed data (D-041 in Lean; scoped 2026-10-12).** The probability
+reading of `epoch_systems_core` needs the events fixed by what the seed hashes. The pieces:
+1. *Record boundaries are the stream's parse:* `rows_sound` (`S₀ = 1`, `Sᵣ₊₁ = Sᵣ + 9 + TLᵣ`) and
+   `tl_bytes` (`TLᵣ` from the header bytes) give `Sᵣ = recStart Ub r` for a spec `recStart` reading the
+   stream sequentially.
+2. *Input `n` uses record `n`:* the coin component's `J` counts inputs (`J₀ = 0`, `Jⱼ₊₁ = Jⱼ + KIⱼ`) and
+   URec row `r` has `J = r`, so `coin_urec`'s `rj` is the input's ordinal.
+3. *The claim is the record:* code and ctx are its header bytes (`ClaimAt`); the script's length must be
+   exported as `TL_rj` from `coin_in_tuple` (today `ser` is existential there; the segment `(1, J)`
+   fixes it internally).
+4. Hence `claim t k = recAt Ub (ordinal t k)`, and the events are a function of `(raw, Ub)`, which
+   `commit_sound` hashes into `C_h`; with the block hash in `T` and both sets' digests, the seed hashes
+   everything the events depend on (collision resistance of Blake2s/SHA-256 stated as the assumption).
+
 **`WFE` (2026-10-12).** **Created and spent events are proven well formed** (`Block/CoinWFE.lean`:
 `created_wfe_systems`, `spent_wfe`; `epoch_systems_wf` is `epoch_systems_core` with `WFE` assumed for the
 initial and final sets only). Created events — from the systems' `Blk.WF`, the heights and the offsets: the txid is `sha256d` (32 bytes: a lemma on the digest's
