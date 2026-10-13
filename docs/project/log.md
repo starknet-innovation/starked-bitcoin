@@ -21,6 +21,20 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-10-13 (session 13, natural upload) — CUDA: trees 0–1 uploaded in natural order, reordered on the device (host-checked; device run pending)
+Who: Claude (agent, Opus 5.5), worktree branch `cuda/natural-upload`
+Roadmap: GPU step 3 (CUDA): host trace trees lever done on the host side; the pod run decides it
+Done:
+- fc579dd: `ir.PreCol.fill` (memset/period runs instead of per-row `at`), `ir.fillParallel`, `system.preprocessedNatural`; `genPreprocessed` uses them (every caller benefits).
+- bbc8599: `src/gpu/cuda/reorder.zig`: one generated AOT kernel (`gpu/cuda_aot/witness_starked_reorder_*.cu`, native-authenticated, tag `native_m31_permutation_trace_v3`) moves each cohort of trees 0–1 from staging to the coefficient buffer in storage order in `.trace_generation` (`pipeline.assembleTrace`); the LogUp gather now reads the reordered buffers; a host-LogUp tree 2 is a device copy. `prover.hostTraceTrees`: tree 1 borrows the witness columns, tree 0 is generated in natural order. docs/design/gpu-cuda.md § Natural upload.
+Evidence:
+- `cuda-test`: new `reorder_test.zig`: the kernel's exact source as host C++ equals `toStorage` (logs 0–16, mixed cohorts; log 0 caught a bug), and the whole `.trace_generation` over block 0's real plans (uniform 2 launches, tiered 18) reproduces all 1,435 CPU storage-order columns and the LogUp sources. Drift, LogUp, arena (unchanged: 26.4 / 52.8 GiB) pass.
+- `cuda-check`, `cuda-parity`, `cuda-archive-plan` (80 AOT sources: 48 + 16 + 15 + 1) pass; `zig build test -Doptimize=ReleaseFast` green: filters "ir: PreCol", "golden hashes", "block system" (30 min), then the full suite (37 min, 13.5 GB peak RSS).
+- `cuda-prove --large 400000 --profile production --size tiered --skip-cpu` (M4 Pro, stub link): "host trace trees" 3.66 s → 0.15 s; peak footprint 14.07 GB → 7.16 GB (the main tree's 5.4 GiB storage copy is gone). `--host-logup` still runs its host steps.
+Problems / lessons:
+- Ingress H2D is pageable `cudaMemcpyAsync` and stwo-zig has no pinned/host-register API; registering 13 GB would cost about what it saves. Not done.
+Next: pod run on this branch: `scripts/pod/run.sh` (block 0 ×4, 400000), `large-prod-tiered-hostlogup`, `xl-970347`, `xl-774628`; record host laps, RSS and the `.trace_generation` device time.
+
 ## 2026-10-13 (session 13, later) — Device LogUp validated on an H100: 2^23 block proved in about a minute
 Who: Claude (agent, Opus 5.5), with the owner
 Roadmap: GPU step 3 (CUDA): device LogUp done (merged from `cuda/device-logup`)
