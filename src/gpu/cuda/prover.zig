@@ -28,6 +28,7 @@ const terminal = @import("terminal.zig");
 const controller = @import("composition_controller.zig");
 const pipeline = @import("pipeline.zig");
 const logup = @import("logup.zig");
+const witness = @import("witness.zig");
 const system = sb.air.system;
 const rec = sb.air.prove_rec;
 const M31 = core.fields.m31.M31;
@@ -65,6 +66,9 @@ pub const Input = struct {
     mains: []const []const []const M31,
     config: core.pcs.config_v2.PcsConfigV2,
     catalog: *const catalog_mod.Catalog,
+    /// Device witness (`witness.zig`): the inputs of the generated components, whose `mains` may
+    /// then be empty; null: every column comes from `mains`.
+    witness: ?*const witness.Inputs = null,
 };
 
 pub const Result = struct {
@@ -86,10 +90,31 @@ pub const Prepared = struct {
     alpha_powers: usize,
     /// Device LogUp (null: the host builds the interaction tree, `proveHostLogup`).
     logup: ?*logup.Plan,
+    /// Device witness (null: the host builds and uploads every trace column).
+    witness: ?*witness.Plan = null,
+    witness_cohorts: []witness.Bound.Cohort = &.{},
 
     pub const Mode = enum { device_logup, host_logup };
 
     pub fn init(allocator: std.mem.Allocator, parts: []const system.Part, cat: *const catalog_mod.Catalog, config: core.pcs.config_v2.PcsConfigV2, mode: Mode) !Prepared {
+        return initWitness(allocator, parts, cat, config, mode, null);
+    }
+
+    /// `init`, with the device generating the columns of `inputs`' components and tree 0.
+    pub fn initWitness(allocator: std.mem.Allocator, parts: []const system.Part, cat: *const catalog_mod.Catalog, config: core.pcs.config_v2.PcsConfigV2, mode: Mode, inputs: ?*const witness.Inputs) !Prepared {
+        const witness_plan: ?*witness.Plan = if (inputs) |in| blk: {
+            if (cat.witness == null) return error.CudaCatalogPlacementMismatch;
+            const p = try allocator.create(witness.Plan);
+            errdefer allocator.destroy(p);
+            p.* = try witness.Plan.init(allocator, parts, in);
+            break :blk p;
+        } else null;
+        errdefer if (witness_plan) |p| {
+            p.deinit(allocator);
+            allocator.destroy(p);
+        };
+        const cohorts: []witness.Bound.Cohort = if (witness_plan) |p| try witness.preCohorts(allocator, p) else &.{};
+        errdefer allocator.free(cohorts);
         var plans = try plan_mod.Plans.init(allocator, parts, cat, config);
         errdefer plans.deinit();
         const logup_plan: ?*logup.Plan = switch (mode) {
@@ -130,6 +155,7 @@ pub const Prepared = struct {
             .decommit = &plans.decommit,
             .terminal = &bundle,
             .logup = logup_plan,
+            .witness = if (witness_plan) |p| .{ .input_words = p.layout.words, .scratch_words = p.scratch_words } else null,
         });
         errdefer mem.deinit();
         return .{
@@ -143,10 +169,17 @@ pub const Prepared = struct {
             .claims_mixed = claims,
             .alpha_powers = alpha_powers,
             .logup = logup_plan,
+            .witness = witness_plan,
+            .witness_cohorts = cohorts,
         };
     }
 
     pub fn deinit(self: *Prepared) void {
+        if (self.witness) |p| {
+            p.deinit(self.allocator);
+            self.allocator.destroy(p);
+        }
+        self.allocator.free(self.witness_cohorts);
         if (self.logup) |p| {
             p.deinit();
             self.allocator.destroy(p);
@@ -162,10 +195,24 @@ pub const Prepared = struct {
 /// Every uploaded trace column, by tree (host memory). Trees 0–1 are in natural (coset) row order:
 /// the device reorders them (`reorder.zig`). Tree 2 (host LogUp only) is in storage order
 /// (`system.interactionTrace`). Tree 1 borrows the witness columns (`Input.mains`): no copy.
+/// With a device witness, the generated columns (all of tree 0, the generated components' main
+/// columns) have empty values and are not uploaded.
 pub const HostTrees = struct {
     trees: [3][]ColumnEvaluation = .{ &.{}, &.{}, &.{} },
     /// Whether `trees[t]`'s values are owned (freed by `deinit`); the descriptors always are.
     owned: [3]bool = .{ true, false, true },
+    /// Device witness: tree 0 is generated, and `generated_main[j]` says whether tree-1 column `j` is.
+    device_tree0: bool = false,
+    generated_main: ?[]const bool = null,
+
+    /// Whether column `j` of `tree` is generated on the device (not uploaded).
+    pub fn generated(self: *const HostTrees, tree: usize, j: usize) bool {
+        return switch (tree) {
+            0 => self.device_tree0,
+            1 => if (self.generated_main) |g| g[j] else false,
+            else => false,
+        };
+    }
 
     pub fn deinit(self: *HostTrees, allocator: std.mem.Allocator) void {
         for (self.trees, self.owned) |t, owned| {
@@ -184,30 +231,53 @@ pub const HostTrees = struct {
 
 /// The preprocessed (generated, natural order) and main (the witness itself) trees.
 pub fn hostTraceTrees(allocator: std.mem.Allocator, input: Input) !HostTrees {
+    return hostTraceTreesFor(allocator, input, null);
+}
+
+/// `hostTraceTrees`, leaving out what the device witness `plan` generates: tree 0 (no host
+/// generation) and the generated components' main columns (their `mains` may be empty).
+pub fn hostTraceTreesFor(allocator: std.mem.Allocator, input: Input, plan: ?*const witness.Plan) !HostTrees {
     var out = HostTrees{};
     errdefer out.deinit(allocator);
-    out.trees[0] = try system.preprocessedNatural(allocator, input.parts);
+    if (plan) |w| {
+        out.device_tree0 = true;
+        out.generated_main = w.generated_main;
+        out.owned[0] = false;
+        const pre = try allocator.alloc(ColumnEvaluation, w.pre_logs.len);
+        for (pre, w.pre_logs) |*c, log| c.* = .{ .log_size = log, .values = &.{} };
+        out.trees[0] = pre;
+    } else out.trees[0] = try system.preprocessedNatural(allocator, input.parts);
     var n_main: usize = 0;
-    for (input.parts, input.mains) |p, m| {
-        if (m.len != p.air.n_main) return error.InvalidPreparedGeometry;
-        n_main += m.len;
-    }
+    for (input.parts) |p| n_main += p.air.n_main;
     const main = try allocator.alloc(ColumnEvaluation, n_main);
     out.trees[1] = main;
     var k: usize = 0;
-    for (input.parts, input.mains) |p, m| for (m) |col| {
-        if (col.len != @as(usize, 1) << @intCast(p.log_size)) return error.InvalidPreparedGeometry;
-        main[k] = .{ .log_size = p.log_size, .values = col };
-        k += 1;
-    };
+    for (input.parts, input.mains) |p, m| {
+        const skip = if (plan) |w| w.generated_main[k] else false;
+        if (skip) {
+            // Generated on the device: the host columns, if any, are not read.
+            if (m.len != 0 and m.len != p.air.n_main) return error.InvalidPreparedGeometry;
+            for (0..p.air.n_main) |_| {
+                main[k] = .{ .log_size = p.log_size, .values = &.{} };
+                k += 1;
+            }
+            continue;
+        }
+        if (m.len != p.air.n_main) return error.InvalidPreparedGeometry;
+        for (m) |col| {
+            if (col.len != @as(usize, 1) << @intCast(p.log_size)) return error.InvalidPreparedGeometry;
+            main[k] = .{ .log_size = p.log_size, .values = col };
+            k += 1;
+        }
+    }
     return out;
 }
 
 /// The whole proof, LogUp on the device (see the file comment).
 pub fn prove(allocator: std.mem.Allocator, input: Input) !Result {
-    var prepared = try Prepared.init(allocator, input.parts, input.catalog, input.config, .device_logup);
+    var prepared = try Prepared.initWitness(allocator, input.parts, input.catalog, input.config, .device_logup, input.witness);
     defer prepared.deinit();
-    var host = try hostTraceTrees(allocator, input);
+    var host = try hostTraceTreesFor(allocator, input, prepared.witness);
     defer host.deinit(allocator);
     var twiddles = try Twiddles.init(allocator, prepared.plans.twiddle_words);
     defer twiddles.deinit();
@@ -222,9 +292,9 @@ pub const HostLogup = struct {
 
 /// The whole proof, LogUp on the host (the first version, for A/B runs).
 pub fn proveHostLogup(allocator: std.mem.Allocator, input: Input) !Result {
-    var prepared = try Prepared.init(allocator, input.parts, input.catalog, input.config, .host_logup);
+    var prepared = try Prepared.initWitness(allocator, input.parts, input.catalog, input.config, .host_logup, input.witness);
     defer prepared.deinit();
-    var host = try hostTraceTrees(allocator, input);
+    var host = try hostTraceTreesFor(allocator, input, prepared.witness);
     defer host.deinit(allocator);
     var twiddles = try Twiddles.init(allocator, prepared.plans.twiddle_words);
     defer twiddles.deinit();
@@ -268,6 +338,7 @@ pub fn proofPass(
     host_logup: ?HostLogup,
 ) !Result {
     if ((host_logup == null) != (prepared.logup != null)) return error.InvalidResidentInput;
+    if ((prepared.witness == null) != (host.generated_main == null) or host.device_tree0 != (prepared.witness != null)) return error.InvalidResidentInput;
     const plans = &prepared.plans;
     const blowup = input.config.fri_config.log_blowup_factor;
     var tx = try Transaction.openPrepared(allocator, &accepted_sms, try prepared.memory.placement.clone(allocator));
@@ -286,7 +357,18 @@ pub fn proofPass(
     // ---- ingress: host data.
     try session.context.uploadSlice(u32, views.twiddles_forward, twiddles.forwardWords());
     try session.context.uploadSlice(u32, views.twiddles_inverse, twiddles.inverseWords());
-    for (views.columns, host.trees) |dst, src| try uploadTree(session, dst, src);
+    for (views.columns, host.trees, 0..) |dst, src, tree| try uploadTree(session, dst, src, host, tree);
+    var witness_bound: ?witness.Bound = null;
+    if (prepared.witness) |plan| {
+        const wv = views.witness orelse return error.InvalidResidentInput;
+        witness_bound = .{
+            .plan = plan,
+            .kernels = if (input.catalog.witness) |*k| k else return error.CudaCatalogPlacementMismatch,
+            .buffers = .{ .inputs = wv.inputs, .scratch = wv.scratch },
+            .pre_cohorts = prepared.witness_cohorts,
+        };
+        try witness_bound.?.upload(allocator, session, .{ views.columns[0], views.columns[1] });
+    }
     try session.context.uploadSlice(u32, views.statement, prepared.statement.words);
     if (host_logup) |h| {
         try uploadFelts(allocator, session, try views.claims_mixed.cast(u32), h.sums);
@@ -380,6 +462,7 @@ pub fn proofPass(
         .proof = views.proof,
         .twiddles_inverse = views.twiddles_inverse,
         .reorder = if (input.catalog.reorder) |*r| r else return error.CudaCatalogPlacementMismatch,
+        .witness = if (witness_bound) |*w| w else null,
     };
     try schedule.execute(input.config);
     const transport = try allocator.alloc(u32, prepared.terminal_bundle.total_words);
@@ -420,9 +503,15 @@ fn inPlaceColumns(allocator: std.mem.Allocator, plan: *const cc.resident_commit.
     return out;
 }
 
-fn uploadTree(session: anytype, destinations: []const common.Words, columns: []const ColumnEvaluation) !void {
+/// Ingress: tree `tree`'s host columns into their staging views (the device-generated ones are
+/// skipped; `witness.Bound.generate` writes them in `.trace_generation`).
+pub fn uploadTree(session: anytype, destinations: []const common.Words, columns: []const ColumnEvaluation, host: *const HostTrees, tree: usize) !void {
     if (destinations.len != columns.len) return error.InvalidResidentInput;
-    for (destinations, columns) |dst, col| {
+    for (destinations, columns, 0..) |dst, col, j| {
+        if (host.generated(tree, j)) {
+            if (col.values.len != 0) return error.InvalidResidentInput;
+            continue;
+        }
         if (dst.len != col.values.len) return error.InvalidResidentInput;
         const words: [*]const u32 = @ptrCast(col.values.ptr);
         try session.context.uploadSlice(u32, dst, words[0..col.values.len]);

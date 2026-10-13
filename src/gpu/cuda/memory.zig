@@ -121,6 +121,8 @@ pub const Kind = enum(u8) {
     logup_geometry,
     logup_partials,
     logup_scan,
+    witness_inputs,
+    witness_scratch,
 };
 
 pub const Slot = struct {
@@ -146,7 +148,12 @@ pub const Input = struct {
     terminal: *const terminal.Bundle,
     /// Device LogUp (`logup.zig`); null: the interaction tree is built on the host and uploaded.
     logup: ?*const logup.Plan = null,
+    /// Device witness (`witness.zig`): its inputs slot and the SHA word scratch; null: the host
+    /// uploads every trace column.
+    witness: ?WitnessSizes = null,
 };
+
+pub const WitnessSizes = struct { input_words: usize, scratch_words: usize };
 
 pub const Plan = struct {
     allocator: std.mem.Allocator,
@@ -276,6 +283,11 @@ const Builder = struct {
             try self.add(.logup_scan, 0, scratch, 64, .trace_commit, .trace_commit);
             if (plan.slab_words > input.commitments[2].requirements.evaluation_words) return error.InvalidResidentGeometry;
         }
+        if (input.witness) |w| {
+            // Small inputs and pointer tables (ingress), the SHA word trace (`.trace_generation`).
+            try self.add(.witness_inputs, 0, w.input_words, 64, .ingress, .trace_generation);
+            try self.add(.witness_scratch, 0, w.scratch_words, 64, .trace_generation, .trace_generation);
+        }
         try self.add(.error_flag, 0, 1, 1, .ingress, .fri_commit);
         try self.addComposition(input.composition);
         try self.addOods(input.oods);
@@ -393,6 +405,8 @@ pub const Views = struct {
     staging: [3]?common.Words,
     /// Device LogUp's buffers (null on the host-LogUp path).
     logup: ?Logup,
+    /// Device witness buffers (null: every trace column is uploaded).
+    witness: ?Witness,
     coefficient_columns: [3][]common.Words,
     evaluation_columns: [3][]common.Words,
     commits: [4]commit.Buffers,
@@ -428,6 +442,11 @@ pub const Logup = struct {
     scan: common.Words,
     /// The denominator slab: the head of tree 2's evaluation buffer.
     denominators: common.Words,
+};
+
+pub const Witness = struct {
+    inputs: common.Words,
+    scratch: common.Words,
 };
 
 pub const BindInput = struct {
@@ -561,12 +580,17 @@ pub fn bind(allocator: std.mem.Allocator, transaction: anytype, input: BindInput
         .scan = try binder.words(.logup_scan, 0),
         .denominators = try commits[2].evaluations.sub(0, input.logup_slab_words),
     } else null;
+    const witness_view: ?Witness = if (input.plans.slot(.witness_inputs, 0)) |_| .{
+        .inputs = try binder.words(.witness_inputs, 0),
+        .scratch = try binder.words(.witness_scratch, 0),
+    } else |_| null;
     const proof_view = try shared.resident_proof_binding.bindAt(shared.proof_bundle, transaction, (try input.plans.slot(.terminal_bundle, 0)).requirement.id, 0, .{ .proof = input.terminal.* });
     return .{
         .allocator = allocator,
         .columns = columns,
         .staging = staging,
         .logup = logup_view,
+        .witness = witness_view,
         .coefficient_columns = coefficient_columns,
         .evaluation_columns = evaluation_columns,
         .commits = commits,

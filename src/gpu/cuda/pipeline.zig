@@ -1,6 +1,6 @@
 //! One proof-owned CUDA schedule for the block system, adapted from
-//! `circuit_cuda/resident_pipeline.zig`: our transcript prefix, no device witness (the trace
-//! arrives at ingress), device LogUp in `.trace_commit` as the circuit's (`logup.zig`; or the
+//! `circuit_cuda/resident_pipeline.zig`: our transcript prefix, our device witness (the largest
+//! columns generated in `.trace_generation`, `witness.zig`; the rest arrives at ingress), device LogUp in `.trace_commit` as the circuit's (`logup.zig`; or the
 //! host's interaction tree from ingress), and our claim capture. The tail (composition, OODS,
 //! quotient, FRI, query grind, openings) is stwo-zig's, in its order. Only the terminal bundle
 //! leaves the GPU.
@@ -15,6 +15,7 @@ const controller = @import("composition_controller.zig");
 const terminal = @import("terminal.zig");
 const logup = @import("logup.zig");
 const reorder = @import("reorder.zig");
+const witness = @import("witness.zig");
 const common = cuda.runtime.stages.common;
 const quotient_module = @import("stwo_cairo_cuda_integration").executor.quotient.controller;
 
@@ -45,6 +46,8 @@ pub fn Bound(comptime Transaction: type, comptime Sink: type) type {
         proof: shared.resident_views.Proof,
         twiddles_inverse: common.Words,
         reorder: *const reorder.Kernel,
+        /// Device witness generation (null: every trace column arrived at ingress).
+        witness: ?*const witness.Bound = null,
 
         const Self = @This();
 
@@ -86,8 +89,9 @@ pub fn Bound(comptime Transaction: type, comptime Sink: type) type {
                 }
             };
 
-            // Trace assembly (`assembleTrace`): trees 0–1 arrive in natural row order and are
-            // reordered into storage order by our kernel; the host-LogUp interaction tree is a copy.
+            // Trace assembly (`assembleTrace`): the device-generated columns are written into the
+            // staging slots, then trees 0–1 (natural row order) are reordered into storage order by
+            // our kernel; the host-LogUp interaction tree is a copy.
             try tx.beginStage(.trace_generation);
             var plans: [3]*const cc.resident_commit.Plan = undefined;
             var coefficients: [3]common.Words = undefined;
@@ -95,7 +99,7 @@ pub fn Bound(comptime Transaction: type, comptime Sink: type) type {
                 p.* = c.plan;
                 k.* = c.buffers.coefficients;
             }
-            try assembleTrace(session, self.reorder, plans, coefficients, self.staging, self.logup);
+            try assembleTrace(session, self.reorder, plans, coefficients, self.staging, self.logup, self.witness);
             try tx.endStage(.trace_generation);
 
             try tx.beginStage(.trace_commit);
@@ -167,13 +171,14 @@ pub fn Bound(comptime Transaction: type, comptime Sink: type) type {
     };
 }
 
-/// `.trace_generation`: each staged tree's cohorts into its commitment's coefficient buffer, in
-/// storage order. Trees 0–1 were uploaded in natural row order (`prover.HostTrees`) and go through
+/// `.trace_generation`: first the device witness (`witness.zig`) writes its columns into the
+/// staging slots in natural row order (where ingress puts the host's). Then each staged tree's
+/// cohorts go into its commitment's coefficient buffer, in storage order. Trees 0–1 (uploaded or
+/// generated in natural row order, `prover.HostTrees`) go through
 /// the reorder kernel (one launch per cohort); a staged tree 2 (host LogUp: `system.interactionTrace`
 /// columns, already in storage order) is a device copy per cohort. Then
 /// device LogUp copies the columns its lookups read out of the reordered buffers (the commitment
-/// interpolates them in place in `.trace_commit`). The trace itself is built on the host; device
-/// witness generation would replace this stage.
+/// interpolates them in place in `.trace_commit`).
 pub fn assembleTrace(
     session: anytype,
     kernel: *const reorder.Kernel,
@@ -181,7 +186,12 @@ pub fn assembleTrace(
     coefficients: [3]common.Words,
     staging: [3]?common.Words,
     device_logup: ?*const logup.Bound,
+    device_witness: ?*const witness.Bound,
 ) !void {
+    if (device_witness) |w| {
+        if (staging[0] == null or staging[1] == null) return error.InvalidResidentPipeline;
+        try w.generate(session);
+    }
     for (plans, coefficients, staging, 0..) |plan, coeff, maybe_staging, tree| {
         const st = maybe_staging orelse continue;
         for (plan.cohorts) |cohort| {

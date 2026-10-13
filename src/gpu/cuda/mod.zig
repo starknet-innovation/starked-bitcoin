@@ -9,6 +9,7 @@
 //! - `transcript`: our prefix; host sink, device sink, host model of the device.
 //! - `memory`: the arena's slots and views; `composition_controller` (fork); `terminal`.
 //! - `reorder`: the natural → storage reorder of trees 0–1 (`.trace_generation`).
+//! - `witness`: device witness generation (`block_sha`, `block_b2s`, tree 0) in `.trace_generation`.
 //! - `logup`: device LogUp (generated fraction kernels, stwo-zig's relation completion).
 //! - `pipeline`, `prover`: the device schedule and the prover.
 
@@ -24,6 +25,7 @@ pub const terminal = @import("terminal.zig");
 pub const pipeline = @import("pipeline.zig");
 pub const logup = @import("logup.zig");
 pub const reorder = @import("reorder.zig");
+pub const witness = @import("witness.zig");
 pub const prover = @import("prover.zig");
 
 test {
@@ -35,6 +37,7 @@ test {
     _ = logup;
     _ = @import("logup_test.zig");
     _ = @import("reorder_test.zig");
+    _ = @import("witness_test.zig");
     _ = @import("cpu_parity_test.zig");
     _ = @import("arena_test.zig");
 }

@@ -542,5 +542,57 @@
     "module_globals": "none",
     "identity_scheme": "sha256-source-and-contract-v1",
     "semantic_contract": "starked-bitcoin/natural-to-storage/v1;args=natural,storage,log_size,columns;storage[c<<log|s]=natural[c<<log|natural_row(s,log)];grid=rows/256,columns;threads=256"
+  },
+  {
+    "kind": "witness",
+    "label": "starked_witness_b2s_c4b4ebb36a86c7dd",
+    "abi_schema": "native_indexed_recurrence_trace_v1",
+    "kernel_name": "starked_witness_b2s_v1_c4b4ebb36a86c7dd",
+    "cache_key": "abd58c0af40d6a74",
+    "semantic_hash": "c4b4ebb36a86c7dd",
+    "program_identity": "57b3298dd253cc17d4a2b154336a16bb52ac9cc6a38aa9d760f3113c6ec5a7de",
+    "file": "witness_starked_witness_b2s_c4b4ebb36a86c7dd_abd58c0af40d6a74.cu",
+    "module_globals": "none",
+    "identity_scheme": "sha256-source-and-contract-v1",
+    "semantic_contract": "starked-bitcoin/witness-b2s/v1;args=sigma,periods,count,columns,rows;block_b2s 312 natural columns: fillPeriod(periods[min(p,count)]: h8,m16,tlo,thi,last) + B2sFill extras;columns=u64 pointers;grid=rows/256;threads=256"
+  },
+  {
+    "kind": "witness",
+    "label": "starked_witness_pre_34475ffbc38611b1",
+    "abi_schema": "native_indexed_recurrence_trace_v1",
+    "kernel_name": "starked_witness_pre_v1_34475ffbc38611b1",
+    "cache_key": "c4e338e9da0f539f",
+    "semantic_hash": "34475ffbc38611b1",
+    "program_identity": "95573ee2aadb98c63b3a9c06874ebf9e1cf5eb7279eb782f4986c37c53d4008d",
+    "file": "witness_starked_witness_pre_34475ffbc38611b1_c4e338e9da0f539f.cu",
+    "module_globals": "none",
+    "identity_scheme": "sha256-source-and-contract-v1",
+    "semantic_contract": "starked-bitcoin/witness-pre/v1;args=desc,values,first,log_size,columns;out[i]=PreCol.at(i,2^log) natural;desc=kind,k,voff,vlen,ptr_lo,ptr_hi,0,0;grid=rows/256,columns;threads=256"
+  },
+  {
+    "kind": "witness",
+    "label": "starked_witness_sha_columns_f3d9386ed65fce5f",
+    "abi_schema": "native_indexed_recurrence_trace_v1",
+    "kernel_name": "starked_witness_sha_columns_v1_f3d9386ed65fce5f",
+    "cache_key": "f5452c1ff3ec3195",
+    "semantic_hash": "f3d9386ed65fce5f",
+    "program_identity": "a5f263a785a7a3ae6cc771c649bf82751b6c98d099d5ce55afcc98522546769d",
+    "file": "witness_starked_witness_sha_columns_f3d9386ed65fce5f_f5452c1ff3ec3195.cu",
+    "module_globals": "none",
+    "identity_scheme": "sha256-source-and-contract-v1",
+    "semantic_contract": "starked-bitcoin/witness-sha-columns/v1;args=words,meta,count,columns,rows;block_sha 144 natural columns: sha256 columns(shaRole, K=meta[0..64]) + Extra(meta[64+6p]: mid,blk,flags,lid,rid,ym);columns=u64 pointers;grid=rows/256;threads=256"
+  },
+  {
+    "kind": "witness",
+    "label": "starked_witness_sha_words_f0c8fc61b9592dfd",
+    "abi_schema": "native_indexed_recurrence_trace_v1",
+    "kernel_name": "starked_witness_sha_words_v1_f0c8fc61b9592dfd",
+    "cache_key": "151a1a85775a167e",
+    "semantic_hash": "f0c8fc61b9592dfd",
+    "program_identity": "ff76ea831952d365d392db5c41d8d84a7ada8f7d9fbd469725d9fe34131c7f54",
+    "file": "witness_starked_witness_sha_words_f0c8fc61b9592dfd_151a1a85775a167e.cu",
+    "module_globals": "none",
+    "identity_scheme": "sha256-source-and-contract-v1",
+    "semantic_contract": "starked-bitcoin/witness-sha-words/v1;args=ktab(meta region: K[64], then meta),comps,count,words,rows;per 72-row period p: Words.place(comps[p] or zero dummy) -> a,e,w at words[0|rows|2rows + r];grid=periods/64;threads=64"
   }
 ]

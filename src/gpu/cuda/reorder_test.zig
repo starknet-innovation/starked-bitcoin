@@ -248,7 +248,7 @@ fn checkStage(a: std.mem.Allocator, host: *const Host, k: *const reorder.Kernel,
         pp.* = &prepared.plans.commits[t];
         kk.* = views.commits[t].coefficients;
     }
-    try pipeline.assembleTrace(&session, k, plans, coefficients, views.staging, &bound);
+    try pipeline.assembleTrace(&session, k, plans, coefficients, views.staging, &bound, null);
 
     // Trees 0–1 = the CPU prover's storage-order columns.
     const want_pre = try system.preprocessedColumns(a, &parts);
