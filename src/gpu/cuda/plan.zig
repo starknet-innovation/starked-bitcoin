@@ -23,6 +23,8 @@ const composition = stwzeva.composition;
 const parametric = cairo_cuda.parametric_eval;
 const topology_fork = @import("topology.zig");
 const masks = @import("masks.zig");
+const fri_mod = @import("fri.zig");
+const decommit_mod = @import("decommit.zig");
 
 pub const Geometry = cc.geometry.Geometry;
 pub const Tree = cc.geometry.Tree;
@@ -258,8 +260,8 @@ pub const Plans = struct {
     commits: [4]cc.resident_commit.Plan,
     oods: cc.resident_oods.Plan,
     quotient: cc.resident_quotient.Topology,
-    fri: cc.resident_fri.Plan,
-    decommit: cc.resident_decommit.Plan,
+    fri: fri_mod.Plan,
+    decommit: decommit_mod.Plan,
     proof_layout: masks.ProofLayout,
     twiddle_words: usize,
 
@@ -284,9 +286,9 @@ pub const Plans = struct {
         var quotient = try masks.quotientTopology(allocator, &b, &geo, &oods, blowup);
         errdefer quotient.deinit();
         const twiddle_words = @as(usize, 1) << @intCast(geo.fri_input_log - 1);
-        var fri = try cc.resident_fri.Plan.init(allocator, &geo, config, twiddle_words);
+        var fri = try fri_mod.Plan.init(allocator, &geo, config, twiddle_words);
         errdefer fri.deinit();
-        var decommit = try cc.resident_decommit.Plan.init(allocator, &geo, config);
+        var decommit = try decommit_mod.decommitPlan(allocator, &geo, config);
         errdefer decommit.deinit();
         const layout = try masks.ProofLayout.init(allocator, &geo, &oods, config);
         return .{

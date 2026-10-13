@@ -25,7 +25,7 @@ const Stage = cuda.runtime.telemetry.Stage;
 const field = cuda.abi.field;
 const common = cuda.runtime.stages.common;
 const commit = cc.resident_commit;
-const fri = cc.resident_fri;
+const fri = @import("fri.zig");
 const decommit = cc.resident_decommit;
 const Quotient = cairo.executor.quotient.controller.QuotientBindings;
 
@@ -319,7 +319,7 @@ const Builder = struct {
         try self.add(.fri_alpha, 0, 4, 4, .fri_commit, .fri_commit);
         for (plan.layers, 0..) |layer, ordinal| {
             if (ordinal != 0) try self.add(.fri_coordinates, ordinal, try mul(layer.evaluation_size, 4), 64, .fri_commit, .decommit);
-            try self.add(.fri_hashes, ordinal, try mul(try mul(layer.evaluation_size >> 2, 2) - 1, 8), 64, .fri_commit, .decommit);
+            try self.add(.fri_hashes, ordinal, try mul(try mul(layer.evaluation_size >> @intCast(layer.leaf_log), 2) - 1, 8), 64, .fri_commit, .decommit);
             try self.add(.fri_layers, ordinal, try mul(layer.merkle_count, @sizeOf(field.MerkleLayerDescriptor) / 4), 2, .ingress, .decommit);
         }
         const rows = try pow2(plan.final_log);

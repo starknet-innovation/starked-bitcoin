@@ -25,7 +25,7 @@ pub fn Bound(comptime Transaction: type, comptime Sink: type) type {
         composition: *controller.Bound,
         oods: *const cc.resident_oods.Bound,
         quotient: *const quotient_module.Prepared,
-        fri_plan: *const cc.resident_fri.Plan,
+        fri_plan: *const @import("fri.zig").Plan,
         decommit_plan: *const cc.resident_decommit.Plan,
         commitments: *[4]cc.resident_commit.Bound,
         columns: [3][]const common.Words,
