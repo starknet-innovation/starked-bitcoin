@@ -98,12 +98,22 @@ fn check(a: std.mem.Allocator, lib: *std.DynLib, kernels: []const ?logup.Kernel,
 
     var plan = try logup.Plan.init(a, parts, kernels);
     defer plan.deinit();
-    // What ingress uploads: storage-order trees 0–1 and the statement.
-    var trees: [2][]const @import("stwo_prover_engine").pcs.ColumnEvaluation = undefined;
+    // What ingress uploads (storage-order trees 0–1, as `prover.hostTraceTrees`), for the columns
+    // the lookups read only (the others stay empty), and the statement.
+    const ColumnEvaluation = @import("stwo_prover_engine").pcs.ColumnEvaluation;
+    var trees: [2][]ColumnEvaluation = undefined;
     trees[0] = try system.preprocessedColumns(a, parts);
-    var main = std.ArrayList(@import("stwo_prover_engine").pcs.ColumnEvaluation).empty;
-    for (parts, mains) |p, m| try main.appendSlice(a, try sb.air.prove.toStorage(a, p.log_size, m));
-    trees[1] = main.items;
+    var n_main: usize = 0;
+    for (parts) |p| n_main += p.air.n_main;
+    trees[1] = try a.alloc(ColumnEvaluation, n_main);
+    for (trees[1]) |*c| c.* = .{ .log_size = 0, .values = &.{} };
+    for (plan.instances) |x| for (x.columns) |c| if (c.tree == 1) {
+        var first: usize = 0;
+        for (parts[0..x.component]) |p| first += p.air.n_main;
+        const col = mains[x.component][c.column - first];
+        const st = try sb.air.prove.toStorage(a, x.log_size, &.{col});
+        trees[1][c.column] = st[0];
+    };
     var statement = try transcript.Statement.init(a, parts);
     defer statement.deinit(a);
     // α⁰…α^w and z, as `stwo_relation_expand_challenges_on` writes them.
@@ -120,21 +130,25 @@ fn check(a: std.mem.Allocator, lib: *std.DynLib, kernels: []const ?logup.Kernel,
         try std.testing.expectEqual(output_columns, x.output_first);
         output_columns += 4 * x.batches;
         const rows: usize = x.rows;
+        // Per-component buffers come from the page allocator and are freed (large blocks).
+        var local = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer local.deinit();
+        const la = local.allocator();
         // The gather of `logup.Bound.gather`.
-        const sources = try a.alloc(u32, @max(x.columns.len * rows, 1));
+        const sources = try la.alloc(u32, @max(x.columns.len * rows, 1));
         for (x.columns, 0..) |c, k| {
             const col = trees[c.tree][c.column];
             try std.testing.expectEqual(rows, col.values.len);
             for (col.values, 0..) |v, i| sources[k * rows + i] = v.toU32();
         }
-        const outputs = try a.alloc([]M31, 4 * x.batches);
-        const pointers = try a.alloc([*]u32, 4 * x.batches);
+        const outputs = try la.alloc([]M31, 4 * x.batches);
+        const pointers = try la.alloc([*]u32, 4 * x.batches);
         for (outputs, pointers) |*o, *ptr| {
-            o.* = try a.alloc(M31, rows);
+            o.* = try la.alloc(M31, rows);
             @memset(o.*, M31.fromCanonical(0x5a5a5a5));
             ptr.* = @ptrCast(o.*.ptr);
         }
-        const slab = try a.alloc(QM31, rows * x.batches);
+        const slab = try la.alloc(QM31, rows * x.batches);
         var err: u32 = 0;
         const sym = try std.fmt.allocPrintSentinel(a, "drive_{s}", .{x.kernel.kernel_name}, 0);
         const drive = lib.lookup(Drive, sym) orelse {
