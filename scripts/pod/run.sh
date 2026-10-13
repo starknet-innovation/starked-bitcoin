@@ -25,7 +25,7 @@ step() {
   local rc=$?
   kill $smi 2>/dev/null; wait $smi 2>/dev/null
   local peak
-  peak=$(awk -F', ' '{gsub(/ MiB/,"",$2); if ($2>m) m=$2} END {print m+0}' "$LOGS/$name.smi.csv")
+  peak=$(awk -F', ' '{gsub(/ MiB/,"",$2); if ($2+0>m) m=$2+0} END {print m+0}' "$LOGS/$name.smi.csv")
   grep -E "^\[|DIFF|MISMATCH|BYTE|verify|device|planned|error" "$log" | tail -25
   echo "   nvidia-smi peak memory.used: ${peak} MiB; host peak RSS: $(grep 'Maximum resident' "$log" | awk '{print $NF}') kB; exit $rc"
   if [ $rc -ne 0 ]; then echo "== $name FAILED (see $log)"; exit $rc; fi

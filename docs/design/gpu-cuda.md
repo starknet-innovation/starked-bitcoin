@@ -137,6 +137,34 @@ Big blocks use `--skip-cpu --cpu-sha <prefix> --cpu-len <bytes>`, or `--cpu-proo
 - `diag.sh`: device facts and a pass-1-only run.
 - `CUDA_ARCH=sm_89` (etc.) builds one target only, which is faster.
 
+## Pod runs (2026-10-13, RunPod L40S, sm_89, driver 580.178.04, nvcc 12.8.93)
+
+| Step | Result |
+|---|---|
+| block 0, test profile, uniform (log 11) | byte-identical, verifies (`b03d4b8a…`, 121,905 B) |
+| block 0, test profile, tiered (logs 8–12) | byte-identical, verifies (121,843 B) |
+| block 0, production, uniform | byte-identical, verifies (681,480 B) |
+| block 0, production, tiered | byte-identical, verifies (718,143 B) |
+| **block 400000, production, tiered (L = 22)** | **sha256 `cbcf7026134f9a71…`, 1,131,354 B: equal to the saved CPU proof**, verifies |
+
+**Block 400000 (production):**
+- Wall time: 62 s. Of that, 54.7 s is host work: witness 9 s, plans and trace trees 12 s, CPU commit of trees 0–1 21 s, LogUp 8 s.
+- Device proof: 4.2 s. Of that, ingress (host→device copy of 7.4 GB) takes 2.3 s; constraint evaluation 0.57 s; trace commit 0.27 s; the rest is under 0.1 s.
+- Device peak: 25.6 GiB live (planned 25.61); 26.9 GB in `nvidia-smi`. Host peak RSS: 45.9 GB.
+
+**Failures and fixes on the way:**
+1. **`StageOrderViolation`.** The runtime runs every stage in order and requires kernel work in each; transforms are not allowed in `.trace_generation`. A roots-only device pass is therefore impossible.
+   - Fix: the host computes the trace roots (`system.traceRoots`), and the device proof is one transaction.
+   - Trees 0–2 are uploaded to staging and assembled in `.trace_generation` with stwo-zig's contiguous witness gather (a copy).
+2. **FRI first-layer root differed;** every trace root and sampled value already matched. stwo packs four rows per FRI leaf only when a layer folds more than once. The circuit pipeline always packs.
+   - Fix: `fri.zig`/`decommit.zig` (forks) use `leafLog(fold_step)`.
+3. **One byte differed** (offset 245): the decoder filled the legacy `PcsConfig.lifting_log_size`, which the CPU leaves empty. Fix: it is cleared in `terminal.toSystemProof`.
+
+**Next levers** (the device proof is now a small part of the wall time):
+- device LogUp and the device main commit (remove the CPU commit and the host LogUp);
+- device witness, or uploading only the natural-order columns (ingress is 2.3 s for 7.4 GB);
+- a bigger or uniform block on an H100/H200.
+
 ## CuMetal (local Apple-GPU run): blocked
 
 `~/Workshop/cuda-metal` is cloned at the pinned commit e88dd103 and not built. Three things block a local run:
