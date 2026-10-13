@@ -7,6 +7,7 @@ const M31 = @import("stwo_core").fields.m31.M31;
 const sha = @import("../sha256/witness.zig");
 const spec = @import("../sha256/spec.zig");
 const msg = @import("msg.zig");
+const par = @import("../par.zig");
 
 pub const json = @embedFile("air:block_sha");
 pub const N_MAIN = 144;
@@ -110,47 +111,61 @@ pub fn generate(a: std.mem.Allocator, log_size: u32, p: Plan) ![][]M31 {
         c.* = try a.alloc(M31, n);
         @memset(c.*, M31.zero());
     }
-    const one = M31.one();
-    for (0..n) |r| {
-        const per = r / sha.PERIOD;
-        if (per < p.meta.len) {
-            const m = p.meta[per];
-            cols[MID][r] = f(m.mid);
-            cols[BLKI][r] = f(m.blk);
-            if (m.fst) cols[FST][r] = one;
-            if (m.dbl) cols[DBL][r] = one;
-            if (m.node) cols[NODE][r] = one;
-            if (m.npad) cols[NPAD][r] = one;
-            cols[LID][r] = f(m.lid);
-            cols[RID][r] = f(m.rid);
-            if (m.dup) cols[NDUP][r] = one;
-            if (m.dbl and r % sha.PERIOD == sha.PERIOD - 1) cols[YM][r] = f(m.ym);
-        } else cols[NILS][r] = one;
-        const kinds = cols[NODE][r].add(cols[NPAD][r]);
-        cols[USEW][r] = one.sub(cols[DBL][r]).sub(cols[NILS][r]).sub(kinds);
-        cols[CHN][r] = one.sub(cols[FST][r]).sub(cols[DBL][r]).sub(cols[NILS][r]).sub(kinds);
-        cols[NNE][r] = cols[NODE][r].mul(one.sub(cols[NDUP][r]));
-    }
-    // Mutation check columns: limb differences of message word t and t − 8.
-    const limb = struct {
-        fn get(c: [][]M31, row: usize, h: usize) M31 {
-            var v: u32 = 0;
-            for (0..16) |i| v |= @as(u32, @intCast(c[sha.W + 16 * h + i][row].toU32())) << @intCast(i);
-            return M31.fromCanonical(v);
-        }
-    };
-    for (0..n) |r| {
-        const rp = (r + n - 8) % n;
-        const dl = limb.get(cols, r, 0).sub(limb.get(cols, rp, 0));
-        const dh = limb.get(cols, r, 1).sub(limb.get(cols, rp, 1));
-        if (dl.eql(M31.zero())) cols[ZL][r] = one else cols[IL][r] = try dl.inv();
-        if (dh.eql(M31.zero())) cols[ZH][r] = one else cols[IH][r] = try dh.inv();
-        cols[ZZ][r] = cols[ZL][r].mul(cols[ZH][r]);
-        const q = r % sha.PERIOD;
-        if (q == 12) cols[ALLEQ][r] = cols[ZZ][r] else if (q > 12 and q < 20) cols[ALLEQ][r] = cols[ALLEQ][r - 1].mul(cols[ZZ][r]);
-    }
+    par.forRanges(n, sha.PERIOD, Extra{ .cols = cols, .meta = p.meta, .n = n }, Extra.rows);
     return cols;
 }
+
+/// The block columns past the compression's, row by row. Chunks start on a period boundary: the
+/// mutation check chains `ALLEQ` within a period, and reads only the compression columns of other rows.
+const Extra = struct {
+    cols: [][]M31,
+    meta: []const Meta,
+    n: usize,
+
+    fn rows(self: Extra, lo_row: usize, hi_row: usize) void {
+        const cols = self.cols;
+        const n = self.n;
+        const one = M31.one();
+        for (lo_row..hi_row) |r| {
+            const per = r / sha.PERIOD;
+            if (per < self.meta.len) {
+                const m = self.meta[per];
+                cols[MID][r] = f(m.mid);
+                cols[BLKI][r] = f(m.blk);
+                if (m.fst) cols[FST][r] = one;
+                if (m.dbl) cols[DBL][r] = one;
+                if (m.node) cols[NODE][r] = one;
+                if (m.npad) cols[NPAD][r] = one;
+                cols[LID][r] = f(m.lid);
+                cols[RID][r] = f(m.rid);
+                if (m.dup) cols[NDUP][r] = one;
+                if (m.dbl and r % sha.PERIOD == sha.PERIOD - 1) cols[YM][r] = f(m.ym);
+            } else cols[NILS][r] = one;
+            const kinds = cols[NODE][r].add(cols[NPAD][r]);
+            cols[USEW][r] = one.sub(cols[DBL][r]).sub(cols[NILS][r]).sub(kinds);
+            cols[CHN][r] = one.sub(cols[FST][r]).sub(cols[DBL][r]).sub(cols[NILS][r]).sub(kinds);
+            cols[NNE][r] = cols[NODE][r].mul(one.sub(cols[NDUP][r]));
+        }
+        // Mutation check columns: limb differences of message word t and t − 8.
+        const limb = struct {
+            fn get(c: [][]M31, row: usize, h: usize) M31 {
+                var v: u32 = 0;
+                for (0..16) |i| v |= @as(u32, @intCast(c[sha.W + 16 * h + i][row].toU32())) << @intCast(i);
+                return M31.fromCanonical(v);
+            }
+        };
+        for (lo_row..hi_row) |r| {
+            const rp = (r + n - 8) % n;
+            const dl = limb.get(cols, r, 0).sub(limb.get(cols, rp, 0));
+            const dh = limb.get(cols, r, 1).sub(limb.get(cols, rp, 1));
+            if (dl.eql(M31.zero())) cols[ZL][r] = one else cols[IL][r] = dl.inv() catch unreachable;
+            if (dh.eql(M31.zero())) cols[ZH][r] = one else cols[IH][r] = dh.inv() catch unreachable;
+            cols[ZZ][r] = cols[ZL][r].mul(cols[ZH][r]);
+            const q = r % sha.PERIOD;
+            if (q == 12) cols[ALLEQ][r] = cols[ZZ][r] else if (q > 12 and q < 20) cols[ALLEQ][r] = cols[ALLEQ][r - 1].mul(cols[ZZ][r]);
+        }
+    }
+};
 
 /// The digest bytes of a state (big-endian words).
 pub fn digestBytes(s: spec.State) [32]u8 {

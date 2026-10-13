@@ -9,6 +9,7 @@
 
 const std = @import("std");
 const spec = @import("spec.zig");
+const par = @import("../par.zig");
 const M31 = @import("stwo_core").fields.m31.M31;
 
 pub const PERIOD: usize = 72;
@@ -124,69 +125,84 @@ pub fn columns(allocator: std.mem.Allocator, words: Words, roleOf: *const fn (us
     const e = words.e;
     const w = words.w;
     const main = try allocator.alloc([]M31, N_MAIN);
-    for (main) |*col| {
-        col.* = try allocator.alloc(M31, n);
-        @memset(col.*, M31.zero());
-    }
-    const at = struct {
-        fn f(xs: []const u32, r: usize, back: usize) u32 {
-            return xs[(r + xs.len - back) % xs.len];
-        }
-    }.f;
-    for (0..n) |r| {
-        for (0..32) |i| {
-            const sh: u5 = @intCast(i);
-            main[A + i][r] = M31.fromCanonical((a[r] >> sh) & 1);
-            main[E + i][r] = M31.fromCanonical((e[r] >> sh) & 1);
-            main[W + i][r] = M31.fromCanonical((w[r] >> sh) & 1);
-        }
-        const s0v = spec.bigSigma0(at(a, r, 1));
-        const s1v = spec.bigSigma1(at(e, r, 1));
-        const chv = spec.ch(at(e, r, 1), at(e, r, 2), at(e, r, 3));
-        const mjv = spec.maj(at(a, r, 1), at(a, r, 2), at(a, r, 3));
-        const ss0 = spec.smallSigma0(at(w, r, 15));
-        const ss1 = spec.smallSigma1(at(w, r, 2));
-        inline for (.{ .{ S0, s0v }, .{ S1, s1v }, .{ CH, chv }, .{ MJ, mjv }, .{ SS0, ss0 }, .{ SS1, ss1 } }) |pair| {
-            main[pair[0]][r] = M31.fromCanonical(lo(pair[1]));
-            main[pair[0] + 1][r] = M31.fromCanonical(hi(pair[1]));
-        }
-
-        var ca = [2]u32{ 0, 0 };
-        var ce = [2]u32{ 0, 0 };
-        var cw = [2]u32{ 0, 0 };
-        switch (roleOf(r)) {
-            .idle => {},
-            .round => |t| {
-                const k = spec.K[t];
-                const h4 = at(e, r, 4);
-                const d4 = at(a, r, 4);
-                const t1_lo = lo(h4) + lo(s1v) + lo(chv) + lo(k) + lo(w[r]);
-                const t1_hi = hi(h4) + hi(s1v) + hi(chv) + hi(k) + hi(w[r]);
-                ca[0] = (t1_lo + lo(s0v) + lo(mjv)) >> 16;
-                ca[1] = (t1_hi + hi(s0v) + hi(mjv) + ca[0]) >> 16;
-                ce[0] = (lo(d4) + t1_lo) >> 16;
-                ce[1] = (hi(d4) + t1_hi + ce[0]) >> 16;
-                if (t >= 16) {
-                    const w7 = at(w, r, 7);
-                    const w16 = at(w, r, 16);
-                    cw[0] = (lo(ss1) + lo(w7) + lo(ss0) + lo(w16)) >> 16;
-                    cw[1] = (hi(ss1) + hi(w7) + hi(ss0) + hi(w16) + cw[0]) >> 16;
-                }
-            },
-            .final => {
-                ca[0] = (lo(at(a, r, 4)) + lo(at(a, r, 68))) >> 16;
-                ca[1] = (hi(at(a, r, 4)) + hi(at(a, r, 68)) + ca[0]) >> 16;
-                ce[0] = (lo(at(e, r, 4)) + lo(at(e, r, 68))) >> 16;
-                ce[1] = (hi(at(e, r, 4)) + hi(at(e, r, 68)) + ce[0]) >> 16;
-            },
-        }
-        inline for (.{ .{ CA_LO, 0, 3, &ca }, .{ CA_HI, 1, 3, &ca }, .{ CE_LO, 0, 3, &ce }, .{ CE_HI, 1, 3, &ce }, .{ CW_LO, 0, 2, &cw }, .{ CW_HI, 1, 2, &cw } }) |cfg| {
-            const v = cfg[3][cfg[1]];
-            for (0..cfg[2]) |j| main[cfg[0] + j][r] = M31.fromCanonical((v >> @intCast(j)) & 1);
-        }
-    }
+    // Every row writes every column below, so the columns need no zeroing.
+    for (main) |*col| col.* = try allocator.alloc(M31, n);
+    par.forRanges(n, 1, Fill{ .main = main, .a = a, .e = e, .w = w, .roleOf = roleOf }, Fill.rows);
     return main;
 }
+
+const Fill = struct {
+    main: [][]M31,
+    a: []const u32,
+    e: []const u32,
+    w: []const u32,
+    roleOf: *const fn (usize) Role,
+
+    fn rows(self: Fill, lo_row: usize, hi_row: usize) void {
+        const main = self.main;
+        const a = self.a;
+        const e = self.e;
+        const w = self.w;
+        const roleOf = self.roleOf;
+        const at = struct {
+            fn f(xs: []const u32, r: usize, back: usize) u32 {
+                return xs[(r + xs.len - back) % xs.len];
+            }
+        }.f;
+        for (lo_row..hi_row) |r| {
+            for (0..32) |i| {
+                const sh: u5 = @intCast(i);
+                main[A + i][r] = M31.fromCanonical((a[r] >> sh) & 1);
+                main[E + i][r] = M31.fromCanonical((e[r] >> sh) & 1);
+                main[W + i][r] = M31.fromCanonical((w[r] >> sh) & 1);
+            }
+            const s0v = spec.bigSigma0(at(a, r, 1));
+            const s1v = spec.bigSigma1(at(e, r, 1));
+            const chv = spec.ch(at(e, r, 1), at(e, r, 2), at(e, r, 3));
+            const mjv = spec.maj(at(a, r, 1), at(a, r, 2), at(a, r, 3));
+            const ss0 = spec.smallSigma0(at(w, r, 15));
+            const ss1 = spec.smallSigma1(at(w, r, 2));
+            inline for (.{ .{ S0, s0v }, .{ S1, s1v }, .{ CH, chv }, .{ MJ, mjv }, .{ SS0, ss0 }, .{ SS1, ss1 } }) |pair| {
+                main[pair[0]][r] = M31.fromCanonical(lo(pair[1]));
+                main[pair[0] + 1][r] = M31.fromCanonical(hi(pair[1]));
+            }
+
+            var ca = [2]u32{ 0, 0 };
+            var ce = [2]u32{ 0, 0 };
+            var cw = [2]u32{ 0, 0 };
+            switch (roleOf(r)) {
+                .idle => {},
+                .round => |t| {
+                    const k = spec.K[t];
+                    const h4 = at(e, r, 4);
+                    const d4 = at(a, r, 4);
+                    const t1_lo = lo(h4) + lo(s1v) + lo(chv) + lo(k) + lo(w[r]);
+                    const t1_hi = hi(h4) + hi(s1v) + hi(chv) + hi(k) + hi(w[r]);
+                    ca[0] = (t1_lo + lo(s0v) + lo(mjv)) >> 16;
+                    ca[1] = (t1_hi + hi(s0v) + hi(mjv) + ca[0]) >> 16;
+                    ce[0] = (lo(d4) + t1_lo) >> 16;
+                    ce[1] = (hi(d4) + t1_hi + ce[0]) >> 16;
+                    if (t >= 16) {
+                        const w7 = at(w, r, 7);
+                        const w16 = at(w, r, 16);
+                        cw[0] = (lo(ss1) + lo(w7) + lo(ss0) + lo(w16)) >> 16;
+                        cw[1] = (hi(ss1) + hi(w7) + hi(ss0) + hi(w16) + cw[0]) >> 16;
+                    }
+                },
+                .final => {
+                    ca[0] = (lo(at(a, r, 4)) + lo(at(a, r, 68))) >> 16;
+                    ca[1] = (hi(at(a, r, 4)) + hi(at(a, r, 68)) + ca[0]) >> 16;
+                    ce[0] = (lo(at(e, r, 4)) + lo(at(e, r, 68))) >> 16;
+                    ce[1] = (hi(at(e, r, 4)) + hi(at(e, r, 68)) + ce[0]) >> 16;
+                },
+            }
+            inline for (.{ .{ CA_LO, 0, 3, &ca }, .{ CA_HI, 1, 3, &ca }, .{ CE_LO, 0, 3, &ce }, .{ CE_HI, 1, 3, &ce }, .{ CW_LO, 0, 2, &cw }, .{ CW_HI, 1, 2, &cw } }) |cfg| {
+                const v = cfg[3][cfg[1]];
+                for (0..cfg[2]) |j| main[cfg[0] + j][r] = M31.fromCanonical((v >> @intCast(j)) & 1);
+            }
+        }
+    }
+};
 
 /// Standalone SHA-256 AIR witness: compressions back to back every 72 rows. Rows of a
 /// trailing partial block carry a dummy compression so its constraints hold.
@@ -197,11 +213,20 @@ pub fn generate(allocator: std.mem.Allocator, log_size: u32, compressions: []con
     defer words.deinit(allocator);
     const outputs = try allocator.alloc(spec.State, compressions.len);
     errdefer allocator.free(outputs);
-    const dummy = Compression{ .input = [_]u32{0} ** 8, .block = [_]u32{0} ** 16 };
-    for (0..(n + PERIOD - 1) / PERIOD) |b| {
-        const out = words.place(b * PERIOD, if (b < compressions.len) compressions[b] else dummy);
-        if (b < compressions.len) outputs[b] = out;
-    }
+    // Each compression owns its 72 rows: lay them out on all cores.
+    const Place = struct {
+        words: Words,
+        compressions: []const Compression,
+        outputs: []spec.State,
+        fn blocks(self: @This(), lo_b: usize, hi_b: usize) void {
+            const dummy = Compression{ .input = [_]u32{0} ** 8, .block = [_]u32{0} ** 16 };
+            for (lo_b..hi_b) |b| {
+                const out = self.words.place(b * PERIOD, if (b < self.compressions.len) self.compressions[b] else dummy);
+                if (b < self.compressions.len) self.outputs[b] = out;
+            }
+        }
+    };
+    par.forRanges((n + PERIOD - 1) / PERIOD, 1, Place{ .words = words, .compressions = compressions, .outputs = outputs }, Place.blocks);
     return .{ .main = try columns(allocator, words, &shaRole), .outputs = outputs };
 }
 

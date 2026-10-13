@@ -3,6 +3,7 @@
 //! its txid (id 1 + 2i) and wtxid (id 2 + 2i) messages, each starting at a row ≡ 0 (mod 64).
 
 const std = @import("std");
+const par = @import("../par.zig");
 const M31 = @import("stwo_core").fields.m31.M31;
 const fields = @import("fields.zig");
 
@@ -177,26 +178,38 @@ pub fn generate(a: std.mem.Allocator, log_size: u32, raw: []const u8, msgs: []co
         for ([_]usize{ HDR, WTX, SEG, TI, TA, TW, TL, MT, MID }) |c| cols[c][row] = cols[c][row - 1];
         cols[IDX][row] = cols[IDX][row - 1].add(one);
     }
-    // Derived columns, row by row.
+    // Derived columns: row by row on all cores, then the running `DLC` in one pass.
+    par.forRanges(n, 1, Derived{ .cols = cols }, Derived.rows);
     for (0..n) |row| {
-        const mt = cols[MT][row];
-        const pos = cols[POS][row];
-        const tl3 = cols[TL][row].add(f(3));
-        const ez = mt.mul(cols[PC0][row].mul(cols[IDX][row].sub(f(3)))
-            .add(cols[PC1][row].mul(pos.sub(cols[TW][row]).add(one)))
-            .add(cols[PC2][row].mul(pos.sub(tl3))))
-            .add(one.sub(mt).mul(pos.sub(tl3)));
-        cols[EZ][row] = ez;
-        cols[Z][row] = if (ez.isZero()) one else M31.zero();
-        cols[INV][row] = ez.inv() catch M31.zero();
-        const z = cols[Z][row];
-        cols[CONT][row] = cols[D][row].mul(one.sub(z));
-        cols[SW][row] = z.mul(mt).mul(cols[PC0][row].add(cols[PC1][row]));
-        cols[ENDD][row] = cols[D][row].mul(z).sub(cols[SW][row]);
         cols[DLC][row] = if (cols[P80][row].eql(one)) cols[IDX][row] else if (row > 0) cols[DLC][row - 1] else M31.zero();
     }
     return cols;
 }
+
+const Derived = struct {
+    cols: [][]M31,
+
+    fn rows(self: Derived, lo: usize, hi: usize) void {
+        const cols = self.cols;
+        const one = M31.one();
+        for (lo..hi) |row| {
+            const mt = cols[MT][row];
+            const pos = cols[POS][row];
+            const tl3 = cols[TL][row].add(f(3));
+            const ez = mt.mul(cols[PC0][row].mul(cols[IDX][row].sub(f(3)))
+                .add(cols[PC1][row].mul(pos.sub(cols[TW][row]).add(one)))
+                .add(cols[PC2][row].mul(pos.sub(tl3))))
+                .add(one.sub(mt).mul(pos.sub(tl3)));
+            cols[EZ][row] = ez;
+            cols[Z][row] = if (ez.isZero()) one else M31.zero();
+            cols[INV][row] = ez.inv() catch M31.zero();
+            const z = cols[Z][row];
+            cols[CONT][row] = cols[D][row].mul(one.sub(z));
+            cols[SW][row] = z.mul(mt).mul(cols[PC0][row].add(cols[PC1][row]));
+            cols[ENDD][row] = cols[D][row].mul(z).sub(cols[SW][row]);
+        }
+    }
+};
 
 test "block msg: header, txid and wtxid messages of the samples satisfy the message AIR" {
     const ir = @import("../air/ir.zig");

@@ -7,6 +7,7 @@ const std = @import("std");
 const M31 = @import("stwo_core").fields.m31.M31;
 const bytes = @import("bytes.zig");
 const b2 = @import("../hash/blake2s_air.zig");
+const par = @import("../par.zig");
 
 pub const undo_json = @embedFile("air:block_undo");
 pub const msg_json = @embedFile("air:block_b2msg");
@@ -133,50 +134,69 @@ pub fn msgColumns(a: std.mem.Allocator, log_size: u32, undo: []const u8, undo_re
 
 /// The Blake2s component's columns: the stream's blocks from period 0, then unused periods.
 pub fn b2sColumns(a: std.mem.Allocator, log_size: u32, undo: []const u8) ![][]M31 {
-    const BLKI = 300;
-    const FST = 301;
-    const NIL = 302;
-    const LASTF = 303;
-    const T = 304;
-    const WLO = 305;
-    const WHI = 306;
-    const CHN = 307;
-    const USEW = 308;
-    const YD = 309;
-    const MU0 = 310;
-    const MU1 = 311;
     const n = @as(usize, 1) << @intCast(log_size);
-    const cols = try zeros(a, 312, n);
+    const cols = try a.alloc([]M31, B2S_COLS);
+    for (cols) |*c| c.* = try a.alloc(M31, n);
     const bs = try blocks(a, undo);
     const hs = try chain(a, bs);
-    var p: usize = 0;
-    while (p * b2.PERIOD < n) : (p += 1) {
-        const used = p < bs.len;
-        const in: b2.Input = if (used) .{ .h = if (p == 0) H0 else hs[p - 1], .m = bs[p].m, .t = bs[p].t, .f = bs[p].last } else .{ .h = H0, .m = [_]u32{0} ** 16, .t = 0, .f = false };
-        const last = used and bs[p].last;
-        const base = p * b2.PERIOD;
-        b2.fillPeriod(cols, base, n, in);
-        for (0..b2.PERIOD) |q| {
-            const row = base + q;
-            if (row >= n) break;
-            cols[BLKI][row] = if (used) f(p) else M31.zero();
-            cols[FST][row] = if (used and p == 0) M31.one() else M31.zero();
-            cols[NIL][row] = if (used) M31.zero() else M31.one();
-            cols[LASTF][row] = if (last) M31.one() else M31.zero();
-            cols[T][row] = if (used) f(bs[p].t) else M31.zero();
-            cols[CHN][row] = if (used and p > 0) M31.one() else M31.zero();
-            cols[USEW][row] = if (used) M31.one() else M31.zero();
-            cols[YD][row] = if (last) M31.one() else M31.zero();
-            cols[MU0][row] = if (used and q < 16) M31.one() else M31.zero();
-            cols[MU1][row] = if (used and q == 0) M31.one() else M31.zero();
-            if (q < 16) {
-                cols[WLO][row] = f(in.m[q] & 0xffff);
-                cols[WHI][row] = f(in.m[q] >> 16);
+    // The chaining values are known, so each 88-row period fills (and zeroes) its own rows.
+    par.forRanges(n, b2.PERIOD, B2sFill{ .cols = cols, .bs = bs, .hs = hs, .n = n }, B2sFill.rows);
+    return cols;
+}
+
+const B2S_COLS = 312;
+
+const B2sFill = struct {
+    cols: [][]M31,
+    bs: []const Block,
+    hs: []const [8]u32,
+    n: usize,
+
+    fn rows(self: B2sFill, lo: usize, hi: usize) void {
+        const BLKI = 300;
+        const FST = 301;
+        const NIL = 302;
+        const LASTF = 303;
+        const T = 304;
+        const WLO = 305;
+        const WHI = 306;
+        const CHN = 307;
+        const USEW = 308;
+        const YD = 309;
+        const MU0 = 310;
+        const MU1 = 311;
+        const cols = self.cols;
+        const bs = self.bs;
+        const n = self.n;
+        for (cols) |c| @memset(c[lo..hi], M31.zero());
+        var p = lo / b2.PERIOD;
+        while (p * b2.PERIOD < hi) : (p += 1) {
+            const used = p < bs.len;
+            const in: b2.Input = if (used) .{ .h = if (p == 0) H0 else self.hs[p - 1], .m = bs[p].m, .t = bs[p].t, .f = bs[p].last } else .{ .h = H0, .m = [_]u32{0} ** 16, .t = 0, .f = false };
+            const last = used and bs[p].last;
+            const base = p * b2.PERIOD;
+            b2.fillPeriod(cols, base, n, in);
+            for (0..b2.PERIOD) |q| {
+                const row = base + q;
+                if (row >= n) break;
+                cols[BLKI][row] = if (used) f(p) else M31.zero();
+                cols[FST][row] = if (used and p == 0) M31.one() else M31.zero();
+                cols[NIL][row] = if (used) M31.zero() else M31.one();
+                cols[LASTF][row] = if (last) M31.one() else M31.zero();
+                cols[T][row] = if (used) f(bs[p].t) else M31.zero();
+                cols[CHN][row] = if (used and p > 0) M31.one() else M31.zero();
+                cols[USEW][row] = if (used) M31.one() else M31.zero();
+                cols[YD][row] = if (last) M31.one() else M31.zero();
+                cols[MU0][row] = if (used and q < 16) M31.one() else M31.zero();
+                cols[MU1][row] = if (used and q == 0) M31.one() else M31.zero();
+                if (q < 16) {
+                    cols[WLO][row] = f(in.m[q] & 0xffff);
+                    cols[WHI][row] = f(in.m[q] >> 16);
+                }
             }
         }
     }
-    return cols;
-}
+};
 
 /// The undo table's columns (the byte table's layout).
 pub fn undoColumns(a: std.mem.Allocator, log_size: u32, undo: []const u8, reads: []const u32) ![][]M31 {

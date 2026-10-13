@@ -102,14 +102,37 @@ pub fn preprocessedRoot(
 pub fn toStorage(allocator: std.mem.Allocator, log_size: u32, columns: []const []const M31) ![]prover_pcs.ColumnEvaluation {
     const n = @as(usize, 1) << @intCast(log_size);
     const out = try allocator.alloc(prover_pcs.ColumnEvaluation, columns.len);
+    var done: usize = 0;
+    errdefer {
+        for (out[0..done]) |o| allocator.free(o.values);
+        allocator.free(out);
+    }
     for (columns, out) |col, *o| {
         if (col.len != n) return error.InvalidPreparedGeometry;
-        const values = try allocator.alloc(M31, n);
-        for (col, 0..) |v, i| {
-            values[utils.bitReverseIndex(utils.cosetIndexToCircleDomainIndex(i, log_size), log_size)] = v;
-        }
-        o.* = .{ .log_size = log_size, .values = values };
+        o.* = .{ .log_size = log_size, .values = try allocator.alloc(M31, n) };
+        done += 1;
     }
+    // The storage position of every natural row, computed once for all the columns, which are then
+    // permuted on all cores.
+    const position = try allocator.alloc(u32, n);
+    defer allocator.free(position);
+    for (position, 0..) |*p, i| p.* = @intCast(utils.bitReverseIndex(utils.cosetIndexToCircleDomainIndex(i, log_size), log_size));
+    const Job = struct {
+        fn run(next: *std.atomic.Value(usize), pos: []const u32, src: []const []const M31, dst: []const prover_pcs.ColumnEvaluation) void {
+            while (true) {
+                const c = next.fetchAdd(1, .monotonic);
+                if (c >= src.len) return;
+                const values = @constCast(dst[c].values); // allocated above, not shared yet
+                for (src[c], pos) |v, p| values[p] = v;
+            }
+        }
+    };
+    var next = std.atomic.Value(usize).init(0);
+    const n_threads = @min(std.Thread.getCpuCount() catch 1, 64, columns.len) -| 1;
+    var threads: [64]?std.Thread = @splat(null);
+    for (threads[0..n_threads]) |*t| t.* = std.Thread.spawn(.{}, Job.run, .{ &next, position, columns, out }) catch null;
+    Job.run(&next, position, columns, out);
+    for (threads[0..n_threads]) |t| if (t) |th| th.join();
     return out;
 }
 

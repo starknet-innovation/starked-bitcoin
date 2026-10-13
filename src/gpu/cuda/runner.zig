@@ -243,9 +243,11 @@ pub fn main() !void {
         std.debug.print("  LogUp on the {s}; planned arena {d:.2} GiB, geometry {x}\n", .{
             if (opts.host_logup) "host" else "device", @as(f64, @floatFromInt(try prepared.memory.bytes())) / (1 << 30), prepared.plans.geometry.identity[0..8],
         });
+        lap("plans");
         var host = try prover.hostTraceTrees(a, in);
+        lap("host trace trees");
         var twiddles = try prover.Twiddles.init(a, prepared.plans.twiddle_words);
-        lap("plans, host trace trees, twiddles");
+        lap("twiddles");
         var host_logup: ?prover.HostLogup = null;
         if (opts.host_logup) {
             const roots = try system.traceRoots(a, cfg, parts, &mains);
