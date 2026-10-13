@@ -304,6 +304,21 @@ pub fn build(b: *std.Build) void {
         chainproof.linkLibC();
         b.installArtifact(chainproof);
     }
+    // `survey`: the chain survey (docs/design/chain-survey.md): each block's trace size from its
+    // needs, no witness. CPU only; cross-compiles (e.g. -Dtarget=aarch64-linux-gnu).
+    {
+        const survey = b.addExecutable(.{
+            .name = "survey",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/bin/survey.zig"),
+                .target = target,
+                .optimize = optimize,
+                .imports = &.{.{ .name = "starked_bitcoin", .module = lib }},
+            }),
+        });
+        survey.linkLibC();
+        b.installArtifact(survey);
+    }
     // `blockleaf`: BLOCK-REC measurement (a block proof verified in-circuit).
     {
         const bl = b.addExecutable(.{
