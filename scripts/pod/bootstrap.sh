@@ -37,6 +37,12 @@ zig version
 echo "== source =="
 if [ "${1:-}" = "--tarball" ]; then
   rm -rf "$SRC" && mkdir -p "$SRC" && tar xf "$2" -C "$SRC"
+  # The build identity reads `git rev-parse HEAD` and hashes untracked files (stwo-zig
+  # build_support/build_identity.zig), so the shipped trees become one-commit repos.
+  git config --global --add safe.directory '*'
+  git config --global user.email pod@local && git config --global user.name pod
+  (cd "$SRC/third_party/stwo-zig" && rm -rf .git && git init -q && git add -A && git commit -q -m "stwo-zig (tarball)")
+  (cd "$SRC" && rm -rf .git && git init -q && echo third_party/stwo-zig/ >> .git/info/exclude && git add -A && git commit -q -m "starked-bitcoin (tarball)")
 else
   commit=${1:?usage: bootstrap.sh <commit> | --tarball <file>}
   [ -d "$SRC/.git" ] || git clone -q --recurse-submodules https://github.com/starknet-innovation/starked-bitcoin "$SRC"

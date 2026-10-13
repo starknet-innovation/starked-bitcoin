@@ -38,10 +38,13 @@ run() {
     small-prod-uniform) step "$1" --small 0 --profile production --size uniform ;;
     small-prod-tiered) step "$1" --small 0 --profile production --size tiered --min-log 12 ;;
     large-prod-tiered) step "$1" --large 400000 --profile production --size tiered --skip-cpu --cpu-sha $LARGE_SHA --cpu-len $LARGE_LEN --save-device "$LOGS/$1.proof" ;;
+    # Any large sample (src/block/checks.zig samples_large) with the CPU reference proved on the pod:
+    #   run.sh large <height> <uniform|tiered>   (2^23 tiered: ~51 GiB device, H100 80 GB)
+    large) step "large-$2-$3" --large "$2" --profile production --size "$3" --save-cpu "$LOGS/large-$2-$3.cpu.proof" --save-device "$LOGS/large-$2-$3.proof" ;;
     *) echo "unknown step $1"; exit 2 ;;
   esac
 }
 
-if [ $# -gt 0 ]; then run "$1"; exit; fi
+if [ $# -gt 0 ]; then run "$@"; exit; fi
 for s in small-test-uniform small-test-tiered small-prod-uniform small-prod-tiered large-prod-tiered; do run "$s"; done
 echo "== RUN DONE =="
