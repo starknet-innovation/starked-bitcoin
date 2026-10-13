@@ -181,6 +181,10 @@ pub const Proof = struct {
     pub fn toSystemProof(self: *const Proof, allocator: std.mem.Allocator, logical: *const masks.ProofLayout, config: core.pcs.config_v2.PcsConfigV2) !sb.air.system.Proof {
         var stark = try self.decodeStarkProof(allocator, logical, config);
         errdefer stark.deinit(allocator);
+        // stwo-zig's decoder records the lifting height in the legacy `PcsConfig` view; the CPU
+        // prover under `proving_5a7c5ed` leaves it empty (the height lives in `PcsConfigV2`). The
+        // postcard encoding includes it, so match the CPU's bytes.
+        stark.commitment_scheme_proof.config.lifting_log_size = null;
         return .{ .stark = stark, .claimed_sums = try self.claimedSums(allocator) };
     }
 };
