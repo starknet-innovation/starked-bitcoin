@@ -30,6 +30,7 @@ const decommit = cc.resident_decommit;
 const Quotient = cairo.executor.quotient.controller.QuotientBindings;
 
 pub const Kind = enum(u8) {
+    trace_staging,
     commit_coefficients,
     commit_evaluations,
     commit_logs,
@@ -225,9 +226,11 @@ const Builder = struct {
             return error.InvalidResidentGeometry;
         for (input.commitments, 0..) |plan, tree| {
             const r = plan.requirements;
-            // Trees 0–2 receive their evaluations at ingress, in place; the composition tree is
-            // written by the evaluator.
-            const start: Stage = if (tree == 3) .constraint_evaluation else .ingress;
+            // Trees 0–2: evaluations are uploaded to a staging slot at ingress and gathered into
+            // the coefficient buffer in `.trace_generation` (pipeline.zig); the staging slot dies
+            // there, so the arena reuses it. The composition tree is written by the evaluator.
+            if (tree < 3) try self.add(.trace_staging, tree, r.coefficient_words, 64, .ingress, .trace_generation);
+            const start: Stage = if (tree == 3) .constraint_evaluation else .trace_generation;
             try self.add(.commit_coefficients, tree, r.coefficient_words, 64, start, .oods);
             try self.add(.commit_evaluations, tree, r.evaluation_words, 64, if (tree == 3) .constraint_evaluation else .trace_commit, .decommit);
             try self.add(.commit_logs, tree, r.column_log_words, 1, .ingress, if (tree == 3) .constraint_evaluation else .trace_commit);
@@ -359,8 +362,11 @@ const Builder = struct {
 
 pub const Views = struct {
     allocator: std.mem.Allocator,
-    /// Each trace column's ingress destination (inside its tree's coefficient buffer).
+    /// Each trace column's ingress destination (inside its tree's staging slot, in the commit's
+    /// cohort layout).
     columns: [3][]common.Words,
+    /// Trees 0–2's staging slots.
+    staging: [3]common.Words,
     coefficient_columns: [3][]common.Words,
     evaluation_columns: [3][]common.Words,
     commits: [4]commit.Buffers,
@@ -381,6 +387,7 @@ pub const Views = struct {
     proof: shared.resident_views.Proof,
 
     pub fn deinit(self: *Views) void {
+        for (self.columns) |c| self.allocator.free(c);
         for (self.coefficient_columns) |c| self.allocator.free(c);
         for (self.evaluation_columns) |c| self.allocator.free(c);
         self.* = undefined;
@@ -409,6 +416,19 @@ pub fn bind(allocator: std.mem.Allocator, transaction: anytype, input: BindInput
         allocator.free(c);
         allocator.free(e);
     };
+    var staging: [3]common.Words = undefined;
+    var columns: [3][]common.Words = undefined;
+    var staged: usize = 0;
+    errdefer for (columns[0..staged]) |c| allocator.free(c);
+    for (&staging, &columns, input.commitments[0..3], 0..) |*st, *cols, plan, tree| {
+        st.* = try binder.words(.trace_staging, tree);
+        cols.* = try allocator.alloc(common.Words, plan.column_logs.len);
+        staged += 1;
+        for (plan.cohorts) |cohort| {
+            const rows = try pow2(cohort.trace_log);
+            for (0..cohort.count) |local| cols.*[cohort.first_column + local] = try st.sub(cohort.coefficient_offset + local * rows, rows);
+        }
+    }
     var commits: [4]commit.Buffers = undefined;
     for (input.commitments, &commits, 0..) |plan, *out, tree| {
         out.* = .{
@@ -490,7 +510,8 @@ pub fn bind(allocator: std.mem.Allocator, transaction: anytype, input: BindInput
     const proof_view = try shared.resident_proof_binding.bindAt(shared.proof_bundle, transaction, (try input.plans.slot(.terminal_bundle, 0)).requirement.id, 0, .{ .proof = input.terminal.* });
     return .{
         .allocator = allocator,
-        .columns = coefficient_columns,
+        .columns = columns,
+        .staging = staging,
         .coefficient_columns = coefficient_columns,
         .evaluation_columns = evaluation_columns,
         .commits = commits,

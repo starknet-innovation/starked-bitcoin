@@ -29,6 +29,7 @@ pub fn Bound(comptime Transaction: type, comptime Sink: type) type {
         decommit_plan: *const cc.resident_decommit.Plan,
         commitments: *[4]cc.resident_commit.Bound,
         columns: [3][]const common.Words,
+        staging: [3]common.Words,
         error_flag: common.Words,
         oods_view: shared.resident_views.Oods,
         quotient_challenge: common.SecureFields,
@@ -70,14 +71,27 @@ pub fn Bound(comptime Transaction: type, comptime Sink: type) type {
                 }
             };
 
-            // Interpolate the uploaded evaluations of trees 0–2 in place (bit-reversed evaluations →
-            // coefficients), as `resident_commit` would at the start of each commit.
+            // Trace assembly: gather each cohort of trees 0–2 from its ingress staging slot into
+            // the commitment's input buffer (stwo-zig's contiguous witness gather; a plain column
+            // copy here). The trace itself is built on the host for now, so this is the stage's
+            // only device work; device witness generation would replace it.
             try tx.beginStage(.trace_generation);
-            for (self.commitments[0..3]) |*c| {
+            for (self.commitments[0..3], self.staging) |*c, staging| {
                 for (c.plan.cohorts) |cohort| {
-                    const rows = @as(usize, 1) << @intCast(cohort.trace_log);
-                    const m = common.WordMatrix{ .storage = try c.buffers.coefficients.sub(cohort.coefficient_offset, cohort.count * rows), .column_stride_words = rows };
-                    try cuda.runtime.stages.transform.Native.inverseCompact(session, .trace_generation, m, m, cohort.trace_log, c.buffers.inverse_twiddles);
+                    const rows: u32 = @as(u32, 1) << @intCast(cohort.trace_log);
+                    const words = cohort.count * rows;
+                    try cuda.runtime.stages.cairo_witness.Native.gatherEdge(session, .{
+                        .producer_rows = rows,
+                        .word_base = 0,
+                        .words_per_instance = @intCast(cohort.count),
+                        .instance_count = 1,
+                        .consumer_rows = rows,
+                        .include_enabler = false,
+                        .include_iota = false,
+                    }, try staging.sub(cohort.coefficient_offset, words), .{
+                        .storage = try c.buffers.coefficients.sub(cohort.coefficient_offset, words),
+                        .column_stride_words = rows,
+                    });
                 }
             }
             try tx.endStage(.trace_generation);

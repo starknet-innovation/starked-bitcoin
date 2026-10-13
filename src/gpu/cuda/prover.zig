@@ -5,8 +5,8 @@
 //! 1. Host: the preprocessed and main roots (`system.traceRoots`, CPU), the prefix replay to (z, α)
 //!    (`transcript.HostSink`), the interaction columns and claimed sums (`system.interactionTrace`).
 //! 2. Device, one transaction (`proofPass`): ingress uploads all three trace trees as evaluations
-//!    (in place, into their coefficient buffers), the statement, claims, z and α⁰…α^w; the schedule
-//!    (`pipeline.zig`) interpolates them (`.trace_generation`), commits, draws (z, α) itself and
+//!    (into staging slots), the statement, claims, z and α⁰…α^w; the schedule
+//!    (`pipeline.zig`) assembles them from staging (`.trace_generation`), commits, draws (z, α) itself and
 //!    runs the STARK tail; the terminal bundle decodes to `system.Proof`.
 //! The runtime runs every stage in order with kernel work in each, so a roots-only device
 //! transaction is not possible; device LogUp will remove the host commit.
@@ -289,6 +289,7 @@ pub fn proofPass(
         .decommit_plan = &plans.decommit,
         .commitments = &commits,
         .columns = .{ views.columns[0], views.columns[1], views.columns[2] },
+        .staging = views.staging,
         .error_flag = views.error_flag,
         .oods_view = views.oods,
         .quotient_challenge = views.quotient.challenge,
