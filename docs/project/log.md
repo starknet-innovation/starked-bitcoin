@@ -50,6 +50,13 @@ Problems / lessons:
 - Ingress H2D is pageable `cudaMemcpyAsync` and stwo-zig has no pinned/host-register API; registering 13 GB would cost about what it saves. Not done.
 Next: pod run on this branch: `scripts/pod/run.sh` (block 0 ×4, 400000), `large-prod-tiered-hostlogup`, `xl-970347`, `xl-774628`; record host laps, RSS and the `.trace_generation` device time.
 
+## 2026-10-13 (session 13, night) — Device witness validated: 2^23 block proved in 9–11 s on one H100
+Who: Claude (agent, Opus 5.5), with the owner
+Roadmap: GPU step 3 (CUDA): device witness phase 1 (SHA, BLAKE2s, preprocessed) merged from `cuda/device-witness`
+Done:
+- H100 PCIe pod (16 vCPUs, ~14 min, ≈ $0.66): every step byte-identical and verified, incl. A/B with `--host-witness` and `--host-logup`. Time to proof: 400000 5.3 s (12.7 s with the host witness on the same pod), 970347 11.0 s (32.2 s), 774628 9.2 s. H2D at 2^23: 3.99 GiB (12.92); host RSS 14.2 GB (23.7).
+Next: the remaining host witness (3–6 s: fields, msg, walk, coin, …), ingress variance; aggregation on GPU (stwo-zig circuit pipeline spike).
+
 ## 2026-10-13 (session 13, evening) — 2^23 block proved in ~21–23 s on one H100
 Who: Claude (agent, Opus 5.5), with the owner
 Roadmap: GPU step 3 (CUDA): host side sped up; natural-order upload (merged from `cuda/natural-upload`)

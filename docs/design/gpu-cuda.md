@@ -287,6 +287,18 @@ All steps byte-identical and verified (block 0 ×4, 400000, A/B host LogUp, 9703
 
 The witness is now the largest step. It is 4× slower on this pod than on the M4 Pro (8.3 s vs 2.0 s at 2^22): its remaining single-threaded parts (walk, fields, checks, coin) run on slower server cores. Ingress (pageable H2D, 6.5–12.9 GiB) is next: 1.4–4.1 s.
 
+### Device witness run (H100 PCIe 80 GB, sm_90, 16 vCPUs, 2026-10-13 night)
+
+All steps byte-identical and verified (block 0 ×4, 400000, A/B host witness, A/B host LogUp, 970347 + A/B, 774628). Time to proof (runner clock; `verifyExt` afterwards is optional):
+
+| Block | Device witness | Host witness (A/B, same pod) | H2D | Host RSS |
+|---|---|---|---|---|
+| 400000 (2^22) | **5.3 s** (witness 3.2, device 2.0: ingress 0.30, trace generation 0.027) | 12.7 s | 2.00 GiB (6.46) | 7.2 GB (12.0) |
+| 970347 (2^23) | **11.0 s** (witness 6.0, device 4.9: ingress 2.05, trace generation 0.085) | 32.2 s | 3.99 GiB (12.92) | 14.2 GB (23.7) |
+| 774628 (2^23) | **9.2 s** (witness 5.6, device 3.5: ingress 0.70) | — | 3.99 GiB | 14.2 GB |
+
+The host witness for the remaining components (fields, msg, walk, coin, …) is now the largest step (3–6 s). Ingress still varies run to run (0.7–2.1 s for the same 4 GiB). The optional self-check (`verifyExt`) takes 4.5 s / 17 s.
+
 ## CuMetal (local Apple-GPU run): blocked
 
 `~/Workshop/cuda-metal` is cloned at the pinned commit e88dd103 and not built. Three things block a local run:
