@@ -434,3 +434,18 @@ Decision: the block system's components may have different trace sizes
   `Compat.lean` restates every current theorem's statement verbatim as a corollary at the constant size
   vector, and the build must pass it. The mixed-size soundness assumption (`StarkSoundV`) is a new named
   hypothesis; it is checked against Stwo's lifting soundness argument before anything relies on it.
+
+### D-046 — Default size profile: tiered from 2^12, uniform below
+Date: 2026-10-13 · By: owner ("make tiered the default for L ≥ 12, keep uniform for small blocks") · Status: **accepted**
+Decision: the production tools choose the profile by size (`block.system.sizesAuto`, `Opts.auto`).
+- A block whose uniform size is at least 2^12 (`TIERED_MIN_L`) is proved *tiered*. If it doesn't fit the
+  tiers it falls back to *uniform*, as before (D-045).
+- Smaller blocks stay *uniform*: tiering gains nothing there and costs ~5 % proof size (block 0: 718 KB
+  vs 681 KB).
+- Defaults: `chainproof prove-block` and `prove-epoch` (`--uniform` / `--tiered` force one),
+  `cuda-prove` (`--size auto|uniform|tiered`), `metal-prove` (`METAL_PROVE_UNIFORM` / `METAL_PROVE_TIERED`).
+  The library's `Opts` default stays uniform so tests and golden hashes keep their meaning.
+- Why: tiered is the only profile that fits 2^23 blocks on one GPU (53 GiB vs ~186 GiB) and reaches 2^24
+  (`SizeOk`).
+- Open: tiered proofs rest on `StarkSoundV`, sent for review to stwo-zig
+  (`~/Workshop/stwo-zig/LIFTING_SOUNDNESS_BRIEF.md`); the review gates freezing the block VK set.

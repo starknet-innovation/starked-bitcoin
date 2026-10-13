@@ -30,7 +30,7 @@
 //!       Verifies the chain proof, the block file's headers against its MMR root, the block proof
 //!       under the pinned FRI configuration, and its height, context and block hash against those
 //!       headers. Needs no header file. Prints the proven statement.
-//!   chainproof prove-epoch <headers.bin> <dir> <to> <file.sbchain> [--test-strength] [--tiered]
+//!   chainproof prove-epoch <headers.bin> <dir> <to> <file.sbchain> [--test-strength] [--uniform | --tiered]
 //!       M3b (D-040): proves blocks 0..to from <dir>/blocks/<h>.bin, <dir>/undo/<h>.undo and .ctx
 //!       (scripts/fetch_undo.py --ctx) under the epoch's challenge (derived from the blocks' hashes and
 //!       commitments), writing <dir>/proofs/<h>.sbblock and the coin set <dir>/set-<to>.bin.
@@ -137,7 +137,10 @@ pub fn main() !void {
                 weak = true;
                 i += 1;
             } else if (std.mem.eql(u8, args[i], "--tiered")) {
-                from.tiered = true;
+                from.size = .tiered;
+                i += 1;
+            } else if (std.mem.eql(u8, args[i], "--uniform")) {
+                from.size = .uniform;
                 i += 1;
             } else if (std.mem.eql(u8, args[i], "--from") and i + 2 < args.len) {
                 from.height = try std.fmt.parseInt(u32, args[i + 1], 10);
@@ -387,7 +390,7 @@ fn proveBlock(gpa: std.mem.Allocator, a: std.mem.Allocator, block_path: []const 
     const ctx = sb.block.checks.Ctx{ .height = height, .prev_mtp = PF.prevMtp(all, height), .anc = PF.ancestors(all, height) };
     var timer = try std.time.Timer.start();
     const airs = try BS.parseAirs(a);
-    const b = try BS.buildU(a, raw, undo, ctx);
+    const b = try BS.buildFull(a, raw, undo, ctx, .{ .auto = true });
     if (b.ntx > 1 and undo.len == 1) {
         std.debug.print("REJECTED: the block spends outputs; pass its undo stream (scripts/fetch_undo.py), not `-`\n", .{});
         return error.UndoRequired;
@@ -421,12 +424,15 @@ fn pathOf(a: std.mem.Allocator, dir: []const u8, sub: []const u8, h: u32, ext: [
     return std.fmt.allocPrint(a, "{s}/{s}/{d}.{s}", .{ dir, sub, h, ext });
 }
 
+const SizeChoice = enum { auto, uniform, tiered };
+
 /// An epoch's start: genesis, or block `height` from the coin set after `height − 1` (`prev_set`).
 const EpochFrom = struct {
     height: u32 = 0,
     prev_set: ?[]const u8 = null,
-    /// prove-epoch `--tiered`: the tiered size profile where a block fits it (D-045).
-    tiered: bool = false,
+    /// prove-epoch size profile: by size (default: tiered from 2^12, uniform below), or forced with
+    /// `--uniform` / `--tiered` (D-045).
+    size: SizeChoice = .auto,
     /// prove-epoch-tree `--test-strength`: the block proofs were made at test strength.
     weak: bool = false,
 };
@@ -489,7 +495,7 @@ fn proveEpoch(gpa: std.mem.Allocator, a: std.mem.Allocator, headers_path: []cons
         const ba = arena.allocator();
         const hh: u32 = from.height + @as(u32, @intCast(i));
         const ctx = sb.block.checks.Ctx{ .height = hh, .prev_mtp = PF.prevMtp(all, hh), .anc = PF.ancestors(all, hh) };
-        const b = try BS.buildFull(ba, raws[i], undos[i], ctx, .{ .chal = ch, .ctx = ctxs[i], .profile = if (from.tiered) .tiered else .uniform });
+        const b = try BS.buildFull(ba, raws[i], undos[i], ctx, .{ .chal = ch, .ctx = ctxs[i], .profile = if (from.size == .tiered) .tiered else .uniform, .auto = from.size == .auto });
         const proof = try PF.prove(ba, &airs, &b, fri);
         const window = try PF.bindWindow(ba, all, tree, hh);
         const bytes = try PF.encode(ba, &.{ .log_size = b.log_size, .profile = b.profile, .pubs = b.pubs, .proof = proof, .provenance = "prove-epoch", .chain_len = @intCast(n), .window = window });

@@ -1,7 +1,7 @@
 //! `cuda-prove`: one block proof on the resident CUDA prover, checked against the CPU prover.
 //!
 //!   zig-out/bin/cuda-prove [--small i | --large height] [--profile test|production]
-//!                          [--size uniform|tiered] [--min-log k]
+//!                          [--size auto|uniform|tiered] [--min-log k]
 //!                          [--skip-cpu] [--cpu-sha hexprefix] [--cpu-len bytes]
 //!                          [--cpu-proof file] [--save-cpu file] [--save-device file] [--mock]
 //!                          [--host-logup]
@@ -36,7 +36,8 @@ const Opts = struct {
     small: usize = 0,
     large: ?u32 = null,
     production: bool = false,
-    tiered: bool = false,
+    /// Size profile: by size (tiered from 2^12, uniform below; the default), or forced.
+    size: enum { auto, uniform, tiered } = .auto,
     min_log: u32 = 0,
     skip_cpu: bool = false,
     cpu_sha: ?[]const u8 = null,
@@ -66,8 +67,7 @@ fn parse(args: []const []const u8) !Opts {
             if (!o.production and !std.mem.eql(u8, v, "test")) return error.BadProfile;
         } else if (std.mem.eql(u8, a, "--size")) {
             const v = try next(args, &i);
-            o.tiered = std.mem.eql(u8, v, "tiered");
-            if (!o.tiered and !std.mem.eql(u8, v, "uniform")) return error.BadSize;
+            o.size = std.meta.stringToEnum(@TypeOf(o.size), v) orelse return error.BadSize;
         } else if (std.mem.eql(u8, a, "--min-log")) o.min_log = try std.fmt.parseInt(u32, try next(args, &i), 10) else if (std.mem.eql(u8, a, "--skip-cpu")) o.skip_cpu = true else if (std.mem.eql(u8, a, "--cpu-sha")) o.cpu_sha = try next(args, &i) else if (std.mem.eql(u8, a, "--cpu-len")) o.cpu_len = try std.fmt.parseInt(usize, try next(args, &i), 10) else if (std.mem.eql(u8, a, "--cpu-proof")) o.cpu_proof = try next(args, &i) else if (std.mem.eql(u8, a, "--save-cpu")) o.save_cpu = try next(args, &i) else if (std.mem.eql(u8, a, "--save-device")) o.save_device = try next(args, &i) else if (std.mem.eql(u8, a, "--mock")) o.mock = true else if (std.mem.eql(u8, a, "--host-logup")) o.host_logup = true else {
             std.debug.print("unknown argument {s}\n", .{a});
             return error.BadArgument;
@@ -197,7 +197,7 @@ pub fn main() !void {
     const airs = try a.create([bs.N_COMP]sb.air.ir.Air);
     airs.* = try bs.parseAirs(a);
     const built = try a.create(bs.Built);
-    built.* = try bs.buildFull(a, sample.raw, sample.undo, sample.ctx, .{ .min_log = opts.min_log, .profile = if (opts.tiered) .tiered else .uniform });
+    built.* = try bs.buildFull(a, sample.raw, sample.undo, sample.ctx, .{ .min_log = opts.min_log, .profile = if (opts.size == .tiered) .tiered else .uniform, .auto = opts.size == .auto });
     const parts = try a.create([bs.N_COMP]system.Part);
     parts.* = bs.parts(airs, built);
     var mains: [bs.N_COMP][]const []const M31 = undefined;

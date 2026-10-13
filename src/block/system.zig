@@ -121,6 +121,10 @@ pub const Opts = struct {
     min_log: u32 = 0,
     /// The size profile to try; `tiered` falls back to `uniform` when the block doesn't fit it.
     profile: Profile = .uniform,
+    /// Choose the profile by size (the production default, D-045 as decided 2026-10-13): `tiered`
+    /// when the uniform size is at least 2^TIERED_MIN_L (with its fallback), `uniform` below.
+    /// Overrides `profile`.
+    auto: bool = false,
 };
 
 pub fn parseAirs(a: std.mem.Allocator) ![N_COMP]ir.Air {
@@ -249,7 +253,7 @@ pub fn buildFull(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctx
     needs[C.coin] = tok_rows + 1;
     needs[C.anc] = if (ctx.csv()) ancw.MIN_ROWS_CSV else 256;
     for (&needs) |*n| n.* = @max(n.*, 256);
-    const sized = sizesFor(needs, opts.profile, opts.min_log);
+    const sized = if (opts.auto) sizesAuto(needs, opts.min_log) else sizesFor(needs, opts.profile, opts.min_log);
     const log_size = sized.L;
     const logs = profileLogs(log_size, sized.profile);
     if (!sizeOk(logs)) return error.SizesNotCovered;
@@ -378,7 +382,16 @@ pub fn partsAt(airs: *const [N_COMP]ir.Air, logs: [N_COMP]u32, pubs: *const [N_P
 
 /// (L, profile) for components needing `needs` rows: `tiered` when asked for and every component
 /// fits its tier, else `uniform`; L at least `min_log`.
-pub fn sizesFor(needs: [N_COMP]usize, profile: Profile, min_log: u32) struct { L: u32, profile: Profile } {
+pub const Sized = struct { L: u32, profile: Profile };
+
+/// The production choice: tiered for blocks of uniform size 2^12 and more, uniform below.
+pub fn sizesAuto(needs: [N_COMP]usize, min_log: u32) Sized {
+    const u = sizesFor(needs, .uniform, min_log);
+    if (u.L < TIERED_MIN_L) return u;
+    return sizesFor(needs, .tiered, min_log);
+}
+
+pub fn sizesFor(needs: [N_COMP]usize, profile: Profile, min_log: u32) Sized {
     var max: usize = 0;
     for (needs) |n| max = @max(max, n);
     const uniform_L = @max(std.math.log2_int_ceil(usize, max), min_log);
@@ -618,6 +631,22 @@ test "block system: SizeOk matches the AIRs' lookups; uniform stops at 23, tiere
     try std.testing.expect(!sizeOk(profileLogs(24, .uniform)));
     try std.testing.expect(sizeOk(profileLogs(24, .tiered)));
     try std.testing.expect(!sizeOk(profileLogs(25, .tiered)));
+}
+
+test "block sizes: auto is uniform below 2^12 and tiered from 2^12" {
+    var needs: [N_COMP]usize = @splat(256);
+    needs[C.sha] = 2000; // uniform 2^11
+    const small = sizesAuto(needs, 0);
+    try std.testing.expectEqual(Profile.uniform, small.profile);
+    try std.testing.expectEqual(@as(u32, 11), small.L);
+    needs[C.sha] = 3000; // uniform 2^12
+    try std.testing.expectEqual(Profile.tiered, sizesAuto(needs, 0).profile);
+    needs[C.sha] = 1 << 22;
+    const big = sizesAuto(needs, 0);
+    try std.testing.expectEqual(Profile.tiered, big.profile);
+    try std.testing.expectEqual(@as(u32, 22), big.L);
+    needs[C.coin] = 1 << 21; // too big for its tier (L − 5): falls back to uniform
+    try std.testing.expectEqual(Profile.uniform, sizesAuto(needs, 0).profile);
 }
 
 test "tiered real block (STARKED_TIERED_LARGE=height): constraints hold and lookups balance" {

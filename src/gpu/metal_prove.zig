@@ -10,7 +10,8 @@
 //! - `METAL_PROVE_DISCARD=1` (with `ONLY`): `discard_mains`, the witness is released mid-proof;
 //! - `METAL_PROVE_STORAGE=default|evaluations_only|compact`: the commitment storage policy;
 //! - `METAL_PROVE_COMPOSITION=interpreter|stwzeva|stwzeva_native`: the CPU prover's composition;
-//! - `METAL_PROVE_TIERED=1`: the tiered size profile (D-045);
+//! - size profile (D-045): by size by default (tiered from 2^12, uniform below);
+//!   `METAL_PROVE_TIERED=1` or `METAL_PROVE_UNIFORM=1` forces one;
 //! - `METAL_PROVE_VERIFY=1` (with `ONLY`): verify the proof after proving;
 //! - `METAL_PROVE_LARGE=height`: one sample of `checks.samples_large` (e.g. 400000, a 2^22 block).
 
@@ -129,7 +130,11 @@ test "metal: block-system proofs on the Metal backend are byte-identical to CPU 
         defer arena.deinit();
         const a = arena.allocator();
         var timer = try std.time.Timer.start();
-        const b = try bs.buildFull(a, s.raw, s.undo, s.ctx, .{ .min_log = min_log, .profile = if (std.process.hasEnvVarConstant("METAL_PROVE_TIERED")) .tiered else .uniform });
+        const b = try bs.buildFull(a, s.raw, s.undo, s.ctx, .{
+            .min_log = min_log,
+            .profile = if (std.process.hasEnvVarConstant("METAL_PROVE_TIERED")) .tiered else .uniform,
+            .auto = !std.process.hasEnvVarConstant("METAL_PROVE_TIERED") and !std.process.hasEnvVarConstant("METAL_PROVE_UNIFORM"),
+        });
         const t_wit = timer.lap();
         std.debug.print("height {d}: size profile {s}, L = {d}, component logs {any}\n", .{ s.ctx.height, @tagName(b.profile), b.log_size, b.logs });
         @import("stwo_prover_engine").measurement.process_usage.reportStage("witness built");
