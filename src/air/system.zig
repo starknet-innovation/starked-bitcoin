@@ -593,6 +593,31 @@ pub fn preprocessedColumns(a: std.mem.Allocator, parts: []const Part) ![]prover_
     return preprocessedStorage(a, parts);
 }
 
+/// Every preprocessed column of `parts` in natural (coset) row order, generated on all cores: what
+/// the CUDA prover uploads (it reorders on the device, src/gpu/cuda/reorder.zig).
+pub fn preprocessedNatural(a: std.mem.Allocator, parts: []const Part) ![]prover_pcs.ColumnEvaluation {
+    var n: usize = 0;
+    for (parts) |p| n += p.air.preprocessed.len;
+    const out = try a.alloc(prover_pcs.ColumnEvaluation, n);
+    var made: usize = 0;
+    errdefer {
+        for (out[0..made]) |c| a.free(c.values);
+        a.free(out);
+    }
+    const defs = try a.alloc(ir.PreCol, n);
+    defer a.free(defs);
+    const values = try a.alloc([]M31, n);
+    defer a.free(values);
+    for (parts) |p| for (p.air.preprocessed) |def| {
+        values[made] = try a.alloc(M31, @as(usize, 1) << @intCast(p.log_size));
+        defs[made] = def;
+        out[made] = .{ .log_size = p.log_size, .values = values[made] };
+        made += 1;
+    };
+    ir.fillParallel(defs, values);
+    return out;
+}
+
 /// Returns `column`'s whole pages to the OS; their contents become undefined. For witness columns
 /// the caller will not read again (`Options.discard_mains`), possibly inside an arena.
 fn discardPages(column: []const M31) void {

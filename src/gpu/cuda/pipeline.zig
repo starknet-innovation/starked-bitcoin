@@ -14,6 +14,7 @@ const transcript = @import("transcript.zig");
 const controller = @import("composition_controller.zig");
 const terminal = @import("terminal.zig");
 const logup = @import("logup.zig");
+const reorder = @import("reorder.zig");
 const common = cuda.runtime.stages.common;
 const quotient_module = @import("stwo_cairo_cuda_integration").executor.quotient.controller;
 
@@ -43,6 +44,7 @@ pub fn Bound(comptime Transaction: type, comptime Sink: type) type {
         decommit_view: shared.resident_views.Decommit,
         proof: shared.resident_views.Proof,
         twiddles_inverse: common.Words,
+        reorder: *const reorder.Kernel,
 
         const Self = @This();
 
@@ -84,32 +86,16 @@ pub fn Bound(comptime Transaction: type, comptime Sink: type) type {
                 }
             };
 
-            // Trace assembly: gather each cohort of the staged trees from its ingress staging slot
-            // into the commitment's input buffer (stwo-zig's contiguous witness gather; a plain
-            // column copy here). The trace itself is built on the host for now, so this is the
-            // stage's only device work; device witness generation would replace it. Device LogUp
-            // keeps a copy of the columns its lookups read (the commit interpolates in place).
+            // Trace assembly (`assembleTrace`): trees 0–1 arrive in natural row order and are
+            // reordered into storage order by our kernel; the host-LogUp interaction tree is a copy.
             try tx.beginStage(.trace_generation);
-            if (self.logup) |l| try l.gather(session);
-            for (self.commitments[0..3], self.staging) |*c, maybe_staging| {
-                const staging = maybe_staging orelse continue;
-                for (c.plan.cohorts) |cohort| {
-                    const rows: u32 = @as(u32, 1) << @intCast(cohort.trace_log);
-                    const words = cohort.count * rows;
-                    try cuda.runtime.stages.cairo_witness.Native.gatherEdge(session, .{
-                        .producer_rows = rows,
-                        .word_base = 0,
-                        .words_per_instance = @intCast(cohort.count),
-                        .instance_count = 1,
-                        .consumer_rows = rows,
-                        .include_enabler = false,
-                        .include_iota = false,
-                    }, try staging.sub(cohort.coefficient_offset, words), .{
-                        .storage = try c.buffers.coefficients.sub(cohort.coefficient_offset, words),
-                        .column_stride_words = rows,
-                    });
-                }
+            var plans: [3]*const cc.resident_commit.Plan = undefined;
+            var coefficients: [3]common.Words = undefined;
+            for (self.commitments[0..3], &plans, &coefficients) |*c, *p, *k| {
+                p.* = c.plan;
+                k.* = c.buffers.coefficients;
             }
+            try assembleTrace(session, self.reorder, plans, coefficients, self.staging, self.logup);
             try tx.endStage(.trace_generation);
 
             try tx.beginStage(.trace_commit);
@@ -179,6 +165,35 @@ pub fn Bound(comptime Transaction: type, comptime Sink: type) type {
             try tx.endStage(.decommit);
         }
     };
+}
+
+/// `.trace_generation`: each staged tree's cohorts into its commitment's coefficient buffer, in
+/// storage order. Trees 0–1 were uploaded in natural row order (`prover.HostTrees`) and go through
+/// the reorder kernel (one launch per cohort); a staged tree 2 (host LogUp: `system.interactionTrace`
+/// columns, already in storage order) is a device copy per cohort. Then
+/// device LogUp copies the columns its lookups read out of the reordered buffers (the commitment
+/// interpolates them in place in `.trace_commit`). The trace itself is built on the host; device
+/// witness generation would replace this stage.
+pub fn assembleTrace(
+    session: anytype,
+    kernel: *const reorder.Kernel,
+    plans: [3]*const cc.resident_commit.Plan,
+    coefficients: [3]common.Words,
+    staging: [3]?common.Words,
+    device_logup: ?*const logup.Bound,
+) !void {
+    for (plans, coefficients, staging, 0..) |plan, coeff, maybe_staging, tree| {
+        const st = maybe_staging orelse continue;
+        for (plan.cohorts) |cohort| {
+            const words = cohort.count << @intCast(cohort.trace_log);
+            const src = try st.sub(cohort.coefficient_offset, words);
+            const dst = try coeff.sub(cohort.coefficient_offset, words);
+            if (tree < 2) {
+                try kernel.launch(session, src, dst, cohort.trace_log, cohort.count);
+            } else try session.context.copyDeviceSlice(u32, dst, src);
+        }
+    }
+    if (device_logup) |l| try l.gather(session);
 }
 
 pub const Native = Bound(cuda.runtime.proof_transaction.ResidentProofTransaction, transcript.NativeSink);

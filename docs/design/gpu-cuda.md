@@ -16,7 +16,7 @@ pipeline (`cc/resident_prover.zig:67`, `cc/resident_pipeline.zig:81`), which alr
 | Stage (cc/) | Verdict | Why / what changes |
 |---|---|---|
 | `geometry.zig` | **replace** (fill its struct) | `Geometry.init` is bound to the 11 circuit components (`geometry.zig:44-58`). `Geometry` is a plain struct, so `plan.geometry` fills it from our parts: per-component column logs for trees 0–2, 8 composition columns at L, FRI layers from `FriGeometry`. |
-| `resident_commit.zig` | reuse | Cohorts are runs of equal height (≤ 96, `abi/stages/commitment.zig:5`); mixed heights lift shorter-first, as the CPU. Input form for trees 0–2: evaluations in storage (bit-reversed) order. |
+| `resident_commit.zig` | reuse | Cohorts are runs of equal height (≤ 96, `abi/stages/commitment.zig:5`); mixed heights lift shorter-first, as the CPU. Input form for trees 0–2: evaluations in storage (bit-reversed) order; trees 0–1 get there on the device (§ Natural upload). |
 | `transcript_prefix.zig`, `resident_transcript.zig` | **replace** | Different prefix (below). `transcript.DeviceSink` keeps the stage kernels (`backends/cuda/runtime/stages/transcript.zig`) and the tail calls `resident_fri`/`resident_decommit` make on a sink (`anytype`). |
 | `air_aot.zig`, `resident_composition.zig` | **replace** | Pinned to the circuit bundle SHA (`air_aot.zig:84`) and N_COMPONENTS (`resident_composition.zig:42`). `catalog.zig` + `plan.compositionPlan` fill the same `Plan` struct from our catalog. |
 | `cairo_cuda/executor/eval/topology.zig` | **fork** (one line) | `uniqueSpan` (`topology.zig:407`) rejects a component with no interaction columns; `block_anc` has no lookups. `topology.zig` (ours) accepts an empty span. |
@@ -47,7 +47,7 @@ The statement words are public: uploaded at ingress, mixed as slices (digest wor
 
 ## Witness and interaction
 
-The resident contract allows host writes only during ingress (`backends/cuda/runtime/context.zig:537`) and one proof read at the end (`telemetry.zig:253`). The trace (trees 0–1) is built on the host and uploaded at ingress into staging slots; `.trace_generation` gathers it into the commitments' buffers.
+The resident contract allows host writes only during ingress (`backends/cuda/runtime/context.zig:537`) and one proof read at the end (`telemetry.zig:253`). The trace (trees 0–1) is built on the host and uploaded at ingress, in natural row order, into staging slots; `.trace_generation` reorders it into the commitments' buffers in storage order (§ Natural upload).
 
 **Host LogUp (first version; `cuda-prove --host-logup`).** Host-built interaction columns need (z, α), which depend on the main root. The host computes the roots of trees 0–1 (`system.traceRoots`, a CPU commit), replays the prefix (`transcript.HostSink`), draws (z, α) and builds the interaction columns and claims (`system.interactionTrace`). Ingress uploads them with the trees; the device recommits trees 0–1, draws (z, α) itself and commits the uploaded tree 2. A different draw would be caught by the verifier. (The first plan was a roots-only device transaction; the runtime forbids it, see Pod runs.)
 
@@ -57,7 +57,7 @@ Code: `src/gpu/cuda/logup.zig`; schedule in `pipeline.zig` (`.trace_generation`,
 
 | Step | Where | What |
 |---|---|---|
-| sources | `.trace_generation` | The lookups read 551 of the 1,435 columns of trees 0–1. They are copied from the staging slots into one compact slot (`logup_sources`, per component in kernel order) because the commitments interpolate trees 0–1 in place before the draw. Runs of adjacent columns are one device copy. |
+| sources | `.trace_generation` | The lookups read 551 of the 1,435 columns of trees 0–1. Right after the reorder (§ Natural upload) they are copied from the trees' coefficient buffers (storage order) into one compact slot (`logup_sources`, per component in kernel order) because the commitments interpolate trees 0–1 in place before the draw. Runs of adjacent columns are one device copy. |
 | challenges | `.trace_commit` | `stwo_relation_expand_challenges_on` expands the drawn (z, α) into `relation_z` and α⁰…α¹⁷ (`relation_alpha_powers`, read later by the composition). The circuit wrapper fixes 6 powers; we call the ABI with 18. Both LogUp modes use it now (nothing is uploaded for z and α). |
 | fractions | `.trace_commit` | One generated kernel per AIR with lookups (15; `block_anc` has none). One thread per storage row: every live lookup expression once (columns at their row offsets, constants, public inputs read from the statement words), then per batch `N = m₀·d₁ + m₁·d₀`, `D = d₀·d₁` with `d = rel + Σ vᵢ·αⁱ⁺¹ − z` (`system.Fractions.fill`, `component.denominator`). `N` goes to the batch's four tree-2 coefficient columns, `D` to a slab. A zero `D` sets the error flag (the CPU fails on it). |
 | completion | `.trace_commit` | stwo-zig's generic `relation_completion` (`TraceCommitNative`): batch inverse of the slab, per-row running sum across batches, claimed sum of the last column, minus `claim · 2^-log`, and the coset-order inclusive scan of the last column — the semantics of `logup_columns.build`. Claims are written to `claims_mixed` (one per component with lookups) and copied into `claims_component` (zero for `block_anc`) for the composition. |
@@ -67,7 +67,40 @@ Code: `src/gpu/cuda/logup.zig`; schedule in `pipeline.zig` (`.trace_generation`,
 
 **Memory** (`memory.zig`). New slots: `logup_sources` (`.trace_generation`–`.trace_commit`), pointer tables and completion geometry (ingress–`.trace_commit`, uploaded at ingress), completion scratch (`.trace_commit`). The denominator slab (tree-2 sized) borrows the head of tree 2's evaluation buffer, which is unused until tree 2 is committed right after the completion. Tree 2 has no staging slot. Planned arena (production profile): 2^22 tiered 26.4 GiB (25.6 with host LogUp), 2^23 tiered 52.8 GiB (51.2), 2^22 uniform 98.3 GiB (92.8). The 0.8–1.6 GiB tiered increase is the sources slot.
 
-**AOT.** The kernels are `witness` entries of `gpu/cuda_aot/aot_manifest.json` under stwo-zig's native-authenticated identity (`sha256-source-and-contract-v1`: cache key from the source hash and a semantic contract naming the AIR digest and our argument list). The build admits only its listed ABI tags; we use `native_blake_exact_interaction_v1`, the only paired-LogUp-fraction tag. The tag is just an equality key between the manifest and the launch (`session.launchKernel`, `kernel.Kernel`); the argument contract is ours (8 arguments: `sources, outputs, pubs, powers, z, denominators, error, log_size`). `cuda-archive-plan`: 79 AOT sources (48 native + 16 constraint + 15 LogUp).
+**AOT.** The kernels are `witness` entries of `gpu/cuda_aot/aot_manifest.json` under stwo-zig's native-authenticated identity (`sha256-source-and-contract-v1`: cache key from the source hash and a semantic contract naming the AIR digest and our argument list). The build admits only its listed ABI tags; we use `native_blake_exact_interaction_v1`, the only paired-LogUp-fraction tag. The tag is just an equality key between the manifest and the launch (`session.launchKernel`, `kernel.Kernel`); the argument contract is ours (8 arguments: `sources, outputs, pubs, powers, z, denominators, error, log_size`). `cuda-archive-plan`: 80 AOT sources (48 native + 16 constraint + 15 LogUp + 1 reorder).
+
+## Natural upload (2026-10-13, branch `cuda/natural-upload`)
+
+Before: the host permuted every column of trees 0–1 into storage order (`air/prove.zig toStorage`: natural row `i` → `bitrev(circle(i))`) and uploaded the copies. At 2^22 tiered on the M4 Pro that was 2.3–3.6 s of memory-bound scatter plus 0.6 s for the preprocessed columns, and a second host copy of the main tree.
+
+Now (`prover.hostTraceTrees`, `pipeline.assembleTrace`, `reorder.zig`):
+
+| Step | Where | What |
+|---|---|---|
+| host | `hostTraceTrees` | Tree 1: descriptors over the witness's own column slices (`Input.mains`), no copy. Tree 0: `system.preprocessedNatural` (natural order; `ir.PreCol.fill` by memset and period runs, all columns on all cores). Tree 2 (host LogUp only) stays the storage-order `system.interactionTrace`. |
+| ingress | `uploadTree` | Unchanged: column `j` into its staging view (the commitment's cohort layout). |
+| reorder | `.trace_generation` | Our kernel `starked_reorder_v1_*`, one launch per cohort of trees 0–1 (grid `(⌈2^log/256⌉, columns)`, at most 65,535 columns per launch): `storage[c·2^log + s] = natural[c·2^log + natural_row(s)]`, one thread per destination row (coalesced writes, gathered reads), staging → coefficient buffer, in place of the copy. A staged tree 2 (host LogUp) is a device copy per cohort. |
+| LogUp sources | `.trace_generation` | `logup.Bound.gather` now reads the reordered coefficient buffers (storage order), so the fraction kernels are unchanged. |
+
+The proof bytes cannot change: from the end of `.trace_generation` on, the device holds exactly what it held before. The arena is unchanged (same slots and lifetimes; 26.4 GiB at 2^22 tiered).
+
+**AOT.** One fixed `witness` entry (`gpu/cuda_aot/witness_starked_reorder_*.cu`, last in the manifest), native-authenticated identity, ABI tag `native_m31_permutation_trace_v3` (a row permutation of M31 columns; the four-argument contract `natural, storage, log_size, columns` is ours and pinned by the semantic contract). As for LogUp, the tag is only an equality key between manifest and launch.
+
+**Host checks** (`reorder_test.zig`, in `cuda-test`). The exact AOT source is built as host C++ and run over each launch's whole grid:
+- it equals `toStorage` for cohorts of logs 0, 1, 2, 4, 7, 8, 9, 11, 12 and 16 with 1–7 columns, packed back to back (log 0 caught a bug: a one-row column maps row 0 to itself);
+- the whole `.trace_generation` (`assembleTrace` through `reorder.Kernel.launch` and `logup.Bound.gather`, with a host session that runs the kernel at the launch's own grid and arguments) over an arena in host memory, bound with the real plans of block 0 uniform (2 launches) and tiered (18 launches): each of the 1,435 tree-0/1 columns equals the CPU prover's storage-order column, and the LogUp sources equal the storage-order columns they read.
+
+**Host effect** (M4 Pro, block 400000 tiered 2^22, production, `cuda-prove --skip-cpu`, stops at session open):
+
+| | before (0852bfd) | natural upload |
+|---|---|---|
+| "host trace trees" lap | 3.66 s | **0.15 s** |
+| host trees | 1.0 GiB preprocessed + 5.4 GiB main, storage-order copies | 1.0 GiB preprocessed generated, 5.43 GiB main borrowed |
+| peak memory footprint (`time -l`) | 14.07 GB | **7.16 GB** |
+
+The saving in RSS is the main tree's storage copy: 5.4 GiB at 2^22, about 11 GiB at 2^23 (where the H100 runs reported 37 GB RSS, so expect about 25 GB). On the 18-vCPU H100 pod "plans/trees" was 16.9 s (2^22) and 30–35 s (2^23) before the parallel host commit 0852bfd; that pod is the place to measure the combined effect. The device adds one reorder launch per cohort of trees 0–1 (18 launches at block 0 tiered), a memory-bound gather over 6.4 GiB at 2^22: a few ms on an H100.
+
+**Pinned host memory.** stwo-zig's ingress is `cudaMemcpyAsync` from pageable memory (`native/runtime/context.cu`, `stwo_exec_context_memcpy_h2d_async`), and the runtime has no host-register or pinned-staging API. Registering the witness ourselves (`cudaHostRegister`, about 13 GB at 2^23) would cost about what it saves: pinning runs at a few GB/s and ingress is 1.6 s for 12.9 GiB. It pays only if the witness generators allocate pinned memory from the start, or with an upstream double-buffered pinned upload. Not done.
 
 ## Public inputs
 
@@ -143,7 +176,7 @@ Estimate: 1–2 weeks with an H100 or H200, mostly steps 3–4. Later, device Lo
 
 **Runner (`src/gpu/cuda/runner.zig`).** Runs on one sample at one profile, in this order:
 1. CPU proof.
-2. Host: plans, the storage-order trees 0–1, twiddles. With `--host-logup` also the CPU roots of trees 0–1 (compared with the CPU proof's), (z, α) and the interaction trace.
+2. Host: plans, the natural-order trees 0–1 (preprocessed generated, main borrowed from the witness), twiddles. With `--host-logup` also the CPU roots of trees 0–1 (compared with the CPU proof's), (z, α) and the interaction trace.
 3. The device proof (one transaction; device LogUp unless `--host-logup`).
 4. Structured diff in production order, naming the stage behind the first difference: claims, roots 0–3, sampled values (tree/column/sample), FRI roots, last layer, nonce, openings.
 5. Byte comparison, `verifyExt`, timings, and device counters (peak live bytes, H2D bytes, launches, AOT misses).
@@ -220,6 +253,7 @@ Device stages at 2^23: ingress 1.56 s, trace commit (now with commits 0–1, Log
 ## Risks and open items
 
 - **Fold step 1 is unqualified on CUDA**, and so is the packed-leaf FRI layout at fold 1 (`resident_decommit.zig` uses 4 rows per leaf). Only a device run settles it.
+- **Reorder kernel, unverified on a device:** nvcc on `starked_reorder_v1_*`, its AOT bind under `native_m31_permutation_trace_v3`, and kernel launches in `.trace_generation` (so far the runtime has run only copies there). Host-checked against `toStorage` and over the whole stage (§ Natural upload).
 - **Device LogUp, unverified on a device:** the completion kernels, the source copies, nvcc on the generated kernels (`block_sha` has 1,585 live lookup values in one thread; expect register spills, not errors) and the AOT bind under the borrowed `native_blake_exact_interaction_v1` tag. The slab borrows tree 2's evaluation buffer: correct only while nothing writes it between the completion and tree 2's commit (true in our schedule).
 - **Unverified on a device:** the composition kernels, LDE, Merkle, OODS, quotient and FRI kernels are stwo-zig's. Our inputs to them are checked only for shape (plans equal the CPU proof's) and for transcript order, not numerically.
 - **Many OODS cohorts:** each extra mask offset of a column is its own cohort (`resident_oods.zig:107`), giving 4,837 samples. That is correct, but launch-heavy; batching by column is an optimisation.

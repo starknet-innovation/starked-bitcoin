@@ -57,7 +57,63 @@ pub const PreCol = union(enum) {
             .row_ge_end => |k| if (row + k >= n) M31.one() else M31.zero(),
         };
     }
+
+    /// `out[i] = self.at(i, out.len)` for every row, by runs (memset / period copies).
+    pub fn fill(self: PreCol, out: []M31) void {
+        const n = out.len;
+        if (n == 0) return;
+        switch (self) {
+            .is_first => {
+                @memset(out, M31.zero());
+                out[0] = M31.one();
+            },
+            .not_last => {
+                @memset(out, M31.one());
+                out[n - 1] = M31.zero();
+            },
+            .periodic => |v| {
+                std.debug.assert(v.len != 0); // `Air.validate`
+                var i: usize = 0;
+                while (i < n) {
+                    const run = @min(v.len, n - i);
+                    for (out[i..][0..run], v[0..run]) |*o, x| o.* = M31.fromCanonical(x);
+                    i += run;
+                }
+            },
+            .row_lt => |k| {
+                const ones = @min(@as(usize, k), n);
+                @memset(out[0..ones], M31.one());
+                @memset(out[ones..], M31.zero());
+            },
+            .row_ge_end => |k| {
+                const zeros = n -| @as(usize, k);
+                @memset(out[0..zeros], M31.zero());
+                @memset(out[zeros..], M31.one());
+            },
+        }
+    }
 };
+
+/// `outs[j]` ← `defs[j].fill`, on all cores when the columns are large.
+pub fn fillParallel(defs: []const PreCol, outs: []const []M31) void {
+    var total: usize = 0;
+    for (outs) |o| total += o.len;
+    const Job = struct {
+        fn run(next: *std.atomic.Value(usize), d: []const PreCol, o: []const []M31) void {
+            while (true) {
+                const j = next.fetchAdd(1, .monotonic);
+                if (j >= d.len) return;
+                d[j].fill(o[j]);
+            }
+        }
+    };
+    var next = std.atomic.Value(usize).init(0);
+    const n_threads = if (total < (1 << 22)) 0 else @min(std.Thread.getCpuCount() catch 1, 64, defs.len) -| 1;
+    var threads: [64]?std.Thread = @splat(null);
+    for (threads[0..n_threads]) |*t| t.* = std.Thread.spawn(.{}, Job.run, .{ &next, defs, outs }) catch null;
+    Job.run(&next, defs, outs);
+    for (threads[0..n_threads]) |t| if (t) |th| th.join();
+}
 
 pub const Expr = union(enum) {
     col: struct { tree: Tree, index: u32, offset: i32 },
@@ -92,10 +148,16 @@ pub const Air = struct {
     pub fn genPreprocessed(self: Air, allocator: std.mem.Allocator, log_size: u32) ![][]M31 {
         const n = @as(usize, 1) << @intCast(log_size);
         const out = try allocator.alloc([]M31, self.preprocessed.len);
-        for (self.preprocessed, out) |def, *col| {
-            col.* = try allocator.alloc(M31, n);
-            for (col.*, 0..) |*v, i| v.* = def.at(i, n);
+        var made: usize = 0;
+        errdefer {
+            for (out[0..made]) |c| allocator.free(c);
+            allocator.free(out);
         }
+        for (out) |*col| {
+            col.* = try allocator.alloc(M31, n);
+            made += 1;
+        }
+        fillParallel(self.preprocessed, out);
         return out;
     }
 
@@ -380,5 +442,19 @@ test "every exported AIR re-serializes to Lean's exact text, so its digest is SH
         var want: [32]u8 = undefined;
         std.crypto.hash.sha2.Sha256.hash(text, &want, .{});
         try std.testing.expectEqualSlices(u8, &want, &try air.digest(a));
+    }
+}
+
+test "ir: PreCol.fill and fillParallel equal PreCol.at" {
+    const a = std.testing.allocator;
+    const defs = [_]PreCol{ .is_first, .not_last, .{ .periodic = &.{ 3, 0, 7 } }, .{ .periodic = &.{5} }, .{ .row_lt = 0 }, .{ .row_lt = 5 }, .{ .row_lt = 1 << 20 }, .{ .row_ge_end = 0 }, .{ .row_ge_end = 3 }, .{ .row_ge_end = 1 << 20 } };
+    for ([_]u5{ 0, 1, 2, 4, 9, 20 }) |log| {
+        const n = @as(usize, 1) << log;
+        const outs = try a.alloc([]M31, defs.len);
+        defer a.free(outs);
+        for (outs) |*o| o.* = try a.alloc(M31, n);
+        defer for (outs) |o| a.free(o);
+        fillParallel(&defs, outs);
+        for (defs, outs) |d, o| for (o, 0..) |v, i| try std.testing.expectEqual(d.at(i, n).toU32(), v.toU32());
     }
 }

@@ -529,5 +529,18 @@
     "module_globals": "none",
     "identity_scheme": "sha256-source-and-contract-v1",
     "semantic_contract": "starked-bitcoin/logup-fractions/v1;air=block_ctx;digest=f3c5aa620e580b60b2c905559b15c4301486d9515fc558a9fde6717ce340791b;args=sources,outputs,pubs,powers,z,denominators,error,log_size;rows=storage;threads=256"
+  },
+  {
+    "kind": "witness",
+    "label": "starked_reorder_242dee363e5e2b8f",
+    "abi_schema": "native_m31_permutation_trace_v3",
+    "kernel_name": "starked_reorder_v1_242dee363e5e2b8f",
+    "cache_key": "1ee214e5bc234c0a",
+    "semantic_hash": "242dee363e5e2b8f",
+    "program_identity": "ec90d66932ceb2dae210a32bd5a0698912c7cda46ba6dc76e3a3b091b3e0f1da",
+    "file": "witness_starked_reorder_242dee363e5e2b8f_1ee214e5bc234c0a.cu",
+    "module_globals": "none",
+    "identity_scheme": "sha256-source-and-contract-v1",
+    "semantic_contract": "starked-bitcoin/natural-to-storage/v1;args=natural,storage,log_size,columns;storage[c<<log|s]=natural[c<<log|natural_row(s,log)];grid=rows/256,columns;threads=256"
   }
 ]
