@@ -160,10 +160,21 @@ Big blocks use `--skip-cpu --cpu-sha <prefix> --cpu-len <bytes>`, or `--cpu-proo
    - Fix: `fri.zig`/`decommit.zig` (forks) use `leafLog(fold_step)`.
 3. **One byte differed** (offset 245): the decoder filled the legacy `PcsConfig.lifting_log_size`, which the CPU leaves empty. Fix: it is cleared in `terminal.toSystemProof`.
 
+**H100 NVL (RunPod, sm_90, 94 GB, 27 vCPUs, driver host CUDA 13.0, nvcc 12.8; 2026-10-13):**
+
+| Step | Result | Wall | Device proof | Device peak | Host RSS |
+|---|---|---|---|---|---|
+| block 0, production, tiered | byte-identical, verifies | 1.5 s | | 0.9 GB | 0.4 GB |
+| block 400000, production, tiered (L = 22) | `cbcf7026…` as on the L40S, verifies | 82 s | 4.8 s | 27.0 GB | 45.9 GB |
+| **block 970347, production, tiered (L = 23)** | **byte-identical to the CPU proof** (`f6ff8ac953601dea…`, 1,184,413 B), verifies | 630 s incl. CPU proof | 5.5 s | 53.2 GB (51.20 GiB planned) | 90.7 GB |
+| **block 774628, production, tiered (L = 23)** | **byte-identical to the CPU proof** (`c015e4b36600463a…`, 1,185,434 B), verifies | 682 s incl. CPU proof | 10.4 s (ingress 7.2 s) | 53.2 GB | 90.6 GB |
+
+At 2^23 (block 970347) the host dominates even more on this 27-vCPU pod: witness 25 s, CPU proof (reference only) 394 s, plans and trace trees 38 s, **CPU commit of trees 0–1 123 s**, host LogUp 14 s. Device stages: ingress 2.9 s (14.75 GB), constraint evaluation 1.16 s, trace commit 0.49 s, the rest < 0.15 s each. The device itself scales about linearly (sum of stages after ingress, 2^22 → 2^23: 1.05 s → 1.9 s). Ingress varies between runs (2.9 s vs 7.2 s for the same size), so pinned host buffers are worth checking.
+
 **Next levers** (the device proof is now a small part of the wall time):
 - device LogUp and the device main commit (remove the CPU commit and the host LogUp);
 - device witness, or uploading only the natural-order columns (ingress is 2.3 s for 7.4 GB);
-- a bigger or uniform block on an H100/H200.
+- a uniform 2^22 block (92.8 GiB) on an H200; tiered 2^23 is done (above).
 
 ## CuMetal (local Apple-GPU run): blocked
 

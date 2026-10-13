@@ -21,6 +21,20 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-10-13 (session 13) — CUDA prover on real GPUs: byte-identical from block 0 to 2^23
+Who: Claude (agent, Opus 5.5), with the owner
+Roadmap: GPU step 3 (CUDA): device runs done (L40S, H100 NVL); device LogUp started (branch `cuda/device-logup`)
+Done:
+- L40S (RunPod, sm_89, 34.5 min, $0.64 billed): block 0 ×4 profiles and block 400000 tiered (2^22) byte-identical to the CPU, verified. Three device fixes (287ebe2, 7691c82, 4e52bdb, c2fd88b); pushed to main as daa311e.
+- H100 NVL (RunPod, sm_90, 94 GB, $3.19/hr, ~36 min): block 0 tiered and block 400000 again identical; **blocks 970347 and 774628 (tiered, L = 23) byte-identical to CPU proofs made on the pod, verified.** Details in docs/design/gpu-cuda.md § Pod runs. Proofs kept in `data/store/gpu/` (gitignored).
+- Pod scripts: the tarball bootstrap creates the one-commit repos the build identity needs; `run.sh large <height> <size>`; the source bundle drops stwo-zig's report evidence and notes (2.5 GB → 326 MB, upload 32 s).
+Evidence:
+- `cuda-prove` logs: sha256 970347 `f6ff8ac953601dea…` (1,184,413 B), 774628 `c015e4b36600463a…` (1,185,434 B), 400000 `cbcf7026134f9a71…` on both GPUs.
+Problems / lessons:
+- At 2^23 the device proof is 5.5 s of an 11-minute run; on a 27-vCPU pod the CPU commit of trees 0–1 alone takes 123–138 s. Device LogUp (removes it) is the next lever; host witness/plans next.
+- Quote pod cost from RunPod billing, not from memory.
+Next: device LogUp on `cuda/device-logup`, then one pod run to validate it.
+
 ## 2026-10-12 (session 12, night) — GPU step 3: resident CUDA prover ported (host-checked, no device run)
 Who: Claude (agent, Opus 5.5), worktree branch `cuda/resident`
 Roadmap: GPU step 3 (CUDA): M0 design, M1 build and linked schedule, M2 host checks done; M3 (CuMetal) blocked on tooling
