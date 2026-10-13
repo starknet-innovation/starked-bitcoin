@@ -60,9 +60,8 @@ The CPU path bakes public inputs into the program as literals. Our lowering dedu
 ## AOT catalog
 
 - `gpu/cuda_aot/`: 16 kernels (3.2 MiB of CUDA) and an `aot_manifest.json` in stwo-zig's product-set format.
-- Cache key = `parametric.cacheKey(program identity, source identity, AIR digest)`, so changing an AIR changes only its own kernel.
-- To build on a GPU host: `scripts/cuda_build.py --native-aot-root <root>` with a `product_sets.json`, plus `--aot-set-root`.
-  - The script's `--frontend`/`--aot-set` choices are hard-coded (`scripts/cuda_build.py:56-64`), so it needs either an upstream entry for our set or a local AOT root that reuses the `circuit` names.
+- Cache key = `parametric.cacheKey(program identity, source identity, Cairo authority)`: stwo-zig's build validator pins the authority. Changing an AIR changes only its own kernel.
+- GPU-host build: a local AOT root that reuses the `circuit` names (see Running on a pod). The script's `--frontend`/`--aot-set` choices are hard-coded (`scripts/cuda_build.py:56-64`).
 
 ## Results so far (host only)
 
