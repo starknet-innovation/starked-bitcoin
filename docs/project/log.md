@@ -21,6 +21,21 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-10-13 (session 13, device witness) — CUDA: block_sha, block_b2s and tree 0 generated on the device (host-checked; device run pending)
+Who: Claude (agent, Opus 5.5), worktree branch `cuda/device-witness`
+Roadmap: GPU step 3 (CUDA): device witness for the three largest column sets implemented and host-checked; the pod run decides it
+Done:
+- 043a068: `buildFull` keeps `Built.sha_plan` (compressions + final Meta) and `Built.undo`; `skip_device_columns` leaves `mains[sha]`, `mains[b2s]` empty.
+- 14e9c6c: `src/gpu/cuda/witness.zig`: four fixed AOT witness kernels (`sha_words`, `sha_columns`, `b2s`, `pre`; tag `native_indexed_recurrence_trace_v1`) run first in `.trace_generation` and write the staging slots in natural order; ingress uploads only their inputs (`witness_inputs`, 5–10 MiB) and skips the generated columns; SHA word scratch slot (`.trace_generation`). Arena unchanged. `gpu/cuda_aot` regenerated (84 AOT sources).
+- 0ef9c19: `cuda-prove` uses the device witness by default; `--host-witness` for A/B; lean host witness with `--skip-cpu`/`--cpu-proof` (not with `--host-logup`). `scripts/pod/run.sh`: `large-prod-tiered-hostwitness`, `xl-970347-hostwitness`. docs/design/gpu-cuda.md § Device witness.
+Evidence:
+- `cuda-test` (new `witness_test.zig`): the exact kernel sources as host C++ reproduce `block_sha` (144), `block_b2s` (312) and tree 0 bit for bit for blocks 0 (uniform, tiered), 170, 91812, 91722, 91842, 91880, and SHA + Blake2s for 400000 tiered at L 22; two input mutations are caught; the whole `.trace_generation` (generators + reorder + LogUp gather) over block 0's real plans (uniform, tiered) with a lean host witness equals the CPU storage-order trees 0–1 and LogUp sources. Drift, catalog parity, LogUp, reorder, arena tests pass.
+- `cuda-check`, `cuda-parity`, `cuda-archive-plan` (84 sources) pass; `zig build test` filters "golden hashes", "block system", "block sha", "SHA-256 AIR", "Blake2s AIR", "block commitment" pass; full suite `zig build test -Doptimize=ReleaseFast` green (35.5 min, 11.4 GB peak RSS).
+- `cuda-prove --skip-cpu --profile production --size tiered` (M4 Pro, stub link, stops at session open), device witness vs `--host-witness`: 400000 (2^22) witness 0.79 vs 1.27 s, planned H2D 2.00 vs 6.46 GiB, peak footprint 2.30 vs 7.16 GB; 970347 (2^23) 1.55 vs 2.94 s, 3.99 vs 12.92 GiB, 4.50 vs 14.21 GB.
+Problems / lessons:
+- None blocking. The kernels passed the host comparison the first time; the mutation check was added to make sure the comparison is live.
+Next: pod run on this branch: `scripts/pod/run.sh` (block 0 ×4 against the CPU proof, 400000), `large-prod-tiered-hostwitness`, `xl-970347`, `xl-970347-hostwitness`, `xl-774628`; record the witness lap, ingress, `.trace_generation` time and host RSS.
+
 ## 2026-10-13 (session 13, natural upload) — CUDA: trees 0–1 uploaded in natural order, reordered on the device (host-checked; device run pending)
 Who: Claude (agent, Opus 5.5), worktree branch `cuda/natural-upload`
 Roadmap: GPU step 3 (CUDA): host trace trees lever done on the host side; the pod run decides it

@@ -1,9 +1,11 @@
 //! The resident CUDA block-system prover: same transcript and proof bytes as `system.proveOpts`
 //! (src/air/system.zig), adapted from `circuit_cuda/resident_prover.zig`.
 //!
-//! One device transaction (`proofPass`; docs/design/gpu-cuda.md § Device LogUp, § Natural upload):
-//! ingress uploads the preprocessed and main trees as natural-order evaluations (the host's own
-//! column slices, into staging slots) and the statement; the schedule (`pipeline.zig`) reorders
+//! One device transaction (`proofPass`; docs/design/gpu-cuda.md § Device LogUp, § Natural upload,
+//! § Device witness): ingress uploads the preprocessed and main trees as natural-order evaluations
+//! (the host's own column slices, into staging slots) and the statement; with `Input.witness`, tree
+//! 0 and the `block_sha`/`block_b2s` columns are not uploaded but generated on the device from
+//! small inputs (`witness.zig`, first in `.trace_generation`); the schedule (`pipeline.zig`) reorders
 //! them into storage order on the device (`.trace_generation`, `reorder.zig`), commits, draws (z, α), builds the
 //! interaction tree and claimed sums on the device (`logup.zig`), commits it and runs the STARK
 //! tail; the terminal bundle decodes to `system.Proof`. The caller verifies the result

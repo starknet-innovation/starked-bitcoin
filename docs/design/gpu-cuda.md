@@ -1,6 +1,6 @@
 # GPU step 3: resident CUDA prover for the block system (2026-10-12)
 
-Status: **byte-identical on L40S and H100 up to 2^23 tiered (2026-10-13), with device LogUp (default) and host LogUp (`--host-logup`).** Parent: [gpu.md](gpu.md), step 3.
+Status: **byte-identical on L40S and H100 up to 2^23 tiered (2026-10-13), with device LogUp (default) and host LogUp (`--host-logup`).** Device witness for `block_sha`, `block_b2s` and tree 0 (default; `--host-witness` for A/B): host-checked, device run pending (§ Device witness). Parent: [gpu.md](gpu.md), step 3.
 Code: `src/gpu/cuda/` (built only with `-Dcuda=true`). stwo-zig paths below are under
 `third_party/stwo-zig/src/` at 4afa09dbf; `cc/` is `integrations/circuit_cuda/`. Nothing in stwo-zig is modified.
 
@@ -23,7 +23,7 @@ pipeline (`cc/resident_prover.zig:67`, `cc/resident_pipeline.zig:81`), which alr
 | `resident_composition_controller.zig` | **fork** (one line) | Generic, except `relation_alpha_powers.len != 6` (`:278`). Our widest tuple has 17 values, so we need α⁰…α¹⁷ (`composition_controller.zig`). |
 | `resident_oods.zig`, `resident_quotient.zig`, `resident_proof_layout.zig` | **fork** (caps) | All three reject more than 2 mask offsets per column (`resident_oods.zig:75,80`, `resident_quotient.zig:61`, proof layout `count > 2`). Our AIRs read up to 23 rows (`block_sha`, `block_anc`; offsets −68…2816). The CPU PCS adds the periodic sample only for exactly two (`core/pcs/quotients/samples.zig:207`); `masks.zig` keeps that and lifts the cap, returning stwo-zig's own types. |
 | `resident_fri.zig`, `resident_decommit.zig` | reuse | Generic over geometry and sink. Fold step 1: supported by code, **unqualified on a device**. |
-| `resident_witness.zig` | **replace** | Circuit witness producer. Ours: host columns uploaded at ingress (below). |
+| `resident_witness.zig` | **replace** | Circuit witness producer. Ours: `block_sha`, `block_b2s` and tree 0 generated in `.trace_generation` (`witness.zig`, § Device witness); the other columns built on the host and uploaded at ingress (below). |
 | `resident_interaction.zig` | **replace** (`logup.zig`) | Its fraction producer is the circuit's 11 hand-written gates and its challenge expansion fixes 6 α powers. Ours: one generated kernel per AIR, the same generic `relation_completion` (§ Device LogUp). |
 | `resident_memory_plan.zig`, `resident_memory_binding.zig` | **adapt** (`memory.zig`) | Slot ids were `kind·256 + ordinal` with one source slot per column (`resident_memory_plan.zig:206`); our main tree has 1,210 columns. Trace columns now land in place in each tree's coefficient buffer (the commit skips the copy, `resident_commit.zig:193`), so there are no source copies. The circuit `values`/`interaction` slots go; statement words, claimed sums, z and α powers come in. |
 | `resident_terminal_bundle.zig`, `resident_terminal_decode.zig`, `resident_terminal_capture.zig` | **adapt** (`terminal.zig`) | N_COMPONENTS claims and an interaction nonce (`resident_terminal_bundle.zig:54,70,76`). Ours: claims of the components with lookups (15), no interaction nonce. The decoder is generic over the layout type (`native_cuda/common/proof_decode.zig:24`). |
@@ -47,7 +47,7 @@ The statement words are public: uploaded at ingress, mixed as slices (digest wor
 
 ## Witness and interaction
 
-The resident contract allows host writes only during ingress (`backends/cuda/runtime/context.zig:537`) and one proof read at the end (`telemetry.zig:253`). The trace (trees 0–1) is built on the host and uploaded at ingress, in natural row order, into staging slots; `.trace_generation` reorders it into the commitments' buffers in storage order (§ Natural upload).
+The resident contract allows host writes only during ingress (`backends/cuda/runtime/context.zig:537`) and one proof read at the end (`telemetry.zig:253`). The trace (trees 0–1) is built on the host and uploaded at ingress, in natural row order, into staging slots, except the columns the device generates there in `.trace_generation` (§ Device witness); `.trace_generation` then reorders it into the commitments' buffers in storage order (§ Natural upload).
 
 **Host LogUp (first version; `cuda-prove --host-logup`).** Host-built interaction columns need (z, α), which depend on the main root. The host computes the roots of trees 0–1 (`system.traceRoots`, a CPU commit), replays the prefix (`transcript.HostSink`), draws (z, α) and builds the interaction columns and claims (`system.interactionTrace`). Ingress uploads them with the trees; the device recommits trees 0–1, draws (z, α) itself and commits the uploaded tree 2. A different draw would be caught by the verifier. (The first plan was a roots-only device transaction; the runtime forbids it, see Pod runs.)
 
@@ -101,6 +101,38 @@ The proof bytes cannot change: from the end of `.trace_generation` on, the devic
 The saving in RSS is the main tree's storage copy: 5.4 GiB at 2^22, about 11 GiB at 2^23 (where the H100 runs reported 37 GB RSS, so expect about 25 GB). On the 18-vCPU H100 pod "plans/trees" was 16.9 s (2^22) and 30–35 s (2^23) before the parallel host commit 0852bfd; that pod is the place to measure the combined effect. The device adds one reorder launch per cohort of trees 0–1 (18 launches at block 0 tiered), a memory-bound gather over 6.4 GiB at 2^22: a few ms on an H100.
 
 **Pinned host memory.** stwo-zig's ingress is `cudaMemcpyAsync` from pageable memory (`native/runtime/context.cu`, `stwo_exec_context_memcpy_h2d_async`), and the runtime has no host-register or pinned-staging API. Registering the witness ourselves (`cudaHostRegister`, about 13 GB at 2^23) would cost about what it saves: pinning runs at a few GB/s and ingress is 1.6 s for 12.9 GiB. It pays only if the witness generators allocate pinned memory from the start, or with an upstream double-buffered pinned upload. Not done.
+
+## Device witness (2026-10-13, branch `cuda/device-witness`)
+
+Code: `src/gpu/cuda/witness.zig` (kernels, inputs, plan, launches), `witness_test.zig`; `pipeline.assembleTrace` runs it first in `.trace_generation`. The device writes the largest columns into the staging slots in natural row order, exactly where ingress would have put the host's, so the reorder, the LogUp gather and every commitment are unchanged. No AIR or column definition changes.
+
+| Kernel | Grid | Writes | Host generator it reproduces |
+|---|---|---|---|
+| `sha_words` | one thread per 72-row period (64 threads/block) | words `a, e, w` of every row into `witness_scratch` (3 words/row) | `sha256/witness.zig Words.place` (zero dummy past the plan) |
+| `sha_columns` | one thread per row | `block_sha`'s 144 columns | `witness.columns` with `shaRole` (bits, Σ/σ/Ch/Maj limbs from cyclic neighbours, carries by role), `block/sha.zig Extra` (Meta columns, NILS/USEW/CHN/NNE, the mutation check's limb differences with row r − 8 and their M31 inverses, the ALLEQ chain on period rows 12–19) |
+| `b2s` | one thread per row; recomputes its period's earlier G steps | `block_b2s`'s 312 columns | `hash/blake2s_air.zig fillPeriod` + `block/commit.zig B2sFill` |
+| `pre` | one thread per (row, column); one launch per run of equal-log tree-0 columns | every preprocessed column | `ir.PreCol.at` (is_first, not_last, periodic, row_lt, row_ge_end) |
+
+**Inputs** (`witness_inputs`, ingress → `.trace_generation`; `witness.Layout`): the SHA-256 K table followed by the per-period `Meta` (mid, blk, flags, lid, rid, ym; final, i.e. after `buildFull` sets `ym` from the coin counts), one compression (input state, block) per used period, the Blake2s σ table, one input per used Blake2s period (chaining value: `H0` or `chain[p−1]`, block, counter, last flag) plus the unused-period dummy, the preprocessed descriptors and periodic values, and the device address of every generated column (pointer tables, as the LogUp tables). 5.0 MiB at 2^22, 9.6 MiB at 2^23. `witness_scratch` (`.trace_generation` only) holds the SHA word trace: 48 / 96 MiB. The planned arena is unchanged (26.42 GiB at 2^22 tiered, 52.82 GiB at 2^23 tiered): both slots overlap buffers that are not live yet.
+
+**Host** (`Input.witness`, `Prepared.initWitness`, `hostTraceTreesFor`): `buildFull` keeps the plan (`Built.sha_plan`) and the undo stream (`Built.undo`); with `skip_device_columns` it does not build the two components' columns. Tree 0 is not generated on the host. `uploadTree` skips the generated columns. `cuda-prove` uses the device witness unless `--host-witness` (or `--mock`), and skips the host columns when nothing on the host reads them (`--skip-cpu` or `--cpu-proof`, no `--host-logup`). Host LogUp needs every column on the host (its CPU roots and interaction trace), so there the host builds them all and the device still generates its own.
+
+**AOT.** Four fixed `witness` entries (`gpu/cuda_aot/witness_starked_witness_{b2s,pre,sha_columns,sha_words}_*.cu`, after the reorder in the manifest), native-authenticated identity, ABI tag `native_indexed_recurrence_trace_v1` (a row-indexed trace; as for the reorder and LogUp tags, only an equality key between manifest and launch: the five-argument contract is ours and pinned by each semantic contract). No module globals: the K and σ tables travel in the inputs. `cuda-archive-plan`: 84 AOT sources (48 native + 16 constraint + 15 LogUp + 1 reorder + 4 witness).
+
+**Host checks** (`witness_test.zig`, in `cuda-test`). The exact AOT sources are built as host C++ and each launch runs over its whole grid with its own argument array:
+- generators = CPU: `witness.Bound.upload` + `generate` over host memory reproduce `buildFull`'s `block_sha` and `block_b2s` columns and `system.preprocessedNatural`, bit for bit: block 0 (uniform L 11, tiered L 12), 170, 91812 (tiered); with `STARKED_WITNESS_SAMPLES=2,4,5` also 91722, 91842, 91880; with `STARKED_WITNESS_LARGE=400000` block 400000 tiered at L 22 (SHA: 39,691 compressions at log 22, Blake2s: 3,213 blocks at log 20; 4.5 s on one core, 9.8 GB RSS). A flipped message word or Blake2s counter changes the output (the comparison is live);
+- the whole `.trace_generation` (generators, reorder, LogUp gather) over a host-memory arena bound with block 0's real plans (uniform 6 launches, tiered 30), the host witness built with `skip_device_columns` and ingress through `prover.uploadTree`: all 1,435 tree-0/1 columns equal the CPU prover's storage-order columns (from a full build), and the LogUp sources the columns they read. Ingress for block 0: 6.0 MiB instead of 11.2 MiB (uniform).
+
+**Host effect** (M4 Pro, production, tiered, `cuda-prove --skip-cpu`, stops at session open; `/usr/bin/time -l`):
+
+| | 400000 (2^22) device witness | `--host-witness` | 970347 (2^23) device witness | `--host-witness` |
+|---|---|---|---|---|
+| "witness built" lap | **0.79 s** | 1.27 s | **1.55 s** | 2.94 s |
+| host trees to upload | 0 + 1.96 GiB | 1.00 + 5.43 GiB | 0 + 3.92 GiB | 2.00 + 10.86 GiB |
+| planned H2D | **2.00 GiB** | 6.46 GiB | **3.99 GiB** | 12.92 GiB |
+| peak memory footprint | **2.30 GB** | 7.16 GB | **4.50 GB** | 14.21 GB |
+
+Generated on the device: 4.47 GiB (2^22) / 8.94 GiB (2^23) of trees 0–1. Expected on the 16-vCPU H100 pod (witness 4× slower than the M4 Pro, ingress 1.4–4.1 s for 6.5–12.9 GiB): at 2^23 roughly 7–9 s less host witness and 1–3 s less ingress, against a few ms of kernels (a memory-bound 9 GiB write).
 
 ## Public inputs
 
@@ -176,7 +208,7 @@ Estimate: 1–2 weeks with an H100 or H200, mostly steps 3–4. Later, device Lo
 
 **Runner (`src/gpu/cuda/runner.zig`).** Runs on one sample at one profile, in this order:
 1. CPU proof.
-2. Host: plans, the natural-order trees 0–1 (preprocessed generated, main borrowed from the witness), twiddles. With `--host-logup` also the CPU roots of trees 0–1 (compared with the CPU proof's), (z, α) and the interaction trace.
+2. Host: plans, the natural-order trees 0–1 (main borrowed from the witness; `block_sha`, `block_b2s` and tree 0 generated on the device unless `--host-witness`), twiddles. With `--host-logup` also the CPU roots of trees 0–1 (compared with the CPU proof's), (z, α) and the interaction trace.
 3. The device proof (one transaction; device LogUp unless `--host-logup`).
 4. Structured diff in production order, naming the stage behind the first difference: claims, roots 0–3, sampled values (tree/column/sample), FRI roots, last layer, nonce, openings.
 5. Byte comparison, `verifyExt`, timings, and device counters (peak live bytes, H2D bytes, launches, AOT misses).
@@ -185,7 +217,7 @@ Big blocks use `--skip-cpu --cpu-sha <prefix> --cpu-len <bytes>`, or `--cpu-proo
 
 **Scripts (`scripts/pod/`, image `runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404`).**
 - `bootstrap.sh <commit>` (or `--tarball f`): installs the apt tools, Zig 0.15.2 (checksummed), source and submodule, then builds.
-- `run.sh`: block 0 test uniform → tiered → production uniform → tiered, then 400000 tiered production against `cbcf7026134f9a71` / 1,131,354 B.
+- `run.sh`: block 0 test uniform → tiered → production uniform → tiered, then 400000 tiered production against `cbcf7026134f9a71` / 1,131,354 B. Single steps: `large-prod-tiered-hostlogup`, `large-prod-tiered-hostwitness`, `xl-970347`, `xl-970347-hostwitness`, `xl-774628`; `EXTRA=--host-witness` (or `--host-logup`) applies to any step.
   - Logs and `nvidia-smi` memory samples go to `/workspace/logs`.
 - `diag.sh`: device facts and a pass-1-only run.
 - `CUDA_ARCH=sm_89` (etc.) builds one target only, which is faster.
@@ -263,6 +295,8 @@ The witness is now the largest step. It is 4× slower on this pod than on the M4
 - **Our Metal backend already covers local device checks.** Step 2 runs whole proofs on the Apple GPU, byte-identical to CPU. A CuMetal run would add a check of the CUDA sources only.
 
 ## Risks and open items
+
+- **Device witness, unverified on a device:** nvcc on the four generators, their AOT bind under `native_indexed_recurrence_trace_v1`, local-memory arrays in `b2s` (σ-indexed message words, G-step state) and `sha_words` (message schedule ring), the 64-bit pointer-table loads, and the scratch slot's placement. Host-checked bit for bit against the CPU generators and over the whole stage (§ Device witness). A difference would show up as a tree-0 or tree-1 root (`DIFF root of tree 0/1`).
 
 - **Fold step 1 is unqualified on CUDA**, and so is the packed-leaf FRI layout at fold 1 (`resident_decommit.zig` uses 4 rows per leaf). Only a device run settles it.
 - **Reorder kernel, unverified on a device:** nvcc on `starked_reorder_v1_*`, its AOT bind under `native_m31_permutation_trace_v3`, and kernel launches in `.trace_generation` (so far the runtime has run only copies there). Host-checked against `toStorage` and over the whole stage (§ Natural upload).

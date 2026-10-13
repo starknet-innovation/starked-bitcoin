@@ -10,6 +10,8 @@
 //!   source and target coincide). The staging slots die there.
 //! - New ingress slots: the statement words, the claimed sums (as mixed, and per component for
 //!   the composition), the lookup `z` and the powers `α⁰…α^w`.
+//! - Device witness (`witness.zig`): `witness_inputs` (ingress → `.trace_generation`) and the SHA
+//!   word trace `witness_scratch` (`.trace_generation`); the generators write the staging slots.
 //! - Slot ids are `kind · 2¹⁶ + ordinal` (the circuit's `· 256` cannot hold our column counts).
 
 const std = @import("std");
