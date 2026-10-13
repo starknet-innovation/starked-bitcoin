@@ -9,7 +9,8 @@
 //! Steps, each printed with its time:
 //!  1. build the block's witness (`block.system.buildFull`);
 //!  2. CPU proof (`system.proveOpts`, compact storage) unless `--skip-cpu` / `--cpu-proof`;
-//!  3. host: plans, the preprocessed and main trees in storage order, twiddles; with
+//!  3. host: plans, the preprocessed trees (generated) and the main ones (the witness, borrowed) in
+//!     natural row order (the device reorders them), twiddles; with
 //!     `--host-logup` (the first version, for A/B) also the trace roots (CPU commit of trees 0–1),
 //!     (z, α) and the interaction trace;
 //!  4. the device proof (one transaction; LogUp on the device unless `--host-logup`);
@@ -245,6 +246,9 @@ pub fn main() !void {
         });
         lap("plans");
         var host = try prover.hostTraceTrees(a, in);
+        std.debug.print("  host trees (natural order): preprocessed {d:.2} GiB generated, main {d:.2} GiB borrowed from the witness\n", .{
+            @as(f64, @floatFromInt(host.bytes(0))) / (1 << 30), @as(f64, @floatFromInt(host.bytes(1))) / (1 << 30),
+        });
         lap("host trace trees");
         var twiddles = try prover.Twiddles.init(a, prepared.plans.twiddle_words);
         lap("twiddles");

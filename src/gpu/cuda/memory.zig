@@ -4,9 +4,10 @@
 //!
 //! Differences from the circuit:
 //! - No circuit witness (`values`), interaction producers or circuit hash. Trace columns are
-//!   uploaded at ingress straight into each tree's coefficient buffer, where the commitment
-//!   interpolates them in place (`resident_commit.loadEvaluations` skips the copy when source and
-//!   target coincide): no separate source copy of the 1,879 trace columns.
+//!   uploaded at ingress into a staging slot per tree and moved (trees 0–1: reordered natural →
+//!   storage, `reorder.zig`) into each tree's coefficient buffer in `.trace_generation`, where the
+//!   commitment interpolates them in place (`resident_commit.loadEvaluations` skips the copy when
+//!   source and target coincide). The staging slots die there.
 //! - New ingress slots: the statement words, the claimed sums (as mixed, and per component for
 //!   the composition), the lookup `z` and the powers `α⁰…α^w`.
 //! - Slot ids are `kind · 2¹⁶ + ordinal` (the circuit's `· 256` cannot hold our column counts).
@@ -234,8 +235,9 @@ const Builder = struct {
             return error.InvalidResidentGeometry;
         for (input.commitments, 0..) |plan, tree| {
             const r = plan.requirements;
-            // Trees 0–2: evaluations are uploaded to a staging slot at ingress and gathered into
-            // the coefficient buffer in `.trace_generation` (pipeline.zig); the staging slot dies
+            // Trees 0–2: evaluations are uploaded to a staging slot at ingress and moved into the
+            // coefficient buffer in `.trace_generation` (`pipeline.assembleTrace`: trees 0–1
+            // reordered natural → storage, a host-LogUp tree 2 copied); the staging slot dies
             // there, so the arena reuses it. The composition tree is written by the evaluator;
             // with device LogUp, tree 2 is written in `.trace_commit` (no staging).
             if (tree < 2 or (tree == 2 and input.logup == null)) try self.add(.trace_staging, tree, r.coefficient_words, 64, .ingress, .trace_generation);

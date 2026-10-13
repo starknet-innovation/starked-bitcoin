@@ -51,7 +51,7 @@ test "cuda resident arena: real block sizes plan and bind (uniform and tiered, L
         const lv = views.logup.?;
         var bound = try logup.Bound.init(a, plan, .{
             .sources = lv.sources,
-            .staging = .{ views.columns[0], views.columns[1] },
+            .trace = .{ views.coefficient_columns[0], views.coefficient_columns[1] },
             .outputs = views.coefficient_columns[2],
             .denominators = lv.denominators,
             .tables = lv.tables,

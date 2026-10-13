@@ -18,10 +18,10 @@
 //! map of `system.fractions`. A lookup read at offset `o` reads storage row
 //! `bitrev(circle((i + o) mod n))`.
 //!
-//! Sources. The lookups read 551 of the 1,435 preprocessed and main columns. They are copied from
-//! the ingress staging slots into one compact slot (`logup_sources`) in `.trace_generation`, per
-//! component in kernel order (`sources`), because the commitment interpolates trees 0–1 in place
-//! before the draw. The denominator slab (tree-2 sized) lives in tree 2's evaluation buffer, which
+//! Sources. The lookups read 551 of the 1,435 preprocessed and main columns. They are copied into
+//! one compact slot (`logup_sources`) in `.trace_generation`, per component in kernel order
+//! (`sources`), from the trees' coefficient buffers right after the natural → storage reorder
+//! (`reorder.zig`), because the commitment interpolates trees 0–1 in place before the draw. The denominator slab (tree-2 sized) lives in tree 2's evaluation buffer, which
 //! is unused until tree 2 is committed right after the completion.
 //!
 //! The kernels are AOT products (`gpu/cuda_aot/witness_starked_logup_*.cu`): stwo-zig's
@@ -497,8 +497,9 @@ pub const Plan = struct {
 pub const Buffers = struct {
     /// `logup_sources` (compact lookup sources).
     sources: common.Words,
-    /// Trees 0–1: each column's staging view (`memory.Views.columns`).
-    staging: [2][]const common.Words,
+    /// Trees 0–1: each column's coefficient view (`memory.Views.coefficient_columns`), which
+    /// holds the storage-order evaluations after the reorder of `.trace_generation`.
+    trace: [2][]const common.Words,
     /// Tree 2: each column's coefficient view (the commitment interpolates them in place).
     outputs: []const common.Words,
     /// The denominator slab (inside tree 2's evaluation buffer).
@@ -526,7 +527,7 @@ pub const Buffers = struct {
             self.tables.address % @alignOf(usize) != 0)
             return error.InvalidLogupBuffers;
         for (plan.instances) |x| {
-            for (x.columns) |c| if (c.column >= self.staging[c.tree].len or self.staging[c.tree][c.column].len != x.rows) return error.InvalidLogupBuffers;
+            for (x.columns) |c| if (c.column >= self.trace[c.tree].len or self.trace[c.tree][c.column].len != x.rows) return error.InvalidLogupBuffers;
             for (self.outputs[x.output_first..][0 .. 4 * x.batches]) |o| if (o.len != x.rows) return error.InvalidLogupBuffers;
             if (x.component >= self.claims_component.len or x.pub_offset + x.n_pub > self.statement.len) return error.InvalidLogupBuffers;
         }
@@ -624,18 +625,19 @@ pub const Bound = struct {
         });
     }
 
-    /// `.trace_generation`: the lookups' columns, from the staging slots into `logup_sources`
-    /// (runs of adjacent columns in one copy).
+    /// `.trace_generation`, after the reorder (`pipeline.assembleTrace`): the lookups' columns,
+    /// from the trees' coefficient buffers into `logup_sources` (runs of adjacent columns in one
+    /// copy).
     pub fn gather(self: *const Bound, session: anytype) !void {
         const b = self.buffers;
         for (self.plan.instances) |x| {
             var k: usize = 0;
             while (k < x.columns.len) {
-                const first = b.staging[x.columns[k].tree][x.columns[k].column];
+                const first = b.trace[x.columns[k].tree][x.columns[k].column];
                 var run: usize = 1;
                 while (k + run < x.columns.len) : (run += 1) {
                     const c = x.columns[k + run];
-                    const next = b.staging[c.tree][c.column];
+                    const next = b.trace[c.tree][c.column];
                     if (next.address != first.address + run * x.rows * 4) break;
                 }
                 const src = common.Words{ .address = first.address, .len = run * x.rows, .owner = first.owner, .generation = first.generation };

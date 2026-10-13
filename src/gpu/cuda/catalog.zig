@@ -9,7 +9,8 @@
 //! `identity_scheme`), so an AIR change selects new code and an unchanged AIR keeps its kernel.
 //!
 //! Each AIR with lookups also has a LogUp fraction kernel (`logup.zig`), a `witness` entry under
-//! stwo-zig's native-authenticated identity.
+//! stwo-zig's native-authenticated identity, and the system one natural → storage reorder kernel
+//! (`reorder.zig`, the last `witness` entry).
 //!
 //! `gpu/cuda_aot/` holds the generated sources, an `aot_manifest.json` that stwo-zig's CUDA build
 //! admits (the `circuit_eval` set of our local AOT root, see build.zig `cuda-archive`) and
@@ -25,6 +26,7 @@ const ir = sb.air.ir;
 const stwzeva = sb.air.stwzeva;
 const M31 = @import("stwo_core").fields.m31.M31;
 const logup = @import("logup.zig");
+const reorder = @import("reorder.zig");
 
 /// Where the generated catalog lives, relative to the repository root.
 pub const directory = "gpu/cuda_aot";
@@ -106,6 +108,8 @@ pub const Catalog = struct {
     allocator: std.mem.Allocator,
     bodies: []Body,
     logup: []?logup.Kernel = &.{},
+    /// The trace reorder (null only in tests that build a catalog by hand).
+    reorder: ?reorder.Kernel = null,
 
     pub fn init(allocator: std.mem.Allocator, airs: []const ir.Air) !Catalog {
         const bodies = try allocator.alloc(Body, airs.len);
@@ -136,7 +140,11 @@ pub const Catalog = struct {
                 if (a.cache_key == b.cache_key or std.mem.eql(u8, a.kernel_name, b.kernel_name)) return error.CudaCatalogCollision;
             };
         };
-        return .{ .allocator = allocator, .bodies = bodies, .logup = kernels };
+        var permute = try reorder.kernel(allocator);
+        errdefer permute.deinit(allocator);
+        for (bodies) |b| if (b.cache_key == permute.cache_key) return error.CudaCatalogCollision;
+        for (kernels) |k| if (k) |x| if (x.cache_key == permute.cache_key) return error.CudaCatalogCollision;
+        return .{ .allocator = allocator, .bodies = bodies, .logup = kernels, .reorder = permute };
     }
 
     pub fn deinit(self: *Catalog) void {
@@ -144,6 +152,7 @@ pub const Catalog = struct {
         self.allocator.free(self.bodies);
         for (self.logup) |*k| if (k.*) |*x| x.deinit(self.allocator);
         self.allocator.free(self.logup);
+        if (self.reorder) |*r| r.deinit(self.allocator);
         self.* = undefined;
     }
 
@@ -216,7 +225,7 @@ pub const Catalog = struct {
                 identity_scheme,
                 i,
                 &source_sha,
-                if (n + 1 == self.bodies.len and self.logupCount() == 0) "" else ",",
+                if (n + 1 == self.bodies.len and self.logupCount() == 0 and self.reorder == null) "" else ",",
             });
         }
         // LogUp fraction kernels (`kind: witness` sorts after every constraint): stwo-zig's
@@ -266,8 +275,31 @@ pub const Catalog = struct {
                 file,
                 logup.identity_scheme,
                 k.semantic_contract,
-                if (n + 1 == lorder.len) "" else ",",
+                if (n + 1 == lorder.len and self.reorder == null) "" else ",",
             });
+        }
+        // The reorder kernel: label `starked_reorder_*` sorts after every `starked_logup_*`.
+        if (self.reorder) |r| {
+            const file = try r.fileName(allocator);
+            defer allocator.free(file);
+            const label = try r.label(allocator);
+            defer allocator.free(label);
+            try w.print(
+                \\  {{
+                \\    "kind": "witness",
+                \\    "label": "{s}",
+                \\    "abi_schema": "{s}",
+                \\    "kernel_name": "{s}",
+                \\    "cache_key": "{x:0>16}",
+                \\    "semantic_hash": "{x:0>16}",
+                \\    "program_identity": "{x}",
+                \\    "file": "{s}",
+                \\    "module_globals": "none",
+                \\    "identity_scheme": "{s}",
+                \\    "semantic_contract": "{s}"
+                \\  }}
+                \\
+            , .{ label, reorder.abi_schema_name, r.kernel_name, r.cache_key, r.semantic_hash, &r.program_identity, file, reorder.identity_scheme, reorder.semantic_contract });
         }
         try w.writeAll("]\n");
         return out.toOwnedSlice();
@@ -353,9 +385,10 @@ test "cuda catalog: generated sources and manifest match gpu/cuda_aot (drift che
         defer dir.close();
         for (catalog.bodies) |b| try dir.writeFile(.{ .sub_path = try b.fileName(a), .data = b.source });
         for (catalog.logup) |k| if (k) |x| try dir.writeFile(.{ .sub_path = try x.fileName(a), .data = x.source });
+        if (catalog.reorder) |r| try dir.writeFile(.{ .sub_path = try r.fileName(a), .data = r.source });
         try dir.writeFile(.{ .sub_path = "aot_manifest.json", .data = manifest });
         try dir.writeFile(.{ .sub_path = "catalog.json", .data = try catalog.sidecar(a) });
-        std.debug.print("cuda catalog: wrote {d} constraint and {d} LogUp kernels to {s}\n", .{ catalog.bodies.len, catalog.logupCount(), directory });
+        std.debug.print("cuda catalog: wrote {d} constraint, {d} LogUp and {d} reorder kernels to {s}\n", .{ catalog.bodies.len, catalog.logupCount(), @intFromBool(catalog.reorder != null), directory });
         return;
     }
     var dir = std.fs.cwd().openDir(directory, .{ .iterate = true }) catch |e| {
@@ -380,6 +413,11 @@ test "cuda catalog: generated sources and manifest match gpu/cuda_aot (drift che
         try std.testing.expect(std.mem.eql(u8, on_disk, x.source));
         total += x.source.len;
     };
+    if (catalog.reorder) |r| {
+        const name = try r.fileName(a);
+        try expected.put(name, {});
+        try std.testing.expect(std.mem.eql(u8, try dir.readFileAlloc(a, name, 1 << 20), r.source));
+    }
     // No stale kernels.
     var it = dir.iterate();
     while (try it.next()) |entry| {
@@ -389,7 +427,7 @@ test "cuda catalog: generated sources and manifest match gpu/cuda_aot (drift che
             return error.CudaCatalogDrift;
         }
     }
-    std.debug.print("cuda catalog: {d} constraint and {d} LogUp kernels ({d} KiB of CUDA) match {s}\n", .{ catalog.bodies.len, catalog.logupCount(), total / 1024, directory });
+    std.debug.print("cuda catalog: {d} constraint, {d} LogUp and {d} reorder kernels ({d} KiB of CUDA) match {s}\n", .{ catalog.bodies.len, catalog.logupCount(), @intFromBool(catalog.reorder != null), total / 1024, directory });
 }
 
 // The catalog's own kernels (parametric, wide trace offsets, constants from the live program)

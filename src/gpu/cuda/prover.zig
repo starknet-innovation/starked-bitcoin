@@ -1,9 +1,10 @@
 //! The resident CUDA block-system prover: same transcript and proof bytes as `system.proveOpts`
 //! (src/air/system.zig), adapted from `circuit_cuda/resident_prover.zig`.
 //!
-//! One device transaction (`proofPass`; docs/design/gpu-cuda.md § Device LogUp): ingress uploads the
-//! preprocessed and main trees as evaluations (into staging slots) and the statement; the schedule
-//! (`pipeline.zig`) assembles them (`.trace_generation`), commits, draws (z, α), builds the
+//! One device transaction (`proofPass`; docs/design/gpu-cuda.md § Device LogUp, § Natural upload):
+//! ingress uploads the preprocessed and main trees as natural-order evaluations (the host's own
+//! column slices, into staging slots) and the statement; the schedule (`pipeline.zig`) reorders
+//! them into storage order on the device (`.trace_generation`, `reorder.zig`), commits, draws (z, α), builds the
 //! interaction tree and claimed sums on the device (`logup.zig`), commits it and runs the STARK
 //! tail; the terminal bundle decodes to `system.Proof`. The caller verifies the result
 //! (`system.verifyExt`).
@@ -158,35 +159,47 @@ pub const Prepared = struct {
     }
 };
 
-/// Storage-order evaluations of every trace column, by tree (host memory).
+/// Every uploaded trace column, by tree (host memory). Trees 0–1 are in natural (coset) row order:
+/// the device reorders them (`reorder.zig`). Tree 2 (host LogUp only) is in storage order
+/// (`system.interactionTrace`). Tree 1 borrows the witness columns (`Input.mains`): no copy.
 pub const HostTrees = struct {
     trees: [3][]ColumnEvaluation = .{ &.{}, &.{}, &.{} },
+    /// Whether `trees[t]`'s values are owned (freed by `deinit`); the descriptors always are.
+    owned: [3]bool = .{ true, false, true },
 
     pub fn deinit(self: *HostTrees, allocator: std.mem.Allocator) void {
-        for (self.trees) |t| {
-            for (t) |c| allocator.free(c.values);
+        for (self.trees, self.owned) |t, owned| {
+            if (owned) for (t) |c| allocator.free(c.values);
             allocator.free(t);
         }
     }
+
+    /// Bytes of host column data per tree (owned or borrowed).
+    pub fn bytes(self: *const HostTrees, tree: usize) usize {
+        var n: usize = 0;
+        for (self.trees[tree]) |c| n += c.values.len * @sizeOf(M31);
+        return n;
+    }
 };
 
-/// Bit-reversed evaluations of the preprocessed and main trees.
+/// The preprocessed (generated, natural order) and main (the witness itself) trees.
 pub fn hostTraceTrees(allocator: std.mem.Allocator, input: Input) !HostTrees {
     var out = HostTrees{};
     errdefer out.deinit(allocator);
-    out.trees[0] = try system.preprocessedColumns(allocator, input.parts);
-    var main = std.ArrayList(ColumnEvaluation).empty;
-    errdefer {
-        for (main.items) |c| allocator.free(c.values);
-        main.deinit(allocator);
-    }
+    out.trees[0] = try system.preprocessedNatural(allocator, input.parts);
+    var n_main: usize = 0;
     for (input.parts, input.mains) |p, m| {
         if (m.len != p.air.n_main) return error.InvalidPreparedGeometry;
-        const st = try sb.air.prove.toStorage(allocator, p.log_size, m);
-        defer allocator.free(st);
-        try main.appendSlice(allocator, st);
+        n_main += m.len;
     }
-    out.trees[1] = try main.toOwnedSlice(allocator);
+    const main = try allocator.alloc(ColumnEvaluation, n_main);
+    out.trees[1] = main;
+    var k: usize = 0;
+    for (input.parts, input.mains) |p, m| for (m) |col| {
+        if (col.len != @as(usize, 1) << @intCast(p.log_size)) return error.InvalidPreparedGeometry;
+        main[k] = .{ .log_size = p.log_size, .values = col };
+        k += 1;
+    };
     return out;
 }
 
@@ -323,7 +336,7 @@ pub fn proofPass(
         const lv = views.logup orelse return error.InvalidResidentInput;
         logup_bound = try logup.Bound.init(allocator, plan, .{
             .sources = lv.sources,
-            .staging = .{ views.columns[0], views.columns[1] },
+            .trace = .{ views.coefficient_columns[0], views.coefficient_columns[1] },
             .outputs = views.coefficient_columns[2],
             .denominators = lv.denominators,
             .tables = lv.tables,
@@ -366,6 +379,7 @@ pub fn proofPass(
         .decommit_view = views.decommit,
         .proof = views.proof,
         .twiddles_inverse = views.twiddles_inverse,
+        .reorder = if (input.catalog.reorder) |*r| r else return error.CudaCatalogPlacementMismatch,
     };
     try schedule.execute(input.config);
     const transport = try allocator.alloc(u32, prepared.terminal_bundle.total_words);
