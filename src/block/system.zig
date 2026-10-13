@@ -111,6 +111,11 @@ pub const Built = struct {
     /// M3b: the block's partial LogUp sum and its non-coinbase input count.
     coin_sum: @import("stwo_core").fields.qm31.QM31 = @import("stwo_core").fields.qm31.QM31.zero(),
     nin: u32 = 0,
+    /// The `block_sha` inputs (compressions and final per-period `Meta`, after the digest
+    /// multiplicities) and the in-circuit undo stream (`block_b2s`'s message): what a device witness
+    /// generator needs (src/gpu/cuda/witness.zig).
+    sha_plan: bsha.Plan = .{ .compressions = &.{}, .meta = &.{}, .digests = &.{} },
+    undo: []const u8 = &.{},
 };
 
 /// M3b options: the epoch's challenge and the spent coins' creating transaction indices.
@@ -125,6 +130,9 @@ pub const Opts = struct {
     /// when the uniform size is at least 2^TIERED_MIN_L (with its fallback), `uniform` below.
     /// Overrides `profile`.
     auto: bool = false,
+    /// Leave `mains[C.sha]` and `mains[C.b2s]` empty: a device generates them from `Built.sha_plan`
+    /// and `Built.undo` (src/gpu/cuda/witness.zig). Everything else is unchanged.
+    skip_device_columns: bool = false,
 };
 
 pub fn parseAirs(a: std.mem.Allocator) ![N_COMP]ir.Air {
@@ -298,7 +306,7 @@ pub fn buildFull(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctx
     const mm = try msg.generate(a, logs[C.msg], raw, msgs, &reads);
     msg.setUses(mm);
     merkle.addHeaderUses(mm);
-    const sm = try bsha.generate(a, logs[C.sha], pl);
+    const sm: [][]M31 = if (opts.skip_device_columns) &.{} else try bsha.generate(a, logs[C.sha], pl);
     const km = try merkle.generate(a, logs[C.merkle], ntx, nodes, root);
     const wm = try wmerkle.generate(a, logs[C.wmerkle], ntx, wnodes, cx.hc);
     try reads.appendSlice(a, try fields.reads(a, rows));
@@ -312,7 +320,7 @@ pub fn buildFull(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctx
     try undo_reads.appendSlice(a, urec_reads.items);
     const b2m = try commit.msgColumns(a, logs[C.b2msg], undo, &undo_reads);
     const um = try commit.undoColumns(a, logs[C.undo], undo, undo_reads.items);
-    const b2sm = try commit.b2sColumns(a, logs[C.b2s], undo);
+    const b2sm: [][]M31 = if (opts.skip_device_columns) &.{} else try commit.b2sColumns(a, logs[C.b2s], undo);
     const bm = try bytes.generate(a, logs[C.bytes], raw, reads.items);
     var ranges = std.ArrayList(u32).empty;
     try ranges.appendSlice(a, chk.ranges);
@@ -343,6 +351,8 @@ pub fn buildFull(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctx
         .reads = reads.items,
         .coin_sum = co.sum,
         .nin = co.nin,
+        .sha_plan = pl,
+        .undo = undo,
     };
 }
 

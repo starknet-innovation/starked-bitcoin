@@ -39,7 +39,7 @@ pub fn blocks(a: std.mem.Allocator, data: []const u8) ![]Block {
 }
 
 /// The chaining values after each block (index `i`: after block `i`).
-fn chain(a: std.mem.Allocator, bs: []const Block) ![][8]u32 {
+pub fn chain(a: std.mem.Allocator, bs: []const Block) ![][8]u32 {
     const hs = try a.alloc([8]u32, bs.len);
     var h = H0;
     for (bs, 0..) |b, i| {
