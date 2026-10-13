@@ -1,19 +1,18 @@
 //! `cuda-prove`: one block proof on the resident CUDA prover, checked against the CPU prover.
 //!
 //!   zig-out/bin/cuda-prove [--small i | --large height] [--profile test|production]
-//!                          [--size uniform|tiered] [--min-log k] [--pass1-only]
+//!                          [--size uniform|tiered] [--min-log k]
 //!                          [--skip-cpu] [--cpu-sha hexprefix] [--cpu-len bytes]
 //!                          [--cpu-proof file] [--save-cpu file] [--save-device file] [--mock]
 //!
 //! Steps, each printed with its time:
 //!  1. build the block's witness (`block.system.buildFull`);
 //!  2. CPU proof (`system.proveOpts`, compact storage) unless `--skip-cpu` / `--cpu-proof`;
-//!  3. device pass 1: preprocessed and main roots, compared with the CPU proof's (first differing
-//!     word printed);
-//!  4. host: (z, α) from the roots, interaction trace;
-//!  5. device pass 2: the whole proof; then a structured comparison with the CPU proof in stage
-//!     order (claims, roots 0–3, sampled values, FRI roots, last layer, nonce, openings): the first
-//!     difference names the stage that produced it;
+//!  3. host: trace roots (CPU commit of trees 0–1), (z, α), interaction trace;
+//!  4. the device proof (one transaction);
+//!  5. a structured comparison with the CPU proof in stage order (claims, roots 0–3, sampled
+//!     values, FRI roots, last layer, nonce, openings): the first difference names the stage
+//!     that produced it;
 //!  6. byte comparison (sha256, length; first differing offset), `system.verifyExt`.
 //! `--mock` replaces the device with a second CPU proof (default storage): it exercises everything
 //! but the GPU, on any host. Exit status 0 only if every check passes.
@@ -36,7 +35,6 @@ const Opts = struct {
     production: bool = false,
     tiered: bool = false,
     min_log: u32 = 0,
-    pass1_only: bool = false,
     skip_cpu: bool = false,
     cpu_sha: ?[]const u8 = null,
     cpu_len: ?usize = null,
@@ -66,7 +64,7 @@ fn parse(args: []const []const u8) !Opts {
             const v = try next(args, &i);
             o.tiered = std.mem.eql(u8, v, "tiered");
             if (!o.tiered and !std.mem.eql(u8, v, "uniform")) return error.BadSize;
-        } else if (std.mem.eql(u8, a, "--min-log")) o.min_log = try std.fmt.parseInt(u32, try next(args, &i), 10) else if (std.mem.eql(u8, a, "--pass1-only")) o.pass1_only = true else if (std.mem.eql(u8, a, "--skip-cpu")) o.skip_cpu = true else if (std.mem.eql(u8, a, "--cpu-sha")) o.cpu_sha = try next(args, &i) else if (std.mem.eql(u8, a, "--cpu-len")) o.cpu_len = try std.fmt.parseInt(usize, try next(args, &i), 10) else if (std.mem.eql(u8, a, "--cpu-proof")) o.cpu_proof = try next(args, &i) else if (std.mem.eql(u8, a, "--save-cpu")) o.save_cpu = try next(args, &i) else if (std.mem.eql(u8, a, "--save-device")) o.save_device = try next(args, &i) else if (std.mem.eql(u8, a, "--mock")) o.mock = true else {
+        } else if (std.mem.eql(u8, a, "--min-log")) o.min_log = try std.fmt.parseInt(u32, try next(args, &i), 10) else if (std.mem.eql(u8, a, "--skip-cpu")) o.skip_cpu = true else if (std.mem.eql(u8, a, "--cpu-sha")) o.cpu_sha = try next(args, &i) else if (std.mem.eql(u8, a, "--cpu-len")) o.cpu_len = try std.fmt.parseInt(usize, try next(args, &i), 10) else if (std.mem.eql(u8, a, "--cpu-proof")) o.cpu_proof = try next(args, &i) else if (std.mem.eql(u8, a, "--save-cpu")) o.save_cpu = try next(args, &i) else if (std.mem.eql(u8, a, "--save-device")) o.save_device = try next(args, &i) else if (std.mem.eql(u8, a, "--mock")) o.mock = true else {
             std.debug.print("unknown argument {s}\n", .{a});
             return error.BadArgument;
         }
@@ -238,37 +236,26 @@ pub fn main() !void {
         lap("mock device proof");
     } else {
         var prepared = try prover.Prepared.init(a, parts, &catalog, cfg);
-        std.debug.print("  planned arena {d:.2} GiB (pass 1: {d:.2} GiB), geometry {x}\n", .{
-            @as(f64, @floatFromInt(try prepared.memory.bytes())) / (1 << 30), @as(f64, @floatFromInt(prepared.roots_memory.bytes())) / (1 << 30), prepared.plans.geometry.identity[0..8],
+        std.debug.print("  planned arena {d:.2} GiB, geometry {x}\n", .{
+            @as(f64, @floatFromInt(try prepared.memory.bytes())) / (1 << 30), prepared.plans.geometry.identity[0..8],
         });
         var host = try prover.hostTraceTrees(a, in);
         var twiddles = try prover.Twiddles.init(a, prepared.plans.twiddle_words);
         lap("plans, host trace trees, twiddles");
-        const roots = try prover.rootsPass(a, &prepared, &host, &twiddles);
-        lap("device pass 1 (preprocessed + main roots)");
-        if (cpu_proof) |cp| {
-            for (roots, 0..) |r, t| {
-                const want = cp.stark.commitment_scheme_proof.commitments.items[t];
-                const rb = std.mem.asBytes(&r);
-                const wb = std.mem.asBytes(&want);
-                for (0..8) |i| {
-                    const x = std.mem.readInt(u32, rb[4 * i ..][0..4], .little);
-                    const y = std.mem.readInt(u32, wb[4 * i ..][0..4], .little);
-                    if (x == y) continue;
-                    std.debug.print("ROOT MISMATCH tree {d} word {d}: device {x:0>8} CPU {x:0>8} ({s})\n", .{ t, i, x, y, if (t == 0) "preprocessed upload/LDE/Merkle" else "main upload/LDE/Merkle" });
-                    failed = true;
-                    break;
-                }
+        const roots = try system.traceRoots(a, cfg, parts, &mains);
+        lap("host trace roots (CPU commit of trees 0-1)");
+        if (cpu_proof) |cp| for (roots, 0..) |r, t| {
+            if (!std.mem.eql(u8, std.mem.asBytes(&r), std.mem.asBytes(&cp.stark.commitment_scheme_proof.commitments.items[t]))) {
+                std.debug.print("HOST ROOT MISMATCH tree {d} (system.traceRoots vs proveOpts)\n", .{t});
+                return error.HostRootMismatch;
             }
-            if (!failed) std.debug.print("  pass 1 roots = CPU roots\n", .{});
-        }
-        if (opts.pass1_only or failed) return if (failed) error.Pass1Mismatch else {};
+        };
         const el = try prover.lookupElements(&prepared, cfg, roots);
         const inter = try system.interactionTrace(a, parts, &mains, el);
         host.trees[2] = inter.columns;
         lap("host (z, alpha) and interaction trace");
         const result = try prover.proofPass(a, &prepared, &host, &twiddles, in, el, inter.sums);
-        lap("device pass 2 (whole proof)");
+        lap("device proof");
         const k = result.verdict.counters;
         std.debug.print("  device: peak live {d:.2} GiB, h2d {d:.2} GiB, {d} kernel launches, AOT misses {d}\n", .{
             @as(f64, @floatFromInt(k.peak_live_bytes)) / (1 << 30), @as(f64, @floatFromInt(k.h2d_bytes)) / (1 << 30), k.kernel_launches, result.verdict.aot.aot_misses,

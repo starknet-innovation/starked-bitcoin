@@ -275,8 +275,12 @@ pub const Plans = struct {
         var commits: [4]cc.resident_commit.Plan = undefined;
         var n_commits: usize = 0;
         errdefer for (commits[0..n_commits]) |*c| c.deinit();
-        for (geo.trees, &commits) |t, *c| {
+        for (geo.trees, &commits, 0..) |t, *c, tree| {
             c.* = try cc.resident_commit.Plan.init(allocator, t, blowup);
+            // Trees 0–2 are interpolated in place in `.trace_generation` (pipeline.zig): the
+            // runtime requires kernel work in every stage, and the circuit's witness kernels that
+            // fill that stage are not ours. The commit then starts from coefficients.
+            if (tree < 3) c.input_form = .coefficients;
             n_commits += 1;
         }
         var oods = try masks.oodsPlan(allocator, &b, &geo, blowup);

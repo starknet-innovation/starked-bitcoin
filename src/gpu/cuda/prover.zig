@@ -1,15 +1,15 @@
 //! The resident CUDA block-system prover: same transcript and proof bytes as `system.proveOpts`
 //! (src/air/system.zig), adapted from `circuit_cuda/resident_prover.zig`.
 //!
-//! First version, two transactions (docs/design/gpu-cuda.md § Witness and interaction):
-//! 1. `rootsPass`: upload the preprocessed and main evaluations, commit both trees on the device,
-//!    read the two roots (the transaction's one proof read).
-//! 2. Host: replay the prefix to (z, α) (`transcript.HostSink`), build the interaction columns
-//!    and claimed sums (`system.interactionTrace`).
-//! 3. `proofPass`: a whole resident proof. Ingress uploads all three trace trees (in place, into
-//!    their coefficient buffers), the statement, claims, z and α⁰…α^w; the schedule
-//!    (`pipeline.zig`) recommits, draws (z, α) itself and runs the STARK tail; the terminal
-//!    bundle decodes to `system.Proof`.
+//! First version (docs/design/gpu-cuda.md § Witness and interaction):
+//! 1. Host: the preprocessed and main roots (`system.traceRoots`, CPU), the prefix replay to (z, α)
+//!    (`transcript.HostSink`), the interaction columns and claimed sums (`system.interactionTrace`).
+//! 2. Device, one transaction (`proofPass`): ingress uploads all three trace trees as evaluations
+//!    (in place, into their coefficient buffers), the statement, claims, z and α⁰…α^w; the schedule
+//!    (`pipeline.zig`) interpolates them (`.trace_generation`), commits, draws (z, α) itself and
+//!    runs the STARK tail; the terminal bundle decodes to `system.Proof`.
+//! The runtime runs every stage in order with kernel work in each, so a roots-only device
+//! transaction is not possible; device LogUp will remove the host commit.
 //! The caller verifies the result (`system.verifyExt`); the roots of pass 1 must equal pass 2's.
 
 const std = @import("std");
@@ -80,7 +80,6 @@ pub const Prepared = struct {
     terminal_decommit: terminal.Decommit,
     terminal_bundle: terminal.Bundle,
     memory: memory.Plan,
-    roots_memory: RootsPlan,
     claims_mixed: usize,
     alpha_powers: usize,
 
@@ -112,7 +111,6 @@ pub const Prepared = struct {
             .terminal = &bundle,
         });
         errdefer mem.deinit();
-        const roots = try RootsPlan.init(allocator, &plans.commits, plans.twiddle_words);
         return .{
             .allocator = allocator,
             .plans = plans,
@@ -121,57 +119,17 @@ pub const Prepared = struct {
             .terminal_decommit = decommit,
             .terminal_bundle = bundle,
             .memory = mem,
-            .roots_memory = roots,
             .claims_mixed = claims,
             .alpha_powers = alpha_powers,
         };
     }
 
     pub fn deinit(self: *Prepared) void {
-        self.roots_memory.deinit();
         self.memory.deinit();
         self.terminal_bundle.deinit(self.allocator);
         self.statement.deinit(self.allocator);
         self.plans.deinit();
         self.* = undefined;
-    }
-};
-
-/// The arena of pass 1: trees 0–1 (in-place sources, coefficients, evaluations, Merkle), twiddles
-/// and the 16-word root output.
-pub const RootsPlan = struct {
-    allocator: std.mem.Allocator,
-    placement: arena.Plan,
-
-    pub const output_id: u32 = 0xffff_0000;
-    fn id(tree: usize, part: u32) u32 {
-        return @as(u32, @intCast(tree)) << 8 | part;
-    }
-
-    pub fn init(allocator: std.mem.Allocator, commits: *const [4]cc.resident_commit.Plan, twiddle_words: usize) !RootsPlan {
-        var reqs = std.ArrayList(arena.Requirement).empty;
-        defer reqs.deinit(allocator);
-        for (commits[0..2], 0..) |plan, tree| {
-            const r = plan.requirements;
-            try reqs.append(allocator, .{ .id = id(tree, 0), .words = r.coefficient_words, .alignment_words = 64, .live_from = .ingress, .live_through = .trace_commit });
-            try reqs.append(allocator, .{ .id = id(tree, 1), .words = r.evaluation_words, .alignment_words = 64, .live_from = .trace_commit, .live_through = .trace_commit });
-            try reqs.append(allocator, .{ .id = id(tree, 2), .words = r.column_log_words, .alignment_words = 1, .live_from = .ingress, .live_through = .trace_commit });
-            try reqs.append(allocator, .{ .id = id(tree, 3), .words = r.merkle_hashes * 8, .alignment_words = 64, .live_from = .trace_commit, .live_through = .trace_commit });
-            try reqs.append(allocator, .{ .id = id(tree, 4), .words = r.merkle_layers * (@sizeOf(field.MerkleLayerDescriptor) / 4), .alignment_words = 2, .live_from = .ingress, .live_through = .trace_commit });
-        }
-        try reqs.append(allocator, .{ .id = id(2, 0), .words = twiddle_words, .alignment_words = 64, .live_from = .ingress, .live_through = .trace_commit });
-        try reqs.append(allocator, .{ .id = id(2, 1), .words = twiddle_words, .alignment_words = 64, .live_from = .ingress, .live_through = .trace_commit });
-        try reqs.append(allocator, .{ .id = output_id, .words = 16, .alignment_words = 4, .live_from = .ingress, .live_through = .proof_assembly });
-        return .{ .allocator = allocator, .placement = try arena.Plan.init(allocator, reqs.items) };
-    }
-
-    pub fn deinit(self: *RootsPlan) void {
-        self.placement.deinit(self.allocator);
-        self.* = undefined;
-    }
-
-    pub fn bytes(self: *const RootsPlan) usize {
-        return self.placement.total_words * 4;
     }
 };
 
@@ -216,22 +174,20 @@ pub fn prove(allocator: std.mem.Allocator, input: Input) !Result {
     var twiddles = try Twiddles.init(allocator, prepared.plans.twiddle_words);
     defer twiddles.deinit();
 
-    // Pass 1: the two roots.
-    const roots = try rootsPass(allocator, &prepared, &host, &twiddles);
-
-    // Host: (z, α), interaction columns, claims.
+    // Host: the trace roots, (z, α), interaction columns, claims.
+    const roots = try system.traceRoots(allocator, input.config, input.parts, input.mains);
     const el = try lookupElements(&prepared, input.config, roots);
     const inter = try system.interactionTrace(allocator, input.parts, input.mains, el);
     host.trees[2] = inter.columns;
     defer allocator.free(inter.sums);
 
-    // Pass 2: the proof.
+    // Device: the proof.
     var result = try proofPass(allocator, &prepared, &host, &twiddles, input, el, inter.sums);
     errdefer result.proof.stark.deinit(allocator);
     const proved = result.proof.stark.commitment_scheme_proof.commitments.items;
     if (!std.mem.eql(u8, std.mem.asBytes(&proved[0]), std.mem.asBytes(&roots[0])) or
         !std.mem.eql(u8, std.mem.asBytes(&proved[1]), std.mem.asBytes(&roots[1])))
-        return error.ResidentRootsDiverged;
+        return error.ResidentRootsDiverged; // device and host commits of trees 0–1 differ
     return result;
 }
 
@@ -246,54 +202,7 @@ pub fn lookupElements(prepared: *const Prepared, config: core.pcs.config_v2.PcsC
     return prefix.drawLookupElements();
 }
 
-/// Pass 1: commit the preprocessed and main trees on the device, read their roots.
-pub fn rootsPass(allocator: std.mem.Allocator, prepared: *const Prepared, host: *const HostTrees, twiddles: *const Twiddles) ![2]rec.Hasher.Hash {
-    var tx = try Transaction.openPrepared(allocator, &accepted_sms, try prepared.roots_memory.placement.clone(allocator));
-    var finished = false;
-    defer if (!finished) tx.abort() catch {};
-    const session = tx.proofSession();
-    const fwd = try tx.slot(RootsPlan.id(2, 0));
-    const inv = try tx.slot(RootsPlan.id(2, 1));
-    try session.context.uploadSlice(u32, fwd, twiddles.forwardWords());
-    try session.context.uploadSlice(u32, inv, twiddles.inverseWords());
-    var bounds: [2]cc.resident_commit.Bound = undefined;
-    var columns: [2][]common.Words = undefined;
-    var made: usize = 0;
-    defer for (columns[0..made]) |c| allocator.free(c);
-    for (prepared.plans.commits[0..2], &bounds, &columns, 0..) |*plan, *bound, *cols, tree| {
-        const buffers = cc.resident_commit.Buffers{
-            .coefficients = try tx.slot(RootsPlan.id(tree, 0)),
-            .evaluations = try tx.slot(RootsPlan.id(tree, 1)),
-            .column_logs = try tx.slot(RootsPlan.id(tree, 2)),
-            .merkle_hashes = try (try tx.slot(RootsPlan.id(tree, 3))).cast(field.Blake2sHash),
-            .merkle_layers = try (try tx.slot(RootsPlan.id(tree, 4))).cast(field.MerkleLayerDescriptor),
-            .forward_twiddles = fwd,
-            .inverse_twiddles = inv,
-        };
-        bound.* = try cc.resident_commit.Bound.init(plan, buffers);
-        try bound.prime(session);
-        cols.* = try inPlaceColumns(allocator, plan, buffers.coefficients);
-        made += 1;
-        try uploadTree(session, cols.*, host.trees[tree]);
-    }
-    try tx.finishIngress();
-    try tx.beginStage(.trace_commit);
-    const out = try tx.slot(RootsPlan.output_id);
-    for (&bounds, columns, 0..) |*bound, cols, tree| {
-        try bound.executeEvaluations(session, cols);
-        try session.context.copyDeviceSlice(u32, try out.sub(8 * tree, 8), try bound.root());
-    }
-    try tx.endStage(.trace_commit);
-    var words: [16]u32 = undefined;
-    const verdict = try tx.assembleAndFinish(&words, RootsPlan.output_id);
-    finished = true;
-    if (!verdict.isResident()) return error.NonresidentRootsPass;
-    var roots: [2]rec.Hasher.Hash = undefined;
-    for (&roots, 0..) |*r, i| @memcpy(std.mem.asBytes(r), std.mem.sliceAsBytes(words[8 * i ..][0..8]));
-    return roots;
-}
-
-/// Pass 2: the resident proof.
+/// The resident proof (one device transaction).
 pub fn proofPass(
     allocator: std.mem.Allocator,
     prepared: *const Prepared,

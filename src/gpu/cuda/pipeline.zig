@@ -70,24 +70,36 @@ pub fn Bound(comptime Transaction: type, comptime Sink: type) type {
                 }
             };
 
+            // Interpolate the uploaded evaluations of trees 0–2 in place (bit-reversed evaluations →
+            // coefficients), as `resident_commit` would at the start of each commit.
+            try tx.beginStage(.trace_generation);
+            for (self.commitments[0..3]) |*c| {
+                for (c.plan.cohorts) |cohort| {
+                    const rows = @as(usize, 1) << @intCast(cohort.trace_log);
+                    const m = common.WordMatrix{ .storage = try c.buffers.coefficients.sub(cohort.coefficient_offset, cohort.count * rows), .column_stride_words = rows };
+                    try cuda.runtime.stages.transform.Native.inverseCompact(session, .trace_generation, m, m, cohort.trace_log, c.buffers.inverse_twiddles);
+                }
+            }
+            try tx.endStage(.trace_generation);
+
             try tx.beginStage(.trace_commit);
             try sink.initialize();
             try prefix.mixConfig(config);
-            try self.commitments[0].executeEvaluations(session, self.columns[0]);
+            try self.commitments[0].execute(session);
             const preprocessed_root = try self.commitments[0].root();
             try proof_root.capture(session, self.proof, 0, preprocessed_root);
             try prefix.commitPreprocessed(preprocessed_root);
             try prefix.mixStatement(self.statement.*, self.statement_words);
-            try self.commitments[1].executeEvaluations(session, self.columns[1]);
+            try self.commitments[1].execute(session);
             const main_root = try self.commitments[1].root();
             try proof_root.capture(session, self.proof, 1, main_root);
             try prefix.commitMain(main_root);
             // The device draws (z, α) itself; the interaction columns uploaded at ingress were
-            // built for the same draw (two-pass flow, prover.zig).
+            // built for the same draw from the host's roots (prover.zig).
             _ = try prefix.drawLookupElements();
             try prefix.mixInteractionClaim(try self.claims_mixed.cast(u32));
             try terminal.captureClaims(session, self.proof, self.claims_mixed);
-            try self.commitments[2].executeEvaluations(session, self.columns[2]);
+            try self.commitments[2].execute(session);
             const interaction_root = try self.commitments[2].root();
             try proof_root.capture(session, self.proof, 2, interaction_root);
             try prefix.commitInteraction(interaction_root);

@@ -562,6 +562,32 @@ pub fn interactionTrace(a: std.mem.Allocator, parts: []const Part, mains: []cons
     return .{ .columns = try cols.toOwnedSlice(a), .sums = try sums.toOwnedSlice(a) };
 }
 
+/// The preprocessed and main roots `proveOpts` commits (CPU, compact storage). The resident CUDA
+/// prover needs them on the host to draw the lookup elements before its one device transaction.
+pub fn traceRoots(a: std.mem.Allocator, cfg: rec.Config, parts: []const Part, mains: []const []const []const M31) ![2]rec.Hasher.Hash {
+    const E = rec.Engine(@import("stwo_cpu_backend").CpuBackend);
+    var scheme = try E.initRevision(a, cfg);
+    defer E.deinit(&scheme, a);
+    scheme.setCompactPolynomialStorage(0);
+    var channel = rec.Channel{};
+    Revision.proving_5a7c5ed.mixConfig(cfg, &channel);
+    try scheme.commitOwnedStreamingWithRecorder(a, try preprocessedStorage(a, parts), 0, null, &channel);
+    try E.flushPendingCommit(&scheme, a, &channel);
+    try mixStatements(&channel, a, parts);
+    var main_cols = std.ArrayList(prover_pcs.ColumnEvaluation).empty;
+    for (parts, mains) |p, m| {
+        if (m.len != p.air.n_main) return error.InvalidPreparedGeometry;
+        const st = try base.toStorage(a, p.log_size, m);
+        defer a.free(st);
+        try main_cols.appendSlice(a, st);
+    }
+    try scheme.commitOwnedStreamingWithRecorder(a, try main_cols.toOwnedSlice(a), 0, null, &channel);
+    try E.flushPendingCommit(&scheme, a, &channel);
+    var roots = try scheme.roots(a);
+    defer roots.deinit(a);
+    return .{ roots.items[0], roots.items[1] };
+}
+
 /// The preprocessed columns of `parts` in storage order (as committed).
 pub fn preprocessedColumns(a: std.mem.Allocator, parts: []const Part) ![]prover_pcs.ColumnEvaluation {
     return preprocessedStorage(a, parts);

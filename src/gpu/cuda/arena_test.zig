@@ -50,11 +50,11 @@ test "cuda resident arena: real block sizes plan and bind (uniform and tiered, L
         try std.testing.expectEqual(views.proof.decommitment.address, views.proof.bundle.address + prepared.terminal_bundle.section(.decommitment).offset_words * 4);
         const m = &prepared.memory;
         const traces = m.kindBytes(.commit_coefficients) + m.kindBytes(.commit_evaluations) + m.kindBytes(.commit_hashes);
-        std.debug.print("L={d} {s}: resident arena {d:.1} GiB (trees {d:.1} GiB, LDE tile {d:.2} GiB, accumulators {d:.2} GiB, quotient+FRI {d:.2} GiB); roots pass {d:.1} GiB; {d} slots\n", .{
+        std.debug.print("L={d} {s}: resident arena {d:.1} GiB (trees {d:.1} GiB, LDE tile {d:.2} GiB, accumulators {d:.2} GiB, quotient+FRI {d:.2} GiB); {d} slots\n", .{
             L,                                                                  @tagName(profile),
             gib(try m.bytes()),                                                 gib(traces),
             gib(m.kindBytes(.composition_lde_tile)),                            gib(m.kindBytes(.composition_accumulators)),
-            gib(m.kindBytes(.quotient_result) + m.kindBytes(.quotient_partial_coordinates) + m.kindBytes(.fri_coordinates) + m.kindBytes(.fri_hashes)), gib(prepared.roots_memory.bytes()),
+            gib(m.kindBytes(.quotient_result) + m.kindBytes(.quotient_partial_coordinates) + m.kindBytes(.fri_coordinates) + m.kindBytes(.fri_hashes)),
             m.slots.len,
         });
     };
