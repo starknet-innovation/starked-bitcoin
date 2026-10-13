@@ -396,6 +396,26 @@ pub fn build(b: *std.Build) void {
                     .{ .name = "stwo_backend_contracts", .module = imports.get("stwo_backend_contracts").? },
                 },
             });
+            // NVIDIA toolchain (all of them for a device build; none for the stub build). The same
+            // names as stwo-zig's own CUDA products (third_party/stwo-zig/build_support/backends/cuda.zig).
+            const tc = .{
+                .nvcc = b.option([]const u8, "cuda-nvcc", "nvcc (device build)"),
+                .host_cxx = b.option([]const u8, "cuda-host-cxx", "Host C++ compiler for nvcc (device build)"),
+                .host_runtime = b.option([]const u8, "cuda-host-runtime", "Absolute path of libstdc++.so.6 (device build)"),
+                .host_unwind = b.option([]const u8, "cuda-host-unwind-runtime", "Absolute path of libgcc_s.so.1 (device build)"),
+                .ar = b.option([]const u8, "cuda-ar", "ar (device build)") orelse "ar",
+                .home = b.option([]const u8, "cuda-home", "CUDA toolkit root, e.g. /usr/local/cuda-12.8 (device build)"),
+                .lib = b.option([]const u8, "cuda-library-dir", "Directory with libcudart/libcuda (device build)"),
+                .jobs = b.option(u16, "cuda-jobs", "Parallel nvcc jobs for the archive") orelse 8,
+                // libcuda.so to link against (the toolkit's stub; the driver's libcuda.so.1 loads at run time).
+                .driver = b.option([]const u8, "cuda-driver-dir", "Directory with libcuda.so for linking (default <cuda-library-dir>/stubs)"),
+            };
+            // SM targets: the archive's cubins and the SMs a session accepts. 89 = RTX 4090 / L40S,
+            // 80 = A100, 90 = H100 / H200.
+            const cuda_arch = b.option([]const u8, "cuda-arch", "Comma-separated SM targets, e.g. sm_89 or sm_80,sm_89,sm_90") orelse "sm_80,sm_89,sm_90";
+            const cuda_options = b.addOptions();
+            cuda_options.addOption([]const u8, "architectures", cuda_arch);
+            resident.addImport("cuda_build", cuda_options.createModule());
             const stubs = [_]std.Build.LazyPath{
                 b.path("third_party/stwo-zig/src/backends/cuda/runtime/stages/test_stubs.c"),
                 b.path("src/gpu/cuda/link_stubs.c"),
@@ -409,14 +429,117 @@ pub fn build(b: *std.Build) void {
                 check.root_module.addCSourceFile(.{ .file = stub, .flags = &.{ "-std=c11", "-Wno-strict-prototypes" } });
             check.linkLibC();
             b.step("cuda-check", "Resident CUDA prover: type-check and link the whole device schedule against C stubs (no GPU)").dependOn(&b.addRunArtifact(check).step);
-            const cuda_tests = b.addTest(.{ .root_module = resident, .filters = test_filters });
+            // The tests get their own instance of the module: the stubs must not ride along with
+            // `resident`, which the device runner links against the real archive.
+            const test_module = b.createModule(.{ .root_source_file = resident.root_source_file, .target = target, .optimize = optimize });
+            for (resident.import_table.keys(), resident.import_table.values()) |name, module| test_module.addImport(name, module);
+            const cuda_tests = b.addTest(.{ .root_module = test_module, .filters = test_filters });
             for (stubs) |stub| cuda_tests.root_module.addCSourceFile(.{ .file = stub, .flags = &.{ "-std=c11", "-Wno-strict-prototypes" } });
             cuda_tests.linkLibC();
             const run_cuda_tests = b.addRunArtifact(cuda_tests);
             run_cuda_tests.setCwd(b.path(".")); // the AOT drift check reads gpu/cuda_aot
             b.step("cuda-test", "Resident CUDA prover: host-checkable plans, transcript and AOT catalog (no GPU)").dependOn(&run_cuda_tests.step);
+
+            // ---- Device build: stwo-zig's native CUDA archive with our 16 AOT kernels.
+            // stwo-zig's `scripts/cuda_build.py` only takes frontend/set names it knows, and an
+            // overriding set root must equal its pinned manifest. So we give it a local AOT root:
+            // the `circuit` frontend there is {".", "circuit_eval"}, "." is stwo-zig's own native set
+            // (regenerated as its build does), and "circuit_eval" is gpu/cuda_aot (whose manifest
+            // uses stwo-zig's parametric Cairo-eval identity scheme, catalog.zig). The submodule is
+            // not modified.
+            const st = "third_party/stwo-zig/";
+            const aot_root = b.addWriteFiles();
+            _ = aot_root.add("product_sets.json", cuda_product_sets);
+            _ = aot_root.addCopyFile(b.path(st ++ "src/backends/cuda/aot/native/aot_manifest.json"), "aot_manifest.json");
+            _ = aot_root.addCopyDirectory(b.path("gpu/cuda_aot"), "circuit_eval", .{ .include_extensions = &.{ ".cu", "aot_manifest.json" } });
+            const native_set = blk: {
+                const model = b.createModule(.{ .root_source_file = b.path(st ++ "src/tools/cairo_witness_cpu_codegen/model.zig"), .target = b.graph.host, .optimize = .ReleaseFast });
+                model.addImport("cairo_deduction_contract", b.createModule(.{ .root_source_file = b.path(st ++ "src/frontends/cairo/witness/deduction_contract.zig"), .target = b.graph.host, .optimize = .ReleaseFast }));
+                const gen_root = b.createModule(.{ .root_source_file = b.path(st ++ "src/tools/cairo_cuda_witness_aot/main.zig"), .target = b.graph.host, .optimize = .ReleaseFast });
+                gen_root.addImport("cairo_witness_model", model);
+                const gen = b.addRunArtifact(b.addExecutable(.{ .name = "cairo-cuda-witness-aot", .root_module = gen_root }));
+                gen.addFileArg(b.path(st ++ "vectors/cairo/sn_pie_2_witness_programs.bin"));
+                gen.addDirectoryArg(b.path(st ++ "src/backends/cuda/aot/native"));
+                gen.addDirectoryArg(b.path(st ++ "src/backends/cuda/authority/active"));
+                gen.addDirectoryArg(b.path(st ++ "src/backends/cuda/native"));
+                break :blk gen.addOutputDirectoryArg("native-cuda-product").path(b, "aot/native");
+            };
+            const archiveCommand = struct {
+                fn f(bb: *std.Build, root: std.Build.LazyPath, native: std.Build.LazyPath, t: anytype, arch: []const u8, plan_only: bool) *std.Build.Step.Run {
+                    const cmd = bb.addSystemCommand(&.{"python3"});
+                    cmd.addFileArg(bb.path(st ++ "scripts/cuda_build.py"));
+                    cmd.addArg("--source-root");
+                    cmd.addDirectoryArg(bb.path(st ++ "src/backends/cuda/authority/active"));
+                    cmd.addArg("--source-manifest");
+                    cmd.addFileArg(bb.path(st ++ "src/backends/cuda/active_source_manifest.json"));
+                    cmd.addArg("--product-manifest");
+                    cmd.addFileArg(bb.path(st ++ "src/backends/cuda/product_manifest.json"));
+                    cmd.addArg("--native-root");
+                    cmd.addDirectoryArg(bb.path(st ++ "src/backends/cuda/native"));
+                    cmd.addArg("--native-aot-root");
+                    cmd.addDirectoryArg(root);
+                    cmd.addArgs(&.{ "--frontend", "circuit", "--aot-set", ".", "--aot-set", "circuit_eval", "--aot-set-root", "." });
+                    cmd.addDirectoryArg(native);
+                    cmd.addArgs(&.{ "--nvcc", t.nvcc, "--host-cxx", t.host_cxx, "--ar", t.ar, "--cuda-home", t.home, "--cuda-library-dir", t.lib, "--arch", arch, "--jobs", bb.fmt("{d}", .{t.jobs}) });
+                    if (plan_only) cmd.addArg("--plan-only");
+                    cmd.addArg("--out-dir");
+                    return cmd;
+                }
+            }.f;
+            // `cuda-archive-plan`: the exact selection and arguments, validated without NVIDIA tools (any host).
+            const plan_cmd = archiveCommand(b, aot_root.getDirectory(), native_set, .{ .nvcc = "/cuda-plan-only/bin/nvcc", .host_cxx = "/cuda-plan-only/bin/c++", .ar = "/cuda-plan-only/bin/ar", .home = "/cuda-plan-only", .lib = "/cuda-plan-only/lib64", .jobs = tc.jobs }, cuda_arch, true);
+            _ = plan_cmd.addOutputDirectoryArg("starked-cuda-plan");
+            const plan_json = plan_cmd.captureStdOut();
+            b.step("cuda-archive-plan", "Validate the CUDA archive selection (stwo-zig runtime + our 16 kernels) without NVIDIA tools").dependOn(&b.addInstallFile(plan_json, "cuda-archive-plan.json").step);
+
+            // `cuda-prove`: the runner (src/gpu/cuda/runner.zig). With the toolchain options it links
+            // the real archive; without them it links the stubs (CPU side and `--mock` only).
+            const runner_module = b.createModule(.{ .root_source_file = b.path("src/gpu/cuda/runner.zig"), .target = target, .optimize = optimize });
+            for (resident.import_table.keys(), resident.import_table.values()) |name, module| runner_module.addImport(name, module);
+            runner_module.addImport("cuda_resident", resident);
+            runner_module.addImport("stwo_postcard", stwo_postcard);
+            const runner = b.addExecutable(.{ .name = "cuda-prove", .root_module = runner_module });
+            if (tc.nvcc) |nvcc| {
+                const missing = tc.host_cxx == null or tc.host_runtime == null or tc.host_unwind == null or tc.home == null or tc.lib == null;
+                if (missing) @panic("a device build needs -Dcuda-nvcc, -Dcuda-host-cxx, -Dcuda-host-runtime, -Dcuda-host-unwind-runtime, -Dcuda-home and -Dcuda-library-dir");
+                const archive = archiveCommand(b, aot_root.getDirectory(), native_set, .{ .nvcc = nvcc, .host_cxx = tc.host_cxx.?, .ar = tc.ar, .home = tc.home.?, .lib = tc.lib.?, .jobs = tc.jobs }, cuda_arch, false);
+                const archive_dir = archive.addOutputDirectoryArg("starked-cuda-runtime");
+                runner.step.dependOn(&archive.step);
+                runner.root_module.addLibraryPath(archive_dir);
+                runner.root_module.addLibraryPath(.{ .cwd_relative = tc.lib.? });
+                runner.root_module.addRPath(.{ .cwd_relative = tc.lib.? });
+                runner.root_module.addLibraryPath(.{ .cwd_relative = tc.driver orelse b.fmt("{s}/stubs", .{tc.lib.?}) });
+                runner.root_module.linkSystemLibrary("stwo_cuda_kernels", .{});
+                runner.root_module.linkSystemLibrary("cudart", .{});
+                runner.root_module.linkSystemLibrary("cuda", .{});
+                runner.root_module.addObjectFile(.{ .cwd_relative = tc.host_runtime.? });
+                runner.root_module.addObjectFile(.{ .cwd_relative = tc.host_unwind.? });
+            } else {
+                for (stubs) |stub| runner.root_module.addCSourceFile(.{ .file = stub, .flags = &.{ "-std=c11", "-Wno-strict-prototypes" } });
+            }
+            runner.linkLibC();
+            b.installArtifact(runner);
+            const run_runner = b.addRunArtifact(runner);
+            if (b.args) |args| run_runner.addArgs(args);
+            b.step("cuda-prove", "Resident CUDA block proof vs CPU (device build with -Dcuda-nvcc=...; stubs otherwise)").dependOn(&run_runner.step);
         }
     }
     const test_step = b.step("test", "Run starked-bitcoin tests");
     test_step.dependOn(&b.addRunArtifact(tests).step);
 }
+
+/// The local AOT root's frontend catalogue (`cuda-archive*`): our kernels as the `circuit_eval` set.
+const cuda_product_sets =
+    \\{
+    \\  "frontends": {
+    \\    "cairo": { "reason": "starked-bitcoin local AOT root: block-system kernels only", "sets": [], "status": "unavailable" },
+    \\    "circuit": { "sets": [".", "circuit_eval"], "status": "staged" },
+    \\    "native": { "sets": ["."], "status": "staged" },
+    \\    "riscv": { "reason": "starked-bitcoin local AOT root: block-system kernels only", "sets": [], "status": "unavailable" },
+    \\    "sm83": { "reason": "starked-bitcoin local AOT root: block-system kernels only", "sets": [], "status": "unavailable" }
+    \\  },
+    \\  "schema": "stwo-zig-cuda-aot-frontend-catalog-v1",
+    \\  "sets": [".", "circuit_eval"]
+    \\}
+    \\
+;

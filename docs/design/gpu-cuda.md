@@ -108,6 +108,36 @@ The CPU path bakes public inputs into the program as literals. Our lowering dedu
 
 Estimate: 1–2 weeks with an H100 or H200, mostly steps 3–4. Later, device LogUp removes pass 1 (another 1–2 weeks).
 
+## Running on a pod
+
+**Build (`-Dcuda=true`).**
+- `zig build cuda-archive-plan`: validates the archive selection without NVIDIA tools (passes on macOS).
+  - It runs stwo-zig's `scripts/cuda_build.py --plan-only` on a local AOT root built by `build.zig`: frontend `circuit` = {`.`, `circuit_eval`}.
+  - `.` is stwo-zig's native set, regenerated as its build does. `circuit_eval` is `gpu/cuda_aot/`.
+  - Result: 64 AOT sources (48 native + our 16); cubins per SM.
+- `gpu/cuda_aot/aot_manifest.json` uses stwo-zig's parametric Cairo-eval identity scheme, the only one its validator admits for 16 components. `catalog.json` maps kernels to AIRs.
+- `zig build install <toolchain flags>` builds the real archive and links `zig-out/bin/cuda-prove` against it.
+  - Toolchain flags: `-Dcuda-nvcc`, `-Dcuda-host-cxx`, `-Dcuda-host-runtime`, `-Dcuda-host-unwind-runtime`, `-Dcuda-ar`, `-Dcuda-home`, `-Dcuda-library-dir`, `-Dcuda-driver-dir`, `-Dcuda-arch`.
+  - `-Dcuda-arch` defaults to `sm_80,sm_89,sm_90` and is also the list of SMs a session accepts.
+  - Without `-Dcuda-nvcc`, `cuda-prove` links the C stubs: the CPU side and `--mock` work; the device fails at session open (`ExecutionProviderMismatch`).
+
+**Runner (`src/gpu/cuda/runner.zig`).** Runs on one sample at one profile, in this order:
+1. CPU proof.
+2. Device pass 1: compares the preprocessed and main roots with the CPU's (first differing word).
+3. Host LogUp.
+4. Device pass 2.
+5. Structured diff in production order, naming the stage behind the first difference: claims, roots 0–3, sampled values (tree/column/sample), FRI roots, last layer, nonce, openings.
+6. Byte comparison, `verifyExt`, timings, and device counters (peak live bytes, H2D bytes, launches, AOT misses).
+
+Big blocks use `--skip-cpu --cpu-sha <prefix> --cpu-len <bytes>`, or `--cpu-proof <file>`. Mid-proof device state cannot be read: the resident contract allows one read per transaction. The diff is the stage checkpoint.
+
+**Scripts (`scripts/pod/`, image `runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404`).**
+- `bootstrap.sh <commit>` (or `--tarball f`): installs the apt tools, Zig 0.15.2 (checksummed), source and submodule, then builds.
+- `run.sh`: block 0 test uniform → tiered → production uniform → tiered, then 400000 tiered production against `cbcf7026134f9a71` / 1,131,354 B.
+  - Logs and `nvidia-smi` memory samples go to `/workspace/logs`.
+- `diag.sh`: device facts and a pass-1-only run.
+- `CUDA_ARCH=sm_89` (etc.) builds one target only, which is faster.
+
 ## CuMetal (local Apple-GPU run): blocked
 
 `~/Workshop/cuda-metal` is cloned at the pinned commit e88dd103 and not built. Three things block a local run:

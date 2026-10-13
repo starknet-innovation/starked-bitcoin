@@ -5,12 +5,13 @@
 //! (`cairo_cuda/parametric_eval.normalize`: every base literal becomes a session constant, the
 //! domain size is erased) and generated with every constant dynamic, as `circuit_cuda/air_aot`
 //! does for the recursion circuit. The kernel therefore depends on the AIR only: not on its log
-//! size, nor on the statement. Its cache key binds the AIR's digest (the one the proof statement
-//! commits to), so an AIR change selects new code and an unchanged AIR keeps its kernel.
+//! size, nor on the statement. Its cache key binds the program and source identities (see
+//! `identity_scheme`), so an AIR change selects new code and an unchanged AIR keeps its kernel.
 //!
-//! `gpu/cuda_aot/` holds the generated sources and an `aot_manifest.json` in stwo-zig's AOT
-//! product-set format (a `--aot-set-root` for `scripts/cuda_build.py`). The drift test below
-//! regenerates both and compares them byte for byte; `STARKED_CUDA_AOT_WRITE=1` rewrites them.
+//! `gpu/cuda_aot/` holds the generated sources, an `aot_manifest.json` that stwo-zig's CUDA build
+//! admits (the `circuit_eval` set of our local AOT root, see build.zig `cuda-archive`) and
+//! `catalog.json` (kernel → AIR). The drift test regenerates them and compares byte for byte;
+//! `STARKED_CUDA_AOT_WRITE=1` rewrites them.
 
 const std = @import("std");
 const sb = @import("starked_bitcoin");
@@ -23,7 +24,12 @@ const M31 = @import("stwo_core").fields.m31.M31;
 
 /// Where the generated catalog lives, relative to the repository root.
 pub const directory = "gpu/cuda_aot";
-pub const identity_scheme = "sha256-starked-eval-parametric-source-v6";
+/// stwo-zig's CUDA build (`scripts/cuda_build_lib/aot_identity.py`, `_validate_parametric_cairo_eval`)
+/// admits parametric `cairo_eval_part_v1` kernels under two schemes only, each with a pinned
+/// authority in the cache key. We use the Cairo one (the circuit one caps component indices at 11):
+/// cache key = `parametric.cacheKey(program, source, parametric.source_authority)`. Which AIR a
+/// kernel belongs to is recorded in `catalog.json` beside the manifest.
+pub const identity_scheme = "sha256-cairo-eval-parametric-source-v6";
 
 pub const Body = struct {
     /// The AIR's name (`ir.Air.name`).
@@ -83,7 +89,7 @@ pub fn body(allocator: std.mem.Allocator, air: ir.Air) !Body {
         .semantic_hash = program.header.semantic_hash,
         .normalized_program_identity = program_identity,
         .source_identity = source_identity,
-        .cache_key = parametric.cacheKey(program_identity, source_identity, digest),
+        .cache_key = parametric.cacheKey(program_identity, source_identity, parametric.source_authority),
         .kernel_name = kernel_name,
         .source = source,
         .constant_count = constant_count,
@@ -131,13 +137,23 @@ pub const Catalog = struct {
         return b;
     }
 
-    /// `aot_manifest.json` in stwo-zig's AOT product-set format (`backends/cuda/aot/native/*`).
+    /// `aot_manifest.json` in stwo-zig's AOT product-set format (`backends/cuda/aot/native/*`): the
+    /// exact field set and (kind, label, cache key) order its build validates.
     pub fn manifest(self: *const Catalog, allocator: std.mem.Allocator) ![]u8 {
+        const order = try allocator.alloc(usize, self.bodies.len);
+        defer allocator.free(order);
+        for (order, 0..) |*o, i| o.* = i;
+        std.mem.sort(usize, order, self, struct {
+            fn lt(c: *const Catalog, l: usize, r: usize) bool {
+                return c.bodies[l].semantic_hash < c.bodies[r].semantic_hash;
+            }
+        }.lt);
         var out: std.Io.Writer.Allocating = .init(allocator);
         errdefer out.deinit();
         const w = &out.writer;
         try w.writeAll("[\n");
-        for (self.bodies, 0..) |b, i| {
+        for (order, 0..) |i, n| {
+            const b = self.bodies[i];
             const file = try b.fileName(allocator);
             defer allocator.free(file);
             var source_sha: [32]u8 = undefined;
@@ -153,11 +169,9 @@ pub const Catalog = struct {
                 \\    "program_identity": "{x}",
                 \\    "file": "{s}",
                 \\    "module_globals": "none",
-                \\    "catalog_identity": "{x}",
+                \\    "catalog_identity": "{s}",
                 \\    "codegen_version": {d},
                 \\    "identity_scheme": "{s}",
-                \\    "air": "{s}",
-                \\    "constant_count": {d},
                 \\    "occurrences": [
                 \\      {{
                 \\        "component_index": {d},
@@ -174,16 +188,27 @@ pub const Catalog = struct {
                 b.semantic_hash,
                 &b.normalized_program_identity,
                 file,
-                &b.air_digest,
+                parametric.authority_hex,
                 codegen.parametric_version,
                 identity_scheme,
-                b.air,
-                b.constant_count,
                 i,
                 &source_sha,
-                if (i + 1 == self.bodies.len) "" else ",",
+                if (n + 1 == self.bodies.len) "" else ",",
             });
         }
+        try w.writeAll("]\n");
+        return out.toOwnedSlice();
+    }
+
+    /// `catalog.json`: which AIR (name, digest, component index) each kernel is, in component order.
+    pub fn sidecar(self: *const Catalog, allocator: std.mem.Allocator) ![]u8 {
+        var out: std.Io.Writer.Allocating = .init(allocator);
+        errdefer out.deinit();
+        const w = &out.writer;
+        try w.writeAll("[\n");
+        for (self.bodies, 0..) |b, i| try w.print("  {{ \"component_index\": {d}, \"air\": \"{s}\", \"air_digest\": \"{x}\", \"kernel_name\": \"{s}\", \"cache_key\": \"{x:0>16}\", \"constant_count\": {d} }}{s}\n", .{
+            i, b.air, &b.air_digest, b.kernel_name, b.cache_key, b.constant_count, if (i + 1 == self.bodies.len) "" else ",",
+        });
         try w.writeAll("]\n");
         return out.toOwnedSlice();
     }
@@ -245,6 +270,7 @@ test "cuda catalog: generated sources and manifest match gpu/cuda_aot (drift che
         defer dir.close();
         for (catalog.bodies) |b| try dir.writeFile(.{ .sub_path = try b.fileName(a), .data = b.source });
         try dir.writeFile(.{ .sub_path = "aot_manifest.json", .data = manifest });
+        try dir.writeFile(.{ .sub_path = "catalog.json", .data = try catalog.sidecar(a) });
         std.debug.print("cuda catalog: wrote {d} kernels ({d} KiB) to {s}\n", .{ catalog.bodies.len, total / 1024, directory });
         return;
     }
@@ -255,6 +281,7 @@ test "cuda catalog: generated sources and manifest match gpu/cuda_aot (drift che
     defer dir.close();
     const pinned = try dir.readFileAlloc(a, "aot_manifest.json", 1 << 20);
     try std.testing.expectEqualStrings(pinned, manifest);
+    try std.testing.expectEqualStrings(try dir.readFileAlloc(a, "catalog.json", 1 << 20), try catalog.sidecar(a));
     var expected = std.StringHashMap(void).init(a);
     for (catalog.bodies) |b| {
         const name = try b.fileName(a);
@@ -265,7 +292,7 @@ test "cuda catalog: generated sources and manifest match gpu/cuda_aot (drift che
     // No stale kernels.
     var it = dir.iterate();
     while (try it.next()) |entry| {
-        if (std.mem.eql(u8, entry.name, "aot_manifest.json")) continue;
+        if (std.mem.eql(u8, entry.name, "aot_manifest.json") or std.mem.eql(u8, entry.name, "catalog.json")) continue;
         if (!expected.contains(entry.name)) {
             std.debug.print("cuda catalog: stale file {s}/{s}\n", .{ directory, entry.name });
             return error.CudaCatalogDrift;

@@ -36,8 +36,26 @@ const arena = cuda.runtime.arena;
 const Transaction = cuda.runtime.proof_transaction.ResidentProofTransaction;
 const ColumnEvaluation = prover_engine.pcs.ColumnEvaluation;
 
-/// SM targets the session accepts (as the circuit prover: A100/H100 class).
-pub const accepted_sms = [_]u32{ 80, 90 };
+/// SM targets the session accepts: the archive's (`-Dcuda-arch`, e.g. "sm_80,sm_89,sm_90").
+pub const accepted_sms = parseSms(@import("cuda_build").architectures);
+
+fn parseSms(comptime text: []const u8) [countSms(text)]u32 {
+    @setEvalBranchQuota(100_000);
+    var out: [countSms(text)]u32 = undefined;
+    var it = std.mem.tokenizeAny(u8, text, ", ");
+    var i: usize = 0;
+    while (it.next()) |tok| : (i += 1) {
+        const digits = if (std.mem.startsWith(u8, tok, "sm_")) tok[3..] else tok;
+        out[i] = std.fmt.parseInt(u32, digits, 10) catch @compileError("bad -Dcuda-arch entry: " ++ tok);
+    }
+    return out;
+}
+fn countSms(comptime text: []const u8) usize {
+    var it = std.mem.tokenizeAny(u8, text, ", ");
+    var n: usize = 0;
+    while (it.next()) |_| n += 1;
+    return n;
+}
 
 pub const Input = struct {
     parts: []const system.Part,
@@ -158,10 +176,10 @@ pub const RootsPlan = struct {
 };
 
 /// Storage-order evaluations of every trace column, by tree (host memory).
-const HostTrees = struct {
+pub const HostTrees = struct {
     trees: [3][]ColumnEvaluation = .{ &.{}, &.{}, &.{} },
 
-    fn deinit(self: *HostTrees, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *HostTrees, allocator: std.mem.Allocator) void {
         for (self.trees) |t| {
             for (t) |c| allocator.free(c.values);
             allocator.free(t);
@@ -170,7 +188,7 @@ const HostTrees = struct {
 };
 
 /// Bit-reversed evaluations of the preprocessed and main trees.
-fn hostTraceTrees(allocator: std.mem.Allocator, input: Input) !HostTrees {
+pub fn hostTraceTrees(allocator: std.mem.Allocator, input: Input) !HostTrees {
     var out = HostTrees{};
     errdefer out.deinit(allocator);
     out.trees[0] = try system.preprocessedColumns(allocator, input.parts);
@@ -202,13 +220,7 @@ pub fn prove(allocator: std.mem.Allocator, input: Input) !Result {
     const roots = try rootsPass(allocator, &prepared, &host, &twiddles);
 
     // Host: (z, α), interaction columns, claims.
-    var sink = transcript.HostSink{};
-    var prefix = transcript.Prefix(transcript.HostSink){ .sink = &sink };
-    try prefix.mixConfig(input.config);
-    try prefix.commitPreprocessed(roots[0]);
-    try prefix.mixStatement(prepared.statement, prepared.statement.words);
-    try prefix.commitMain(roots[1]);
-    const el = try prefix.drawLookupElements();
+    const el = try lookupElements(&prepared, input.config, roots);
     const inter = try system.interactionTrace(allocator, input.parts, input.mains, el);
     host.trees[2] = inter.columns;
     defer allocator.free(inter.sums);
@@ -221,6 +233,17 @@ pub fn prove(allocator: std.mem.Allocator, input: Input) !Result {
         !std.mem.eql(u8, std.mem.asBytes(&proved[1]), std.mem.asBytes(&roots[1])))
         return error.ResidentRootsDiverged;
     return result;
+}
+
+/// The host replay of our prefix up to the lookup draw, from pass 1's roots.
+pub fn lookupElements(prepared: *const Prepared, config: core.pcs.config_v2.PcsConfigV2, roots: [2]rec.Hasher.Hash) !core.channel.lookup_transcript.LookupElements {
+    var sink = transcript.HostSink{};
+    var prefix = transcript.Prefix(transcript.HostSink){ .sink = &sink };
+    try prefix.mixConfig(config);
+    try prefix.commitPreprocessed(roots[0]);
+    try prefix.mixStatement(prepared.statement, prepared.statement.words);
+    try prefix.commitMain(roots[1]);
+    return prefix.drawLookupElements();
 }
 
 /// Pass 1: commit the preprocessed and main trees on the device, read their roots.
@@ -371,12 +394,20 @@ pub fn proofPass(
     const verdict = try tx.assembleAndFinish(transport, terminal_id);
     finished = true;
     if (!verdict.isResident()) return error.NonresidentProof;
-    var decoded = try terminal.Proof.decode(allocator, prepared.terminal_layout, prepared.terminal_decommit, transport, .{
+    var decoded = terminal.Proof.decode(allocator, prepared.terminal_layout, prepared.terminal_decommit, transport, .{
         .operations = verdict.counters.d2h_proof_operations,
         .bytes = verdict.counters.d2h_proof_bytes,
         .runtime_compile_attempts = verdict.aot.aot_misses,
         .cpu_fallback_attempts = verdict.counters.cpu_fallback_attempts,
-    });
+    }) catch |err| {
+        // The device-written header word 15 is the final-layer degree verdict (0 = accepted).
+        std.debug.print("cuda: terminal decode failed: {s}; header {any}\n", .{ @errorName(err), transport[0..@min(transport.len, 16)] });
+        inline for (.{ .trace_commitments, .sampled_values, .fri_commitments, .fri_last_layer, .proof_of_work, .decommitment }) |kind| {
+            const sec = prepared.terminal_bundle.section(kind);
+            std.debug.print("  section {s}: words {d}..{d}, head {any}\n", .{ @tagName(kind), sec.offset_words, sec.offset_words + sec.words, transport[sec.offset_words..][0..@min(sec.words, 8)] });
+        }
+        return err;
+    };
     defer decoded.deinit(allocator);
     return .{
         .proof = try decoded.toSystemProof(allocator, &plans.proof_layout, input.config),
