@@ -28,6 +28,7 @@ const commit = cc.resident_commit;
 const fri = @import("fri.zig");
 const decommit = cc.resident_decommit;
 const Quotient = cairo.executor.quotient.controller.QuotientBindings;
+const logup = @import("logup.zig");
 
 pub const Kind = enum(u8) {
     trace_staging,
@@ -114,6 +115,11 @@ pub const Kind = enum(u8) {
     decommit_level_counts,
     decommit_column_logs,
     terminal_bundle,
+    logup_sources,
+    logup_tables,
+    logup_geometry,
+    logup_partials,
+    logup_scan,
 };
 
 pub const Slot = struct {
@@ -137,6 +143,8 @@ pub const Input = struct {
     fri: *const fri.Plan,
     decommit: *const decommit.Plan,
     terminal: *const terminal.Bundle,
+    /// Device LogUp (`logup.zig`); null: the interaction tree is built on the host and uploaded.
+    logup: ?*const logup.Plan = null,
 };
 
 pub const Plan = struct {
@@ -228,8 +236,9 @@ const Builder = struct {
             const r = plan.requirements;
             // Trees 0–2: evaluations are uploaded to a staging slot at ingress and gathered into
             // the coefficient buffer in `.trace_generation` (pipeline.zig); the staging slot dies
-            // there, so the arena reuses it. The composition tree is written by the evaluator.
-            if (tree < 3) try self.add(.trace_staging, tree, r.coefficient_words, 64, .ingress, .trace_generation);
+            // there, so the arena reuses it. The composition tree is written by the evaluator;
+            // with device LogUp, tree 2 is written in `.trace_commit` (no staging).
+            if (tree < 2 or (tree == 2 and input.logup == null)) try self.add(.trace_staging, tree, r.coefficient_words, 64, .ingress, .trace_generation);
             const start: Stage = if (tree == 3) .constraint_evaluation else .trace_generation;
             try self.add(.commit_coefficients, tree, r.coefficient_words, 64, start, .oods);
             try self.add(.commit_evaluations, tree, r.evaluation_words, 64, if (tree == 3) .constraint_evaluation else .trace_commit, .decommit);
@@ -250,8 +259,21 @@ const Builder = struct {
         try self.add(.statement, 0, input.statement_words, 4, .ingress, .trace_commit);
         try self.add(.claims_mixed, 0, try mul(input.claims_mixed, 4), 4, .ingress, .trace_commit);
         try self.add(.claims_component, 0, try mul(input.claims_component, 4), 4, .ingress, .constraint_evaluation);
-        try self.add(.relation_z, 0, 4, 4, .ingress, .constraint_evaluation);
-        try self.add(.relation_alpha_powers, 0, try mul(input.alpha_powers, 4), 4, .ingress, .constraint_evaluation);
+        // Expanded on the device from the drawn (z, α) (`logup.expandChallenges`).
+        try self.add(.relation_z, 0, 4, 4, .trace_commit, .constraint_evaluation);
+        try self.add(.relation_alpha_powers, 0, try mul(input.alpha_powers, 4), 4, .trace_commit, .constraint_evaluation);
+        if (input.logup) |plan| {
+            if (plan.alpha_powers > input.alpha_powers or plan.instances.len != input.claims_mixed) return error.InvalidResidentGeometry;
+            // The lookups' columns, copied out of the staging slots before trees 0–1 are
+            // interpolated in place; the denominator slab borrows tree 2's evaluation buffer.
+            try self.add(.logup_sources, 0, plan.source_words, 64, .trace_generation, .trace_commit);
+            try self.add(.logup_tables, 0, plan.tableWords(), 2, .ingress, .trace_commit);
+            try self.add(.logup_geometry, 0, try mul(plan.instances.len, @sizeOf(cuda.abi.stages.relation.Geometry) / 4), 1, .ingress, .trace_commit);
+            const scratch = try plan.scratchWords();
+            try self.add(.logup_partials, 0, scratch, 64, .trace_commit, .trace_commit);
+            try self.add(.logup_scan, 0, scratch, 64, .trace_commit, .trace_commit);
+            if (plan.slab_words > input.commitments[2].requirements.evaluation_words) return error.InvalidResidentGeometry;
+        }
         try self.add(.error_flag, 0, 1, 1, .ingress, .fri_commit);
         try self.addComposition(input.composition);
         try self.addOods(input.oods);
@@ -363,10 +385,12 @@ const Builder = struct {
 pub const Views = struct {
     allocator: std.mem.Allocator,
     /// Each trace column's ingress destination (inside its tree's staging slot, in the commit's
-    /// cohort layout).
+    /// cohort layout). Empty for tree 2 with device LogUp.
     columns: [3][]common.Words,
-    /// Trees 0–2's staging slots.
-    staging: [3]common.Words,
+    /// Trees 0–2's staging slots (tree 2: none with device LogUp).
+    staging: [3]?common.Words,
+    /// Device LogUp's buffers (null on the host-LogUp path).
+    logup: ?Logup,
     coefficient_columns: [3][]common.Words,
     evaluation_columns: [3][]common.Words,
     commits: [4]commit.Buffers,
@@ -394,11 +418,23 @@ pub const Views = struct {
     }
 };
 
+pub const Logup = struct {
+    sources: common.Words,
+    tables: common.Words,
+    geometry: cuda.runtime.stages.relation_completion.Geometries,
+    partials: common.Words,
+    scan: common.Words,
+    /// The denominator slab: the head of tree 2's evaluation buffer.
+    denominators: common.Words,
+};
+
 pub const BindInput = struct {
     plans: *const Plan,
     commitments: *const [4]commit.Plan,
     fri: *const fri.Plan,
     terminal: *const terminal.Bundle,
+    /// `logup.Plan.slab_words` (device LogUp only).
+    logup_slab_words: usize = 0,
 };
 
 /// Typed views of `transaction`'s arena (a `ResidentProofTransaction`, or a test fake with
@@ -416,17 +452,25 @@ pub fn bind(allocator: std.mem.Allocator, transaction: anytype, input: BindInput
         allocator.free(c);
         allocator.free(e);
     };
-    var staging: [3]common.Words = undefined;
+    var staging: [3]?common.Words = undefined;
     var columns: [3][]common.Words = undefined;
     var staged: usize = 0;
     errdefer for (columns[0..staged]) |c| allocator.free(c);
+    const device_logup = input.plans.slot(.logup_sources, 0) catch null;
     for (&staging, &columns, input.commitments[0..3], 0..) |*st, *cols, plan, tree| {
-        st.* = try binder.words(.trace_staging, tree);
+        if (tree == 2 and device_logup != null) {
+            st.* = null;
+            cols.* = &.{};
+            staged += 1;
+            continue;
+        }
+        const view = try binder.words(.trace_staging, tree);
+        st.* = view;
         cols.* = try allocator.alloc(common.Words, plan.column_logs.len);
         staged += 1;
         for (plan.cohorts) |cohort| {
             const rows = try pow2(cohort.trace_log);
-            for (0..cohort.count) |local| cols.*[cohort.first_column + local] = try st.sub(cohort.coefficient_offset + local * rows, rows);
+            for (0..cohort.count) |local| cols.*[cohort.first_column + local] = try view.sub(cohort.coefficient_offset + local * rows, rows);
         }
     }
     var commits: [4]commit.Buffers = undefined;
@@ -507,11 +551,20 @@ pub fn bind(allocator: std.mem.Allocator, transaction: anytype, input: BindInput
         .reduce_b = try binder.as(field.SecureField, .oods_reduce_b, 0),
         .sampled_values = try binder.as(field.SecureField, .oods_values, 0),
     };
+    const logup_view: ?Logup = if (device_logup) |_| .{
+        .sources = try binder.words(.logup_sources, 0),
+        .tables = try binder.words(.logup_tables, 0),
+        .geometry = try binder.as(cuda.abi.stages.relation.Geometry, .logup_geometry, 0),
+        .partials = try binder.words(.logup_partials, 0),
+        .scan = try binder.words(.logup_scan, 0),
+        .denominators = try commits[2].evaluations.sub(0, input.logup_slab_words),
+    } else null;
     const proof_view = try shared.resident_proof_binding.bindAt(shared.proof_bundle, transaction, (try input.plans.slot(.terminal_bundle, 0)).requirement.id, 0, .{ .proof = input.terminal.* });
     return .{
         .allocator = allocator,
         .columns = columns,
         .staging = staging,
+        .logup = logup_view,
         .coefficient_columns = coefficient_columns,
         .evaluation_columns = evaluation_columns,
         .commits = commits,

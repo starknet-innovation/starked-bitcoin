@@ -1,0 +1,486 @@
+// starked-bitcoin LogUp fraction kernel v1 (src/gpu/cuda/logup.zig): AIR block_b2s, digest 7fece1818533e9696a745216d7305b653b0585aae3be0330c2c09f0a9373815a.
+// 11 lookups in 6 batches, 86 source columns, tuples up to 4 values.
+typedef unsigned long long u64;
+#define STARKED_P 2147483647u
+struct StarkedQm31 { unsigned a, b, c, d; };
+__device__ __forceinline__ unsigned starked_add(unsigned x, unsigned y) {
+    const unsigned s = x + y;
+    return s < STARKED_P ? s : s - STARKED_P;
+}
+__device__ __forceinline__ unsigned starked_sub(unsigned x, unsigned y) {
+    return x >= y ? x - y : x + STARKED_P - y;
+}
+__device__ __forceinline__ unsigned starked_mul(unsigned x, unsigned y) {
+    const u64 p = (u64)x * y;
+    const unsigned f = (unsigned)(p & STARKED_P) + (unsigned)(p >> 31u);
+    return f < STARKED_P ? f : f - STARKED_P;
+}
+__device__ __forceinline__ unsigned starked_neg(unsigned x) {
+    return x == 0u ? 0u : STARKED_P - x;
+}
+__device__ __forceinline__ StarkedQm31 starked_q_add(StarkedQm31 x, StarkedQm31 y) {
+    return {starked_add(x.a, y.a), starked_add(x.b, y.b), starked_add(x.c, y.c), starked_add(x.d, y.d)};
+}
+__device__ __forceinline__ StarkedQm31 starked_q_mul_base(StarkedQm31 x, unsigned s) {
+    return {starked_mul(x.a, s), starked_mul(x.b, s), starked_mul(x.c, s), starked_mul(x.d, s)};
+}
+// (a + b·u)(c + d·u) with u² = 2 + i over CM31 = M31[i]/(i² + 1), as stwo.
+__device__ __forceinline__ StarkedQm31 starked_q_mul(StarkedQm31 l, StarkedQm31 r) {
+    const unsigned x0 = starked_sub(starked_mul(l.a, r.a), starked_mul(l.b, r.b));
+    const unsigned x1 = starked_add(starked_mul(l.a, r.b), starked_mul(l.b, r.a));
+    const unsigned y0 = starked_sub(starked_mul(l.c, r.c), starked_mul(l.d, r.d));
+    const unsigned y1 = starked_add(starked_mul(l.c, r.d), starked_mul(l.d, r.c));
+    const unsigned c0 = starked_sub(starked_mul(l.a, r.c), starked_mul(l.b, r.d));
+    const unsigned c1 = starked_add(starked_mul(l.a, r.d), starked_mul(l.b, r.c));
+    const unsigned c2 = starked_sub(starked_mul(l.c, r.a), starked_mul(l.d, r.b));
+    const unsigned c3 = starked_add(starked_mul(l.c, r.b), starked_mul(l.d, r.a));
+    return {starked_add(x0, starked_sub(starked_add(y0, y0), y1)),
+            starked_add(x1, starked_add(y0, starked_add(y1, y1))),
+            starked_add(c0, c2), starked_add(c1, c3)};
+}
+__device__ __forceinline__ StarkedQm31 starked_q_load(const unsigned *p) {
+    return {p[0], p[1], p[2], p[3]};
+}
+__device__ __forceinline__ unsigned starked_brev(unsigned v, unsigned bits) {
+    return bits == 0u ? 0u : __brev(v) >> (32u - bits);
+}
+// Storage (bit-reversed circle-domain) index of natural (coset-order) row i.
+__device__ __forceinline__ unsigned starked_storage_row(unsigned i, unsigned log_size) {
+    const unsigned n = 1u << log_size;
+    const unsigned circle = (i & 1u) == 0u ? i >> 1u : n - 1u - (i >> 1u);
+    return starked_brev(circle, log_size);
+}
+// Natural (coset-order) row of storage index s.
+__device__ __forceinline__ unsigned starked_natural_row(unsigned s, unsigned log_size) {
+    const unsigned n = 1u << log_size;
+    const unsigned c = starked_brev(s, log_size);
+    return c < (n >> 1u) ? c << 1u : ((n - c) << 1u) - 1u;
+}
+extern "C" __global__ void __launch_bounds__(256) starked_logup_v1_241aa7294452d2a9(
+    const unsigned *sources, unsigned *const *outputs, const unsigned *pubs,
+    const unsigned *powers, const unsigned *z, unsigned *denominators,
+    unsigned *error, unsigned log_size) {
+    const unsigned rows = 1u << log_size;
+    const unsigned row = blockIdx.x * blockDim.x + threadIdx.x;
+    if (row >= rows) return;
+    const unsigned natural = starked_natural_row(row, log_size);
+    (void)natural; (void)pubs;
+    const u64 r_0 = row;
+    const unsigned v0 = sources[(u64)14u * rows + r_0];
+    const unsigned v1 = 1u;
+    const unsigned v4 = sources[(u64)15u * rows + r_0];
+    const unsigned v7 = sources[(u64)16u * rows + r_0];
+    const unsigned v10 = sources[(u64)17u * rows + r_0];
+    const unsigned v13 = sources[(u64)18u * rows + r_0];
+    const unsigned v16 = sources[(u64)19u * rows + r_0];
+    const unsigned v19 = sources[(u64)20u * rows + r_0];
+    const unsigned v22 = sources[(u64)21u * rows + r_0];
+    const unsigned v25 = sources[(u64)22u * rows + r_0];
+    const unsigned v28 = sources[(u64)23u * rows + r_0];
+    const unsigned v31 = sources[(u64)24u * rows + r_0];
+    const unsigned v34 = sources[(u64)25u * rows + r_0];
+    const unsigned v37 = sources[(u64)26u * rows + r_0];
+    const unsigned v40 = sources[(u64)27u * rows + r_0];
+    const unsigned v43 = sources[(u64)28u * rows + r_0];
+    const unsigned v46 = sources[(u64)29u * rows + r_0];
+    const unsigned v49 = sources[(u64)30u * rows + r_0];
+    const unsigned v52 = sources[(u64)31u * rows + r_0];
+    const unsigned v55 = sources[(u64)32u * rows + r_0];
+    const unsigned v58 = sources[(u64)33u * rows + r_0];
+    const unsigned v61 = sources[(u64)34u * rows + r_0];
+    const unsigned v64 = sources[(u64)35u * rows + r_0];
+    const unsigned v67 = sources[(u64)36u * rows + r_0];
+    const unsigned v70 = sources[(u64)37u * rows + r_0];
+    const unsigned v73 = sources[(u64)38u * rows + r_0];
+    const unsigned v76 = sources[(u64)39u * rows + r_0];
+    const unsigned v79 = sources[(u64)40u * rows + r_0];
+    const unsigned v82 = sources[(u64)41u * rows + r_0];
+    const unsigned v85 = sources[(u64)42u * rows + r_0];
+    const unsigned v88 = sources[(u64)43u * rows + r_0];
+    const unsigned v91 = sources[(u64)44u * rows + r_0];
+    const unsigned v94 = sources[(u64)45u * rows + r_0];
+    const unsigned v97 = sources[(u64)46u * rows + r_0];
+    const unsigned v100 = sources[(u64)47u * rows + r_0];
+    const unsigned v103 = sources[(u64)48u * rows + r_0];
+    const unsigned v106 = sources[(u64)49u * rows + r_0];
+    const unsigned v109 = sources[(u64)50u * rows + r_0];
+    const unsigned v112 = sources[(u64)51u * rows + r_0];
+    const unsigned v115 = sources[(u64)52u * rows + r_0];
+    const unsigned v118 = sources[(u64)53u * rows + r_0];
+    const unsigned v121 = sources[(u64)54u * rows + r_0];
+    const unsigned v124 = sources[(u64)55u * rows + r_0];
+    const unsigned v127 = sources[(u64)56u * rows + r_0];
+    const unsigned v130 = sources[(u64)57u * rows + r_0];
+    const unsigned v133 = sources[(u64)58u * rows + r_0];
+    const unsigned v136 = sources[(u64)59u * rows + r_0];
+    const unsigned v139 = sources[(u64)60u * rows + r_0];
+    const unsigned v142 = sources[(u64)61u * rows + r_0];
+    const unsigned v145 = sources[(u64)62u * rows + r_0];
+    const unsigned v148 = sources[(u64)63u * rows + r_0];
+    const unsigned v151 = sources[(u64)64u * rows + r_0];
+    const unsigned v154 = sources[(u64)65u * rows + r_0];
+    const unsigned v157 = sources[(u64)66u * rows + r_0];
+    const unsigned v160 = sources[(u64)67u * rows + r_0];
+    const unsigned v163 = sources[(u64)68u * rows + r_0];
+    const unsigned v166 = sources[(u64)69u * rows + r_0];
+    const unsigned v169 = sources[(u64)70u * rows + r_0];
+    const unsigned v172 = sources[(u64)71u * rows + r_0];
+    const unsigned v175 = sources[(u64)72u * rows + r_0];
+    const unsigned v178 = sources[(u64)73u * rows + r_0];
+    const unsigned v181 = sources[(u64)74u * rows + r_0];
+    const unsigned v184 = sources[(u64)75u * rows + r_0];
+    const unsigned v187 = sources[(u64)76u * rows + r_0];
+    const unsigned v190 = sources[(u64)77u * rows + r_0];
+    const unsigned v806 = 0u;
+    const unsigned v810 = 2u;
+    const unsigned v814 = 4u;
+    const unsigned v818 = 8u;
+    const unsigned v822 = 16u;
+    const unsigned v826 = 32u;
+    const unsigned v830 = 64u;
+    const unsigned v834 = 128u;
+    const unsigned v838 = 256u;
+    const unsigned v842 = 512u;
+    const unsigned v846 = 1024u;
+    const unsigned v850 = 2048u;
+    const unsigned v854 = 4096u;
+    const unsigned v858 = 8192u;
+    const unsigned v862 = 16384u;
+    const unsigned v866 = 32768u;
+    const unsigned v985 = starked_mul(v1, v0);
+    const unsigned v986 = starked_add(v806, v985);
+    const unsigned v987 = starked_mul(v810, v4);
+    const unsigned v988 = starked_add(v986, v987);
+    const unsigned v989 = starked_mul(v814, v7);
+    const unsigned v990 = starked_add(v988, v989);
+    const unsigned v991 = starked_mul(v818, v10);
+    const unsigned v992 = starked_add(v990, v991);
+    const unsigned v993 = starked_mul(v822, v13);
+    const unsigned v994 = starked_add(v992, v993);
+    const unsigned v995 = starked_mul(v826, v16);
+    const unsigned v996 = starked_add(v994, v995);
+    const unsigned v997 = starked_mul(v830, v19);
+    const unsigned v998 = starked_add(v996, v997);
+    const unsigned v999 = starked_mul(v834, v22);
+    const unsigned v1000 = starked_add(v998, v999);
+    const unsigned v1001 = starked_mul(v838, v25);
+    const unsigned v1002 = starked_add(v1000, v1001);
+    const unsigned v1003 = starked_mul(v842, v28);
+    const unsigned v1004 = starked_add(v1002, v1003);
+    const unsigned v1005 = starked_mul(v846, v31);
+    const unsigned v1006 = starked_add(v1004, v1005);
+    const unsigned v1007 = starked_mul(v850, v34);
+    const unsigned v1008 = starked_add(v1006, v1007);
+    const unsigned v1009 = starked_mul(v854, v37);
+    const unsigned v1010 = starked_add(v1008, v1009);
+    const unsigned v1011 = starked_mul(v858, v40);
+    const unsigned v1012 = starked_add(v1010, v1011);
+    const unsigned v1013 = starked_mul(v862, v43);
+    const unsigned v1014 = starked_add(v1012, v1013);
+    const unsigned v1015 = starked_mul(v866, v46);
+    const unsigned v1016 = starked_add(v1014, v1015);
+    const unsigned v1174 = starked_mul(v1, v49);
+    const unsigned v1175 = starked_add(v806, v1174);
+    const unsigned v1176 = starked_mul(v810, v52);
+    const unsigned v1177 = starked_add(v1175, v1176);
+    const unsigned v1178 = starked_mul(v814, v55);
+    const unsigned v1179 = starked_add(v1177, v1178);
+    const unsigned v1180 = starked_mul(v818, v58);
+    const unsigned v1181 = starked_add(v1179, v1180);
+    const unsigned v1182 = starked_mul(v822, v61);
+    const unsigned v1183 = starked_add(v1181, v1182);
+    const unsigned v1184 = starked_mul(v826, v64);
+    const unsigned v1185 = starked_add(v1183, v1184);
+    const unsigned v1186 = starked_mul(v830, v67);
+    const unsigned v1187 = starked_add(v1185, v1186);
+    const unsigned v1188 = starked_mul(v834, v70);
+    const unsigned v1189 = starked_add(v1187, v1188);
+    const unsigned v1190 = starked_mul(v838, v73);
+    const unsigned v1191 = starked_add(v1189, v1190);
+    const unsigned v1192 = starked_mul(v842, v76);
+    const unsigned v1193 = starked_add(v1191, v1192);
+    const unsigned v1194 = starked_mul(v846, v79);
+    const unsigned v1195 = starked_add(v1193, v1194);
+    const unsigned v1196 = starked_mul(v850, v82);
+    const unsigned v1197 = starked_add(v1195, v1196);
+    const unsigned v1198 = starked_mul(v854, v85);
+    const unsigned v1199 = starked_add(v1197, v1198);
+    const unsigned v1200 = starked_mul(v858, v88);
+    const unsigned v1201 = starked_add(v1199, v1200);
+    const unsigned v1202 = starked_mul(v862, v91);
+    const unsigned v1203 = starked_add(v1201, v1202);
+    const unsigned v1204 = starked_mul(v866, v94);
+    const unsigned v1205 = starked_add(v1203, v1204);
+    const unsigned v1263 = starked_mul(v1, v97);
+    const unsigned v1264 = starked_add(v806, v1263);
+    const unsigned v1265 = starked_mul(v810, v100);
+    const unsigned v1266 = starked_add(v1264, v1265);
+    const unsigned v1267 = starked_mul(v814, v103);
+    const unsigned v1268 = starked_add(v1266, v1267);
+    const unsigned v1269 = starked_mul(v818, v106);
+    const unsigned v1270 = starked_add(v1268, v1269);
+    const unsigned v1271 = starked_mul(v822, v109);
+    const unsigned v1272 = starked_add(v1270, v1271);
+    const unsigned v1273 = starked_mul(v826, v112);
+    const unsigned v1274 = starked_add(v1272, v1273);
+    const unsigned v1275 = starked_mul(v830, v115);
+    const unsigned v1276 = starked_add(v1274, v1275);
+    const unsigned v1277 = starked_mul(v834, v118);
+    const unsigned v1278 = starked_add(v1276, v1277);
+    const unsigned v1279 = starked_mul(v838, v121);
+    const unsigned v1280 = starked_add(v1278, v1279);
+    const unsigned v1281 = starked_mul(v842, v124);
+    const unsigned v1282 = starked_add(v1280, v1281);
+    const unsigned v1283 = starked_mul(v846, v127);
+    const unsigned v1284 = starked_add(v1282, v1283);
+    const unsigned v1285 = starked_mul(v850, v130);
+    const unsigned v1286 = starked_add(v1284, v1285);
+    const unsigned v1287 = starked_mul(v854, v133);
+    const unsigned v1288 = starked_add(v1286, v1287);
+    const unsigned v1289 = starked_mul(v858, v136);
+    const unsigned v1290 = starked_add(v1288, v1289);
+    const unsigned v1291 = starked_mul(v862, v139);
+    const unsigned v1292 = starked_add(v1290, v1291);
+    const unsigned v1293 = starked_mul(v866, v142);
+    const unsigned v1294 = starked_add(v1292, v1293);
+    const unsigned v1381 = starked_mul(v1, v145);
+    const unsigned v1382 = starked_add(v806, v1381);
+    const unsigned v1383 = starked_mul(v810, v148);
+    const unsigned v1384 = starked_add(v1382, v1383);
+    const unsigned v1385 = starked_mul(v814, v151);
+    const unsigned v1386 = starked_add(v1384, v1385);
+    const unsigned v1387 = starked_mul(v818, v154);
+    const unsigned v1388 = starked_add(v1386, v1387);
+    const unsigned v1389 = starked_mul(v822, v157);
+    const unsigned v1390 = starked_add(v1388, v1389);
+    const unsigned v1391 = starked_mul(v826, v160);
+    const unsigned v1392 = starked_add(v1390, v1391);
+    const unsigned v1393 = starked_mul(v830, v163);
+    const unsigned v1394 = starked_add(v1392, v1393);
+    const unsigned v1395 = starked_mul(v834, v166);
+    const unsigned v1396 = starked_add(v1394, v1395);
+    const unsigned v1397 = starked_mul(v838, v169);
+    const unsigned v1398 = starked_add(v1396, v1397);
+    const unsigned v1399 = starked_mul(v842, v172);
+    const unsigned v1400 = starked_add(v1398, v1399);
+    const unsigned v1401 = starked_mul(v846, v175);
+    const unsigned v1402 = starked_add(v1400, v1401);
+    const unsigned v1403 = starked_mul(v850, v178);
+    const unsigned v1404 = starked_add(v1402, v1403);
+    const unsigned v1405 = starked_mul(v854, v181);
+    const unsigned v1406 = starked_add(v1404, v1405);
+    const unsigned v1407 = starked_mul(v858, v184);
+    const unsigned v1408 = starked_add(v1406, v1407);
+    const unsigned v1409 = starked_mul(v862, v187);
+    const unsigned v1410 = starked_add(v1408, v1409);
+    const unsigned v1411 = starked_mul(v866, v190);
+    const unsigned v1412 = starked_add(v1410, v1411);
+    const unsigned v5110 = sources[(u64)0u * rows + r_0];
+    const unsigned v6007 = sources[(u64)1u * rows + r_0];
+    const unsigned v6136 = sources[(u64)2u * rows + r_0];
+    const unsigned v6617 = sources[(u64)3u * rows + r_0];
+    const unsigned v6849 = sources[(u64)79u * rows + r_0];
+    const unsigned v6852 = sources[(u64)84u * rows + r_0];
+    const unsigned v6855 = sources[(u64)85u * rows + r_0];
+    const unsigned v6866 = sources[(u64)83u * rows + r_0];
+    const unsigned v6876 = sources[(u64)78u * rows + r_0];
+    const unsigned v6889 = sources[(u64)80u * rows + r_0];
+    const unsigned v6903 = sources[(u64)4u * rows + r_0];
+    const unsigned v8184 = sources[(u64)81u * rows + r_0];
+    const unsigned v8185 = sources[(u64)6u * rows + r_0];
+    const unsigned v8188 = sources[(u64)7u * rows + r_0];
+    const unsigned v8191 = sources[(u64)8u * rows + r_0];
+    const unsigned v8194 = sources[(u64)9u * rows + r_0];
+    const unsigned v8197 = sources[(u64)10u * rows + r_0];
+    const unsigned v8200 = sources[(u64)11u * rows + r_0];
+    const unsigned v8203 = sources[(u64)12u * rows + r_0];
+    const unsigned v8206 = sources[(u64)13u * rows + r_0];
+    const unsigned v8235 = sources[(u64)82u * rows + r_0];
+    const unsigned v8270 = starked_neg(v6852);
+    const unsigned v8271 = sources[(u64)5u * rows + r_0];
+    const unsigned v8272 = starked_neg(v6855);
+    const unsigned v8273 = starked_neg(v6903);
+    const unsigned v8274 = pubs[9];
+    const unsigned v8275 = starked_mul(v8185, v8274);
+    const unsigned v8276 = starked_add(v806, v8275);
+    const unsigned v8277 = pubs[11];
+    const unsigned v8278 = starked_mul(v8188, v8277);
+    const unsigned v8279 = starked_add(v8276, v8278);
+    const unsigned v8280 = pubs[13];
+    const unsigned v8281 = starked_mul(v8191, v8280);
+    const unsigned v8282 = starked_add(v8279, v8281);
+    const unsigned v8283 = pubs[15];
+    const unsigned v8284 = starked_mul(v8194, v8283);
+    const unsigned v8285 = starked_add(v8282, v8284);
+    const unsigned v8286 = pubs[17];
+    const unsigned v8287 = starked_mul(v8197, v8286);
+    const unsigned v8288 = starked_add(v8285, v8287);
+    const unsigned v8289 = pubs[19];
+    const unsigned v8290 = starked_mul(v8200, v8289);
+    const unsigned v8291 = starked_add(v8288, v8290);
+    const unsigned v8292 = pubs[21];
+    const unsigned v8293 = starked_mul(v8203, v8292);
+    const unsigned v8294 = starked_add(v8291, v8293);
+    const unsigned v8295 = pubs[23];
+    const unsigned v8296 = starked_mul(v8206, v8295);
+    const unsigned v8297 = starked_add(v8294, v8296);
+    const unsigned v8298 = pubs[10];
+    const unsigned v8299 = starked_mul(v8185, v8298);
+    const unsigned v8300 = starked_add(v806, v8299);
+    const unsigned v8301 = pubs[12];
+    const unsigned v8302 = starked_mul(v8188, v8301);
+    const unsigned v8303 = starked_add(v8300, v8302);
+    const unsigned v8304 = pubs[14];
+    const unsigned v8305 = starked_mul(v8191, v8304);
+    const unsigned v8306 = starked_add(v8303, v8305);
+    const unsigned v8307 = pubs[16];
+    const unsigned v8308 = starked_mul(v8194, v8307);
+    const unsigned v8309 = starked_add(v8306, v8308);
+    const unsigned v8310 = pubs[18];
+    const unsigned v8311 = starked_mul(v8197, v8310);
+    const unsigned v8312 = starked_add(v8309, v8311);
+    const unsigned v8313 = pubs[20];
+    const unsigned v8314 = starked_mul(v8200, v8313);
+    const unsigned v8315 = starked_add(v8312, v8314);
+    const unsigned v8316 = pubs[22];
+    const unsigned v8317 = starked_mul(v8203, v8316);
+    const unsigned v8318 = starked_add(v8315, v8317);
+    const unsigned v8319 = pubs[24];
+    const unsigned v8320 = starked_mul(v8206, v8319);
+    const unsigned v8321 = starked_add(v8318, v8320);
+    const unsigned v8322 = starked_mul(v6866, v5110);
+    const unsigned v8323 = 5u;
+    const unsigned v8324 = starked_mul(v6866, v6007);
+    const unsigned v8325 = 6u;
+    const unsigned v8326 = starked_mul(v6866, v6136);
+    const unsigned v8327 = 7u;
+    const unsigned v8328 = starked_mul(v6866, v6617);
+    const unsigned v8329 = 3u;
+    const StarkedQm31 minus_z = {starked_neg(z[0]), starked_neg(z[1]), starked_neg(z[2]), starked_neg(z[3])};
+    const StarkedQm31 alpha1 = starked_q_load(powers + 4);
+    const StarkedQm31 alpha2 = starked_q_load(powers + 8);
+    const StarkedQm31 alpha3 = starked_q_load(powers + 12);
+    const StarkedQm31 alpha4 = starked_q_load(powers + 16);
+    StarkedQm31 d0 = minus_z;
+    d0.a = starked_add(d0.a, 18u);
+    d0 = starked_q_add(d0, starked_q_mul_base(alpha1, v6876));
+    d0 = starked_q_add(d0, starked_q_mul_base(alpha2, v8271));
+    d0 = starked_q_add(d0, starked_q_mul_base(alpha3, v8184));
+    d0 = starked_q_add(d0, starked_q_mul_base(alpha4, v8235));
+    StarkedQm31 d1 = minus_z;
+    d1.a = starked_add(d1.a, 19u);
+    d1 = starked_q_add(d1, starked_q_mul_base(alpha1, v6876));
+    d1 = starked_q_add(d1, starked_q_mul_base(alpha2, v6849));
+    d1 = starked_q_add(d1, starked_q_mul_base(alpha3, v6889));
+    StarkedQm31 d2 = minus_z;
+    d2.a = starked_add(d2.a, 20u);
+    d2 = starked_q_add(d2, starked_q_mul_base(alpha1, v8271));
+    d2 = starked_q_add(d2, starked_q_mul_base(alpha2, v8297));
+    d2 = starked_q_add(d2, starked_q_mul_base(alpha3, v8321));
+    StarkedQm31 d3 = minus_z;
+    d3.a = starked_add(d3.a, 20u);
+    d3 = starked_q_add(d3, starked_q_mul_base(alpha1, v806));
+    d3 = starked_q_add(d3, starked_q_mul_base(alpha2, v1016));
+    d3 = starked_q_add(d3, starked_q_mul_base(alpha3, v1205));
+    StarkedQm31 d4 = minus_z;
+    d4.a = starked_add(d4.a, 20u);
+    d4 = starked_q_add(d4, starked_q_mul_base(alpha1, v8323));
+    d4 = starked_q_add(d4, starked_q_mul_base(alpha2, v1294));
+    d4 = starked_q_add(d4, starked_q_mul_base(alpha3, v1412));
+    StarkedQm31 d5 = minus_z;
+    d5.a = starked_add(d5.a, 20u);
+    d5 = starked_q_add(d5, starked_q_mul_base(alpha1, v1));
+    d5 = starked_q_add(d5, starked_q_mul_base(alpha2, v1016));
+    d5 = starked_q_add(d5, starked_q_mul_base(alpha3, v1205));
+    StarkedQm31 d6 = minus_z;
+    d6.a = starked_add(d6.a, 20u);
+    d6 = starked_q_add(d6, starked_q_mul_base(alpha1, v8325));
+    d6 = starked_q_add(d6, starked_q_mul_base(alpha2, v1294));
+    d6 = starked_q_add(d6, starked_q_mul_base(alpha3, v1412));
+    StarkedQm31 d7 = minus_z;
+    d7.a = starked_add(d7.a, 20u);
+    d7 = starked_q_add(d7, starked_q_mul_base(alpha1, v810));
+    d7 = starked_q_add(d7, starked_q_mul_base(alpha2, v1016));
+    d7 = starked_q_add(d7, starked_q_mul_base(alpha3, v1205));
+    StarkedQm31 d8 = minus_z;
+    d8.a = starked_add(d8.a, 20u);
+    d8 = starked_q_add(d8, starked_q_mul_base(alpha1, v8327));
+    d8 = starked_q_add(d8, starked_q_mul_base(alpha2, v1294));
+    d8 = starked_q_add(d8, starked_q_mul_base(alpha3, v1412));
+    StarkedQm31 d9 = minus_z;
+    d9.a = starked_add(d9.a, 20u);
+    d9 = starked_q_add(d9, starked_q_mul_base(alpha1, v8329));
+    d9 = starked_q_add(d9, starked_q_mul_base(alpha2, v1016));
+    d9 = starked_q_add(d9, starked_q_mul_base(alpha3, v1205));
+    StarkedQm31 d10 = minus_z;
+    d10.a = starked_add(d10.a, 20u);
+    d10 = starked_q_add(d10, starked_q_mul_base(alpha1, v814));
+    d10 = starked_q_add(d10, starked_q_mul_base(alpha2, v1294));
+    d10 = starked_q_add(d10, starked_q_mul_base(alpha3, v1412));
+    {
+        const StarkedQm31 n = starked_q_add(starked_q_mul_base(d1, v8270), starked_q_mul_base(d0, v8272));
+        const StarkedQm31 d = starked_q_mul(d0, d1);
+        if ((d.a | d.b | d.c | d.d) == 0u) atomicOr(error, 2u);
+        outputs[0][row] = n.a;
+        outputs[1][row] = n.b;
+        outputs[2][row] = n.c;
+        outputs[3][row] = n.d;
+        unsigned *slot = denominators + ((u64)0u * rows + row) * 4u;
+        slot[0] = d.a; slot[1] = d.b; slot[2] = d.c; slot[3] = d.d;
+    }
+    {
+        const StarkedQm31 n = starked_q_add(starked_q_mul_base(d3, v8273), starked_q_mul_base(d2, v8322));
+        const StarkedQm31 d = starked_q_mul(d2, d3);
+        if ((d.a | d.b | d.c | d.d) == 0u) atomicOr(error, 2u);
+        outputs[4][row] = n.a;
+        outputs[5][row] = n.b;
+        outputs[6][row] = n.c;
+        outputs[7][row] = n.d;
+        unsigned *slot = denominators + ((u64)1u * rows + row) * 4u;
+        slot[0] = d.a; slot[1] = d.b; slot[2] = d.c; slot[3] = d.d;
+    }
+    {
+        const StarkedQm31 n = starked_q_add(starked_q_mul_base(d5, v8322), starked_q_mul_base(d4, v8324));
+        const StarkedQm31 d = starked_q_mul(d4, d5);
+        if ((d.a | d.b | d.c | d.d) == 0u) atomicOr(error, 2u);
+        outputs[8][row] = n.a;
+        outputs[9][row] = n.b;
+        outputs[10][row] = n.c;
+        outputs[11][row] = n.d;
+        unsigned *slot = denominators + ((u64)2u * rows + row) * 4u;
+        slot[0] = d.a; slot[1] = d.b; slot[2] = d.c; slot[3] = d.d;
+    }
+    {
+        const StarkedQm31 n = starked_q_add(starked_q_mul_base(d7, v8324), starked_q_mul_base(d6, v8326));
+        const StarkedQm31 d = starked_q_mul(d6, d7);
+        if ((d.a | d.b | d.c | d.d) == 0u) atomicOr(error, 2u);
+        outputs[12][row] = n.a;
+        outputs[13][row] = n.b;
+        outputs[14][row] = n.c;
+        outputs[15][row] = n.d;
+        unsigned *slot = denominators + ((u64)3u * rows + row) * 4u;
+        slot[0] = d.a; slot[1] = d.b; slot[2] = d.c; slot[3] = d.d;
+    }
+    {
+        const StarkedQm31 n = starked_q_add(starked_q_mul_base(d9, v8326), starked_q_mul_base(d8, v8328));
+        const StarkedQm31 d = starked_q_mul(d8, d9);
+        if ((d.a | d.b | d.c | d.d) == 0u) atomicOr(error, 2u);
+        outputs[16][row] = n.a;
+        outputs[17][row] = n.b;
+        outputs[18][row] = n.c;
+        outputs[19][row] = n.d;
+        unsigned *slot = denominators + ((u64)4u * rows + row) * 4u;
+        slot[0] = d.a; slot[1] = d.b; slot[2] = d.c; slot[3] = d.d;
+    }
+    {
+        const StarkedQm31 n = {v8328, 0u, 0u, 0u};
+        const StarkedQm31 d = d10;
+        if ((d.a | d.b | d.c | d.d) == 0u) atomicOr(error, 2u);
+        outputs[20][row] = n.a;
+        outputs[21][row] = n.b;
+        outputs[22][row] = n.c;
+        outputs[23][row] = n.d;
+        unsigned *slot = denominators + ((u64)5u * rows + row) * 4u;
+        slot[0] = d.a; slot[1] = d.b; slot[2] = d.c; slot[3] = d.d;
+    }
+}

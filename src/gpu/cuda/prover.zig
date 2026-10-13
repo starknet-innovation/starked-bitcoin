@@ -1,16 +1,16 @@
 //! The resident CUDA block-system prover: same transcript and proof bytes as `system.proveOpts`
 //! (src/air/system.zig), adapted from `circuit_cuda/resident_prover.zig`.
 //!
-//! First version (docs/design/gpu-cuda.md § Witness and interaction):
-//! 1. Host: the preprocessed and main roots (`system.traceRoots`, CPU), the prefix replay to (z, α)
-//!    (`transcript.HostSink`), the interaction columns and claimed sums (`system.interactionTrace`).
-//! 2. Device, one transaction (`proofPass`): ingress uploads all three trace trees as evaluations
-//!    (into staging slots), the statement, claims, z and α⁰…α^w; the schedule
-//!    (`pipeline.zig`) assembles them from staging (`.trace_generation`), commits, draws (z, α) itself and
-//!    runs the STARK tail; the terminal bundle decodes to `system.Proof`.
-//! The runtime runs every stage in order with kernel work in each, so a roots-only device
-//! transaction is not possible; device LogUp will remove the host commit.
-//! The caller verifies the result (`system.verifyExt`); the roots of pass 1 must equal pass 2's.
+//! One device transaction (`proofPass`; docs/design/gpu-cuda.md § Device LogUp): ingress uploads the
+//! preprocessed and main trees as evaluations (into staging slots) and the statement; the schedule
+//! (`pipeline.zig`) assembles them (`.trace_generation`), commits, draws (z, α), builds the
+//! interaction tree and claimed sums on the device (`logup.zig`), commits it and runs the STARK
+//! tail; the terminal bundle decodes to `system.Proof`. The caller verifies the result
+//! (`system.verifyExt`).
+//!
+//! `proveHostLogup` keeps the first version for A/B runs: the host computes the trace roots
+//! (`system.traceRoots`, CPU), replays the prefix to (z, α) (`transcript.HostSink`) and builds the
+//! interaction columns and claims (`system.interactionTrace`), which ingress uploads with the trees.
 
 const std = @import("std");
 const sb = @import("starked_bitcoin");
@@ -26,6 +26,7 @@ const masks = @import("masks.zig");
 const terminal = @import("terminal.zig");
 const controller = @import("composition_controller.zig");
 const pipeline = @import("pipeline.zig");
+const logup = @import("logup.zig");
 const system = sb.air.system;
 const rec = sb.air.prove_rec;
 const M31 = core.fields.m31.M31;
@@ -82,10 +83,28 @@ pub const Prepared = struct {
     memory: memory.Plan,
     claims_mixed: usize,
     alpha_powers: usize,
+    /// Device LogUp (null: the host builds the interaction tree, `proveHostLogup`).
+    logup: ?*logup.Plan,
 
-    pub fn init(allocator: std.mem.Allocator, parts: []const system.Part, cat: *const catalog_mod.Catalog, config: core.pcs.config_v2.PcsConfigV2) !Prepared {
+    pub const Mode = enum { device_logup, host_logup };
+
+    pub fn init(allocator: std.mem.Allocator, parts: []const system.Part, cat: *const catalog_mod.Catalog, config: core.pcs.config_v2.PcsConfigV2, mode: Mode) !Prepared {
         var plans = try plan_mod.Plans.init(allocator, parts, cat, config);
         errdefer plans.deinit();
+        const logup_plan: ?*logup.Plan = switch (mode) {
+            .host_logup => null,
+            .device_logup => blk: {
+                if (cat.logup.len != parts.len) return error.CudaCatalogPlacementMismatch;
+                const p = try allocator.create(logup.Plan);
+                errdefer allocator.destroy(p);
+                p.* = try logup.Plan.init(allocator, parts, cat.logup);
+                break :blk p;
+            },
+        };
+        errdefer if (logup_plan) |p| {
+            p.deinit();
+            allocator.destroy(p);
+        };
         var statement = try transcript.Statement.init(allocator, parts);
         errdefer statement.deinit(allocator);
         var claims: usize = 0;
@@ -109,6 +128,7 @@ pub const Prepared = struct {
             .fri = &plans.fri,
             .decommit = &plans.decommit,
             .terminal = &bundle,
+            .logup = logup_plan,
         });
         errdefer mem.deinit();
         return .{
@@ -121,10 +141,15 @@ pub const Prepared = struct {
             .memory = mem,
             .claims_mixed = claims,
             .alpha_powers = alpha_powers,
+            .logup = logup_plan,
         };
     }
 
     pub fn deinit(self: *Prepared) void {
+        if (self.logup) |p| {
+            p.deinit();
+            self.allocator.destroy(p);
+        }
         self.memory.deinit();
         self.terminal_bundle.deinit(self.allocator);
         self.statement.deinit(self.allocator);
@@ -165,9 +190,26 @@ pub fn hostTraceTrees(allocator: std.mem.Allocator, input: Input) !HostTrees {
     return out;
 }
 
-/// The whole proof (see the file comment).
+/// The whole proof, LogUp on the device (see the file comment).
 pub fn prove(allocator: std.mem.Allocator, input: Input) !Result {
-    var prepared = try Prepared.init(allocator, input.parts, input.catalog, input.config);
+    var prepared = try Prepared.init(allocator, input.parts, input.catalog, input.config, .device_logup);
+    defer prepared.deinit();
+    var host = try hostTraceTrees(allocator, input);
+    defer host.deinit(allocator);
+    var twiddles = try Twiddles.init(allocator, prepared.plans.twiddle_words);
+    defer twiddles.deinit();
+    return proofPass(allocator, &prepared, &host, &twiddles, input, null);
+}
+
+/// The interaction tree the host built for the lookup elements the device will draw.
+pub const HostLogup = struct {
+    el: core.channel.lookup_transcript.LookupElements,
+    sums: []const QM31,
+};
+
+/// The whole proof, LogUp on the host (the first version, for A/B runs).
+pub fn proveHostLogup(allocator: std.mem.Allocator, input: Input) !Result {
+    var prepared = try Prepared.init(allocator, input.parts, input.catalog, input.config, .host_logup);
     defer prepared.deinit();
     var host = try hostTraceTrees(allocator, input);
     defer host.deinit(allocator);
@@ -182,7 +224,7 @@ pub fn prove(allocator: std.mem.Allocator, input: Input) !Result {
     defer allocator.free(inter.sums);
 
     // Device: the proof.
-    var result = try proofPass(allocator, &prepared, &host, &twiddles, input, el, inter.sums);
+    var result = try proofPass(allocator, &prepared, &host, &twiddles, input, .{ .el = el, .sums = inter.sums });
     errdefer result.proof.stark.deinit(allocator);
     const proved = result.proof.stark.commitment_scheme_proof.commitments.items;
     if (!std.mem.eql(u8, std.mem.asBytes(&proved[0]), std.mem.asBytes(&roots[0])) or
@@ -202,16 +244,17 @@ pub fn lookupElements(prepared: *const Prepared, config: core.pcs.config_v2.PcsC
     return prefix.drawLookupElements();
 }
 
-/// The resident proof (one device transaction).
+/// The resident proof (one device transaction). `host_logup`: the interaction tree in
+/// `host.trees[2]` and its claims (`Prepared.Mode.host_logup`); null: device LogUp.
 pub fn proofPass(
     allocator: std.mem.Allocator,
     prepared: *const Prepared,
     host: *const HostTrees,
     twiddles: *const Twiddles,
     input: Input,
-    el: core.channel.lookup_transcript.LookupElements,
-    sums: []const QM31,
+    host_logup: ?HostLogup,
 ) !Result {
+    if ((host_logup == null) != (prepared.logup != null)) return error.InvalidResidentInput;
     const plans = &prepared.plans;
     const blowup = input.config.fri_config.log_blowup_factor;
     var tx = try Transaction.openPrepared(allocator, &accepted_sms, try prepared.memory.placement.clone(allocator));
@@ -223,6 +266,7 @@ pub fn proofPass(
         .commitments = &plans.commits,
         .fri = &plans.fri,
         .terminal = &prepared.terminal_bundle,
+        .logup_slab_words = if (prepared.logup) |p| p.slab_words else 0,
     });
     defer views.deinit();
 
@@ -231,26 +275,25 @@ pub fn proofPass(
     try session.context.uploadSlice(u32, views.twiddles_inverse, twiddles.inverseWords());
     for (views.columns, host.trees) |dst, src| try uploadTree(session, dst, src);
     try session.context.uploadSlice(u32, views.statement, prepared.statement.words);
-    try uploadFelts(allocator, session, try views.claims_mixed.cast(u32), sums);
-    const per_component = try allocator.alloc(QM31, input.parts.len);
-    defer allocator.free(per_component);
-    {
+    if (host_logup) |h| {
+        try uploadFelts(allocator, session, try views.claims_mixed.cast(u32), h.sums);
+        const per_component = try allocator.alloc(QM31, input.parts.len);
+        defer allocator.free(per_component);
         var k: usize = 0;
         for (input.parts, per_component) |p, *s| {
             if (p.air.lookups.len == 0) {
                 s.* = QM31.zero();
             } else {
-                s.* = sums[k];
+                s.* = h.sums[k];
                 k += 1;
             }
         }
+        try uploadFelts(allocator, session, try views.claims_component.cast(u32), per_component);
+    } else {
+        // The device writes the claims of the components with lookups; the others stay zero.
+        try tx.zeroResidentSlice(u32, .ingress, (try prepared.memory.slot(.claims_component, 0)).requirement.id, 0, 4 * input.parts.len);
     }
-    try uploadFelts(allocator, session, try views.claims_component.cast(u32), per_component);
-    try uploadFelts(allocator, session, try views.relation_z.cast(u32), &.{el.z});
-    const powers = try allocator.alloc(QM31, prepared.alpha_powers);
-    defer allocator.free(powers);
-    for (powers, 0..) |*x, i| x.* = if (i == 0) QM31.one() else powers[i - 1].mul(el.alpha);
-    try uploadFelts(allocator, session, try views.relation_alpha_powers.cast(u32), powers);
+    // z and α⁰…α^w are expanded on the device from its own draw (`logup.expandChallenges`).
     try tx.zeroResidentSlice(u32, .ingress, (try prepared.memory.slot(.error_flag, 0)).requirement.id, 0, 1);
     const terminal_id = (try prepared.memory.slot(.terminal_bundle, 0)).requirement.id;
     try tx.zeroResidentSlice(u32, .ingress, terminal_id, 0, prepared.terminal_bundle.total_words);
@@ -274,6 +317,29 @@ pub fn proofPass(
     defer quotient_bound.deinit();
     try plans.fri.upload(session, views.fri, views.twiddles_inverse);
     try plans.decommit.upload(session, views.decommit);
+    var logup_bound: ?logup.Bound = null;
+    defer if (logup_bound) |*b| b.deinit();
+    if (prepared.logup) |plan| {
+        const lv = views.logup orelse return error.InvalidResidentInput;
+        logup_bound = try logup.Bound.init(allocator, plan, .{
+            .sources = lv.sources,
+            .staging = .{ views.columns[0], views.columns[1] },
+            .outputs = views.coefficient_columns[2],
+            .denominators = lv.denominators,
+            .tables = lv.tables,
+            .geometry = lv.geometry,
+            .partials = lv.partials,
+            .scan = lv.scan,
+            .statement = views.statement,
+            .lookup = views.transcript.lookup,
+            .z = views.relation_z,
+            .powers = views.relation_alpha_powers,
+            .claims_mixed = views.claims_mixed,
+            .claims_component = views.claims_component,
+            .error_flag = views.error_flag,
+        });
+        try logup_bound.?.prime(session);
+    }
     try tx.finishIngress();
 
     var schedule = pipeline.Native{
@@ -290,6 +356,9 @@ pub fn proofPass(
         .commitments = &commits,
         .columns = .{ views.columns[0], views.columns[1], views.columns[2] },
         .staging = views.staging,
+        .logup = if (logup_bound) |*b| b else null,
+        .relation_z = views.relation_z,
+        .relation_alpha_powers = views.relation_alpha_powers,
         .error_flag = views.error_flag,
         .oods_view = views.oods,
         .quotient_challenge = views.quotient.challenge,
@@ -385,4 +454,6 @@ pub const Twiddles = struct {
 test "cuda resident prover: the whole device schedule typechecks against the native CUDA session" {
     const entry: *const fn (std.mem.Allocator, Input) anyerror!Result = &prove;
     try std.testing.expect(@intFromPtr(entry) != 0);
+    const host: *const fn (std.mem.Allocator, Input) anyerror!Result = &proveHostLogup;
+    try std.testing.expect(@intFromPtr(host) != 0);
 }

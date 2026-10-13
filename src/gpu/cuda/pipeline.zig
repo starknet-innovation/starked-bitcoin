@@ -1,6 +1,7 @@
 //! One proof-owned CUDA schedule for the block system, adapted from
-//! `circuit_cuda/resident_pipeline.zig`: our transcript prefix, no device witness or interaction
-//! stage (their columns arrive at ingress), and our claim capture. The tail (composition, OODS,
+//! `circuit_cuda/resident_pipeline.zig`: our transcript prefix, no device witness (the trace
+//! arrives at ingress), device LogUp in `.trace_commit` as the circuit's (`logup.zig`; or the
+//! host's interaction tree from ingress), and our claim capture. The tail (composition, OODS,
 //! quotient, FRI, query grind, openings) is stwo-zig's, in its order. Only the terminal bundle
 //! leaves the GPU.
 
@@ -12,6 +13,7 @@ const shared = @import("stwo_native_cuda_integration").common;
 const transcript = @import("transcript.zig");
 const controller = @import("composition_controller.zig");
 const terminal = @import("terminal.zig");
+const logup = @import("logup.zig");
 const common = cuda.runtime.stages.common;
 const quotient_module = @import("stwo_cairo_cuda_integration").executor.quotient.controller;
 
@@ -29,7 +31,11 @@ pub fn Bound(comptime Transaction: type, comptime Sink: type) type {
         decommit_plan: *const cc.resident_decommit.Plan,
         commitments: *[4]cc.resident_commit.Bound,
         columns: [3][]const common.Words,
-        staging: [3]common.Words,
+        staging: [3]?common.Words,
+        /// Device LogUp; null: tree 2 and the claims were uploaded at ingress.
+        logup: ?*const logup.Bound,
+        relation_z: common.SecureFields,
+        relation_alpha_powers: common.SecureFields,
         error_flag: common.Words,
         oods_view: shared.resident_views.Oods,
         quotient_challenge: common.SecureFields,
@@ -46,7 +52,14 @@ pub fn Bound(comptime Transaction: type, comptime Sink: type) type {
                 self.proof.trace_commitments.len != 4 * 8 + self.claims_mixed.len * 4 or
                 self.composition.buffers.composition_coefficients.address != self.commitments[3].buffers.coefficients.address)
                 return error.InvalidResidentPipeline;
-            for (self.columns, 0..) |cols, tree| if (cols.len != self.commitments[tree].plan.column_logs.len) return error.InvalidResidentPipeline;
+            for (self.columns, self.staging, 0..) |cols, staging, tree| {
+                const device_tree = tree == 2 and self.logup != null;
+                if (device_tree != (staging == null)) return error.InvalidResidentPipeline;
+                if (cols.len != if (device_tree) 0 else self.commitments[tree].plan.column_logs.len) return error.InvalidResidentPipeline;
+            }
+            if (self.logup) |l| if (l.buffers.claims_mixed.address != self.claims_mixed.address or
+                l.buffers.z.address != self.relation_z.address or l.buffers.powers.address != self.relation_alpha_powers.address)
+                return error.InvalidResidentPipeline;
             const first = self.fri_view.layers[0].coordinates;
             const quotient = self.quotient.views.result_coordinates;
             const row_words = first.column_stride_words;
@@ -71,12 +84,15 @@ pub fn Bound(comptime Transaction: type, comptime Sink: type) type {
                 }
             };
 
-            // Trace assembly: gather each cohort of trees 0–2 from its ingress staging slot into
-            // the commitment's input buffer (stwo-zig's contiguous witness gather; a plain column
-            // copy here). The trace itself is built on the host for now, so this is the stage's
-            // only device work; device witness generation would replace it.
+            // Trace assembly: gather each cohort of the staged trees from its ingress staging slot
+            // into the commitment's input buffer (stwo-zig's contiguous witness gather; a plain
+            // column copy here). The trace itself is built on the host for now, so this is the
+            // stage's only device work; device witness generation would replace it. Device LogUp
+            // keeps a copy of the columns its lookups read (the commit interpolates in place).
             try tx.beginStage(.trace_generation);
-            for (self.commitments[0..3], self.staging) |*c, staging| {
+            if (self.logup) |l| try l.gather(session);
+            for (self.commitments[0..3], self.staging) |*c, maybe_staging| {
+                const staging = maybe_staging orelse continue;
                 for (c.plan.cohorts) |cohort| {
                     const rows: u32 = @as(u32, 1) << @intCast(cohort.trace_log);
                     const words = cohort.count * rows;
@@ -108,9 +124,13 @@ pub fn Bound(comptime Transaction: type, comptime Sink: type) type {
             const main_root = try self.commitments[1].root();
             try proof_root.capture(session, self.proof, 1, main_root);
             try prefix.commitMain(main_root);
-            // The device draws (z, α) itself; the interaction columns uploaded at ingress were
-            // built for the same draw from the host's roots (prover.zig).
-            _ = try prefix.drawLookupElements();
+            // The device draws (z, α) itself. Device LogUp builds tree 2 (in place in its
+            // coefficient buffer) and the claims here; on the host path they were uploaded at
+            // ingress, built for the same draw from the host's roots (prover.zig).
+            const drawn = try prefix.drawLookupElements();
+            if (self.logup) |l| {
+                try l.execute(session);
+            } else try logup.expandChallenges(session, drawn, self.relation_z, self.relation_alpha_powers);
             try prefix.mixInteractionClaim(try self.claims_mixed.cast(u32));
             try terminal.captureClaims(session, self.proof, self.claims_mixed);
             try self.commitments[2].execute(session);
