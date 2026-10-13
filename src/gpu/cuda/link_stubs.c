@@ -47,3 +47,7 @@ int stwo_native_aot_loader_stats() { return -1; }
 int stwo_static_cuda_module_build_identity() { return -1; }
 int stwo_zig_cuda_aot_entry_count() { return -1; }
 int stwo_witness_edge_gather_contiguous_on() { return -1; }
+/* Device LogUp (src/gpu/cuda/logup.zig): stwo-zig's relation challenges and completion. */
+int stwo_relation_expand_challenges_on() { return -1; }
+int stwo_relation_fraction_chain_global_on() { return -1; }
+int stwo_relation_tail_global_on() { return -1; }

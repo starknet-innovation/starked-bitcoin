@@ -4,12 +4,15 @@
 //!                          [--size uniform|tiered] [--min-log k]
 //!                          [--skip-cpu] [--cpu-sha hexprefix] [--cpu-len bytes]
 //!                          [--cpu-proof file] [--save-cpu file] [--save-device file] [--mock]
+//!                          [--host-logup]
 //!
 //! Steps, each printed with its time:
 //!  1. build the block's witness (`block.system.buildFull`);
 //!  2. CPU proof (`system.proveOpts`, compact storage) unless `--skip-cpu` / `--cpu-proof`;
-//!  3. host: trace roots (CPU commit of trees 0–1), (z, α), interaction trace;
-//!  4. the device proof (one transaction);
+//!  3. host: plans, the preprocessed and main trees in storage order, twiddles; with
+//!     `--host-logup` (the first version, for A/B) also the trace roots (CPU commit of trees 0–1),
+//!     (z, α) and the interaction trace;
+//!  4. the device proof (one transaction; LogUp on the device unless `--host-logup`);
 //!  5. a structured comparison with the CPU proof in stage order (claims, roots 0–3, sampled
 //!     values, FRI roots, last layer, nonce, openings): the first difference names the stage
 //!     that produced it;
@@ -42,6 +45,7 @@ const Opts = struct {
     save_cpu: ?[]const u8 = null,
     save_device: ?[]const u8 = null,
     mock: bool = false,
+    host_logup: bool = false,
 };
 
 fn parse(args: []const []const u8) !Opts {
@@ -64,7 +68,7 @@ fn parse(args: []const []const u8) !Opts {
             const v = try next(args, &i);
             o.tiered = std.mem.eql(u8, v, "tiered");
             if (!o.tiered and !std.mem.eql(u8, v, "uniform")) return error.BadSize;
-        } else if (std.mem.eql(u8, a, "--min-log")) o.min_log = try std.fmt.parseInt(u32, try next(args, &i), 10) else if (std.mem.eql(u8, a, "--skip-cpu")) o.skip_cpu = true else if (std.mem.eql(u8, a, "--cpu-sha")) o.cpu_sha = try next(args, &i) else if (std.mem.eql(u8, a, "--cpu-len")) o.cpu_len = try std.fmt.parseInt(usize, try next(args, &i), 10) else if (std.mem.eql(u8, a, "--cpu-proof")) o.cpu_proof = try next(args, &i) else if (std.mem.eql(u8, a, "--save-cpu")) o.save_cpu = try next(args, &i) else if (std.mem.eql(u8, a, "--save-device")) o.save_device = try next(args, &i) else if (std.mem.eql(u8, a, "--mock")) o.mock = true else {
+        } else if (std.mem.eql(u8, a, "--min-log")) o.min_log = try std.fmt.parseInt(u32, try next(args, &i), 10) else if (std.mem.eql(u8, a, "--skip-cpu")) o.skip_cpu = true else if (std.mem.eql(u8, a, "--cpu-sha")) o.cpu_sha = try next(args, &i) else if (std.mem.eql(u8, a, "--cpu-len")) o.cpu_len = try std.fmt.parseInt(usize, try next(args, &i), 10) else if (std.mem.eql(u8, a, "--cpu-proof")) o.cpu_proof = try next(args, &i) else if (std.mem.eql(u8, a, "--save-cpu")) o.save_cpu = try next(args, &i) else if (std.mem.eql(u8, a, "--save-device")) o.save_device = try next(args, &i) else if (std.mem.eql(u8, a, "--mock")) o.mock = true else if (std.mem.eql(u8, a, "--host-logup")) o.host_logup = true else {
             std.debug.print("unknown argument {s}\n", .{a});
             return error.BadArgument;
         }
@@ -109,13 +113,13 @@ fn loadProof(a: std.mem.Allocator, bytes: []const u8, n_claims: usize) !system.P
 fn diffProofs(cpu: *const system.Proof, dev: *const system.Proof) bool {
     const c = &cpu.stark.commitment_scheme_proof;
     const d = &dev.stark.commitment_scheme_proof;
-    const hint = [_][]const u8{ "preprocessed commit (ingress upload / LDE / Merkle)", "main commit", "interaction commit (host LogUp upload, or (z, α) drawn differently)", "composition (constraint kernels, ext params, lift/split)" };
+    const hint = [_][]const u8{ "preprocessed commit (ingress upload / LDE / Merkle)", "main commit", "interaction commit (device LogUp: fraction kernels, completion, sources gather; host LogUp: upload, or (z, α) drawn differently)", "composition (constraint kernels, ext params, lift/split)" };
     if (cpu.claimed_sums.len != dev.claimed_sums.len) {
         std.debug.print("DIFF claimed sums: count {d} vs {d}\n", .{ cpu.claimed_sums.len, dev.claimed_sums.len });
         return true;
     }
     for (cpu.claimed_sums, dev.claimed_sums, 0..) |x, y, i| if (!x.eql(y)) {
-        std.debug.print("DIFF claimed sum {d} (host interaction trace)\n", .{i});
+        std.debug.print("DIFF claimed sum {d} (LogUp: fractions or completion; (z, α) if every claim differs)\n", .{i});
         return true;
     };
     for (c.commitments.items, d.commitments.items, 0..) |x, y, t| if (!std.mem.eql(u8, std.mem.asBytes(&x), std.mem.asBytes(&y))) {
@@ -235,26 +239,30 @@ pub fn main() !void {
         dev_proof = try system.proveOpts(rec.Engine(CpuBackend), a, cfg, parts, &mains, .{});
         lap("mock device proof");
     } else {
-        var prepared = try prover.Prepared.init(a, parts, &catalog, cfg);
-        std.debug.print("  planned arena {d:.2} GiB, geometry {x}\n", .{
-            @as(f64, @floatFromInt(try prepared.memory.bytes())) / (1 << 30), prepared.plans.geometry.identity[0..8],
+        var prepared = try prover.Prepared.init(a, parts, &catalog, cfg, if (opts.host_logup) .host_logup else .device_logup);
+        std.debug.print("  LogUp on the {s}; planned arena {d:.2} GiB, geometry {x}\n", .{
+            if (opts.host_logup) "host" else "device", @as(f64, @floatFromInt(try prepared.memory.bytes())) / (1 << 30), prepared.plans.geometry.identity[0..8],
         });
         var host = try prover.hostTraceTrees(a, in);
         var twiddles = try prover.Twiddles.init(a, prepared.plans.twiddle_words);
         lap("plans, host trace trees, twiddles");
-        const roots = try system.traceRoots(a, cfg, parts, &mains);
-        lap("host trace roots (CPU commit of trees 0-1)");
-        if (cpu_proof) |cp| for (roots, 0..) |r, t| {
-            if (!std.mem.eql(u8, std.mem.asBytes(&r), std.mem.asBytes(&cp.stark.commitment_scheme_proof.commitments.items[t]))) {
-                std.debug.print("HOST ROOT MISMATCH tree {d} (system.traceRoots vs proveOpts)\n", .{t});
-                return error.HostRootMismatch;
-            }
-        };
-        const el = try prover.lookupElements(&prepared, cfg, roots);
-        const inter = try system.interactionTrace(a, parts, &mains, el);
-        host.trees[2] = inter.columns;
-        lap("host (z, alpha) and interaction trace");
-        const result = try prover.proofPass(a, &prepared, &host, &twiddles, in, el, inter.sums);
+        var host_logup: ?prover.HostLogup = null;
+        if (opts.host_logup) {
+            const roots = try system.traceRoots(a, cfg, parts, &mains);
+            lap("host trace roots (CPU commit of trees 0-1)");
+            if (cpu_proof) |cp| for (roots, 0..) |r, t| {
+                if (!std.mem.eql(u8, std.mem.asBytes(&r), std.mem.asBytes(&cp.stark.commitment_scheme_proof.commitments.items[t]))) {
+                    std.debug.print("HOST ROOT MISMATCH tree {d} (system.traceRoots vs proveOpts)\n", .{t});
+                    return error.HostRootMismatch;
+                }
+            };
+            const el = try prover.lookupElements(&prepared, cfg, roots);
+            const inter = try system.interactionTrace(a, parts, &mains, el);
+            host.trees[2] = inter.columns;
+            host_logup = .{ .el = el, .sums = inter.sums };
+            lap("host (z, alpha) and interaction trace");
+        }
+        const result = try prover.proofPass(a, &prepared, &host, &twiddles, in, host_logup);
         lap("device proof");
         const k = result.verdict.counters;
         std.debug.print("  device: peak live {d:.2} GiB, h2d {d:.2} GiB, {d} kernel launches, AOT misses {d}\n", .{

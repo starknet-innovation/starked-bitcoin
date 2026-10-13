@@ -3,6 +3,8 @@
 # production against the saved CPU proof hash. Each step stops the sequence on failure.
 #   run.sh            whole sequence
 #   run.sh <step>     one step: small-test-uniform | small-test-tiered | small-prod-uniform | small-prod-tiered | large-prod-tiered
+#                     | large-prod-tiered-hostlogup (A/B: the first version, LogUp on the host)
+# LogUp runs on the device by default; EXTRA="--host-logup" run.sh <step> runs any step with host LogUp.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 source "$here/env.sh"
@@ -17,6 +19,8 @@ LARGE_LEN=1131354
 step() {
   local name=$1; shift
   local log=$LOGS/$name.log
+  # shellcheck disable=SC2086
+  set -- "$@" ${EXTRA:-}
   echo "== $name: cuda-prove $* (log $log)"
   # Device memory, sampled every 200 ms while the step runs.
   nvidia-smi --query-gpu=timestamp,memory.used,utilization.gpu --format=csv,noheader -lms 200 > "$LOGS/$name.smi.csv" &
@@ -38,6 +42,10 @@ run() {
     small-prod-uniform) step "$1" --small 0 --profile production --size uniform ;;
     small-prod-tiered) step "$1" --small 0 --profile production --size tiered --min-log 12 ;;
     large-prod-tiered) step "$1" --large 400000 --profile production --size tiered --skip-cpu --cpu-sha $LARGE_SHA --cpu-len $LARGE_LEN --save-device "$LOGS/$1.proof" ;;
+    large-prod-tiered-hostlogup) step "$1" --large 400000 --profile production --size tiered --skip-cpu --cpu-sha $LARGE_SHA --cpu-len $LARGE_LEN --host-logup ;;
+    # 2^23 tiered, device only, against the CPU proofs made on the H100 pod (2026-10-13): end-to-end timing.
+    xl-970347) step "$1" --large 970347 --profile production --size tiered --skip-cpu --cpu-sha f6ff8ac953601dea --cpu-len 1184413 --save-device "$LOGS/$1.proof" ;;
+    xl-774628) step "$1" --large 774628 --profile production --size tiered --skip-cpu --cpu-sha c015e4b36600463a --cpu-len 1185434 --save-device "$LOGS/$1.proof" ;;
     # Any large sample (src/block/checks.zig samples_large) with the CPU reference proved on the pod:
     #   run.sh large <height> <uniform|tiered>   (2^23 tiered: ~51 GiB device, H100 80 GB)
     large) step "large-$2-$3" --large "$2" --profile production --size "$3" --save-cpu "$LOGS/large-$2-$3.cpu.proof" --save-device "$LOGS/large-$2-$3.proof" ;;

@@ -21,6 +21,34 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-10-13 (session 13, later) — Device LogUp validated on an H100: 2^23 block proved in about a minute
+Who: Claude (agent, Opus 5.5), with the owner
+Roadmap: GPU step 3 (CUDA): device LogUp done (merged from `cuda/device-logup`)
+Done:
+- H100 NVL pod (RunPod, sm_90, 18 vCPUs, $3.19/hr, 14 min): with LogUp on the device, block 0 ×4 byte-identical; block 400000 tiered `cbcf7026…`; blocks 970347 `f6ff8ac9…` and 774628 `c015e4b3…` (tiered, L = 23) equal to the CPU proofs of the earlier H100 session. All verify. A/B with `--host-logup` also identical.
+Evidence (time to proof, device LogUp vs host LogUp on the same pod):
+- 400000 (2^22): 30.4 s vs 84.0 s; host RSS 18.7 GB vs 45.9 GB; h2d 6.46 vs 7.37 GiB.
+- 970347 (2^23): 60.5 s (witness 21 s, plans and trace trees 35 s, device 4.0 s); 774628: 53.2 s. Host RSS 37 GB, device peak 52.8 GiB.
+Problems / lessons:
+- None on device: the generated LogUp kernels and stwo-zig's relation completion were right the first time, as the host check predicted.
+Next: profile "plans, host trace trees, twiddles" (35 s at 2^23) and the witness (21 s); then the verifier self-check (18 s) is the largest remainder.
+
+## 2026-10-13 — CUDA: device LogUp (host-checked; device run pending)
+Who: Claude (agent, Opus 5.5), worktree branch `cuda/device-logup`
+Roadmap: GPU step 3 (CUDA): device LogUp implemented and host-checked; the pod run decides it
+Done:
+- `src/gpu/cuda/logup.zig`: one generated fraction kernel per AIR with lookups (15, `gpu/cuda_aot/witness_starked_logup_*.cu`, stwo-zig's native-authenticated AOT identity), the plan (sources, tree-2 layout, completion geometry) and the device binding: sources gathered in `.trace_generation`; challenge expansion (18 α powers), fraction kernels, stwo-zig's `relation_completion` and the claim copy in `.trace_commit`. The denominator slab borrows tree 2's evaluation buffer.
+- `pipeline.zig`/`prover.zig`/`memory.zig`: device LogUp is the default; `proveHostLogup` and `cuda-prove --host-logup` keep the first version for A/B; z and α powers are now always expanded on the device. `scripts/pod/run.sh`: `large-prod-tiered-hostlogup`, `EXTRA=...`.
+- docs/design/gpu-cuda.md § Device LogUp.
+Evidence:
+- `zig build cuda-test -Dcuda=true -Doptimize=ReleaseFast`: all pass. New: the generated kernels (host C++) plus a completion model reproduce `system.interactionTrace` (444 columns, 15 claims, exact) for block 0 uniform/tiered; `STARKED_LOGUP_SAMPLES=1,2,3,4,5` (blocks 170–91880) and `STARKED_LOGUP_LARGE=400000` (L 22 tiered, 66 s, 6 GB RSS) also pass; an offset mutation fails. Arena: 2^22 tiered 26.4 GiB (25.6 host LogUp), 2^23 tiered 52.8 GiB.
+- `zig build cuda-check -Dcuda=true`, `zig build cuda-archive-plan -Dcuda=true` (79 AOT sources: 48 + 16 + 15; stwo-zig's validator accepts the new entries), `zig build cuda-parity -Doptimize=ReleaseFast`, `zig build test -Doptimize=ReleaseFast`: pass (37 min, 8.3 GB peak RSS).
+- `cuda-prove --small 0 --skip-cpu` (stub link): host steps run in both modes and stop at session open, as expected without a GPU.
+Problems / lessons:
+- stwo-zig's build admits AOT kernels only under its listed ABI tags; ours use `native_blake_exact_interaction_v1` (the paired-LogUp tag) with our own argument contract. Upstream ask: a generic external fraction-kernel schema.
+- The commitments interpolate trees 0–1 in place, so the lookups' columns must be copied out before the draw (the `logup_sources` slot, +0.8 GiB at 2^22 tiered).
+Next: pod run of `scripts/pod/run.sh` on this branch (block 0 four steps, block 400000 tiered), then the host-side witness and trace trees (12 s) as the next lever.
+
 ## 2026-10-13 (session 13) — CUDA prover on real GPUs: byte-identical from block 0 to 2^23
 Who: Claude (agent, Opus 5.5), with the owner
 Roadmap: GPU step 3 (CUDA): device runs done (L40S, H100 NVL); device LogUp started (branch `cuda/device-logup`)
