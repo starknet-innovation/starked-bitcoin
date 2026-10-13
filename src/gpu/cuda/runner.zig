@@ -4,13 +4,16 @@
 //!                          [--size auto|uniform|tiered] [--min-log k]
 //!                          [--skip-cpu] [--cpu-sha hexprefix] [--cpu-len bytes]
 //!                          [--cpu-proof file] [--save-cpu file] [--save-device file] [--mock]
-//!                          [--host-logup]
+//!                          [--host-logup] [--host-witness]
 //!
 //! Steps, each printed with its time:
-//!  1. build the block's witness (`block.system.buildFull`);
+//!  1. build the block's witness (`block.system.buildFull`); with the device witness (the default)
+//!     and no CPU proof to take, without the columns the device generates (`block_sha`,
+//!     `block_b2s`; `skip_device_columns`);
 //!  2. CPU proof (`system.proveOpts`, compact storage) unless `--skip-cpu` / `--cpu-proof`;
-//!  3. host: plans, the preprocessed trees (generated) and the main ones (the witness, borrowed) in
-//!     natural row order (the device reorders them), twiddles; with
+//!  3. host: plans, the preprocessed trees (generated on the device unless `--host-witness`) and
+//!     the main ones (the witness, borrowed; `block_sha` and `block_b2s` generated on the device
+//!     unless `--host-witness`) in natural row order (the device reorders them), twiddles; with
 //!     `--host-logup` (the first version, for A/B) also the trace roots (CPU commit of trees 0–1),
 //!     (z, α) and the interaction trace;
 //!  4. the device proof (one transaction; LogUp on the device unless `--host-logup`);
@@ -48,6 +51,8 @@ const Opts = struct {
     save_device: ?[]const u8 = null,
     mock: bool = false,
     host_logup: bool = false,
+    /// Build and upload every trace column on the host (A/B against the device witness).
+    host_witness: bool = false,
 };
 
 fn parse(args: []const []const u8) !Opts {
@@ -69,7 +74,7 @@ fn parse(args: []const []const u8) !Opts {
         } else if (std.mem.eql(u8, a, "--size")) {
             const v = try next(args, &i);
             o.size = std.meta.stringToEnum(@TypeOf(o.size), v) orelse return error.BadSize;
-        } else if (std.mem.eql(u8, a, "--min-log")) o.min_log = try std.fmt.parseInt(u32, try next(args, &i), 10) else if (std.mem.eql(u8, a, "--skip-cpu")) o.skip_cpu = true else if (std.mem.eql(u8, a, "--cpu-sha")) o.cpu_sha = try next(args, &i) else if (std.mem.eql(u8, a, "--cpu-len")) o.cpu_len = try std.fmt.parseInt(usize, try next(args, &i), 10) else if (std.mem.eql(u8, a, "--cpu-proof")) o.cpu_proof = try next(args, &i) else if (std.mem.eql(u8, a, "--save-cpu")) o.save_cpu = try next(args, &i) else if (std.mem.eql(u8, a, "--save-device")) o.save_device = try next(args, &i) else if (std.mem.eql(u8, a, "--mock")) o.mock = true else if (std.mem.eql(u8, a, "--host-logup")) o.host_logup = true else {
+        } else if (std.mem.eql(u8, a, "--min-log")) o.min_log = try std.fmt.parseInt(u32, try next(args, &i), 10) else if (std.mem.eql(u8, a, "--skip-cpu")) o.skip_cpu = true else if (std.mem.eql(u8, a, "--cpu-sha")) o.cpu_sha = try next(args, &i) else if (std.mem.eql(u8, a, "--cpu-len")) o.cpu_len = try std.fmt.parseInt(usize, try next(args, &i), 10) else if (std.mem.eql(u8, a, "--cpu-proof")) o.cpu_proof = try next(args, &i) else if (std.mem.eql(u8, a, "--save-cpu")) o.save_cpu = try next(args, &i) else if (std.mem.eql(u8, a, "--save-device")) o.save_device = try next(args, &i) else if (std.mem.eql(u8, a, "--mock")) o.mock = true else if (std.mem.eql(u8, a, "--host-logup")) o.host_logup = true else if (std.mem.eql(u8, a, "--host-witness")) o.host_witness = true else {
             std.debug.print("unknown argument {s}\n", .{a});
             return error.BadArgument;
         }
@@ -197,8 +202,12 @@ pub fn main() !void {
     } else sb.block.checks.samples_small[opts.small];
     const airs = try a.create([bs.N_COMP]sb.air.ir.Air);
     airs.* = try bs.parseAirs(a);
+    // Device witness (default): the device generates `block_sha`, `block_b2s` and tree 0. The host
+    // skips those columns unless something on the host reads them (the CPU proof, host LogUp).
+    const device_witness = !opts.host_witness and !opts.mock;
+    const lean = device_witness and (opts.skip_cpu or opts.cpu_proof != null) and !opts.host_logup;
     const built = try a.create(bs.Built);
-    built.* = try bs.buildFull(a, sample.raw, sample.undo, sample.ctx, .{ .min_log = opts.min_log, .profile = if (opts.size == .tiered) .tiered else .uniform, .auto = opts.size == .auto });
+    built.* = try bs.buildFull(a, sample.raw, sample.undo, sample.ctx, .{ .min_log = opts.min_log, .profile = if (opts.size == .tiered) .tiered else .uniform, .auto = opts.size == .auto, .skip_device_columns = lean });
     const parts = try a.create([bs.N_COMP]system.Part);
     parts.* = bs.parts(airs, built);
     var mains: [bs.N_COMP][]const []const M31 = undefined;
@@ -210,6 +219,7 @@ pub fn main() !void {
     std.debug.print("block {d}: {s} profile, L = {d}, logs {any}; {s} (queries {d}, PoW {d}); device SMs accepted {any}\n", .{
         sample.ctx.height, @tagName(built.profile), built.log_size, built.logs, if (opts.production) "production" else "test", fri.n_queries, fri.pow_bits, prover.accepted_sms,
     });
+    std.debug.print("  witness on the {s}{s}\n", .{ if (device_witness) "device (block_sha, block_b2s, tree 0)" else "host", if (lean) "; host skipped those columns" else "" });
     lap("witness built");
 
     // ---- CPU reference
@@ -232,7 +242,9 @@ pub fn main() !void {
 
     // ---- device
     var catalog = try res.catalog.Catalog.init(a, airs);
-    const in = prover.Input{ .parts = parts, .mains = &mains, .config = cfg, .catalog = &catalog };
+    const witness_inputs = try a.create(res.witness.Inputs);
+    witness_inputs.* = try res.witness.Inputs.ofBlock(a, built);
+    const in = prover.Input{ .parts = parts, .mains = &mains, .config = cfg, .catalog = &catalog, .witness = if (device_witness) witness_inputs else null };
     var failed = false;
     var dev_proof: system.Proof = undefined;
     if (opts.mock) {
@@ -240,17 +252,34 @@ pub fn main() !void {
         dev_proof = try system.proveOpts(rec.Engine(CpuBackend), a, cfg, parts, &mains, .{});
         lap("mock device proof");
     } else {
-        var prepared = try prover.Prepared.init(a, parts, &catalog, cfg, if (opts.host_logup) .host_logup else .device_logup);
+        var prepared = try prover.Prepared.initWitness(a, parts, &catalog, cfg, if (opts.host_logup) .host_logup else .device_logup, in.witness);
         std.debug.print("  LogUp on the {s}; planned arena {d:.2} GiB, geometry {x}\n", .{
             if (opts.host_logup) "host" else "device", @as(f64, @floatFromInt(try prepared.memory.bytes())) / (1 << 30), prepared.plans.geometry.identity[0..8],
         });
         lap("plans");
-        var host = try prover.hostTraceTrees(a, in);
-        std.debug.print("  host trees (natural order): preprocessed {d:.2} GiB generated, main {d:.2} GiB borrowed from the witness\n", .{
+        var host = try prover.hostTraceTreesFor(a, in, prepared.witness);
+        std.debug.print("  host trees to upload (natural order): preprocessed {d:.2} GiB, main {d:.2} GiB borrowed from the witness\n", .{
             @as(f64, @floatFromInt(host.bytes(0))) / (1 << 30), @as(f64, @floatFromInt(host.bytes(1))) / (1 << 30),
         });
+        if (prepared.witness) |w| {
+            var generated: usize = 0;
+            for (host.trees[0..2], 0..) |t, tree| for (t, 0..) |c, j| {
+                if (host.generated(tree, j)) generated += @as(usize, 4) << @intCast(c.log_size);
+            };
+            std.debug.print("  device witness: {d:.2} GiB of trees 0-1 generated on the device from {d:.2} MiB of inputs; SHA word scratch {d:.2} MiB\n", .{
+                @as(f64, @floatFromInt(generated)) / (1 << 30), @as(f64, @floatFromInt(w.inputBytes())) / (1 << 20), @as(f64, @floatFromInt(4 * w.scratch_words)) / (1 << 20),
+            });
+        }
         lap("host trace trees");
         var twiddles = try prover.Twiddles.init(a, prepared.plans.twiddle_words);
+        {
+            const trace = host.bytes(0) + host.bytes(1);
+            const inputs = if (prepared.witness) |w| w.inputBytes() else 0;
+            const tw = 8 * prepared.plans.twiddle_words;
+            std.debug.print("  planned H2D: {d:.2} GiB (trace columns {d:.2} GiB, witness inputs {d:.2} MiB, twiddles {d:.2} MiB; plus statement and plan tables)\n", .{
+                @as(f64, @floatFromInt(trace + inputs + tw)) / (1 << 30), @as(f64, @floatFromInt(trace)) / (1 << 30), @as(f64, @floatFromInt(inputs)) / (1 << 20), @as(f64, @floatFromInt(tw)) / (1 << 20),
+            });
+        }
         lap("twiddles");
         var host_logup: ?prover.HostLogup = null;
         if (opts.host_logup) {
