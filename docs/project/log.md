@@ -35,6 +35,14 @@ Problems / lessons:
 - Ingress H2D is pageable `cudaMemcpyAsync` and stwo-zig has no pinned/host-register API; registering 13 GB would cost about what it saves. Not done.
 Next: pod run on this branch: `scripts/pod/run.sh` (block 0 ×4, 400000), `large-prod-tiered-hostlogup`, `xl-970347`, `xl-774628`; record host laps, RSS and the `.trace_generation` device time.
 
+## 2026-10-13 (session 13, evening) — 2^23 block proved in ~21–23 s on one H100
+Who: Claude (agent, Opus 5.5), with the owner
+Roadmap: GPU step 3 (CUDA): host side sped up; natural-order upload (merged from `cuda/natural-upload`)
+Done:
+- Parallel witness and storage reorder (0852bfd); natural-order upload with a device reorder kernel (bbc8599, fc579dd, merge 358eacd); D-046 tiered by default from 2^12 (bd0219e).
+- H100 NVL pod (16 vCPUs, ~10 min, ≈ $0.55): every step byte-identical and verified. Time to proof: 400000 11.8 s (was 30.4 s), 970347 22.7 s (was 60.5 s), 774628 20.8 s (was 53.2 s). Host RSS at 2^23: 23.6 GB (was 37 GB). Details in docs/design/gpu-cuda.md.
+Next: witness on server cores (8–15 s; single-threaded remainder), then ingress (pageable H2D, 1.4–4.1 s).
+
 ## 2026-10-13 (session 13, later) — Device LogUp validated on an H100: 2^23 block proved in about a minute
 Who: Claude (agent, Opus 5.5), with the owner
 Roadmap: GPU step 3 (CUDA): device LogUp done (merged from `cuda/device-logup`)

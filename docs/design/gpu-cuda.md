@@ -243,6 +243,18 @@ All steps byte-identical and verified, first try. Time to proof (runner clock, b
 
 Device stages at 2^23: ingress 1.56 s, trace commit (now with commits 0–1, LogUp, commit 2) 0.52 s, constraint evaluation 1.15 s, OODS 0.15 s, the rest < 0.1 s. `verifyExt` adds 6 s (2^22) / 18 s (2^23).
 
+### Natural upload + parallel host run (H100 NVL, sm_90, 16 vCPUs, 2026-10-13 evening)
+
+All steps byte-identical and verified (block 0 ×4, 400000, A/B host LogUp, 970347, 774628). Time to proof:
+
+| Block | Witness | Plans + trees + twiddles | Device proof | **Proof done** | Host RSS | Before (afternoon) |
+|---|---|---|---|---|---|---|
+| 400000 (2^22) | 8.3 s | 0.17 s | 3.3 s (ingress 1.36, reorder 0.017) | **11.8 s** | 12.0 GB | 30.4 s, 18.7 GB |
+| 970347 (2^23) | 14.8 s | 0.39 s | 7.6 s (ingress 4.13, reorder 0.039) | **22.7 s** | 23.6 GB | 60.5 s, 37.2 GB |
+| 774628 (2^23) | 15.5 s | 0.32 s | 5.1 s (ingress 2.31, reorder 0.039) | **20.8 s** | 23.6 GB | 53.2 s, 37.1 GB |
+
+The witness is now the largest step. It is 4× slower on this pod than on the M4 Pro (8.3 s vs 2.0 s at 2^22): its remaining single-threaded parts (walk, fields, checks, coin) run on slower server cores. Ingress (pageable H2D, 6.5–12.9 GiB) is next: 1.4–4.1 s.
+
 ## CuMetal (local Apple-GPU run): blocked
 
 `~/Workshop/cuda-metal` is cloned at the pinned commit e88dd103 and not built. Three things block a local run:
