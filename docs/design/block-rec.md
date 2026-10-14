@@ -312,9 +312,45 @@ verifier as today: `K = Blake2s(h₀ ‖ k₀ ‖ … ‖ h_{2^a−1} ‖ k_{2^a
   running `blockNodeK a`. Lean only needs `nodeH` indexed by the variant (the hook's verifier is
   abstract in `TrustK`). It needs natural trace logs at fold 4, so one of the two stwo-zig fixes above,
   or fold 1 on the CUDA circuit prover (not yet tried).
+- **On a GPU (2026-10-14, `src/gpu/cuda/widenode.zig`, `scripts/pod/widenode.sh`; RunPod H100 SXM 80 GB,
+  sm_90, 28 vCPUs).** It uses stwo-zig's resident CUDA circuit prover. A device proof becomes a node child
+  (`leaf.CircuitProof`) as stwo-zig's `circuit_cuda/recursion_source.zig` does it:
+  - the verifier proof is `fromVerifiedCapture`;
+  - the request and the circuit hash are computed on the host.
+
+  Every proof is checked twice natively: `resident_verifier.verify`, then stwo-zig's circuit verifier on
+  the serialized proof.
+  - **The 8-child node works on the GPU**: 8 block leaves (blocks 164–171; block 170 is 2^12 tiered,
+    the others 2^11 uniform) are proved at the shared 2^24 shape (fold 4, last layer 0), then the node
+    over them.
+    - The node's output digest equals `block_node_k.expected`'s.
+    - **All 9 proofs are byte-identical to the CPU prover's** (`--cpu`).
+
+    | step | GPU | CPU (pod) |
+    |---|---|---|
+    | leaf at 2^24, each | 4.2–5.2 s (8 leaves: 36.9 s) | 39–43 s |
+    | node at 2^24 (51.6 M vars, 78.5 M padded) | 4.4 s | 38 s |
+    | device-proof verification, each | 3.1–3.3 s | |
+    | circuit verifier, each | 0.35 s | |
+    | host per leaf: pad, check, preprocess | 5.7 s | |
+
+    - Device peak: 45.65 GiB per proof (planned = measured; nvidia-smi 47.3 GB), every proof 575,016 B.
+    - Host peak RSS: 8.7 GiB, or 35 GiB with the CPU proofs.
+    - End to end without the CPU proofs: 135 s for 8 blocks. The GPU prove is 5.2 s per block; the
+      rest is host work and verification.
+    - Inside each GPU prove, the static preprocessed hash on the host is 3.1–3.4 s. It is the same for
+      every leaf of the shape, so caching it (`expected_preprocessed_root`) would save most of that.
+  - **The CUDA circuit prover fails at fold 1**: block 0's leaf (2^21, last layer 0) gave a proof that
+    the native verifier rejects (`FRI verification failed: FirstLayerCommitmentInvalid`). The CPU prover
+    at fold 1 is fine (Mac: 2.1 s, 858 KB, accepted by the circuit verifier).
+    - Fold 4 on the same pod: 1.55 s at 2^21 (k = 1) and 1.42 s at 2^22 (k = 2). Their proofs have the
+      same SHA-256 as the CPU proofs made on the Mac.
+    - So per-level shapes on CUDA need a stwo-zig fix: either fold 1, or a remainder fold at fold 4.
+  - **Also**: the circuit verifier rejects any proof whose last layer is not 0 (`VerificationFailed`,
+    seen on CPU at fold 4 with last layer 1). Such a proof can only be used for timing, never as a child.
 - **Next:**
-  1. on one GPU session: the CUDA circuit prover at fold 1 (leaf 2^21), and the 8-child node at 2^24
-     (fold 4);
+  1. stwo-zig: fold 1 (or the remainder fold) on the CUDA circuit prover (brief with the error above);
+     until then, the 2^24 shape (8 children, about 5 s of GPU per block on an H100);
   2. per-level shapes;
   3. the forest and outer verifier over `TreeK` (`block_forest.zig` `expected` by arity).
 
