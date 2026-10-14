@@ -11,7 +11,13 @@ source "$here/env.sh"
 mkdir -p "$LOGS"
 cd "$SRC"
 st=$SRC/third_party/stwo-zig
-archive() { ls -t $(find "$st/.zig-cache" -path '*stwo-circuit-cuda-runtime*' -name libstwo_cuda_kernels.a 2>/dev/null) 2>/dev/null | head -1; }
+# The newest stwo-zig circuit archive, or nothing (`ls -t` with no files would list the cwd).
+archive() {
+  local found
+  found=$(find "$st/.zig-cache" -path '*stwo-circuit-cuda-runtime*' -name libstwo_cuda_kernels.a 2>/dev/null)
+  [ -n "$found" ] && ls -t $found | head -1
+  return 0
+}
 case ${1:-} in
   build)
     set -e
