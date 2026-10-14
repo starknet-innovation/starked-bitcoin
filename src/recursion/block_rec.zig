@@ -96,16 +96,24 @@ const InputHooks = struct {
 pub fn buildLeafCircuit(gpa: std.mem.Allocator, values: *const pv.PlainProof(QM31), config: pv.PlainConfig, airs: *const [bs.N_COMP]ir.Air, digests: *const [bs.N_COMP][32]u8, pre_root: [32]u8, pubs: *const [bs.N_PUB]M31) !Context(QM31) {
     var ctx = try Context(QM31).init(gpa, component_list.N_RESERVED);
     errdefer ctx.deinit();
-    const g = try pv.guess(QM31, &ctx, values);
+    try ctx.setOutputs(try leafBody(&ctx, values, config, airs, digests, pre_root, pubs));
+    try ctx.finalize(false);
+    return ctx;
+}
+
+/// The leaf's gates in `ctx`: the plain verifier, the leaf checks and the leaf output program.
+/// Returns the output program's result (the summary digest).
+pub fn leafBody(ctx: *Context(QM31), values: *const pv.PlainProof(QM31), config: pv.PlainConfig, airs: *const [bs.N_COMP]ir.Air, digests: *const [bs.N_COMP][32]u8, pre_root: [32]u8, pubs: *const [bs.N_PUB]M31) ![]Var {
+    const g = try pv.guess(QM31, ctx, values);
     var pub_vars: [bs.N_PUB]Var = undefined;
     for (&pub_vars, pubs) |*v, x| v.* = try ctx.guessM31(QM31.fromBase(x));
     var parts: [bs.N_COMP]pv.PartStatement = undefined;
     for (&parts, airs, digests, 0..) |*p, *air, d, i| p.* = .{ .air = air, .digest = d, .pubs = pub_vars[0..bs.n_pubs[i]] };
     const st = pv.PlainStatement{ .parts = &parts, .preprocessed_root = pre_root };
-    try pv.verifyPlain(QM31, &ctx, &g, config, &st);
-    try bl.leafChecks(&ctx, &pub_vars);
-    try bl.leafCtx(&ctx, &pub_vars);
-    const seed = try bl.seedLeafVars(&ctx, &pub_vars);
+    try pv.verifyPlain(QM31, ctx, &g, config, &st);
+    try bl.leafChecks(ctx, &pub_vars);
+    try bl.leafCtx(ctx, &pub_vars);
+    const seed = try bl.seedLeafVars(ctx, &pub_vars);
     // The summary and its digest: the Lean program `blockLeafOut` (Circuit/BlockRec.lean, `leafOut_vec`).
     // Its hook 0 returns the block's public inputs (the variables the plain verifier bound), then the
     // seed leaf's 16 limbs.
@@ -113,8 +121,7 @@ pub fn buildLeafCircuit(gpa: std.mem.Allocator, values: *const pv.PlainProof(QM3
     var ins: [bs.N_PUB + 16]Var = undefined;
     @memcpy(ins[0..bs.N_PUB], &pub_vars);
     @memcpy(ins[bs.N_PUB..], &seed);
-    try glue.runOutputs(QM31, &ctx, &out_prog, &.{}, InputHooks{ .inputs = &ins });
-    return ctx;
+    return glue.run(QM31, ctx, &out_prog, &.{}, InputHooks{ .inputs = &ins });
 }
 
 /// A node's view of a child.
@@ -229,16 +236,33 @@ pub fn proveNode(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const le
 
 /// A block leaf from a block proof file: verified natively (with capture), its leaf circuit built.
 pub fn leafCircuitOf(gpa: std.mem.Allocator, a: std.mem.Allocator, airs: *const [bs.N_COMP]ir.Air, f: *const PF.File, fri: FriConfigV2) !Context(QM31) {
+    const in = try leafInputsOf(a, airs, f, fri);
+    return buildLeafCircuit(gpa, &in.values, in.config, airs, &in.digests, in.pre_root, &f.pubs);
+}
+
+/// What a block leaf's circuit is built from: the block proof's plain values (after native
+/// verification with capture), its plain configuration, the AIR digests and the preprocessed root.
+pub const LeafInputs = struct {
+    values: pv.PlainProof(QM31),
+    config: pv.PlainConfig,
+    digests: [bs.N_COMP][32]u8,
+    pre_root: [32]u8,
+};
+
+pub fn leafInputsOf(a: std.mem.Allocator, airs: *const [bs.N_COMP]ir.Air, f: *const PF.File, fri: FriConfigV2) !LeafInputs {
     const parts = PF.partsOf(airs, f.log_size, f.profile, &f.pubs);
     const cfg = rec.Config.fromFriAndTraceSize(fri, f.log_size);
     var capture: core.verifier.ProofCapture(rec.Hasher) = undefined;
     try system.verifyCaptureBorrowed(a, cfg, &parts, &.{}, &f.proof, &capture);
     const pc = try bl.configOf(a, airs, f.log_size, f.profile, fri);
-    const pre_root: [32]u8 = std.mem.toBytes(try system.preprocessedRoot(a, cfg, &parts));
-    const values = try pv.fromCapture(a, rec.Hasher, &f.proof.stark, &capture, pc, f.proof.claimed_sums);
-    var digests: [bs.N_COMP][32]u8 = undefined;
-    for (&digests, airs) |*d, *air| d.* = try air.digest(a);
-    return buildLeafCircuit(gpa, &values, pc, airs, &digests, pre_root, &f.pubs);
+    var in: LeafInputs = .{
+        .values = try pv.fromCapture(a, rec.Hasher, &f.proof.stark, &capture, pc, f.proof.claimed_sums),
+        .config = pc,
+        .digests = undefined,
+        .pre_root = std.mem.toBytes(try system.preprocessedRoot(a, cfg, &parts)),
+    };
+    for (&in.digests, airs) |*d, *air| d.* = try air.digest(a);
+    return in;
 }
 
 /// Proves a block leaf under `shape`, verifies it natively, and checks its digest.

@@ -7,7 +7,7 @@ export LOGS=${LOGS:-$WORK/logs}
 # SM targets compiled into the archive and accepted by the session: 89 = RTX 4090 / L40S,
 # 80 = A100, 90 = H100 / H200. One target builds ~3x faster; set CUDA_ARCH=sm_89 etc. to match the pod.
 export CUDA_ARCH=${CUDA_ARCH:-sm_80,sm_89,sm_90}
-LIBDIR=/usr/lib/x86_64-linux-gnu
+export LIBDIR=/usr/lib/x86_64-linux-gnu
 [ "$(uname -m)" = aarch64 ] && LIBDIR=/usr/lib/aarch64-linux-gnu
 # stwo-zig's NVIDIA build inputs (third_party/stwo-zig/src/integrations/circuit_cuda/README.md).
 export CUDA_FLAGS="-Dcuda=true -Doptimize=ReleaseFast \

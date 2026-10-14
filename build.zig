@@ -346,6 +346,17 @@ pub fn build(b: *std.Build) void {
         const drun = b.addRunArtifact(demo);
         if (b.args) |args| drun.addArgs(args);
         b.step("blockrec", "BLOCK-REC: two block leaves and a node from epoch proofs").dependOn(&drun.step);
+        const pack = b.addExecutable(.{
+            .name = "blockpack",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/bin/blockpack.zig"),
+                .target = target,
+                .optimize = optimize,
+                .imports = &.{.{ .name = "starked_bitcoin", .module = lib }},
+            }),
+        });
+        pack.linkLibC();
+        b.installArtifact(pack);
         b.step("blockleaf", "BLOCK-REC: measure a block proof verified in-circuit").dependOn(&run.step);
     }
     // `oracle`: VL-ORACLE, the native verifier as oracle for the in-circuit verifier (FRI included).
@@ -537,6 +548,32 @@ pub fn build(b: *std.Build) void {
             const run_runner = b.addRunArtifact(runner);
             if (b.args) |args| run_runner.addArgs(args);
             b.step("cuda-prove", "Resident CUDA block proof vs CPU (device build with -Dcuda-nvcc=...; stubs otherwise)").dependOn(&run_runner.step);
+
+            // `cuda-pack`: the leaf-packing spike on stwo-zig's resident circuit prover (src/gpu/cuda/pack.zig).
+            // It links stwo-zig's own circuit archive (`zig build benchmark-circuit-cuda-resident` in
+            // third_party/stwo-zig builds it), given as `-Dcuda-circuit-archive=<dir with
+            // libstwo_cuda_kernels.a>`; without it, the stubs (`--plan-only` only).
+            const pack_module = b.createModule(.{ .root_source_file = b.path("src/gpu/cuda/pack.zig"), .target = target, .optimize = optimize });
+            for (resident.import_table.keys(), resident.import_table.values()) |name, module| pack_module.addImport(name, module);
+            pack_module.addImport("stwo_circuit_frontend", imports.get("stwo_circuit_frontend").?);
+            pack_module.addImport("stwo_circuit_cpu_integration", imports.get("stwo_circuit_cpu_integration").?);
+            const pack = b.addExecutable(.{ .name = "cuda-pack", .root_module = pack_module });
+            if (b.option([]const u8, "cuda-circuit-archive", "Directory with stwo-zig's circuit libstwo_cuda_kernels.a (cuda-pack)")) |dir| {
+                pack.root_module.addLibraryPath(.{ .cwd_relative = dir });
+                pack.root_module.addLibraryPath(.{ .cwd_relative = tc.lib.? });
+                pack.root_module.addRPath(.{ .cwd_relative = tc.lib.? });
+                pack.root_module.addLibraryPath(.{ .cwd_relative = tc.driver orelse b.fmt("{s}/stubs", .{tc.lib.?}) });
+                pack.root_module.linkSystemLibrary("stwo_cuda_kernels", .{});
+                pack.root_module.linkSystemLibrary("cudart", .{});
+                pack.root_module.linkSystemLibrary("cuda", .{});
+                pack.root_module.addObjectFile(.{ .cwd_relative = tc.host_runtime.? });
+                pack.root_module.addObjectFile(.{ .cwd_relative = tc.host_unwind.? });
+            } else {
+                for (stubs) |stub| pack.root_module.addCSourceFile(.{ .file = stub, .flags = &.{ "-std=c11", "-Wno-strict-prototypes" } });
+            }
+            pack.linkLibC();
+            b.installArtifact(pack);
+            b.step("cuda-pack", "Install only cuda-pack (the leaf-packing spike)").dependOn(&b.addInstallArtifact(pack, .{}).step);
         }
     }
     const test_step = b.step("test", "Run starked-bitcoin tests");
