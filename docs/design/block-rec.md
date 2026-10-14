@@ -298,20 +298,26 @@ verifier as today: `K = Blake2s(h₀ ‖ k₀ ‖ … ‖ h_{2^a−1} ‖ k_{2^a
   | 8 | 2^25 (114.8 M) | **2^24 (51.6 M)** |
   | 16 | 2^26 (243.9 M) | 2^28 (124.2 M) |
 
-  At fold 4, the trace log must be a multiple of 4 for two reasons, both in stwo-zig:
-  - the CUDA circuit prover fails when the last fold is a remainder (brief
-    `CUDA_FRI_REMAINDER_FOLD_BRIEF.md`);
-  - our run of the in-circuit verifier at fold 4 with trace log 23 panicked, although its loop is written
-    for a remainder.
+  At fold 4, the trace log must be a multiple of 4 *today*, and only because of the CUDA circuit prover.
+  It fails when the last fold is a remainder (`~/Workshop/stwo-zig/CUDA_FRI_REMAINDER_FOLD_BRIEF.md`).
+  Everything else accepts a remainder round at last layer 0 (checked on the CPU, 2026-10-14):
+  - the in-circuit verifier (Debug build, trace logs 20–25);
+  - `circuit_cpu` with the native circuit verifier (a 2^21 leaf);
+  - a 2-child node over such leaves (`SB_FOLD=4 blockpack widenode data/epoch-pack 0 1 prove`): satisfied,
+    proved and verified in **7.3 s, 521 KB** (fold 1: 15.1 s, 981 KB), 11.6 M vars.
 
-  So 8 children at 2^24 is the widest node that fits an 80 GB card (2^24 ≈ 51 GiB of device memory,
-  ~6 s on H200, from the packing runs).
+  What does need last layer 0 is the in-circuit verifier (`fri.zig:77` asserts it). So the earlier
+  workaround, last layer = trace log mod 4, gives proofs that can't be children. With the CUDA fix, every
+  proof can keep its natural trace log at fold 4.
+
+  Until then, 8 children at 2^24 is the widest node that fits an 80 GB card (2^24 ≈ 51 GiB of device
+  memory, ~6 s on H200, from the packing runs).
 - **The open cost: one shared shape pads every leaf to it.** A block leaf is 2^21 natively but 2^24 in
   the shape, 8× the work. The way out is **per-level shapes**: leaves at their natural shape; a node over
   leaves (whose hooks verify leaf-shaped proofs); and a node over nodes. Two node circuits per arity, both
   running `blockNodeK a`. Lean only needs `nodeH` indexed by the variant (the hook's verifier is
-  abstract in `TrustK`). It needs natural trace logs at fold 4, so one of the two stwo-zig fixes above,
-  or fold 1 on the CUDA circuit prover (not yet tried).
+  abstract in `TrustK`). It needs natural trace logs at fold 4 (the CUDA remainder-fold fix), or fold 1
+  on the CUDA circuit prover (being measured).
 - **Next:**
   1. on one GPU session: the CUDA circuit prover at fold 1 (leaf 2^21), and the 8-child node at 2^24
      (fold 4);

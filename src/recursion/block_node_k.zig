@@ -264,7 +264,9 @@ pub fn demo(gpa: std.mem.Allocator, dir: []const u8, from: u32, arity: u32, prov
         const sz = finalize.computePaddedSizes(.fromBuilder(&ctx.circuit));
         start = if (i == 0) sz else start.elementwiseMax(sz);
     }
-    var shp = try br.Shape.init(gpa, &tables.table, start, try FriConfigV2.init(26, 0, 1, 70, 1));
+    // `SB_FOLD` (default 1): the circuits' FRI fold step (last layer 0; a remainder fold when the trace log isn't a multiple).
+    const fold: u32 = if (std.posix.getenv("SB_FOLD")) |v| try std.fmt.parseInt(u32, v, 10) else 1;
+    var shp = try br.Shape.init(gpa, &tables.table, start, try FriConfigV2.init(26, 0, 1, 70, fold));
     defer shp.deinit(gpa);
     const leaves = try a.alloc(br.Proved, n);
     const refs = try a.alloc(*const br.Proved, n);

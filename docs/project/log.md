@@ -44,7 +44,8 @@ Evidence:
 Problems / lessons:
 - My earlier "~61k leaves" assumed mixed-size packing. Check the size distribution before costing a leaf design.
 - One shared shape pads every leaf to the node's 2^24 (8× a 2^21 leaf).
-  - Per-level shapes fix this, but they need natural trace logs at fold 4. That takes a stwo-zig fix: either the CUDA remainder fold, or the in-circuit verifier's fold-4 run at trace log 23, which panicked.
+  - Per-level shapes fix this, but they need natural trace logs at fold 4, which only the CUDA prover's remainder-fold bug blocks.
+  - Correction, same day: what I first logged as an in-circuit verifier panic at fold 4 was my own config (last layer 3); the in-circuit verifier asserts last layer 0. At last layer 0 with a remainder round, the CPU prover, the native verifier and the in-circuit verifier all work. A 2-child node at fold 4: 7.3 s, 521 KB, against 15.1 s and 981 KB at fold 1.
   - Alternatively, fold 1 on the CUDA circuit prover (untested).
 Next: one GPU session (CUDA circuit fold 1 at 2^21; the 8-child node at 2^24, fold 4), then per-level shapes and the forest over `TreeK`.
 
