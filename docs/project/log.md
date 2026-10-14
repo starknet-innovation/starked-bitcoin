@@ -21,6 +21,33 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-10-14 (session 14) — `Collision` is vacuous; per-instance restatements (RecCR); stwo-zig remainder-fold fix staged for a device test
+Who: Claude (agent, Opus 5.5), with the owner
+Roadmap: VL-NODE: tree/forest soundness restated with named collisions (RecCR); GPU per-level shapes await the device test
+Done:
+- `Collision` (BlockRec) and `Mmr.Collision` are provable by pigeonhole, so every `… ∨ Collision`
+  conclusion was vacuous (flagged by the stwo-zig session, confirmed in Lean). New `Circuit/RecCR.lean`:
+  `TrustW`/`TrustKW` (witness functions instead of `∃`, equivalent to `Trust` by choice), and the tree,
+  forest, epoch, wide-tree and header theorems with `Collides ps` over explicit message pairs. `Spec/Mmr.lean`:
+  `inclusion_soundC`, `mmr_inclusionC`. Old theorems and `Compat.lean` unchanged; module docs note the vacuity.
+  `docs/design/verifier-formalization.md` § correction.
+- stwo-zig's remainder-fold fix (`fix/cuda-fri-remainder-fold` aacbb85cb, cherry-picked onto our pin
+  4afa09dbf as d34b26903 in the `starked-bitcoin-gpuwide` worktree, branch `gpu/remainder`): reviewed
+  (per-layer leaf packing, as the CPU prover and native verifier decide). `cuda-widenode` gains `A --last`
+  and `C` (per-level shapes: 8 leaves at their common natural size, the 8-child node at its own). Plan-only
+  run: blocks 164.. at k = 1, 2, 4 give trace logs 21, 22, 23, so last rounds of 1, 2, 3.
+Evidence:
+- `lake build` (whole library incl. `Compat`) passes; `#print axioms` for `collision_true`, `tree_soundW`,
+  `forest_epochW`, `forest_epochVW`, `forestK_epochVW`, `header_root_soundW`, `Trust.exists_w`:
+  propext, Classical.choice, Quot.sound.
+- Pod `q22wlc9916ekx8` (session 13): $2.37 billed.
+Problems / lessons:
+- A disjunction with an existential `Collision` is only meaningful if `Collision` is not a theorem;
+  over unbounded messages it always is. Name the pairs instead.
+- The device run is blocked: RunPod refused a new pod (account balance too low).
+Next: fund RunPod, then on an H100: `widenode.sh run A 164 1 2 4 --fold 4 --last 0 --cpu`,
+`run A 164 1 --cpu` (fold 1), `run C 164 --cpu-node`.
+
 ## 2026-10-14 (session 13, GPU wide node) — 8-child wide node proved on an H100, byte-identical to CPU; CUDA fold 1 fails
 Who: Claude (agent, Opus 5.5), with the owner (pod)
 Roadmap: BLOCK-REC wide nodes: GPU validated at 2^24 (fold 4); per-level shapes blocked on CUDA fold 1

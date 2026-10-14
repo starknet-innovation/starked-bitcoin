@@ -9,6 +9,9 @@ the leaf guarantee `plain_leaf_valid` + `leaf_digest`):
   `pubsDigest(key, p)`, has proven public inputs `PubValidT p` (or a Blake2s collision);
 - `header_root_sound`: the outer verifier's checks (`node.verifyRoot`: the root's digest under the
   expected key, the genesis checks) give `chain_from_genesis_T`'s conclusion (or a collision).
+
+`Collision` is provable (`RecCR.collision_true`), so the `∨ Collision` forms are vacuous;
+`RecCR.htree_soundW` and `RecCR.header_root_soundW` name the colliding messages.
 -/
 import StarkedAir.Circuit.BlockRec
 import StarkedAir.Gadgets.RootChecks

@@ -285,6 +285,27 @@ in the block leaf the 51-limb summary assembly and its digest.
   (`rng_forest`) and `epoch_hyps_of_rng`'s conclusion, or a collision. `header_root_sound`: `verifyRoot`'s
   checks and the Lean genesis checks give `chain_from_genesis_T`'s conclusion, or a collision.
 
+**Correction (2026-10-14): `Collision` is provable**, so the `… ∨ Collision` forms above are vacuous.
+Two different messages with one digest exist by pigeonhole (9-word messages outnumber 8-word digests;
+`RecCR.collision_true`, standard axioms); `Spec/Mmr.lean`'s node-hash `Collision` likewise
+(`Mmr.collision_true`). The theorems stay (they are true) but carry no information. Found by the stwo-zig
+session's review (`LIFTING_SOUNDNESS_REPLY.md`), confirmed in Lean.
+
+The restatements (`Circuit/RecCR.lean`, `Spec/Mmr.lean`; standard axioms) name the collision:
+- `TrustW` / `TrustKW`: `Trust` / `TrustK` with the node assignment and the leaf's public inputs as
+  functions of the claimed digest (`nodeWit`, `leafWit`: what an extractor computes) instead of `∃`.
+  `TrustW.toTrust` and `Trust.exists_w` show it is the same hypothesis (by choice).
+- `tree_soundW`, `forest_soundW`, `forest_epochW`, `forest_epochVW`, `treeK_soundW`, `forestK_soundW`,
+  `forestK_epochVW`, `htree_soundW`, `header_root_soundW`: the old conclusions, or `Collides ps`, where
+  `ps` (`pairs`, `pairsK`, `pairsH`, `forestPairs`, `forestPairsK`) is a finite list of message pairs
+  computed from the tree shapes, the summaries and the witness functions: each node's output digest
+  message against the expected one, its key message against the expected children, each leaf's digest
+  message. `Collides ps`: one listed pair differs and has one Blake2s digest.
+- `inclusion_soundC`, `mmr_inclusionC`: the inputs each path step compares (`pathPairsRev`).
+
+With an efficient extractor as the witness functions this is the reduction: accepted roots for a false
+statement give a Blake2s (resp. node-hash) collision among the listed pairs.
+
 **Named hypotheses** (fields of `Trust`, never axioms; `VGates` is the abstract predicate "the gates
 `CircuitStatement.init` and `verify` emit at that hook hold"):
 - `stwoSound` (Stwo soundness): the native circuit verifier accepting a proof with circuit hash `h` and

@@ -41,6 +41,9 @@ This file proves:
   `ctx_sound`, `seedLeaf_sound`, `leafOut_vec`, and the leaf hooks' binding of the verified public inputs.
 
 Blake2s collision resistance is not assumed: the conclusions are disjunctions with `Collision`.
+
+**`Collision` is provable** (`RecCR.collision_true`, pigeonhole), so these conclusions are vacuous.
+`Circuit/RecCR.lean` restates them with a per-instance collision among named message pairs.
 -/
 import StarkedAir.Circuit.BlockTree
 

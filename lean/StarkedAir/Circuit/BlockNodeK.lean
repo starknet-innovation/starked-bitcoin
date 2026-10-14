@@ -16,7 +16,9 @@ This file proves:
 - `nodeK_sound`: a satisfied wide node over proven children outputs the digest, under the key of its
   children's circuit hashes and keys, of a proven summary; each child's hook checked its digest;
 - `treeK_sound`, `forestK_sound`, `forestK_epochV`: the tree and the outer verifier over trees with
-  wide nodes (`TreeK`), under the same named hypotheses as `BlockRec.Trust`, per arity.
+  wide nodes (`TreeK`), under the same named hypotheses as `BlockRec.Trust`, per arity. Their
+  `∨ Collision` is vacuous (`RecCR.collision_true`); `RecCR.treeK_soundW` and `RecCR.forestK_epochVW`
+  name the colliding messages.
 -/
 import StarkedAir.Circuit.BlockRec
 

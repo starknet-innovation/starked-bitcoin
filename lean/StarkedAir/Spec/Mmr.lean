@@ -6,7 +6,8 @@ sibling and its side; the verifier recomputes the root and checks the sides agai
 position (`HTree.sides`; Zig `header_tree.inclusionSides`, cross-checked on `testdata/mmr_sides.txt`).
 
 `inclusion_sound`: a path whose sides are leaf `h`'s and whose recomputed root is the tree's root
-proves `leaf = leaves[h]`, unless the node hash has a collision. It holds for every tree; for the
+proves `leaf = leaves[h]`, unless the node hash has a collision. `Collision` is provable
+(`collision_true`), so use `inclusion_soundC` / `mmr_inclusionC`, which name the colliding inputs. It holds for every tree; for the
 chain proof the tree is `mmr` of the block hashes (`mmr_leaves`, `mmr_inclusion`).
 
 `fold_eq_mmr`: folding an aligned segment plan with the prover's push-and-merge stack and bagging
@@ -167,6 +168,97 @@ theorem mmr_inclusion (L : List State) (hL : L ≠ []) (h : ℕ) (leaf : State) 
     (hh : h < L.length) (hs : steps.map Step.left = (mmr L).sides h) (hr : pathRoot leaf steps = (mmr L).root) :
     L[h]? = some leaf ∨ Collision := by
   have := inclusion_sound (mmr L) h leaf steps (by rw [HTree.size, mmr_leaves L hL]; exact hh) hs hr
+  rwa [mmr_leaves L hL] at this
+
+/-! ### Inclusion with a named collision
+
+`Collision` is a pigeonhole fact (pairs of states outnumber states: `collision_true`), so the
+`… ∨ Collision` forms above say nothing. The forms below name the colliding inputs: the pairs a
+path's check compares (`pathPairsRev`), all computed from the tree, the leaf and the path. -/
+
+/-- `Collision` is provable: `hnode` maps pairs of states to states, so it is not injective. -/
+theorem collision_true : Collision := by
+  have hfin : Finite State := Finite.of_injective
+    (fun s : State => (s.a, s.b, s.c, s.d, s.e, s.f, s.g, s.h)) fun x y e => by
+      cases x; cases y; simp only [Prod.mk.injEq] at e; obtain ⟨_, _, _, _, _, _, _, _⟩ := e; subst_vars; rfl
+  by_contra hc
+  have hinj : Function.Injective (fun p : State × State => hnode p.1 p.2) := fun p q e => by
+    by_contra hne
+    exact hc ⟨p.1, p.2, q.1, q.2, hne, e⟩
+  have h2 : 1 < Nat.card State := Finite.one_lt_card_iff_nontrivial.mpr
+    ⟨⟨⟨0, 0, 0, 0, 0, 0, 0, 0⟩, ⟨1, 0, 0, 0, 0, 0, 0, 0⟩, by simp⟩⟩
+  have hle := Nat.card_le_card_of_injective _ hinj
+  rw [Nat.card_prod] at hle
+  nlinarith
+
+/-- A node-hash collision among the given pairs of inputs. -/
+def CollidesIn (ps : List ((State × State) × (State × State))) : Prop :=
+  ∃ pq ∈ ps, pq.1 ≠ pq.2 ∧ hnode pq.1.1 pq.1.2 = hnode pq.2.1 pq.2.2
+
+/-- The inputs a root-first path's check compares: at each node, the recomputed (child, sibling) in
+the step's order against the tree's children's roots. -/
+def pathPairsRev : HTree → ℕ → State → List Step → List ((State × State) × (State × State))
+  | .node l r, h, leaf, s :: rest =>
+    if h < l.size then ((pathRootRev leaf rest, s.sibling), (l.root, r.root)) :: pathPairsRev l h leaf rest
+    else ((s.sibling, pathRootRev leaf rest), (l.root, r.root)) :: pathPairsRev r (h - l.size) leaf rest
+  | _, _, _, _ => []
+
+theorem inclusion_sound_revC : ∀ (t : HTree) (h : ℕ) (leaf : State) (rs : List Step),
+    h < t.size → rs.map Step.left = t.sidesRev h → pathRootRev leaf rs = t.root →
+    t.leaves[h]? = some leaf ∨ CollidesIn (pathPairsRev t h leaf rs)
+  | .leaf s, h, leaf, rs, hh, hs, hr => by
+    simp only [HTree.size, HTree.leaves, List.length_singleton, Nat.lt_one_iff] at hh
+    subst hh
+    simp only [HTree.sidesRev, List.map_eq_nil_iff] at hs
+    subst hs
+    simp only [pathRootRev, HTree.root] at hr
+    simp [HTree.leaves, hr]
+  | .node l r, h, leaf, rs, hh, hs, hr => by
+    match rs with
+    | [] => simp [HTree.sidesRev] at hs; split at hs <;> simp at hs
+    | s :: rest =>
+      simp only [pathRootRev, HTree.root, Step.up] at hr
+      simp only [List.map_cons, HTree.sidesRev] at hs
+      by_cases hl : h < l.size
+      · simp only [hl, ite_true, List.cons.injEq] at hs
+        obtain ⟨hs1, hs2⟩ := hs
+        simp only [hs1, Bool.false_eq_true, ite_false] at hr
+        simp only [pathPairsRev, hl, ite_true]
+        by_cases he : (pathRootRev leaf rest, s.sibling) = (l.root, r.root)
+        · simp only [Prod.mk.injEq] at he
+          rcases inclusion_sound_revC l h leaf rest hl hs2 he.1 with h1 | ⟨pq, hm, hc⟩
+          · left; simp only [HTree.leaves]; rw [List.getElem?_append_left (by simpa [HTree.size] using hl)]; exact h1
+          · exact Or.inr ⟨pq, List.mem_cons_of_mem _ hm, hc⟩
+        · exact Or.inr ⟨_, List.mem_cons_self .., he, hr⟩
+      · simp only [hl, ite_false, List.cons.injEq] at hs
+        obtain ⟨hs1, hs2⟩ := hs
+        simp only [hs1, ite_true] at hr
+        simp only [pathPairsRev, hl, ite_false]
+        have hl' : l.size ≤ h := Nat.le_of_not_lt hl
+        have hrs : h - l.size < r.size := by
+          simp only [HTree.size, HTree.leaves, List.length_append] at hh ⊢; unfold HTree.size at hl'; omega
+        by_cases he : (s.sibling, pathRootRev leaf rest) = (l.root, r.root)
+        · simp only [Prod.mk.injEq] at he
+          rcases inclusion_sound_revC r (h - l.size) leaf rest hrs hs2 he.2 with h1 | ⟨pq, hm, hc⟩
+          · left; simp only [HTree.leaves]
+            rw [List.getElem?_append_right (by simpa [HTree.size] using hl')]; exact h1
+          · exact Or.inr ⟨pq, List.mem_cons_of_mem _ hm, hc⟩
+        · exact Or.inr ⟨_, List.mem_cons_self .., he, hr⟩
+
+/-- **Inclusion soundness, with a named collision** (`inclusion_sound`): the path proves leaf `h` of
+`t` is `leaf`, or two of the inputs it compares collide. -/
+theorem inclusion_soundC (t : HTree) (h : ℕ) (leaf : State) (steps : List Step)
+    (hh : h < t.size) (hs : steps.map Step.left = t.sides h) (hr : pathRoot leaf steps = t.root) :
+    t.leaves[h]? = some leaf ∨ CollidesIn (pathPairsRev t h leaf steps.reverse) := by
+  rw [pathRoot_rev] at hr
+  refine inclusion_sound_revC t h leaf steps.reverse hh ?_ hr
+  rw [List.map_reverse, hs, HTree.sides, List.reverse_reverse]
+
+/-- **The MMR inclusion statement, with a named collision** (`mmr_inclusion`). -/
+theorem mmr_inclusionC (L : List State) (hL : L ≠ []) (h : ℕ) (leaf : State) (steps : List Step)
+    (hh : h < L.length) (hs : steps.map Step.left = (mmr L).sides h) (hr : pathRoot leaf steps = (mmr L).root) :
+    L[h]? = some leaf ∨ CollidesIn (pathPairsRev (mmr L) h leaf steps.reverse) := by
+  have := inclusion_soundC (mmr L) h leaf steps (by rw [HTree.size, mmr_leaves L hL]; exact hh) hs hr
   rwa [mmr_leaves L hL] at this
 
 /-! ### Folding an aligned segment plan (the prover's stack, Zig `pushPeak`/`bagPeaks`)
