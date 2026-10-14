@@ -1,4 +1,4 @@
-Status: **sample complete (1 block in 10, all heights 0–971,297); full run in progress on the node** (2026-10-13). Branch `survey`.
+Status: **complete: every block 0–971,297 sized** (full pass collected 2026-10-14; the 1-in-10 sample of 2026-10-13 is kept below).
 
 # Chain survey: trace size and GPU class of every mainnet block
 
@@ -72,9 +72,30 @@ The arena takes only a few distinct values, all far from these limits, so the he
 | 23 | 196.50 | 52.82 |
 | 24 | 393.00 (not SizeOk) | 105.64 |
 
+## Results (full pass: all 971,298 blocks, 2026-10-14)
+
+No block errored and every block is covered by `SizeOk`. The sample's estimates hold, with one correction: **3 blocks need 2^24 tiered** (the sample had none).
+
+| GPU class (arena + 1.5 GiB fits) | blocks | share | cumulative |
+|---|---|---|---|
+| ≤ 24 GB (RTX 4090) | 440,343 | 45.34 % | 45.34 % |
+| ≤ 48 GB (L40S / A6000) | 293,900 | 30.26 % | 75.59 % |
+| ≤ 80 GB (A100 / H100) | 236,968 | 24.40 % | 99.99 % |
+| ≤ 94 GB (H100 NVL) | 0 | 0 | 99.99 % |
+| ≤ 141 GB (H200) | 87 | 0.01 % | 100 % |
+
+- **H200 blocks (87).**
+  - 84 are 22 uniform (98.25 GiB), the b2msg fallbacks of undo-heavy blocks, for example 491072–491097 and 933734–960848.
+  - 3 are **24 tiered** (105.64 GiB): 367851 and 367853 (~1 MB, ~10–12k transactions, 2015) and 836361 (1.72 MB, 8,320 transactions). SHA binds.
+  - The owner's decision (2026-10-14): these go to an H200; no third profile.
+- **Largest classes.** 22 tiered: 293,847 blocks (30.3 %). 23 tiered: 236,765 (24.4 %). 11 uniform: 86,958 (9.0 %).
+- **Uniform fallbacks: 998** (the sample estimated ~870). Of those, 202 are 21 uniform (`fpwalk`, 2012–2015) and 83 are 22 uniform (`b2msg`). The summary script lists every misfit with examples.
+- **The size changes from block to block.** Of the aligned groups of 16 consecutive blocks, only 7,906 of 60,706 have one (L, profile): 2,737 of 12,500 in heights 0–199,999, 24 of 12,500 in 200,000–399,999, 1,988 in 400,000–599,999, 434 in 600,000–799,999, and 2,723 of 10,706 after that. This decides aggregation: a circuit that verifies several block proofs depends on the tuple of their sizes. So the aggregation width belongs in the node (`block-rec.md` § Wide nodes), not in the leaf.
+- **Data.** `data/chain-sizes.csv` (local, 971,298 lines, from the node's `survey/out/w*.csv`). `scripts/survey_summary.py` regenerates the tables.
+
 ## Results (1-in-10 sample: 97,130 blocks, heights ≡ 0 mod 10; multiply by 10 for the chain)
 
-No block errored, every block is covered by `SizeOk`, and **no block needs L ≥ 24**. The largest size is 2^23 tiered.
+No block errored and every block is covered by `SizeOk`. No sampled block needs L ≥ 24 (the full pass found 3).
 
 ### By GPU class
 
@@ -148,14 +169,14 @@ Since 2023, 72–89 % of blocks per year need an 80 GB card (2^23 tiered), and m
 
 - **Largest blocks.** They are about 3.99 MB with a few transactions (inscriptions, 2023–2026), for example 931990 (3,991,999 B, 7 txs) and 927410. All are 2^23 tiered (52.8 GiB): none reaches 2^24.
 - **Largest undo streams.** 491080 (958,485 B), 881050 (806,378 B) and 809680 (724,460 B): all three are the 22-uniform fallbacks above.
-- **L ≥ 24.** None.
+- **L ≥ 24.** None in the sample; 3 in the full pass (above).
 
 ## Implications
 
-- **Hardware.** An 80 GB card (A100 or H100) proves every block except about 50 fallbacks. An H200 proves all of them.
+- **Hardware.** An 80 GB card (A100 or H100) proves every block except 87 (84 fallbacks and 3 blocks at 2^24 tiered). An H200 proves all of them.
 - **Cheap fix for the H200 blocks.** A profile with b2msg, b2s and undo at L−1 (or a third profile for undo-heavy blocks) would make the ~50 H200 blocks 2^22 tiered (48 GB class). It would also move the ~150 21-uniform blocks down.
   - This changes the VK set (D-045: one VK per (L, profile)), so it is the owner's decision.
-- **Tier headroom.** The tiered profile reaches 2^24 under `SizeOk`, but no block needs it today.
+- **Tier headroom.** The tiered profile reaches 2^24 under `SizeOk`; three blocks use it.
 
 ## Reproduce, resume, collect
 

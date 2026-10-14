@@ -1,5 +1,6 @@
 import StarkedAir.Export
 import StarkedAir.Circuit.CompositionLogUp
+import StarkedAir.Circuit.BlockNodeK
 import StarkedAir.Circuit.Balance
 import StarkedAir.Circuit.Statement
 import StarkedAir.Circuit.LeafHash
@@ -66,6 +67,7 @@ def main (args : List String) : IO Unit := do
          StarkedAir.Circuit.Composition.compShape StarkedAir.HeaderTree.tree 0]))
   | ["block_leaf_ctx"] => IO.println StarkedAir.Circuit.BlockCtx.ctxJson
   | ["block_node_glue"] => IO.println StarkedAir.Circuit.BlockNode.nodeJson
+  | ["block_node_k", a] => IO.println (StarkedAir.Circuit.BlockNodeK.nodeKJson a.toNat!)
   | ["block_leaf_out"] => IO.println StarkedAir.Circuit.BlockRec.leafOutJson
   | ["seed_leaf"] => IO.println StarkedAir.Circuit.BlockLeaf.seedLeafJson
   | ["block_leaf_checks"] => IO.println StarkedAir.Circuit.BlockLeaf.checksJson

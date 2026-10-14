@@ -21,6 +21,33 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-10-14 (session 13, wide nodes) — Full survey in: sizes mix, so the width goes into the node; wide node in Lean and Zig
+Who: Claude (agent, Opus 5.5), branch `pack-join`
+Done:
+- Pushed the packing spike to main (518032e). Brief for stwo-zig: `~/Workshop/stwo-zig/CUDA_FRI_REMAINDER_FOLD_BRIEF.md` (untracked).
+- Collected the full survey (971,298 blocks) and wrote it into chain-survey.md:
+  - 87 H200 blocks: 84 are 22 uniform, and **3 are 24 tiered** (367851, 367853, 836361);
+  - 998 uniform fallbacks.
+- **Packing k block proofs into one leaf doesn't work for mixed sizes.** The leaf circuit depends on the tuple of the blocks' (L, profile), and only 7,906 of 60,706 aligned 16-block groups are uniform. Packing only those gives 1.6 blocks per leaf.
+- **Wide node** (`2^a` child circuit proofs per node):
+  - Lean `Circuit/BlockNodeK.lean`: `blockNodeK`, `joinT_sound`, `nodeK_sound`, `treeK_sound`, `forestK_soundP`, `forestK_epochV`; standard axioms only.
+  - JSON `airs/block_node_k{1..4}.json`.
+  - Zig `recursion/block_node_k.zig`, plus `blockpack widenode|nodecost|shapes`.
+Evidence:
+- 2 children (blocks 0–1): output = native digest = the binary node's; proved and verified in 15.1 s (CPU).
+- 4 children: blocks 0–3, and blocks 168–171 (mixed 2^11 uniform and 2^12 tiered leaves). Both satisfied, with the output equal to the native digest.
+- Swapped children and a wrong child key are rejected.
+- One in-circuit child verifier: 12.6 M vars at fold 1, 6.4 M at fold 4.
+- Shape fixpoints: block-rec.md § Wide nodes. 8 children at fold 4 fit 2^24.
+- `zig build test -Dtest-filter="wide node"` passes.
+- Re-proved block proofs 0–171 into `data/epoch-pack` (220 s); the old `data/epoch` ones are stale.
+Problems / lessons:
+- My earlier "~61k leaves" assumed mixed-size packing. Check the size distribution before costing a leaf design.
+- One shared shape pads every leaf to the node's 2^24 (8× a 2^21 leaf).
+  - Per-level shapes fix this, but they need natural trace logs at fold 4. That takes a stwo-zig fix: either the CUDA remainder fold, or the in-circuit verifier's fold-4 run at trace log 23, which panicked.
+  - Alternatively, fold 1 on the CUDA circuit prover (untested).
+Next: one GPU session (CUDA circuit fold 1 at 2^21; the 8-child node at 2^24, fold 4), then per-level shapes and the forest over `TreeK`.
+
 ## 2026-10-14 (session 13) — Survey merged; leaf packing on GPU: 16 blocks per circuit proof on an H200
 Who: Claude (agent), with the owner
 Done:

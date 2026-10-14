@@ -88,3 +88,106 @@ pub fn measure(gpa: std.mem.Allocator, dir: []const u8, from: u32, ks: []const u
         });
     }
 }
+
+const multiverifier = circuit.statements.multiverifier;
+const circuit_statement = circuit.statements.circuit_statement;
+const stark_proof = circuit.stark_verifier.proof;
+const verify_mod = circuit.stark_verifier.verify;
+const NoValue = builder.NoValue;
+const HashValue = builder.blake.HashValue;
+
+/// `nodecost`: the shared shape of block leaves (from the leaf over `files[0]`) and binary nodes, then
+/// the size of a circuit verifying `k` circuit proofs of that shape (no glue), for each k.
+pub fn nodeCost(gpa: std.mem.Allocator, dir: []const u8, from: u32, ks: []const usize, fold: u32) !void {
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const airs = try bs.parseAirs(a);
+    const tables = try leaf.Tables.init(gpa);
+    defer tables.deinit(gpa);
+    const path = try std.fmt.allocPrint(a, "{s}/proofs/{d}.sbblock", .{ dir, from });
+    const f = try PF.decode(a, try std.fs.cwd().readFileAlloc(a, path, 1 << 30));
+    var lctx = try block_rec.leafCircuitOf(gpa, a, &airs, &f, PF.productionFri());
+    const start = finalize.computePaddedSizes(.fromBuilder(&lctx.circuit));
+    std.debug.print("leaf (L {d}): {d} vars\n", .{ f.log_size, lctx.circuit.n_vars });
+    lctx.deinit();
+    var timer = try std.time.Timer.start();
+    // The in-circuit FRI verifier needs last layer 0, and CUDA every round a full fold: for fold > 1 the
+    // shape's trace log is raised to a multiple of the fold step.
+    var shape = try block_rec.Shape.init(gpa, &tables.table, start, try FriConfigV2.init(26, 0, 1, 70, 1));
+    var fri = shape.fri;
+    if (fold != 1) {
+        const tl = try preprocessedLog(shape.target);
+        var bumped = shape.target;
+        bumped.blake_g_gate = @max(bumped.blake_g_gate, @as(usize, 1) << @intCast((tl + fold - 1) / fold * fold));
+        shape.deinit(gpa);
+        fri = try FriConfigV2.init(26, 0, 1, 70, fold);
+        shape = try block_rec.Shape.init(gpa, &tables.table, bumped, fri);
+        if (try preprocessedLog(shape.target) % fold != 0) return error.ShapeNotAligned;
+    }
+    defer shape.deinit(gpa);
+    std.debug.print("shared shape (fold {d}, last layer {d}): trace log {d}, found in {d:.1}s\n", .{ fold, fri.log_last_layer_degree_bound, try preprocessedLog(shape.target), secs(timer.lap()) });
+    const empty = try stark_proof.emptyProof(a, shape.shared.proof_config);
+    for (ks) |k| {
+        var ctx = try Context(NoValue).init(gpa, component_list.N_RESERVED);
+        defer ctx.deinit();
+        const config: circuit_statement.CircuitConfig = .{ .config = shape.shared.pcs_config, .preprocessed_column_log_sizes = shape.shared.preprocessed_column_log_sizes };
+        for (0..k) |_| {
+            var root: HashValue(Var) = undefined;
+            var digest: HashValue(Var) = undefined;
+            for (&root.words) |*w| w.* = .newUnsafe(try ctx.newVar(.{}));
+            for (&digest.words) |*w| w.* = .newUnsafe(try ctx.newVar(.{}));
+            const statement = try circuit_statement.CircuitStatement(NoValue).init(&ctx, &tables.table, &config, root, digest);
+            const pv_ = try stark_proof.guess(NoValue, &ctx, &empty);
+            try verify_mod.verify(NoValue, &ctx, &pv_, shape.shared.proof_config, &statement, verify_mod.NoStages{});
+        }
+        var out: HashValue(Var) = undefined;
+        for (&out.words) |*w| w.* = .newUnsafe(try ctx.newVar(.{}));
+        try leaf.finish(NoValue, &ctx, out);
+        const sz = finalize.computePaddedSizes(.fromBuilder(&ctx.circuit));
+        std.debug.print("k={d} child verifiers: {d} vars ({d} per child); padded log sizes eq {d} qm31_ops {d} m31_to_u32 {d} triple_xor {d} blake_g {d}\n", .{
+            k, ctx.circuit.n_vars, ctx.circuit.n_vars / k, log2(sz.eq), log2(sz.qm31_ops), log2(sz.m31_to_u32), log2(sz.triple_xor), log2(sz.blake_g_gate),
+        });
+    }
+}
+
+fn preprocessedLog(target: finalize.ComponentSizes) !u32 {
+    const layout = try circuit.common.preprocessed.ColumnLayout.fromComponentSizes(target);
+    return layout.traceLogSize();
+}
+
+/// `shapes`: the shared shape (fixpoint of leaf and wide node of `2^a` children) for each arity, at
+/// fold 1 (any trace log) and fold 4 (trace log a multiple of 4: the in-circuit FRI verifier needs last
+/// layer 0, CUDA every round a full fold).
+pub fn shapes(gpa: std.mem.Allocator, dir: []const u8, from: u32) !void {
+    const wk = @import("block_node_k.zig");
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const airs = try bs.parseAirs(a);
+    const tables = try leaf.Tables.init(gpa);
+    defer tables.deinit(gpa);
+    const path = try std.fmt.allocPrint(a, "{s}/proofs/{d}.sbblock", .{ dir, from });
+    const f = try PF.decode(a, try std.fs.cwd().readFileAlloc(a, path, 1 << 30));
+    var lctx = try block_rec.leafCircuitOf(gpa, a, &airs, &f, PF.productionFri());
+    const start = finalize.computePaddedSizes(.fromBuilder(&lctx.circuit));
+    lctx.deinit();
+    for (1..wk.MAX_A + 1) |arity| for ([_]u32{ 1, 4 }) |fold| {
+        var target = start;
+        var tl: u32 = 0;
+        // Raise the target until the fixpoint's trace log is a multiple of the fold step.
+        while (true) {
+            if (fold != 1) target.blake_g_gate = @max(target.blake_g_gate, @as(usize, 1) << @intCast((try preprocessedLog(target) + fold - 1) / fold * fold));
+            var shp = try wk.shape(gpa, &tables.table, @intCast(arity), target, try FriConfigV2.init(26, 0, 1, 70, fold));
+            defer shp.deinit(gpa);
+            tl = try preprocessedLog(shp.target);
+            target = shp.target;
+            if (tl % fold == 0) break;
+        }
+        var shared = try multiverifier.foldSharedConfig(gpa, target, try FriConfigV2.init(26, 0, 1, 70, fold));
+        defer shared.deinit(gpa);
+        var ctx = try wk.topology(gpa, &tables.table, @intCast(arity), &shared);
+        defer ctx.deinit();
+        std.debug.print("a={d} ({d} children), fold {d}: shared trace log {d}, node {d} vars\n", .{ arity, @as(u32, 1) << @intCast(arity), fold, tl, ctx.circuit.n_vars });
+    };
+}

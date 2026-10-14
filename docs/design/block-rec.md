@@ -257,10 +257,66 @@ stwo-zig's circuit prover (70 queries, 26 PoW bits, fold step 4).
   To report upstream.
 - **CPU** (M4 Pro, 24 GB): k = 1 3.7 s, k = 2 7.3 s, k = 4 37.5 s (12.6 GB); k = 8 swaps (433 s).
 
-What it changes: today a block costs a leaf (15.5–17 s CPU) plus a node (16–24 s); packing 16 blocks per
-leaf costs ~0.7 s per block of GPU prove and divides the node count by 16 (~61 k leaves and nodes for
-the chain instead of ~971 k). Blocks of any size can be packed; the leaf circuit grows with the log of
-the block trace, not the block (to measure at 2²³).
+**Superseded for mixed sizes (2026-10-14, the full survey).** A packed leaf verifies k *block* proofs
+with the plain verifier. Its circuit, and so its identity in the VK, depends on the tuple of the k blocks'
+(L, profile). Block sizes change from block to block: only 7,906 of the chain's 60,706 aligned 16-block
+groups have a single size. Packing only uniform aligned runs gives 1.6 blocks per leaf over the chain
+(606,293 leaves). So the width goes into the node instead (below). The capacity numbers above still hold
+for what one GPU proves per circuit.
+
+## Wide nodes (2026-10-14)
+
+A **wide node** verifies `2^a` child *circuit* proofs (block leaves or nodes padded to one shared
+shape) and joins their summaries. A child's circuit hash is an output of the in-circuit verifier, so
+children of any block size mix freely, and the key mechanism carries their identities to the outer
+verifier as today: `K = Blake2s(h₀ ‖ k₀ ‖ … ‖ h_{2^a−1} ‖ k_{2^a−1})`.
+
+- **Lean** (`Circuit/BlockNodeK.lean`, standard axioms):
+  - `blockNodeK a`: the children's sections (as the binary node's), the balanced join (`joinT`, the
+    binary node's `nodeOut` at every inner vertex), the key and the digest. Exported for `a = 1 … 4` as
+    `airs/block_node_k<a>.json`; the 16-child program is 19,275 ops.
+  - `joinT_sound` and `nodeK_sound`: the node's output is the digest of a proven summary (`SumOkP`)
+    under the key of its children's hashes and keys.
+  - `treeK_sound`, `forestK_soundP` and `forestK_epochV`: the tree and the outer verifier over trees with
+    wide nodes (`TreeK`), under the named hypotheses of `BlockRec.Trust` per arity (`TrustK`).
+- **Zig** (`recursion/block_node_k.zig`): the circuit (the glue with stwo-zig's recursive verifier at
+  every hook), its shape fixpoint, the native key and join, prove and verify.
+  `blockpack widenode <dir> <from> <a> [prove]`, on the Mac CPU:
+  - `a = 1` (blocks 0–1): the circuit's output equals the native digest **and the binary node's**. It
+    proved and verified in 15.1 s (981 KB).
+  - `a = 2` (blocks 0–3, and blocks 168–171, which mix 2^11 uniform and 2^12 tiered leaves): satisfied,
+    with the output equal to the native digest (50.6 M vars).
+  - Both arities reject swapped children (the link checks) and a wrong child key (the hook's digest).
+- **Child verifier cost** (`blockpack nodecost`): one child circuit proof verified in-circuit costs
+  12.6 M vars at FRI fold 1 and **6.4 M vars at fold 4**. The plain verifier of a block proof costs 8.4 M.
+- **Shared shape** (`blockpack shapes`; the fixpoint of leaf and node, trace log):
+
+  | children | fold 1 | fold 4 (trace log a multiple of 4) |
+  |---|---|---|
+  | 2 | 2^23 (node 25.3 M vars) | 2^24 (12.9 M) |
+  | 4 | 2^24 (53.9 M) | 2^24 (25.8 M) |
+  | 8 | 2^25 (114.8 M) | **2^24 (51.6 M)** |
+  | 16 | 2^26 (243.9 M) | 2^28 (124.2 M) |
+
+  At fold 4, the trace log must be a multiple of 4 for two reasons, both in stwo-zig:
+  - the CUDA circuit prover fails when the last fold is a remainder (brief
+    `CUDA_FRI_REMAINDER_FOLD_BRIEF.md`);
+  - our run of the in-circuit verifier at fold 4 with trace log 23 panicked, although its loop is written
+    for a remainder.
+
+  So 8 children at 2^24 is the widest node that fits an 80 GB card (2^24 ≈ 51 GiB of device memory,
+  ~6 s on H200, from the packing runs).
+- **The open cost: one shared shape pads every leaf to it.** A block leaf is 2^21 natively but 2^24 in
+  the shape, 8× the work. The way out is **per-level shapes**: leaves at their natural shape; a node over
+  leaves (whose hooks verify leaf-shaped proofs); and a node over nodes. Two node circuits per arity, both
+  running `blockNodeK a`. Lean only needs `nodeH` indexed by the variant (the hook's verifier is
+  abstract in `TrustK`). It needs natural trace logs at fold 4, so one of the two stwo-zig fixes above,
+  or fold 1 on the CUDA circuit prover (not yet tried).
+- **Next:**
+  1. on one GPU session: the CUDA circuit prover at fold 1 (leaf 2^21), and the 8-child node at 2^24
+     (fold 4);
+  2. per-level shapes;
+  3. the forest and outer verifier over `TreeK` (`block_forest.zig` `expected` by arity).
 
 ## Following the tip
 

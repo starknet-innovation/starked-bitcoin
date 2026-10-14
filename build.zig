@@ -166,6 +166,10 @@ pub fn build(b: *std.Build) void {
     lib.addAnonymousImport("air:deep_leaf", .{ .root_source_file = b.path("airs/deep_leaf.json") });
     lib.addAnonymousImport("air:block_leaf_ctx", .{ .root_source_file = b.path("airs/block_leaf_ctx.json") });
     lib.addAnonymousImport("air:block_node_glue", .{ .root_source_file = b.path("airs/block_node_glue.json") });
+    lib.addAnonymousImport("air:block_node_k1", .{ .root_source_file = b.path("airs/block_node_k1.json") });
+    lib.addAnonymousImport("air:block_node_k2", .{ .root_source_file = b.path("airs/block_node_k2.json") });
+    lib.addAnonymousImport("air:block_node_k3", .{ .root_source_file = b.path("airs/block_node_k3.json") });
+    lib.addAnonymousImport("air:block_node_k4", .{ .root_source_file = b.path("airs/block_node_k4.json") });
     lib.addAnonymousImport("air:block_leaf_out", .{ .root_source_file = b.path("airs/block_leaf_out.json") });
     lib.addAnonymousImport("air:seed_leaf", .{ .root_source_file = b.path("airs/seed_leaf.json") });
     lib.addAnonymousImport("air:block_leaf_checks", .{ .root_source_file = b.path("airs/block_leaf_checks.json") });

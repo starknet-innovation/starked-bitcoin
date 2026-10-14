@@ -37,6 +37,7 @@ pub const recursion = struct {
     pub const block_leaf = @import("recursion/block_leaf.zig");
     pub const block_rec = @import("recursion/block_rec.zig");
     pub const block_pack = @import("recursion/block_pack.zig");
+    pub const block_node_k = @import("recursion/block_node_k.zig");
     pub const block_forest = @import("recursion/block_forest.zig");
 };
 pub const air = struct {

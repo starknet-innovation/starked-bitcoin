@@ -150,6 +150,7 @@ import StarkedAir.Circuit.BlockLeaf
 import StarkedAir.Circuit.BlockNode
 import StarkedAir.Circuit.BlockTree
 import StarkedAir.Circuit.BlockRec
+import StarkedAir.Circuit.BlockNodeK
 import StarkedAir.Circuit.HeaderRec
 import StarkedAir.Circuit.BlockCtx
 import StarkedAir.Compat
