@@ -557,27 +557,35 @@ pub fn build(b: *std.Build) void {
             // It links stwo-zig's own circuit archive (`zig build benchmark-circuit-cuda-resident` in
             // third_party/stwo-zig builds it), given as `-Dcuda-circuit-archive=<dir with
             // libstwo_cuda_kernels.a>`; without it, the stubs (`--plan-only` only).
-            const pack_module = b.createModule(.{ .root_source_file = b.path("src/gpu/cuda/pack.zig"), .target = target, .optimize = optimize });
-            for (resident.import_table.keys(), resident.import_table.values()) |name, module| pack_module.addImport(name, module);
-            pack_module.addImport("stwo_circuit_frontend", imports.get("stwo_circuit_frontend").?);
-            pack_module.addImport("stwo_circuit_cpu_integration", imports.get("stwo_circuit_cpu_integration").?);
-            const pack = b.addExecutable(.{ .name = "cuda-pack", .root_module = pack_module });
-            if (b.option([]const u8, "cuda-circuit-archive", "Directory with stwo-zig's circuit libstwo_cuda_kernels.a (cuda-pack)")) |dir| {
-                pack.root_module.addLibraryPath(.{ .cwd_relative = dir });
-                pack.root_module.addLibraryPath(.{ .cwd_relative = tc.lib.? });
-                pack.root_module.addRPath(.{ .cwd_relative = tc.lib.? });
-                pack.root_module.addLibraryPath(.{ .cwd_relative = tc.driver orelse b.fmt("{s}/stubs", .{tc.lib.?}) });
-                pack.root_module.linkSystemLibrary("stwo_cuda_kernels", .{});
-                pack.root_module.linkSystemLibrary("cudart", .{});
-                pack.root_module.linkSystemLibrary("cuda", .{});
-                pack.root_module.addObjectFile(.{ .cwd_relative = tc.host_runtime.? });
-                pack.root_module.addObjectFile(.{ .cwd_relative = tc.host_unwind.? });
-            } else {
-                for (stubs) |stub| pack.root_module.addCSourceFile(.{ .file = stub, .flags = &.{ "-std=c11", "-Wno-strict-prototypes" } });
+            // `cuda-widenode` (src/gpu/cuda/widenode.zig): the wide block node and a fold-1 leaf on the same
+            // prover, linked the same way.
+            const circuit_archive = b.option([]const u8, "cuda-circuit-archive", "Directory with stwo-zig's circuit libstwo_cuda_kernels.a (cuda-pack, cuda-widenode)");
+            for ([_][2][]const u8{
+                .{ "cuda-pack", "src/gpu/cuda/pack.zig" },
+                .{ "cuda-widenode", "src/gpu/cuda/widenode.zig" },
+            }) |spec| {
+                const pack_module = b.createModule(.{ .root_source_file = b.path(spec[1]), .target = target, .optimize = optimize });
+                for (resident.import_table.keys(), resident.import_table.values()) |name, module| pack_module.addImport(name, module);
+                pack_module.addImport("stwo_circuit_frontend", imports.get("stwo_circuit_frontend").?);
+                pack_module.addImport("stwo_circuit_cpu_integration", imports.get("stwo_circuit_cpu_integration").?);
+                const pack = b.addExecutable(.{ .name = spec[0], .root_module = pack_module });
+                if (circuit_archive) |dir| {
+                    pack.root_module.addLibraryPath(.{ .cwd_relative = dir });
+                    pack.root_module.addLibraryPath(.{ .cwd_relative = tc.lib.? });
+                    pack.root_module.addRPath(.{ .cwd_relative = tc.lib.? });
+                    pack.root_module.addLibraryPath(.{ .cwd_relative = tc.driver orelse b.fmt("{s}/stubs", .{tc.lib.?}) });
+                    pack.root_module.linkSystemLibrary("stwo_cuda_kernels", .{});
+                    pack.root_module.linkSystemLibrary("cudart", .{});
+                    pack.root_module.linkSystemLibrary("cuda", .{});
+                    pack.root_module.addObjectFile(.{ .cwd_relative = tc.host_runtime.? });
+                    pack.root_module.addObjectFile(.{ .cwd_relative = tc.host_unwind.? });
+                } else {
+                    for (stubs) |stub| pack.root_module.addCSourceFile(.{ .file = stub, .flags = &.{ "-std=c11", "-Wno-strict-prototypes" } });
+                }
+                pack.linkLibC();
+                b.installArtifact(pack);
+                b.step(spec[0], b.fmt("Install only {s} (src/gpu/cuda/{s})", .{ spec[0], std.fs.path.basename(spec[1]) })).dependOn(&b.addInstallArtifact(pack, .{}).step);
             }
-            pack.linkLibC();
-            b.installArtifact(pack);
-            b.step("cuda-pack", "Install only cuda-pack (the leaf-packing spike)").dependOn(&b.addInstallArtifact(pack, .{}).step);
         }
     }
     const test_step = b.step("test", "Run starked-bitcoin tests");

@@ -2,7 +2,8 @@
 # Pod bootstrap for the resident CUDA block prover (docs/design/gpu-cuda.md § Running on a pod).
 #   bootstrap.sh <commit>            clone github.com/starknet-innovation/starked-bitcoin (with submodules) at <commit>
 #   bootstrap.sh --tarball <file>    use a shipped working tree instead (tar of the repo incl. third_party/stwo-zig)
-# Installs Zig 0.15.2 and the build tools, then builds zig-out/bin/cuda-prove against the real CUDA archive.
+# Installs Zig 0.15.2 and the build tools, then builds zig-out/bin/cuda-prove against the real CUDA archive
+# (NO_BUILD=1 skips that build: cuda-pack / cuda-widenode link stwo-zig's circuit archive instead).
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 here=$(cd "$(dirname "$0")" && pwd)
@@ -51,6 +52,7 @@ else
 fi
 test -f "$SRC/third_party/stwo-zig/scripts/cuda_build.py" || { echo "stwo-zig submodule missing"; exit 1; }
 
+if [ -n "${NO_BUILD:-}" ]; then echo "== BOOTSTRAP DONE (no build) =="; exit 0; fi
 echo "== build (archive: stwo-zig runtime + our 16 kernels for $CUDA_ARCH; first build is the slow part) =="
 cd "$SRC"
 time zig build cuda-archive-plan -Dcuda=true -Dcuda-arch="$CUDA_ARCH"
