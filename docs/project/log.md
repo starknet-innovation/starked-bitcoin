@@ -21,6 +21,37 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-10-14 (session 13, GPU wide node) — 8-child wide node proved on an H100, byte-identical to CPU; CUDA fold 1 fails
+Who: Claude (agent, Opus 5.5), with the owner (pod)
+Roadmap: BLOCK-REC wide nodes: GPU validated at 2^24 (fold 4); per-level shapes blocked on CUDA fold 1
+Done:
+- `cuda-widenode` (`src/gpu/cuda/widenode.zig`, branch `gpu/widenode`, not pushed):
+  - A: a leaf or packed circuit at its natural size, any fold.
+  - B: 8 GPU block leaves at the shared 2^24 shape, then the 8-child node over them on the GPU.
+  - A device proof becomes a `leaf.CircuitProof` child: the verified-capture verifier proof, the
+    request and the circuit hash.
+- Pod scripts: `widenode.sh build|run`, `bundle.sh` (a source tarball for an unpushed branch, 160 MB),
+  and `NO_BUILD=1 bootstrap.sh`.
+Evidence:
+- RunPod H100 SXM 80 GB, sm_90 ($3.99/hr, about 45 min). Logs were kept outside the repo.
+- B, blocks 164–171 (mixed 2^11 uniform and 2^12 tiered):
+  - 8 leaves at 4.6 s each and the node at 4.4 s on the GPU.
+  - The node's digest equals `block_node_k.expected`'s.
+  - All 9 proofs pass both native verifiers and are byte-identical to the CPU proofs (CPU about 40 s each).
+  - 45.65 GiB device memory. Table in block-rec.md § Wide nodes.
+- A, block 0, fold 1, 2^21: the GPU proof is rejected, `FRI verification failed: FirstLayerCommitmentInvalid`.
+  At fold 4: 1.55 s (k = 1) and 1.42 s (k = 2), the same SHA-256 as the Mac CPU proofs.
+- Mac: `zig build -Dcuda=true cuda-widenode` (stubs) and `--plan-only` for A and B work;
+  `zig build test -Dtest-filter="wide node"` passes 3/3.
+Problems / lessons:
+- The CUDA circuit prover's fold 1 doesn't work (first FRI layer commitment), so per-level shapes on the
+  GPU wait for stwo-zig.
+- The circuit verifier also rejects any last layer other than 0 (seen on CPU), so remainder-fold proofs
+  can't be children.
+- Base: in the main checkout `main` is 3815dd5; 4ec348e is `pack-join`'s HEAD, which this branch is based on.
+- `widenode.sh`: `ls -t` with no files lists the cwd; that cost one failed link on the pod (fixed, aa2d97c).
+Next: report the fold-1 failure to stwo-zig; per-level shapes; forest over `TreeK`.
+
 ## 2026-10-14 (session 13, wide nodes) — Full survey in: sizes mix, so the width goes into the node; wide node in Lean and Zig
 Who: Claude (agent, Opus 5.5), branch `pack-join`
 Done:
