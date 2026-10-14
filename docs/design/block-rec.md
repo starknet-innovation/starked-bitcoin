@@ -355,12 +355,21 @@ verifier as today: `K = Blake2s(h₀ ‖ k₀ ‖ … ‖ h_{2^a−1} ‖ k_{2^a
       native and in-circuit verifiers already accept it, see above), or fold 1.
   - **Also**: the circuit verifier rejects any proof whose last layer is not 0 (`VerificationFailed`,
     seen on CPU at fold 4 with last layer 1). Such a proof can only be used for timing, never as a child.
+- **Fixed (2026-10-14, H200, stwo-zig `aacbb85cb` on our pin as `d34b26903`; upstream PR #299).**
+  The CUDA FRI committed every layer with four values per Merkle leaf; a one-level fold has one. All
+  runs below verify and are byte-identical to the CPU circuit prover:
+  - fold 4, last layer 0, last rounds of 1, 2 and 3 (trace logs 21, 22, 23: k = 1, 2, 4 from block
+    164): 1.16 s, 1.19 s and 2.19 s on the GPU (CPU 5.6 s, 9.9 s, 17.1 s), 499 / 521 / 546 KB;
+  - fold 1 at 2^21: 1.16 s, 858 KB (it failed before the fix, so the same cause);
+  - **per-level shapes** (`cuda-widenode C`): blocks 164–171 (one tiered) as leaves at their common
+    natural size 2^21 (0.45–1.05 s each, 0.57 s mean, 7.25 GiB), then the 8-child node over them at its
+    own natural size 2^24 (78.5 M vars, 3.47 s, 45.65 GiB; output digest = `block_node_k.expected`'s).
+    **8.0 s of GPU for 8 blocks (1.0 s per block)**, against 5.2 s per block at the shared 2^24 shape.
 - **Next:**
-  1. stwo-zig: the remainder fold at fold 4 (or fold 1) on the CUDA circuit prover
-     (`CUDA_FRI_REMAINDER_FOLD_BRIEF.md`, with both errors);
-     until then, the 2^24 shape (8 children, about 5 s of GPU per block on an H100);
-  2. per-level shapes;
-  3. the forest and outer verifier over `TreeK` (`block_forest.zig` `expected` by arity).
+  1. per-level shapes in the outer verifier and Lean (`TreeK` already allows any child shape: the
+     child's circuit hash is in the key); `block_forest.zig` `expected` by arity and level;
+  2. cache the static preprocessed hash (0.3–0.4 s per leaf prove, 2.5 s per node prove here);
+  3. the forest over `TreeK`.
 
 ## Following the tip
 

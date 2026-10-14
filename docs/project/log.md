@@ -21,6 +21,24 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-10-14 (session 15) — CUDA remainder-fold fix verified on an H200; per-level shapes at 1.0 s of GPU per block
+Who: Claude (agent, Opus 5.5), with the owner (pod funding)
+Roadmap: BLOCK-REC wide nodes on GPU: per-level shapes validated (leaves 2^21, 8-child node 2^24)
+Done:
+- Device test of stwo-zig's remainder-fold fix (pod `30qsgjojbt7f7h`, H200 SXM, $5.29/hr, ~30 min):
+  every run verified and byte-identical to the CPU circuit prover (`docs/design/block-rec.md` § Wide nodes):
+  short last rounds of 1, 2, 3; fold 1; and `cuda-widenode C` (8 leaves at 2^21 + node at 2^24: 8.0 s GPU).
+- Merged `gpu/remainder` (448d504). main (`9bda446`) has the `RecCR` restatements.
+- stwo-zig's `liftExtract` patch applied on branch `lift-extract` (3e507d5) with their reply in
+  `docs/reports/`; not yet built here (the owner builds it).
+Evidence:
+- Pod logs: runs `widenode-A-164_1_2_4_fold_4_last_0_cpu`, `widenode-A-164_1_fold_1_cpu`,
+  `widenode-C-164_cpunode`, all `BYTE-IDENTICAL`, exit 0. Pod deleted.
+Problems / lessons:
+- H100 SXM and NVL capacity vanished between the capacity read and the create; the H200 create only
+  succeeded without the CUDA-version and disk constraints.
+Next: per-level shapes in `block_forest.zig` and the outer verifier; cache the static preprocessed hash.
+
 ## 2026-10-14 (session 14) — `Collision` is vacuous; per-instance restatements (RecCR); stwo-zig remainder-fold fix staged for a device test
 Who: Claude (agent, Opus 5.5), with the owner
 Roadmap: VL-NODE: tree/forest soundness restated with named collisions (RecCR); GPU per-level shapes await the device test
