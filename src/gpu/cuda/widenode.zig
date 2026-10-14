@@ -1,10 +1,10 @@
 //! `cuda-widenode`: the wide block node (docs/design/block-rec.md § Wide nodes) on stwo-zig's resident
 //! CUDA circuit prover (`circuit_cuda.resident_prover`). Two experiments:
 //!
-//!   cuda-widenode A <epoch dir> <from> <k>... [--fold f] [--plan-only] [--cpu] [--cpu-only]
+//!   cuda-widenode A <epoch dir> <from> <k>... [--fold f] [--last l] [--plan-only] [--cpu] [--cpu-only]
 //!     A block leaf at its natural size (k = 1: `block_rec.leafCircuitOf`, not padded; k > 1: the packed
-//!     circuit `block_pack.buildPacked`), FRI fold `f` (default 1; last layer 0 at fold 1, `trace log
-//!     mod f` otherwise). Does the CUDA circuit prover work at fold 1, and how fast? `--cpu-only` plans
+//!     circuit `block_pack.buildPacked`), FRI fold `f` (default 1), last layer `l` (default 0 at fold 1,
+//!     `trace log mod f` otherwise; 0 at fold 4 gives a short last round). Does the CUDA circuit prover work at fold 1, and how fast? `--cpu-only` plans
 //!     the arena, then proves and verifies with the CPU circuit prover only (any host, no GPU).
 //!
 //!   cuda-widenode B <epoch dir> <from> [--plan-only] [--cpu] [--cpu-node]
@@ -13,6 +13,11 @@
 //!     at that shape on the GPU and turned into `block_rec.Proved` children (the verifier proof, request
 //!     and circuit hash a `leaf.CircuitProof` holds, from the verified device proof); then the node
 //!     circuit over them is proved on the GPU. Its output digest must be `block_node_k.expected`'s.
+//!
+//!   cuda-widenode C <epoch dir> <from> [--cpu] [--cpu-node]
+//!     Per-level shapes at fold 4, last layer 0 (short last rounds): the 8 leaves padded only to their
+//!     common size (the elementwise max, not the node's shape), and the 8-child node over them at its
+//!     own natural size. Needs stwo-zig's remainder-fold fix on the device.
 //!
 //! Every GPU proof is verified twice natively: `resident_verifier.verify` (the device proof) and
 //! `leaf.verifyCircuit` (stwo-zig's circuit verifier on the serialized verifier proof, the one the node
@@ -36,6 +41,7 @@ const QM31 = core.fields.qm31.QM31;
 const FriConfigV2 = core.pcs.config_v2.FriConfigV2;
 const PcsConfigV2 = core.pcs.config_v2.PcsConfigV2;
 const finalize = circuit.common.finalize;
+const multiverifier = circuit.statements.multiverifier;
 const preprocessed = circuit.common.preprocessed;
 const component_list = circuit.common.component_list;
 const Context = circuit.builder.Context;
@@ -151,12 +157,12 @@ const Gpu = struct {
 /// log (0 at fold 1; `trace log mod fold` otherwise, so every CUDA fold is a full one).
 const FriChoice = union(enum) {
     fixed: FriConfigV2,
-    fold: u32,
+    fold: struct { step: u32, last: ?u32 = null },
 
     fn resolve(self: FriChoice, trace_log: u32) !FriConfigV2 {
         return switch (self) {
             .fixed => |f| f,
-            .fold => |fold| try FriConfigV2.init(26, if (fold == 1) 0 else trace_log % fold, 1, 70, fold),
+            .fold => |f| try FriConfigV2.init(26, f.last orelse if (f.step == 1) 0 else trace_log % f.step, 1, 70, f.step),
         };
     }
 };
@@ -303,7 +309,7 @@ fn loadFiles(a: std.mem.Allocator, dir: []const u8, from: u32, n: usize) ![]PF.F
     return files;
 }
 
-const Opts = struct { plan_only: bool = false, cpu: bool = false, cpu_node: bool = false, cpu_only: bool = false, fold: u32 = 1 };
+const Opts = struct { plan_only: bool = false, cpu: bool = false, cpu_node: bool = false, cpu_only: bool = false, fold: u32 = 1, last: ?u32 = null };
 
 /// Experiment A: a leaf (k = 1) or packed circuit (k > 1) at its natural size.
 fn experimentA(gpa: std.mem.Allocator, dir: []const u8, from: u32, ks: []const usize, opts: Opts) !void {
@@ -328,12 +334,12 @@ fn experimentA(gpa: std.mem.Allocator, dir: []const u8, from: u32, ks: []const u
         const label = try std.fmt.allocPrint(scratch.allocator(), "A k={d} (blocks {d}..{d}) fold {d}", .{ k, from, from + k - 1, opts.fold });
         std.debug.print("{s}: block proofs verified natively and circuit built in {d:.1}s\n", .{ label, secs(timer.lap()) });
         var stats: Stats = .{};
-        const maybe = try gpuProve(gpa, scratch.allocator(), &g, label, &ctx, null, .{ .fold = opts.fold }, &stats);
+        const maybe = try gpuProve(gpa, scratch.allocator(), &g, label, &ctx, null, .{ .fold = .{ .step = opts.fold, .last = opts.last } }, &stats);
         if (opts.cpu_only) {
             // The CPU leg alone (any host): the CPU circuit prover at this FRI configuration, and the
             // circuit verifier on its proof.
             _ = timer.lap();
-            var cp = try leaf.proveCircuit(gpa, scratch.allocator(), &ctx, null, try (FriChoice{ .fold = opts.fold }).resolve(stats.trace_log));
+            var cp = try leaf.proveCircuit(gpa, scratch.allocator(), &ctx, null, try (FriChoice{ .fold = .{ .step = opts.fold, .last = opts.last } }).resolve(stats.trace_log));
             defer cp.deinit();
             const prove_s = secs(timer.lap());
             try circuitVerify(gpa, &g, label, &cp);
@@ -348,7 +354,7 @@ fn experimentA(gpa: std.mem.Allocator, dir: []const u8, from: u32, ks: []const u
             if (!std.mem.eql(u32, &want, &gp.request.output_digest)) return error.LeafDigestMismatch;
             std.debug.print("{s}: output digest = the leaf summary's digest\n", .{label});
         }
-        if (opts.cpu) try cpuCompare(gpa, scratch.allocator(), label, &ctx, try (FriChoice{ .fold = opts.fold }).resolve(stats.trace_log), &gp);
+        if (opts.cpu) try cpuCompare(gpa, scratch.allocator(), label, &ctx, try (FriChoice{ .fold = .{ .step = opts.fold, .last = opts.last } }).resolve(stats.trace_log), &gp);
     }
 }
 
@@ -461,11 +467,77 @@ fn experimentB(gpa: std.mem.Allocator, dir: []const u8, from: u32, opts: Opts) !
     if (opts.cpu or opts.cpu_node) try cpuCompare(gpa, scratch.allocator(), "B node", &node_ctx, shp.fri, &node);
 }
 
+/// Experiment C: per-level shapes. The 8 leaves at their common natural size and the 8-child node over
+/// them at its own natural size, all at fold 4 with last layer 0 (whatever the last round's fold).
+fn experimentC(gpa: std.mem.Allocator, dir: []const u8, from: u32, opts: Opts) !void {
+    const n = 8;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const airs = try bs.parseAirs(a);
+    const files = try loadFiles(a, dir, from, n);
+    var g = try Gpu.init(gpa, false);
+    defer g.deinit(gpa);
+    var total = try std.time.Timer.start();
+    const fri = try FriConfigV2.init(26, 0, 1, 70, 4);
+
+    var ctxs: [n]?Context(QM31) = @splat(null);
+    defer for (&ctxs) |*c| if (c.*) |*x| x.deinit();
+    var start: ComponentSizes = undefined;
+    for (files, &ctxs, 0..) |*f, *c, i| {
+        c.* = try br.leafCircuitOf(gpa, a, &airs, f, PF.productionFri());
+        const sz = finalize.computePaddedSizes(.fromBuilder(&c.*.?.circuit));
+        start = if (i == 0) sz else start.elementwiseMax(sz);
+        std.debug.print("block {d}: L {d} {s}, leaf {d} vars, natural trace log {d}\n", .{ from + i, f.log_size, @tagName(f.profile), c.*.?.circuit.n_vars, try traceLogOf(sz) });
+    }
+    // The leaf level's shape: the common size, and the verifier config a node uses for its children.
+    var leaf_shape: br.Shape = .{ .target = start, .shared = try multiverifier.foldSharedConfig(gpa, start, fri), .fri = fri };
+    defer leaf_shape.deinit(gpa);
+    std.debug.print("C: leaf level at trace log {d} (fold 4, last layer 0)\n", .{try traceLogOf(start)});
+
+    var leaves: [n]br.Proved = undefined;
+    var n_leaves: usize = 0;
+    defer for (leaves[0..n_leaves]) |*l| l.proof.deinit();
+    var leaf_prove_s: f64 = 0;
+    for (files, &ctxs, 0..) |*f, *c, i| {
+        const label = try std.fmt.allocPrint(a, "C leaf {d} (block {d})", .{ i, from + i });
+        var stats: Stats = .{};
+        const cp = (try gpuProve(gpa, a, &g, label, &c.*.?, start, .{ .fixed = fri }, &stats)).?;
+        leaves[i] = .{ .proof = cp, .key = leaf.zero_key, .sum = br.leafSummary(&f.pubs) };
+        n_leaves += 1;
+        if (!std.mem.eql(u32, &leaves[i].digest(), &cp.request.output_digest)) return error.LeafDigestMismatch;
+        leaf_prove_s += stats.prove_s;
+        if (opts.cpu) try cpuCompare(gpa, a, label, &c.*.?, fri, &leaves[i].proof);
+        c.*.?.deinit();
+        c.* = null;
+    }
+    std.debug.print("C: 8 leaves GPU-proved in {d:.2}s ({d:.2}s per leaf); elapsed {d:.1}s\n", .{ leaf_prove_s, leaf_prove_s / n, secs(total.read()) });
+
+    var refs: [n]*const br.Proved = undefined;
+    for (&refs, &leaves) |*r, *l| r.* = l;
+    var scratch = std.heap.ArenaAllocator.init(gpa);
+    defer scratch.deinit();
+    var timer = try std.time.Timer.start();
+    var node_ctx = try wk.circuitOf(gpa, scratch.allocator(), g.tables, 3, &leaf_shape, &refs);
+    defer node_ctx.deinit();
+    const want = try wk.expected(scratch.allocator(), &refs);
+    const want_digest = leaf.pubsDigest(want.key, &want.sum);
+    std.debug.print("C node: circuit over the 8 GPU leaf proofs built in {d:.1}s ({d} vars, natural trace log {d}); host peak RSS {d:.1} GiB\n", .{ secs(timer.lap()), node_ctx.circuit.n_vars, try traceLogOf(finalize.computePaddedSizes(.fromBuilder(&node_ctx.circuit))), rssGib() });
+    var stats: Stats = .{};
+    var node = (try gpuProve(gpa, scratch.allocator(), &g, "C node", &node_ctx, null, .{ .fixed = fri }, &stats)).?;
+    defer node.deinit();
+    if (!std.mem.eql(u32, &node.request.output_digest, &want_digest)) return error.NodeDigestMismatch;
+    std.debug.print("C node: output digest = block_node_k.expected's; 8 leaves + node GPU-proved in {d:.2}s ({d:.2}s per block); node peak device {d:.2} GiB; end to end {d:.1}s\n", .{
+        leaf_prove_s + stats.prove_s, (leaf_prove_s + stats.prove_s) / n, gib(stats.peak_device), secs(total.read()),
+    });
+    if (opts.cpu or opts.cpu_node) try cpuCompare(gpa, scratch.allocator(), "C node", &node_ctx, fri, &node);
+}
+
 pub fn main() !void {
     const gpa = std.heap.c_allocator;
     const args = try std.process.argsAlloc(gpa);
     defer std.process.argsFree(gpa, args);
-    const usage = "usage: cuda-widenode A <epoch dir> <from> <k>... [--fold f] [--plan-only] [--cpu] [--cpu-only]\n       cuda-widenode B <epoch dir> <from> [--plan-only] [--cpu] [--cpu-node]\n";
+    const usage = "usage: cuda-widenode A <epoch dir> <from> <k>... [--fold f] [--last l] [--plan-only] [--cpu] [--cpu-only]\n       cuda-widenode B <epoch dir> <from> [--plan-only] [--cpu] [--cpu-node]\n       cuda-widenode C <epoch dir> <from> [--cpu] [--cpu-node]\n";
     if (args.len < 4) {
         std.debug.print("{s}", .{usage});
         return error.Usage;
@@ -483,6 +555,10 @@ pub fn main() !void {
             i += 1;
             if (i >= args.len) return error.Usage;
             opts.fold = try std.fmt.parseInt(u32, args[i], 10);
+        } else if (std.mem.eql(u8, x, "--last")) {
+            i += 1;
+            if (i >= args.len) return error.Usage;
+            opts.last = try std.fmt.parseInt(u32, args[i], 10);
         } else try ks.append(gpa, try std.fmt.parseInt(usize, x, 10));
     }
     const dir = args[2];
@@ -492,6 +568,7 @@ pub fn main() !void {
         return experimentA(gpa, dir, from, ks.items, opts);
     }
     if (std.mem.eql(u8, args[1], "B")) return experimentB(gpa, dir, from, opts);
+    if (std.mem.eql(u8, args[1], "C")) return experimentC(gpa, dir, from, opts);
     std.debug.print("{s}", .{usage});
     return error.Usage;
 }

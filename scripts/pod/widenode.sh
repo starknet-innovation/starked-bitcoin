@@ -3,6 +3,8 @@
 #   widenode.sh build            stwo-zig's circuit archive (its own build; reused if already built), then cuda-widenode
 #   widenode.sh run A <from> <k>... [--fold f] [--cpu]   leaf (k = 1) / packed (k > 1) at natural size, fold f (default 1)
 #   widenode.sh run B <from> [--cpu | --cpu-node]        8 leaves <from..from+7> at the 2^24 shape + the 8-child node, fold 4
+#   widenode.sh run C <from> [--cpu | --cpu-node]        per-level shapes: leaves at their common size, node at its own (fold 4, last layer 0)
+#   (A takes --last l: last layer 0 at fold 4 gives a short last round, which needs stwo-zig's remainder-fold fix)
 # Block proofs come from $WORK/epoch-pack/proofs/<h>.sbblock (shipped). Run bootstrap.sh first
 # (NO_BUILD=1 bootstrap.sh … skips our block-prover archive, which this does not need).
 set -uo pipefail
