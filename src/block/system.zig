@@ -207,13 +207,30 @@ pub fn undoStreamOf(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, 
     return coin.undoStream(a, fetched, ctxs, raw, rows, try txidsOf(a, ntx, msgs, pl.digests), height);
 }
 
-/// `fetched`: the fetched undo stream (`coin.undoStream`), with the creating transactions' indices in
-/// `opts.ctx`.
-pub fn buildFull(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctx0: checks.Ctx, opts: Opts) !Built {
-    // Below the CSV height the previous MTP is unused and its public limbs are 0 (D-043 part 3).
-    var ctx = ctx0;
-    if (!ctx.csv()) ctx.prev_mtp = 0;
-    if (ctx.csv() and ctx.anc == null) return error.MissingAncestors;
+/// What sizing a block needs, before any witness column: its tokens, messages, SHA plan (with the
+/// txid tree's compressions), in-circuit undo stream, trees, records and fingerprint segments, and the
+/// rows each component needs (`needs`; their maximum is the uniform size). `buildFull` sizes by these;
+/// the chain survey (`survey`, docs/design/chain-survey.md) calls this alone.
+pub const Shape = struct {
+    rows: []fields.Row,
+    ntx: u32,
+    txs: []msg.TxRange,
+    msgs: []msg.Message,
+    pl: bsha.Plan,
+    txids: [][32]u8,
+    undo: []u8,
+    nodes: []merkle.Node,
+    root: @import("../sha256/spec.zig").State,
+    wnodes: []merkle.Node,
+    recs: []coin.Rec,
+    osegs: []coin.Seg,
+    usegs: []coin.Seg,
+    needs: [N_COMP]usize,
+};
+
+/// `fetched`: the fetched undo stream; `ctxs`: the spent coins' creating transaction indices (or null).
+/// A wrong merkle root is an error unless `force`.
+pub fn shape(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctxs: ?[]const u32, height: u32, force: bool) !Shape {
     const rows = try fields.tokenize(a, raw);
     const ntx: u32 = @intCast(rows[0].val);
     const txs = try msg.txRanges(a, rows);
@@ -221,10 +238,10 @@ pub fn buildFull(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctx
     var pl = try bsha.plan(a, raw, msgs);
     // M3b: the txids, and the in-circuit undo stream.
     const txids = try txidsOf(a, ntx, msgs, pl.digests);
-    const undo = try coin.undoStream(a, fetched, opts.ctx, raw, rows, txids, ctx.height);
+    const undo = try coin.undoStream(a, fetched, ctxs, raw, rows, txids, height);
     const nodes = try merkle.tree(a, ntx);
     const root = try merkle.extendPlan(a, &pl, nodes);
-    if (!std.mem.eql(u8, raw[36..68], &bsha.digestBytes(root)) and !ctx.force) return error.BadMerkleRoot;
+    if (!std.mem.eql(u8, raw[36..68], &bsha.digestBytes(root)) and !force) return error.BadMerkleRoot;
 
     // Sizes: the checks and the walker need the fields' layout first; size by the largest need.
     const wnodes = try wmerkle.tree(a, ntx);
@@ -259,8 +276,33 @@ pub fn buildFull(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctx
     needs[C.fpwalk] = fp_rows + 1;
     needs[C.urec] = recs.len + 1;
     needs[C.coin] = tok_rows + 1;
-    needs[C.anc] = if (ctx.csv()) ancw.MIN_ROWS_CSV else 256;
+    needs[C.anc] = if (height >= checks.CSV_HEIGHT) ancw.MIN_ROWS_CSV else 256;
     for (&needs) |*n| n.* = @max(n.*, 256);
+    return .{ .rows = rows, .ntx = ntx, .txs = txs, .msgs = msgs, .pl = pl, .txids = txids, .undo = undo, .nodes = nodes, .root = root, .wnodes = wnodes, .recs = recs, .osegs = osegs, .usegs = usegs, .needs = needs };
+}
+
+/// `fetched`: the fetched undo stream (`coin.undoStream`), with the creating transactions' indices in
+/// `opts.ctx`.
+pub fn buildFull(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctx0: checks.Ctx, opts: Opts) !Built {
+    // Below the CSV height the previous MTP is unused and its public limbs are 0 (D-043 part 3).
+    var ctx = ctx0;
+    if (!ctx.csv()) ctx.prev_mtp = 0;
+    if (ctx.csv() and ctx.anc == null) return error.MissingAncestors;
+    const sh = try shape(a, raw, fetched, opts.ctx, ctx.height, ctx.force);
+    const rows = sh.rows;
+    const ntx = sh.ntx;
+    const txs = sh.txs;
+    const msgs = sh.msgs;
+    var pl = sh.pl;
+    const txids = sh.txids;
+    const undo = sh.undo;
+    const nodes = sh.nodes;
+    const root = sh.root;
+    const wnodes = sh.wnodes;
+    const recs = sh.recs;
+    const osegs = sh.osegs;
+    const usegs = sh.usegs;
+    const needs = sh.needs;
     const sized = if (opts.auto) sizesAuto(needs, opts.min_log) else sizesFor(needs, opts.profile, opts.min_log);
     const log_size = sized.L;
     const logs = profileLogs(log_size, sized.profile);
@@ -412,6 +454,38 @@ pub fn sizesFor(needs: [N_COMP]usize, profile: Profile, min_log: u32) Sized {
     const logs = profileLogs(L, .tiered);
     for (needs, logs) |n, l| if (n > @as(usize, 1) << @intCast(l)) return .{ .L = uniform_L, .profile = .uniform };
     return .{ .L = L, .profile = .tiered };
+}
+
+/// A block's size as the survey reports it (docs/design/chain-survey.md): `sizesAuto`'s choice, the
+/// uniform L, the component whose need sets L (`binding`; null when a floor does: 2^8 rows, or tiered's
+/// 2^12), and on a fallback to uniform the first component that misses its tier (`misfit`). `covered`:
+/// Lean's `SizeOk` holds (else `buildFull` refuses the block).
+pub const SizeReport = struct { sized: Sized, uniform_L: u32, binding: ?usize, misfit: ?usize, covered: bool };
+
+pub fn sizeReport(needs: [N_COMP]usize) SizeReport {
+    const sized = sizesAuto(needs, 0);
+    const u = sizesFor(needs, .uniform, 0);
+    var misfit: ?usize = null;
+    if (u.L >= TIERED_MIN_L and sized.profile == .uniform) {
+        var top: usize = 0;
+        for ([_]usize{ C.sha, C.msg, C.bytes, C.walk }) |i| top = @max(top, needs[i]);
+        const logs = profileLogs(@max(std.math.log2_int_ceil(usize, top), TIERED_MIN_L), .tiered);
+        for (needs, logs, 0..) |n, l, i| if (n > @as(usize, 1) << @intCast(l)) {
+            misfit = i;
+            break;
+        };
+    }
+    var binding: ?usize = null;
+    var best: usize = 0;
+    for (needs, 0..) |n, i| {
+        if (sized.profile == .tiered and i != C.sha and i != C.msg and i != C.bytes and i != C.walk) continue;
+        if (n > best) {
+            best = n;
+            binding = i;
+        }
+    }
+    if (best <= 256 or std.math.log2_int_ceil(usize, best) != sized.L) binding = null;
+    return .{ .sized = sized, .uniform_L = u.L, .binding = binding, .misfit = misfit, .covered = sizeOk(profileLogs(sized.L, sized.profile)) };
 }
 
 /// The first violated constraint of any component, for diagnostics.
@@ -685,4 +759,40 @@ test "tiered real block (STARKED_TIERED_LARGE=height): constraints hold and look
         return;
     }
     return error.NoSuchSample;
+}
+
+test "block sizes: shape's needs give buildFull's (L, profile) on every sample (large: STARKED_SURVEY_LARGE=1, ReleaseFast)" {
+    const large = if (std.process.getEnvVarOwned(std.heap.page_allocator, "STARKED_SURVEY_LARGE")) |_| true else |_| false;
+    const all = checks.samples_small ++ checks.samples_large;
+    for (all, 0..) |s, k| {
+        if (k >= checks.samples_small.len and !large) continue;
+        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer arena.deinit();
+        const a = arena.allocator();
+        const sh = try shape(a, s.raw, s.undo, null, s.ctx.height, false);
+        const r = sizeReport(sh.needs);
+        const b = try buildFull(a, s.raw, s.undo, s.ctx, .{ .auto = true });
+        std.debug.print("height {d}: survey L={d} {s} (uniform {d}, binding {s}); buildFull L={d} {s}\n", .{ s.ctx.height, r.sized.L, @tagName(r.sized.profile), r.uniform_L, if (r.binding) |i| names[i] else "floor", b.log_size, @tagName(b.profile) });
+        try std.testing.expectEqual(b.log_size, r.sized.L);
+        try std.testing.expectEqual(b.profile, r.sized.profile);
+        try std.testing.expect(r.covered);
+    }
+}
+
+test "block sizes: sizeReport names the binding component and the misfit" {
+    var needs: [N_COMP]usize = @splat(256);
+    try std.testing.expectEqual(@as(?usize, null), sizeReport(needs).binding);
+    needs[C.sha] = 3000;
+    needs[C.coin] = 5000; // uniform 2^13 by coin; tiered 2^12 by sha with coin above 2^8: fallback
+    const r = sizeReport(needs);
+    try std.testing.expectEqual(Profile.uniform, r.sized.profile);
+    try std.testing.expectEqual(@as(u32, 13), r.sized.L);
+    try std.testing.expectEqual(@as(?usize, C.coin), r.binding);
+    try std.testing.expectEqual(@as(?usize, C.coin), r.misfit);
+    needs[C.coin] = 256;
+    needs[C.walk] = 1 << 20;
+    const t = sizeReport(needs);
+    try std.testing.expectEqual(Profile.tiered, t.sized.profile);
+    try std.testing.expectEqual(@as(?usize, C.walk), t.binding);
+    try std.testing.expectEqual(@as(?usize, null), t.misfit);
 }

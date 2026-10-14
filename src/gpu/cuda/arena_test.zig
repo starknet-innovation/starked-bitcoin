@@ -87,3 +87,29 @@ test "cuda resident arena: real block sizes plan and bind (uniform and tiered, L
         });
     };
 }
+
+test "cuda resident arena: the (L, profile) table for the chain survey (STARKED_ARENA_TABLE=1)" {
+    _ = std.process.getEnvVarOwned(std.heap.page_allocator, "STARKED_ARENA_TABLE") catch return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const airs = try a.create([bs.N_COMP]sb.air.ir.Air);
+    airs.* = try bs.parseAirs(a);
+    var cat = try catalog_mod.Catalog.init(a, airs);
+    defer cat.deinit();
+    const pubs = try a.alloc(M31, bs.N_PUB);
+    @memset(pubs, M31.zero());
+    // docs/design/chain-survey.md: planned device arena (device LogUp), bytes, per (L, profile).
+    for ([_]bs.Profile{ .uniform, .tiered }) |profile| for (8..25) |l| {
+        const L: u32 = @intCast(l);
+        if (profile == .tiered and L < bs.TIERED_MIN_L) continue;
+        const parts = bs.partsAt(airs, bs.profileLogs(L, profile), pubs[0..bs.N_PUB]);
+        var prepared = prover.Prepared.init(a, &parts, &cat, try rec.config(L), .device_logup) catch |e| {
+            std.debug.print("arena,{s},{d},error,{s}\n", .{ @tagName(profile), L, @errorName(e) });
+            continue;
+        };
+        defer prepared.deinit();
+        const bytes = try prepared.memory.bytes();
+        std.debug.print("arena,{s},{d},{d},{d:.2}\n", .{ @tagName(profile), L, bytes, gib(bytes) });
+    };
+}
