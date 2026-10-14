@@ -21,6 +21,22 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-10-14 (session 13) — Survey merged; leaf packing on GPU: 16 blocks per circuit proof on an H200
+Who: Claude (agent), with the owner
+Done:
+- Pushed m3a5 to main with the chain survey merged (f7da4ec). Owner: the ~50 undo-heavy blocks that need
+  uniform 2²² go to an H200 (no third profile).
+- Leaf-packing spike (b61e15f and after): `block_pack` (k block proofs in one circuit), `blockpack`,
+  `cuda-pack` on stwo-zig's resident circuit prover, `scripts/pod/pack.sh`.
+Evidence:
+- H200 pod (~37 min, $5.29/hr): k = 1, 2, 4, 8, 16 byte-identical GPU vs CPU; k = 16 proved in 11.5 s
+  (0.72 s per block), 101 GiB device. Table in block-rec.md § Leaf packing measured.
+Problems / lessons:
+- CUDA FRI with a last fold of 1 gives proofs that fail verification; pick the last-layer bound so
+  every fold is 4 (stwo-zig only qualifies fold step 4).
+- stwo-zig's circuit archive and ours both name a set `circuit_eval`: cuda-pack links stwo-zig's own.
+Next: the packed leaf's join (summaries in-circuit, Lean statement), then a node over packed leaves on GPU.
+
 ## 2026-10-13 (session 13, device witness) — CUDA: block_sha, block_b2s and tree 0 generated on the device (host-checked; device run pending)
 Who: Claude (agent, Opus 5.5), worktree branch `cuda/device-witness`
 Roadmap: GPU step 3 (CUDA): device witness for the three largest column sets implemented and host-checked; the pod run decides it

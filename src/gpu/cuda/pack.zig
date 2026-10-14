@@ -1,7 +1,7 @@
 //! `cuda-pack <epoch dir> <from> <k>... [--plan-only] [--cpu]`: the leaf-packing spike on CUDA
 //! (`recursion/block_pack.zig`). For each k, the k block proofs `<dir>/proofs/<from..>.sbblock` are
 //! verified in one circuit, which is proved with stwo-zig's resident CUDA circuit prover
-//! (`circuit_cuda.resident_prover`, fold step 4, 70 queries, 26 PoW bits) and verified natively.
+//! (`circuit_cuda.resident_prover`, fold step 4, 70 queries, 26 PoW bits, last layer below) and verified natively.
 //!
 //! `--plan-only` stops after the host planning and prints the planned device arena (no GPU needed:
 //! links against the stubs). `--cpu` also proves the circuit with the CPU circuit prover and checks
@@ -116,7 +116,6 @@ pub fn main() !void {
     defer template.deinit();
     var catalog = try cuda.air_aot.build(gpa, leaf.bundle_bytes);
     defer catalog.deinit();
-    const cfri = try FriConfigV2.init(26, 0, 1, 70, 4);
 
     for (ks.items) |k| {
         var scratch = std.heap.ArenaAllocator.init(gpa);
@@ -130,15 +129,19 @@ pub fn main() !void {
         const layout = pp.layout();
         var air = try cpu.air.bind(gpa, &template, try circuit.common.component_list.circuitComponentLogSizes(&layout), &layout);
         defer air.deinit();
-        const config = PcsConfigV2.fromFriAndTraceSize(cfri, pp.traceLogSize());
+        // The FRI folds (trace log + blowup) - (last layer + blowup) rows by 4 per layer, the last layer
+        // taking the remainder. Only fold step 4 is qualified on CUDA (a remainder of 1 fails to
+        // verify), so the last-layer degree bound is the smallest that makes every fold a 4.
+        const last_layer: u32 = if (std.posix.getenv("PACK_LAST_LAYER")) |v| try std.fmt.parseInt(u32, v, 10) else pp.traceLogSize() % 4;
+        const config = PcsConfigV2.fromFriAndTraceSize(try FriConfigV2.init(26, last_layer, 1, 70, 4), pp.traceLogSize());
         const input = cuda.resident_prover.Input{ .values = ctx.values(), .preprocessed = &pp, .air = &air, .catalog = &catalog, .config = config, .profile = .internal };
         const build_s = secs(timer.lap());
         const planned = try plannedArena(gpa, input);
         const sz = circuit.common.finalize.computePaddedSizes(.fromBuilder(&ctx.circuit));
-        std.debug.print("k={d} blocks {d}..{d}: {d} vars, trace log {d} (eq {d} qm31_ops {d} m31_to_u32 {d} triple_xor {d} blake_g {d}), built {d:.1}s, planned arena {d:.2} GiB\n", .{
+        std.debug.print("k={d} blocks {d}..{d}: {d} vars, trace log {d} (eq {d} qm31_ops {d} m31_to_u32 {d} triple_xor {d} blake_g {d}), last layer {d}, built {d:.1}s, planned arena {d:.2} GiB\n", .{
             k, from, from + k - 1, ctx.circuit.n_vars, pp.traceLogSize(),
             log2(sz.eq), log2(sz.qm31_ops), log2(sz.m31_to_u32), log2(sz.triple_xor), log2(sz.blake_g_gate),
-            build_s, @as(f64, @floatFromInt(planned)) / (1 << 30),
+            last_layer, build_s, @as(f64, @floatFromInt(planned)) / (1 << 30),
         });
         if (plan_only) continue;
         _ = timer.lap();

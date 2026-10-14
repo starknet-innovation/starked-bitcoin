@@ -223,6 +223,45 @@ estimated: per-leaf cost is seconds, not the header leaf's 31 s.
   the tree and the outer verifier are composed end to end in `Circuit/BlockRec.lean` (`tree_sound`,
   `forest_sound`, VL-NODE, verifier-formalization.md).
 
+## Leaf packing measured (2026-10-14, spike)
+
+k block proofs verified in **one** circuit (`recursion/block_pack.zig`: the block-leaf body
+`block_rec.leafBody` k times, the output Blake2s over the k leaf digests). Capacity measurement only:
+the in-circuit join of the k summaries (the node glue's checks, a few hashes per pair) and its Lean
+statement are not written yet. Blocks 0–15 (L 11, production block proofs), circuit proved with
+stwo-zig's circuit prover (70 queries, 26 PoW bits, fold step 4).
+
+- **Size is linear in k**: 8.4 M builder variables per block (11.3 M after padding); each doubling of k
+  adds one to every component's log size (k = 1: trace 2²¹; k = 16: 2²⁵).
+- **GPU** (resident CUDA circuit prover, `src/gpu/cuda/pack.zig`, H200, 2026-10-14). Every proof
+  byte-identical to the CPU proof of the same circuit and verified natively:
+
+  | k | trace | planned device arena | GPU prove | per block | CPU (pod) | proof |
+  |---|---|---|---|---|---|---|
+  | 1 | 2²¹ | 7.2 GiB | 1.34 s | 1.34 s | 8.1 s | 494 KB |
+  | 2 | 2²² | 13.5 GiB | 1.28 s | 0.64 s | 12.3 s | 515 KB |
+  | 4 | 2²³ | 26.0 GiB | 3.21 s | 0.80 s | 25.3 s | 535 KB |
+  | 8 | 2²⁴ | 51.1 GiB | 5.99 s | 0.75 s | 54.8 s | 575 KB |
+  | 16 | 2²⁵ | 101.2 GiB | 11.52 s | 0.72 s | 96.7 s | 597 KB |
+
+  Plus, outside the prove: native verification of the k block proofs and the circuit build (0.8 s per
+  block, host), and the optional native check of the circuit proof (0.5 s per block). Device kernels
+  are ~1 s of the 11.5 s at k = 16; the rest is host ingress (5.6 GiB pageable H2D) and the static
+  preprocessed hash, so the GPU prove has headroom.
+- **Capacity is GPU memory**, ~6.3 GiB per block: 24 GB card k = 2, 48 GB k = 4, 80 GB (H100) k = 8,
+  141 GB (H200) k = 16. k = 32 (~202 GiB) fits no single card. The field and domain bounds
+  (trace + blowup ≤ 30) would allow k = 256. k is effectively a power of two (padding).
+- **FRI geometry on CUDA:** only fold step 4 is qualified in stwo-zig; a last FRI layer folding a
+  remainder of 1 produced a proof that fails verification (`InnerLayerCommitmentInvalid`, k = 1 with
+  last layer 0). The driver picks the last-layer degree bound `trace log mod 4` so every fold is a 4.
+  To report upstream.
+- **CPU** (M4 Pro, 24 GB): k = 1 3.7 s, k = 2 7.3 s, k = 4 37.5 s (12.6 GB); k = 8 swaps (433 s).
+
+What it changes: today a block costs a leaf (15.5–17 s CPU) plus a node (16–24 s); packing 16 blocks per
+leaf costs ~0.7 s per block of GPU prove and divides the node count by 16 (~61 k leaves and nodes for
+the chain instead of ~971 k). Blocks of any size can be packed; the leaf circuit grows with the log of
+the block trace, not the block (to measure at 2²³).
+
 ## Following the tip
 
 Three layers at three cadences:
