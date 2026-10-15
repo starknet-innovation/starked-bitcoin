@@ -52,6 +52,8 @@ pub const Set = struct {
     heap: std.ArrayListUnmanaged(u8) = .empty,
     /// Bytes of `heap` that belong to unspent coins.
     live: u64 = 0,
+    /// Coins removed since the last rehash: each leaves a tombstone that lengthens probes.
+    removed: u64 = 0,
 
     pub fn init(gpa: std.mem.Allocator, capacity: u32) !Set {
         var s = Set{ .gpa = gpa };
@@ -81,8 +83,14 @@ pub const Set = struct {
         self.live += s.len;
     }
 
-    /// Rewrites the heap with the unspent coins only, once spent ones are more than half of it.
+    /// Rehashes the table in place once removals reach a quarter of its slots (the tombstones would
+    /// otherwise fill it under the chain's churn: the full replay slowed from 225 to ~20 MB/s), and
+    /// rewrites the heap with the unspent coins only, once spent ones are more than half of it.
     pub fn maybeCompact(self: *Set) !void {
+        if (self.removed > self.map.capacity() / 4) {
+            self.map.rehash(KeyCtx{});
+            self.removed = 0;
+        }
         if (self.heap.items.len < 2 * self.live + (64 << 20)) return;
         var nh = std.ArrayListUnmanaged(u8).empty;
         try nh.ensureTotalCapacity(self.gpa, self.live + (self.live >> 3));
@@ -158,6 +166,7 @@ pub const Set = struct {
                     for (ins.items) |k| {
                         const kv = self.map.fetchRemove(k) orelse return error.MissingCoin;
                         self.live -= kv.value.len;
+                        self.removed += 1;
                         if (want) {
                             var b: [4]u8 = undefined;
                             std.mem.writeInt(u32, &b, kv.value.code, .little);
