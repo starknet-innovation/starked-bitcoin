@@ -352,7 +352,9 @@ pub fn proofPass(
         // stay reserved in the context's pool after its proof, and the next proof's admission
         // (driver-free memory only) would refuse a 2^23 arena after any large one.
         const key = arenaKey(&prepared.memory.placement);
-        if (!runtime.hasPreparedExecution(key)) try runtime.prepareExecution(allocator, key, try prepared.memory.placement.clone(allocator));
+        // The cache keeps the plan beyond this proof (and frees it on eviction): a process
+        // allocator, not the caller's (often per-block) one.
+        if (!runtime.hasPreparedExecution(key)) try runtime.prepareExecution(std.heap.page_allocator, key, try prepared.memory.placement.clone(std.heap.page_allocator));
         const retained = try runtime.beginProof();
         break :blk try Transaction.openPreparedCachedRetained(allocator, retained, key);
     } else try Transaction.openPrepared(allocator, &accepted_sms, try prepared.memory.placement.clone(allocator));
