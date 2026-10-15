@@ -45,8 +45,8 @@ Evidence:
   400000 1.95 s, 970347 3.62 s, 774628 3.13 s to proof (were 5.3 / 11.0 / 9.2 s); epoch 0..100 device =
   CPU (101 proofs + coin set), 0.089 s/block; 37-block sample: all verified, 27 (L <= 19) = CPU;
   2^23 2.66 s/block, 2^22 1.41 s/block in one session. Pod deleted, `list-pods` empty.
-- `zig build test -Doptimize=ReleaseFast`: exit 0 (before the epoch commits; rerun on the final tree
-  before the merge).
+- `zig build test -Doptimize=ReleaseFast`: exit 0 on the final tree; `zig build cuda-test -Dcuda=true`
+  (all host-checkable CUDA tests): exit 0.
 Problems / lessons:
 - A retained CUDA session keeps freed arenas in the context's pool and the per-proof admission counts
   only driver-free memory: a 2^23 proof failed after a 2^22 one. Use the prepared execution cache.
@@ -54,8 +54,13 @@ Problems / lessons:
 - zsh does not word-split `$var`: run multi-word loops under `bash -c`.
 - main's stwo-zig pin d34b26903 is on no stwo-zig branch on GitHub: a fresh clone cannot check out the
   submodule; pods use `bundle.sh` tarballs until it is pushed there.
-Next: overlap the host witness of block i+1 with the device proof of block i (GPU busy ~70 %), then
-the per-level recursion shapes.
+- stwo-zig replies (archived in docs/reports, 2026-10-15): `liftExtract` follow-up (merged as
+  `lift-extract-2`: (W) proven for b2msg, fpwalk, urec; `mainOffs` = the verifier's offsets; the first
+  `hashSysW_of_hard` kept verbatim, the four-component form is `hashSysW_of_hard4`); CUDA generic AIR
+  (items 1–3 on the fork branch `feat/cuda-generic-air`, host-tested; they ask for our device runner
+  against it, with our topology/masks/controller forks replaced by imports).
+Next: overlap the host witness of block i+1 with the device proof of block i (GPU busy ~70 %); a pod run
+of `cuda-prove` against stwo-zig `feat/cuda-generic-air`; then the per-level recursion shapes.
 
 ## 2026-10-14 (session 15) — CUDA remainder-fold fix verified on an H200; per-level shapes at 1.0 s of GPU per block
 Who: Claude (agent, Opus 5.5), with the owner (pod funding)
