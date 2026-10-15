@@ -5,8 +5,8 @@
 # the local node (read-only RPC, the node's cookie on stdin, kept in memory) into `replay`. Writes, in
 # ./out, the coin sets at Core's assumeUTXO heights (compare hash_serialized with chainparams.cpp), a
 # checkpoint set every 100,000 blocks, and the rehearsal window's blocks, undo and ctx with its
-# previous set. Start detached:
-#   cd ~/replay && setsid nohup ./replay_run.sh </dev/null >>run.log 2>&1 &
+# previous set (~100 GB: keep it on the data volume, not the 30 GB root). Start detached:
+#   cd /data/replay && setsid nohup ./replay_run.sh </dev/null >>run.log 2>&1 &
 # Resume after a stop: FROM=<h+1> SET=out/set-<h>.bin ./replay_run.sh (h a checkpoint).
 set -e
 cd "$(dirname "$0")"
