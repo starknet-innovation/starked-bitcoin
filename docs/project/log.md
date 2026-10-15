@@ -21,6 +21,42 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-10-15 (session 16) — Block prover: device witness phase 2 and batch proving; full chain's block proofs ≈ 325 H100-hours
+Who: Claude (agent, Opus 5.5), with the owner (scope: "1 and 3", merge + push when verified, GPU budget $30)
+Roadmap: GPU step 3 (CUDA): device witness phase 2 done; batch proving (`cuda-epoch`) done
+Done:
+- 0dc1416: `cuda-prove` compiles again with `-Dcuda=true` on main's stwo-zig pin (d34b26903 added
+  `FriLayer.rows_per_leaf_log`; the pod run on 2026-10-14 built only `cuda-widenode`).
+- 78bf486: device witness for `block_msg`, `block_walk`, `block_bytes` (`witness.zig`; `walk.plan` +
+  `walk.columns`, `msg.descriptors`, `bytes.multiplicities`). M4 Pro at 2^23: host witness 1.55 -> 0.42 s,
+  planned H2D 3.99 -> 0.85 GiB, peak footprint 4.5 -> 1.1 GB.
+- 5c52c2d, f268d9d: `cuda-epoch` (src/gpu/cuda/epoch.zig), the GPU twin of `chainproof prove-epoch` over
+  the shared `src/block/epoch_run.zig`; one `NativeRuntime` per process; `--mock`, `--verify`,
+  `--heights` (standalone sample, testing challenge). `HT.Paths`: the header MMR folded once (window
+  paths were a full fold per header, about 1 s per block, in both provers).
+- 17a5565, 598a53f: one prepared device arena per size class (`witness.Inputs.fixed_capacity`,
+  `openPreparedCachedRetained`); the cached plan uses a process allocator.
+- docs/design/gpu-cuda.md § Phase 2, § Batch proving.
+Evidence:
+- `cuda-test` filter "cuda witness": kernels = CPU for the five components on blocks 0, 170, 91722,
+  91812, 91842, 91880, 400000 (L 22), mutations caught, fixed-capacity layout, `.trace_generation` = CPU.
+- `cuda-epoch --mock` 0..30 = `chainproof prove-epoch` (bytes); `chainproof verify-epoch` VERIFIED.
+- Pod `jj6cafaqpb7q2b` (H100 SXM 80 GB, secure, $3.99/hr, 8 vCPUs): `run.sh` all byte-identical;
+  400000 1.95 s, 970347 3.62 s, 774628 3.13 s to proof (were 5.3 / 11.0 / 9.2 s); epoch 0..100 device =
+  CPU (101 proofs + coin set), 0.089 s/block; 37-block sample: all verified, 27 (L <= 19) = CPU;
+  2^23 2.66 s/block, 2^22 1.41 s/block in one session. Pod deleted, `list-pods` empty.
+- `zig build test -Doptimize=ReleaseFast`: exit 0 (before the epoch commits; rerun on the final tree
+  before the merge).
+Problems / lessons:
+- A retained CUDA session keeps freed arenas in the context's pool and the per-proof admission counts
+  only driver-free memory: a 2^23 proof failed after a 2^22 one. Use the prepared execution cache.
+- The cached plan outlived the per-block arena allocator (`ArenaSlotMissing` on the second block).
+- zsh does not word-split `$var`: run multi-word loops under `bash -c`.
+- main's stwo-zig pin d34b26903 is on no stwo-zig branch on GitHub: a fresh clone cannot check out the
+  submodule; pods use `bundle.sh` tarballs until it is pushed there.
+Next: overlap the host witness of block i+1 with the device proof of block i (GPU busy ~70 %), then
+the per-level recursion shapes.
+
 ## 2026-10-14 (session 15) — CUDA remainder-fold fix verified on an H200; per-level shapes at 1.0 s of GPU per block
 Who: Claude (agent, Opus 5.5), with the owner (pod funding)
 Roadmap: BLOCK-REC wide nodes on GPU: per-level shapes validated (leaves 2^21, 8-child node 2^24)
