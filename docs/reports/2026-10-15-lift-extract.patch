@@ -1,0 +1,1601 @@
+From b0847756ba6202a367a3879d428b91efc7fdea98 Mon Sep 17 00:00:00 2001
+From: l-henri <henri@starknet.org>
+Date: Wed, 14 Oct 2026 18:39:24 +0200
+Subject: [PATCH 1/2] Derive StarkSoundV from single-size soundness and (W)
+ (liftExtract)
+
+Circuit/Lift.lean:
+- StarkSoundL: single-size soundness at N. Terms vanish at every big row with
+  preprocessed columns lifted, and two-sample columns are periodic.
+- LiftOK: (W) per component.
+- liftExtract, starkSoundV_of_lift, plain_soundL.
+- liftOK_of_offsets: (W) for every component whose main columns have at most
+  two offsets.
+
+Block/LiftW.lean:
+- hashSysW: (W) named per hashSys component.
+- (W) proven for bytes, fields, merkle, tables, walk, ctx, wmerkle and undo.
+- hashSysW_of_hard: reduces the system to the seven components with
+  three-or-more-offset columns.
+
+Existing statements are unchanged. Standard axioms only.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lean/StarkedAir.lean              |   2 +
+ lean/StarkedAir/Block/LiftW.lean  |  66 ++++++
+ lean/StarkedAir/Circuit/Lift.lean | 339 ++++++++++++++++++++++++++++++
+ 3 files changed, 407 insertions(+)
+ create mode 100644 lean/StarkedAir/Block/LiftW.lean
+ create mode 100644 lean/StarkedAir/Circuit/Lift.lean
+
+diff --git a/lean/StarkedAir.lean b/lean/StarkedAir.lean
+index e5ab14e..bd0dd30 100644
+--- a/lean/StarkedAir.lean
++++ b/lean/StarkedAir.lean
+@@ -144,6 +144,8 @@ import StarkedAir.Circuit.Merkle
+ import StarkedAir.Circuit.Channel
+ import StarkedAir.Circuit.Transcript
+ import StarkedAir.Circuit.EndToEnd
++import StarkedAir.Circuit.Lift
++import StarkedAir.Block.LiftW
+ import StarkedAir.Circuit.Pow
+ import StarkedAir.Circuit.Oods
+ import StarkedAir.Circuit.BlockLeaf
+diff --git a/lean/StarkedAir/Block/LiftW.lean b/lean/StarkedAir/Block/LiftW.lean
+new file mode 100644
+index 0000000..e55adc7
+--- /dev/null
++++ b/lean/StarkedAir/Block/LiftW.lean
+@@ -0,0 +1,66 @@
++/-
++**(W) for the block system's components.** `hashSysW` names the condition for each component of
++`hashSys`, at own size `L` inside a `2^N` proof (`Circuit.Lift.LiftOK`).
++
++- **Proven for eight components** (`w_bytes` … `w_undo`): bytes, fields, merkle, tables, walk, ctx,
++  wmerkle and undo. Each reads every main column at no more than two distinct offsets (`offsOk`,
++  checked by the kernel).
++- **Assumed for seven** (`hardW`): msg, sha, b2msg, b2s, fpwalk, urec and coin. Each has a column read
++  at three or more offsets, where lifting can fail in general. For these, (W) is evidence from
++  stwo-zig's `lifting_wrapcheck.py`: all 115 checked (component, size) runs pass. A Lean proof is a
++  later step.
++
++`hashSysW_of_hard` reduces (W) for the whole system to the seven assumed components.
++-/
++import StarkedAir.Block.Link
++import StarkedAir.Circuit.Lift
++
++namespace StarkedAir.Block
++
++open StarkedAir StarkedAir.Circuit.Lift
++
++/-- **(W) for component `i` of `hashSys`**, at own size `L` inside a `2^N` proof. -/
++def hashSysW (i N L : ℕ) : Prop := LiftOK (hashSys.comp i) N L
++
++section
++variable {N L : ℕ}
++
++theorem w_bytes (hLN : L ≤ N) : hashSysW 0 N L := liftOK_of_offsOk hLN (by decide +kernel)
++theorem w_fields (hLN : L ≤ N) : hashSysW 1 N L := liftOK_of_offsOk hLN (by decide +kernel)
++theorem w_merkle (hLN : L ≤ N) : hashSysW 4 N L := liftOK_of_offsOk hLN (by decide +kernel)
++theorem w_tables (hLN : L ≤ N) : hashSysW 5 N L := liftOK_of_offsOk hLN (by decide +kernel)
++theorem w_walk (hLN : L ≤ N) : hashSysW 6 N L := liftOK_of_offsOk hLN (by decide +kernel)
++theorem w_ctx (hLN : L ≤ N) : hashSysW 7 N L := liftOK_of_offsOk hLN (by decide +kernel)
++theorem w_wmerkle (hLN : L ≤ N) : hashSysW 8 N L := liftOK_of_offsOk hLN (by decide +kernel)
++theorem w_undo (hLN : L ≤ N) : hashSysW 9 N L := liftOK_of_offsOk hLN (by decide +kernel)
++
++end
++
++/-- The components whose (W) is assumed: msg, sha, b2msg, b2s, fpwalk, urec, coin. -/
++def hardW : List ℕ := [2, 3, 10, 11, 12, 13, 14]
++
++/-- **(W) for the whole block system from the seven assumed components.** -/
++theorem hashSysW_of_hard {N : ℕ} {Ls : ℕ → ℕ} (hLs : ∀ i < hashSys.m, Ls i ≤ N)
++    (hard : ∀ i ∈ hardW, hashSysW i N (Ls i)) : ∀ i < hashSys.m, LiftOK (hashSys.comp i) N (Ls i) := by
++  intro i hi
++  have hm : hashSys.m = 15 := rfl
++  have hL := hLs i hi
++  rw [hm] at hi
++  interval_cases i
++  · exact w_bytes hL
++  · exact w_fields hL
++  · exact hard 2 (by decide)
++  · exact hard 3 (by decide)
++  · exact w_merkle hL
++  · exact w_tables hL
++  · exact w_walk hL
++  · exact w_ctx hL
++  · exact w_wmerkle hL
++  · exact w_undo hL
++  · exact hard 10 (by decide)
++  · exact hard 11 (by decide)
++  · exact hard 12 (by decide)
++  · exact hard 13 (by decide)
++  · exact hard 14 (by decide)
++
++end StarkedAir.Block
+diff --git a/lean/StarkedAir/Circuit/Lift.lean b/lean/StarkedAir/Circuit/Lift.lean
+new file mode 100644
+index 0000000..8b7d1a3
+--- /dev/null
++++ b/lean/StarkedAir/Circuit/Lift.lean
+@@ -0,0 +1,339 @@
++/-
++**Lifted components from single-size soundness (`liftExtract`).** `StarkSoundV` assumes per-component
++row soundness directly. This file derives it from a more primitive statement about what stwo's lifted
++PCS checks, plus a per-component condition (W) on wrapped reads.
++
++**What the verifier checks** (`LIFTING_SOUNDNESS_REPLY.md`, stwo-zig, 2026-10-14):
++- All trees are committed at the largest size `2^N`, and the composition is checked on the `2^N`-row
++  domain. Preprocessed columns are the verifier's own lifts.
++- A column read at exactly two offsets gets a periodicity sample at `z + 2^(Ls i)·g_N`, which forces
++  it to be `2^(Ls i)`-periodic as a size-`2^N` column.
++- No other column is forced to be a lift.
++
++**The primitive assumption, `StarkSoundL`.** Single-size soundness at `N` gives size-`2^N` main and
++interaction columns. Every term of component `i` vanishes at every big row, with preprocessed columns
++read as lifts (`liftVal`), and every two-sample column is `2^(Ls i)`-periodic (`PeriodicCols`). FRI
++proximity and the Schwartz–Zippel steps stay trusted, as in `StarkSound`.
++
++**(W), `LiftOK c N L`.** Any such big trace yields own-size `2^L` columns on which every term of `c`
++vanishes at every own row. It is a named hypothesis per component, not an axiom.
++- `liftOK_of_offsets` proves it for every component whose main columns are each read at no more than
++  two distinct offsets:
++  - a two-offset column is periodic, so its wrapped reads agree with the own-size trace;
++  - a one-offset column is re-indexed, so the one row that reads each cell sees the big trace's value.
++- Columns read at three or more offsets are where lifting can fail (the rotation counterexample). For
++  those components (W) is evidence from `lifting_wrapcheck.py`, to be proven later.
++
++**Results.**
++- `liftExtract`: the per-component lemma.
++- `starkSoundV_of_lift`: `StarkSoundL` plus (W) for every component gives `StarkSoundV`.
++- `plain_soundL`: `plain_soundV` with the primitive assumption.
++-/
++import StarkedAir.Circuit.EndToEnd
++
++namespace StarkedAir.Circuit.Lift
++
++open StarkedAir StarkedAir.Circuit StarkedAir.Circuit.Composition StarkedAir.Circuit.EndToEnd StarkedAir.LogUpSZ
++open StarkedAir.Spec.QM31 (QM emb)
++
++/-! ### Column reads and offsets -/
++
++/-- The main-tree reads `(column, offset)` of an expression. -/
++def mainReads : Expr → List (ℕ × ℤ)
++  | .col .main j off => [(j, off)]
++  | .col .pre _ _ => []
++  | .const _ => []
++  | .pub _ => []
++  | .add a b => mainReads a ++ mainReads b
++  | .sub a b => mainReads a ++ mainReads b
++  | .mul a b => mainReads a ++ mainReads b
++  | .neg a => mainReads a
++
++/-- A component's expressions: its constraints, then each lookup's multiplicity and values. -/
++def exprs (c : Comp) : List Expr := c.air.constraints ++ c.lookups.flatMap fun l => l.mult :: l.vals
++
++/-- The distinct offsets at which component `c` reads main column `j`. -/
++def mainOffs (c : Comp) (j : ℕ) : List ℤ :=
++  ((exprs c).flatMap fun e => (mainReads e).filterMap fun p => if p.1 = j then some p.2 else none).dedup
++
++theorem mem_mainOffs {c : Comp} {e : Expr} (he : e ∈ exprs c) {j : ℕ} {off : ℤ} (h : (j, off) ∈ mainReads e) :
++    off ∈ mainOffs c j := by
++  unfold mainOffs
++  rw [List.mem_dedup, List.mem_flatMap]
++  exact ⟨e, he, List.mem_filterMap.mpr ⟨(j, off), h, by simp⟩⟩
++
++/-- The number of interaction batches. -/
++def nBatch (c : Comp) : ℕ := (c.lookups.length + 1) / 2
++
++/-! ### Big-row and own-row valuations -/
++
++/-- Component valuation at big row `R` of a `2^N`-row trace. Main and interaction columns are read
++cyclically at size `2^N`; preprocessed columns are read as lifts of their size-`2^L` definition. -/
++noncomputable def liftVal (N L : ℕ) (pre : List PreCol) (T S : ℕ → ℕ → F) (R : ℕ) : Val :=
++  ⟨fun t j off => emb (match t with
++      | .pre => (pre.getD j (.periodic [0])).eval (2 ^ L) (wrap (2 ^ N) R off % 2 ^ L)
++      | .main => T j (wrap (2 ^ N) R off)),
++   fun k off => emb (S k (wrap (2 ^ N) R off))⟩
++
++/-- A size-`2^N` column is `2^L`-periodic. -/
++def Periodic (N L : ℕ) (f : ℕ → F) : Prop := ∀ R < 2 ^ N, f R = f (R % 2 ^ L)
++
++/-- Every two-sample column is periodic: main columns read at exactly two offsets, and the last
++interaction batch (read at `−1` and `0`). -/
++def PeriodicCols (c : Comp) (N L : ℕ) (T S : ℕ → ℕ → F) : Prop :=
++  (∀ j, (mainOffs c j).length = 2 → Periodic N L (T j)) ∧
++  (c.lookups ≠ [] → ∀ k < 4, Periodic N L (S (4 * (nBatch c - 1) + k)))
++
++/-- Every term of `c` vanishes at every big row, preprocessed columns read as lifts. -/
++def BigOK (c : Comp) (N L : ℕ) (α z share : QM) (pub : ℕ → QM) (T S : ℕ → ℕ → F) : Prop :=
++  ∀ R < 2 ^ N, ∀ t ∈ terms c α z share pub (liftVal N L c.air.pre T S R), t = 0
++
++/-- Every term of `c` vanishes at every row of its own `2^L`-row trace. -/
++def SmallOK (c : Comp) (L : ℕ) (α z share : QM) (pub : ℕ → QM) (main I : ℕ → ℕ → F) : Prop :=
++  ∀ r < 2 ^ L, ∀ t ∈ terms c α z share pub (rowVal (2 ^ L) c.air.pre main I r), t = 0
++
++/-- **(W) for component `c` at own size `L` inside a `2^N` proof.** Any big trace that satisfies `c`
++at every big row (preprocessed lifted) and is periodic on two-sample columns yields own-size columns
++satisfying `c` at every own row. -/
++def LiftOK (c : Comp) (N L : ℕ) : Prop :=
++  ∀ (α z share : QM) (pub : ℕ → QM) (T S : ℕ → ℕ → F),
++    BigOK c N L α z share pub T S → PeriodicCols c N L T S → ∃ main I, SmallOK c L α z share pub main I
++
++/-- **`liftExtract`.** For `L ≤ N`: if a size-`2^N` trace satisfies every term of `c` at every big
++row (preprocessed lifted), its two-sample columns are `2^L`-periodic, and (W) holds for `c`, then
++own-size columns satisfy every term at every own row. The content is in (W): `liftOK_of_offsets`
++proves it when every column has at most two offsets. -/
++theorem liftExtract {c : Comp} {N L : ℕ} {α z share : QM} {pub : ℕ → QM} {T S : ℕ → ℕ → F}
++    (hW : LiftOK c N L) (hbig : BigOK c N L α z share pub T S) (hper : PeriodicCols c N L T S) :
++    ∃ main I, SmallOK c L α z share pub main I :=
++  hW α z share pub T S hbig hper
++
++/-! ### The primitive STARK assumption -/
++
++/-- **Single-size STARK soundness for a lifted proof (assumed).** As `StarkSound` at size `N`: if the
++composition check passes, then there are size-`2^N` columns on which component `i`'s terms vanish
++at every big row (preprocessed columns lifted from size `2^(Ls i)`), and whose two-sample columns are
++`2^(Ls i)`-periodic (the periodicity samples). Like `StarkSound`, it is not proven here. -/
++def StarkSoundL (N : ℕ) (Ls : ℕ → ℕ) (pub : ℕ → F) (α z coeff invZ C : QM) (cs : List (Comp × QM × Val)) :
++    Prop :=
++  horner coeff 0 (cs.flatMap fun x => terms x.1 α z x.2.1 (fun j => emb (pub j)) x.2.2) * invZ = C →
++  ∃ T S : ℕ → ℕ → ℕ → F, ∀ i (hi : i < cs.length),
++    BigOK cs[i].1 N (Ls i) α z cs[i].2.1 (fun j => emb (pub j)) (T i) (S i) ∧
++    PeriodicCols cs[i].1 N (Ls i) (T i) (S i)
++
++/-- **`StarkSoundL` and (W) give `StarkSoundV`.** -/
++theorem starkSoundV_of_lift {N : ℕ} {Ls : ℕ → ℕ} {pub : ℕ → F} {α z coeff invZ C : QM}
++    {cs : List (Comp × QM × Val)} (hW : ∀ i (hi : i < cs.length), LiftOK cs[i].1 N (Ls i))
++    (h : StarkSoundL N Ls pub α z coeff invZ C cs) : StarkSoundV Ls pub α z coeff invZ C cs := by
++  intro hc
++  obtain ⟨T, S, hTS⟩ := h hc
++  have hex : ∀ i, ∃ m I : ℕ → ℕ → F, ∀ hi : i < cs.length,
++      SmallOK cs[i].1 (Ls i) α z cs[i].2.1 (fun j => emb (pub j)) m I := by
++    intro i
++    by_cases hi : i < cs.length
++    · obtain ⟨m, I, hm⟩ := hW i hi _ _ _ _ _ _ (hTS i hi).1 (hTS i hi).2
++      exact ⟨m, I, fun _ => hm⟩
++    · exact ⟨fun _ _ => 0, fun _ _ => 0, fun h' => absurd h' hi⟩
++  choose main I hmI using hex
++  exact ⟨main, I, fun i hi r hr t ht => hmI i hi r hr t ht⟩
++
++/-! ### Wrap arithmetic -/
++
++theorem wrap_lt (n r : ℕ) (off : ℤ) (hn : 0 < n) : wrap n r off < n := by
++  unfold wrap
++  have h0 : 0 ≤ ((r : ℤ) + off) % (n : ℤ) := Int.emod_nonneg _ (by omega)
++  have h1 : ((r : ℤ) + off) % (n : ℤ) < n := Int.emod_lt_of_pos _ (by omega)
++  omega
++
++theorem wrap_cast (n r : ℕ) (off : ℤ) (hn : 0 < n) : ((wrap n r off : ℕ) : ℤ) = ((r : ℤ) + off) % (n : ℤ) := by
++  unfold wrap
++  exact Int.toNat_of_nonneg (Int.emod_nonneg _ (by omega))
++
++/-- Reducing a size-`2^N` wrap modulo `2^L` is the size-`2^L` wrap. -/
++theorem wrap_mod_pow {L N : ℕ} (hLN : L ≤ N) (r : ℕ) (off : ℤ) :
++    wrap (2 ^ N) r off % 2 ^ L = wrap (2 ^ L) r off := by
++  have hN : 0 < 2 ^ N := pow_pos (by norm_num) _
++  have hL : 0 < 2 ^ L := pow_pos (by norm_num) _
++  have hd : ((2 ^ L : ℕ) : ℤ) ∣ ((2 ^ N : ℕ) : ℤ) := Int.natCast_dvd_natCast.mpr (Nat.pow_dvd_pow 2 hLN)
++  apply Int.ofNat.inj
++  rw [Int.ofNat_eq_natCast, Int.ofNat_eq_natCast, Int.natCast_mod, wrap_cast _ _ _ hN, wrap_cast _ _ _ hL,
++    Int.emod_emod_of_dvd _ hd]
++
++/-- Wrapping twice adds the offsets. -/
++theorem wrap_wrap {n : ℕ} (hn : 0 < n) (r : ℕ) (a b : ℤ) : wrap n (wrap n r a) b = wrap n r (a + b) := by
++  apply Int.ofNat.inj
++  rw [Int.ofNat_eq_natCast, Int.ofNat_eq_natCast, wrap_cast _ _ _ hn, wrap_cast _ _ _ hn, wrap_cast _ _ _ hn,
++    Int.add_emod, Int.emod_emod_of_dvd _ (dvd_refl _), ← Int.add_emod, add_assoc]
++
++theorem wrap_zero' {n r : ℕ} (h : r < n) : wrap n r 0 = r := wrap_zero h
++
++theorem wrap_small {L N : ℕ} (hLN : L ≤ N) {r : ℕ} (hr : r < 2 ^ L) : r < 2 ^ N :=
++  lt_of_lt_of_le hr (Nat.pow_le_pow_right (by norm_num) hLN)
++
++/-! ### Terms depend only on the reads -/
++
++theorem evalR_congr {R : Type*} [CommRing R] (cst : ℕ → R) (pub : ℕ → R) (l l' : Tree → ℕ → ℤ → R)
++    (hpre : ∀ j off, l .pre j off = l' .pre j off) (e : Expr)
++    (hmain : ∀ j off, (j, off) ∈ mainReads e → l .main j off = l' .main j off) :
++    e.evalR cst l pub = e.evalR cst l' pub := by
++  induction e with
++  | col t i off =>
++    cases t
++    · exact hpre i off
++    · exact hmain i off (by simp [mainReads])
++  | const v => rfl
++  | pub i => rfl
++  | add a b iha ihb =>
++    simp only [Expr.evalR]
++    rw [iha fun j o h => hmain j o (by simp [mainReads, h]), ihb fun j o h => hmain j o (by simp [mainReads, h])]
++  | sub a b iha ihb =>
++    simp only [Expr.evalR]
++    rw [iha fun j o h => hmain j o (by simp [mainReads, h]), ihb fun j o h => hmain j o (by simp [mainReads, h])]
++  | mul a b iha ihb =>
++    simp only [Expr.evalR]
++    rw [iha fun j o h => hmain j o (by simp [mainReads, h]), ihb fun j o h => hmain j o (by simp [mainReads, h])]
++  | neg a iha =>
++    simp only [Expr.evalR]
++    rw [iha fun j o h => hmain j o (by simp [mainReads, h])]
++
++/-- Two valuations agreeing on every preprocessed read, on main reads at the offsets `c` uses, on
++interaction reads at offset `0`, and on the last batch at `−1`, give the same terms. -/
++theorem terms_congr (c : Comp) (α z share : QM) (pub : ℕ → QM) (v v' : Val)
++    (hpre : ∀ j off, v.leaf .pre j off = v'.leaf .pre j off)
++    (hmain : ∀ j off, off ∈ mainOffs c j → v.leaf .main j off = v'.leaf .main j off)
++    (hi0 : ∀ k, v.inter k 0 = v'.inter k 0)
++    (hi1 : c.lookups ≠ [] → ∀ k < 4, v.inter (4 * (nBatch c - 1) + k) (-1) = v'.inter (4 * (nBatch c - 1) + k) (-1)) :
++    terms c α z share pub v = terms c α z share pub v' := by
++  have hE : ∀ e ∈ exprs c, e.evalR cstQ v.leaf pub = e.evalR cstQ v'.leaf pub := fun e he =>
++    evalR_congr _ _ _ _ hpre e fun j off h => hmain j off (mem_mainOffs he h)
++  have hlk : ∀ j, ∀ e ∈ (lk c j).mult :: (lk c j).vals, e.evalR cstQ v.leaf pub = e.evalR cstQ v'.leaf pub := by
++    intro j e he
++    unfold lk at he
++    by_cases hj : j < c.lookups.length
++    · rw [List.getD_eq_getElem _ _ hj] at he
++      exact hE e (List.mem_append_right _ (List.mem_flatMap.mpr ⟨_, List.getElem_mem hj, he⟩))
++    · rw [List.getD_eq_default _ _ (by omega)] at he
++      simp only [List.mem_cons, List.not_mem_nil, or_false] at he
++      subst he; rfl
++  unfold terms
++  congr 1
++  · exact List.map_congr_left fun e he => hE e (List.mem_append_left _ he)
++  · by_cases hEm : c.lookups.isEmpty
++    · simp [hEm]
++    simp only [hEm, if_false, Bool.false_eq_true]
++    have hne : c.lookups ≠ [] := fun h => hEm (by simp [h])
++    have hm : (fun j => (lk c j).mult.evalR cstQ v.leaf pub) = fun j => (lk c j).mult.evalR cstQ v'.leaf pub :=
++      funext fun j => hlk j _ (List.mem_cons_self ..)
++    have hd : (fun j => fingerprint α (emb ((lk c j).rel : F)) ((lk c j).vals.map (·.evalR cstQ v.leaf pub)) - z) =
++        fun j => fingerprint α (emb ((lk c j).rel : F)) ((lk c j).vals.map (·.evalR cstQ v'.leaf pub)) - z := by
++      funext j
++      congr 2
++      exact List.map_congr_left fun e he => hlk j e (List.mem_cons_of_mem _ he)
++    have hS : (fun b => secureVal fun k => v.inter (4 * b + k) 0) = fun b => secureVal fun k => v'.inter (4 * b + k) 0 :=
++      funext fun b => by simp only [hi0]
++    have hp : (secureVal fun k => v.inter (4 * ((c.lookups.length + 1) / 2 - 1) + k) (-1)) =
++        secureVal fun k => v'.inter (4 * ((c.lookups.length + 1) / 2 - 1) + k) (-1) := by
++      unfold secureVal
++      have h := hi1 hne
++      unfold nBatch at h
++      beta_reduce
++      rw [h 0 (by norm_num), h 1 (by norm_num), h 2 (by norm_num), h 3 (by norm_num)]
++    rw [hm, hd, hS, hp]
++
++/-! ### (W) for components whose columns have at most two offsets -/
++
++/-- The own-size column built from big column `f`: itself if it is read at two offsets (it is then
++periodic), else re-indexed so the row reading each cell at the column's one offset `o` sees the big
++trace's value. -/
++noncomputable def ownCol (N L : ℕ) (offs : List ℤ) (f : ℕ → F) : ℕ → F :=
++  if offs.length = 2 then f else fun x => f (wrap (2 ^ N) (wrap (2 ^ L) x (-offs.headD 0)) (offs.headD 0))
++
++/-- **(W) holds for every component whose main columns are each read at no more than two offsets.** -/
++theorem liftOK_of_offsets {c : Comp} {N L : ℕ} (hLN : L ≤ N) (hoffs : ∀ j, (mainOffs c j).length ≤ 2) :
++    LiftOK c N L := by
++  intro α z share pub T S hbig hper
++  have hN : 0 < 2 ^ N := pow_pos (by norm_num) _
++  have hL : 0 < 2 ^ L := pow_pos (by norm_num) _
++  refine ⟨fun j => ownCol N L (mainOffs c j) (T j), S, fun r hr t ht => ?_⟩
++  have hrN := wrap_small hLN hr
++  apply hbig r hrN
++  rwa [← terms_congr c α z share pub (rowVal (2 ^ L) c.air.pre _ S r) (liftVal N L c.air.pre T S r)]
++  · intro j off
++    simp only [rowVal, liftVal, wrap_mod_pow hLN]
++  · intro j off hoff
++    simp only [rowVal, liftVal, ownCol]
++    congr 1
++    split_ifs with h2
++    · rw [hper.1 j h2 _ (wrap_lt _ _ _ hN), wrap_mod_pow hLN]
++    · have h1 : (mainOffs c j).length = 1 := by
++        have := hoffs j
++        have hpos := List.length_pos_of_mem hoff
++        omega
++      obtain ⟨o, ho⟩ := List.length_eq_one_iff.mp h1
++      rw [ho] at hoff ⊢
++      have : off = o := List.mem_singleton.mp hoff
++      subst this
++      simp only [List.headD_cons]
++      rw [wrap_wrap hL, add_neg_cancel, wrap_zero hr]
++  · intro k
++    simp only [rowVal, liftVal, wrap_zero hr, wrap_zero hrN]
++  · intro hne k hk
++    simp only [rowVal, liftVal]
++    rw [hper.2 hne k hk _ (wrap_lt _ _ _ hN), wrap_mod_pow hLN]
++
++/-- Decidable form of `liftOK_of_offsets`'s hypothesis: every column `c` reads is read at no more
++than two distinct offsets. -/
++def offsOk (c : Comp) : Bool :=
++  (exprs c).all fun e => (mainReads e).all fun p => decide ((mainOffs c p.1).length ≤ 2)
++
++theorem offsOk_spec {c : Comp} (h : offsOk c = true) (j : ℕ) : (mainOffs c j).length ≤ 2 := by
++  rcases hj : mainOffs c j with _ | ⟨off, rest⟩
++  · simp
++  have hoff : off ∈ mainOffs c j := by rw [hj]; exact List.mem_cons_self ..
++  unfold mainOffs at hoff
++  rw [List.mem_dedup, List.mem_flatMap] at hoff
++  obtain ⟨e, he, hp⟩ := hoff
++  obtain ⟨p, hp, hpe⟩ := List.mem_filterMap.mp hp
++  have hpj : p.1 = j := by by_contra hne; simp [hne] at hpe
++  unfold offsOk at h
++  rw [List.all_eq_true] at h
++  have := List.all_eq_true.mp (h e he) p hp
++  rw [decide_eq_true_eq, hpj, hj] at this
++  exact this
++
++/-- **(W) from the decidable check.** -/
++theorem liftOK_of_offsOk {c : Comp} {N L : ℕ} (hLN : L ≤ N) (h : offsOk c = true) : LiftOK c N L :=
++  liftOK_of_offsets hLN (offsOk_spec h)
++
++/-! ### The plain verifier from the primitive assumption -/
++
++/-- **The plain verifier, end to end, from single-size soundness.** As `plain_soundV`, with
++`StarkSoundV` replaced by `StarkSoundL` at the proof's size `N` and (W) for each component. -/
++theorem plain_soundL [DecidableEq QM] {ρ : ℕ → Q} (sys : System) (parts : List (Comp × PartRegs)) (sh : Shared)
++    (N : ℕ) (Ls : ℕ → ℕ) (nIn oodsX nB : ℕ) (xs : List ExtE) (pub : ℕ → F) (C : QM)
++    (hm : parts.length = sys.m) (hcomp : ∀ i (hi : i < parts.length), parts[i].1 = sys.comp i)
++    (hlk : ∀ i < sys.m, (sys.comp i).lookups ≠ [])
++    (hstatic : StaticOk sys = true) (hshape : ∀ e ∈ extRaw ρ xs, (e.1, e.2.1.length) ∈ shapes sys)
++    (hpub : ∀ p ∈ parts, ∀ j, val ρ (p.2.ci.pub j) = emb (pub j))
++    (hxb : ∀ e ∈ xs, ∀ r ∈ e.vals, val ρ r = emb (ρ r).a)
++    (hw : ∀ p ∈ parts, WF (pNodes p.1) ∧ ∀ id ∈ pIds p.1, id < (pNodes p.1).size)
++    (hk : HookOk ρ sh Ls parts ([], nIn, nIn + 1))
++    (hsys : Holds ρ (sysProg parts sh nIn oodsX).1)
++    (hoods : val ρ (sysProg parts sh nIn oodsX).2 = C)
++    (hbal : Holds ρ (balanceProg nB (parts.map (·.2.claimed)) xs sh.z sh.alpha))
++    (hW : ∀ i < sys.m, LiftOK (sys.comp i) N (Ls i))
++    (hstark : StarkSoundL N Ls pub (val ρ sh.alpha) (val ρ sh.z) (val ρ sh.coeff)
++      (val ρ (partFold sh parts ([], nIn, nIn + 1)).2.2) C (starkParts ρ Ls parts)) :
++    ∃ main : ℕ → ℕ → ℕ → F,
++      (∀ i < sys.m, (sys.comp i).air.Satisfied (Ls i) pub (main i)) ∧
++      (SZGood ((siteRaw sys (instOfV Ls main) pub ++ extRaw ρ xs).map (toEntry (K := QM)))
++          (val ρ sh.alpha) (val ρ sh.z) →
++        sys.SatisfiedExt (instOfV Ls main) pub (extRaw ρ xs)) := by
++  refine plain_soundV sys parts sh Ls nIn oodsX nB xs pub C hm hcomp hlk hstatic hshape hpub hxb hw hk hsys hoods
++    hbal (starkSoundV_of_lift (fun i hi => ?_) hstark)
++  have hi' : i < parts.length := by simpa [starkParts] using hi
++  simp only [starkParts, List.getElem_mapIdx]
++  rw [hcomp i hi']
++  exact hW i (hm ▸ hi')
++
++end StarkedAir.Circuit.Lift
+-- 
+2.54.0 (Apple Git-157)
+
+
+From a69085bfe8116eafe03314cb5cd97bb0afc325dd Mon Sep 17 00:00:00 2001
+From: l-henri <22731646+l-henri@users.noreply.github.com>
+Date: Thu, 15 Oct 2026 11:14:30 +0200
+Subject: [PATCH 2/2] Tie mainOffs to the verifier's offsets; prove (W) for
+ b2msg, fpwalk, urec
+
+- LiftOffs: mainOffs c j and Composition.mainOffsets (pNodes c) j have the
+  same members and are permutations of each other (mainOffsets_perm), so
+  PeriodicCols asks periodicity of exactly the columns the verifier samples
+  at two offsets (mainOffs_length_eq_shape). colsOk: every read column is a
+  layout column; proven for hashSys (hashSys_colsOk).
+- LiftGuard: liftOK_of_guard proves (W) at every own size L >= L0 from a
+  decidable check: in the boundary rows no expression depends on a wrapped
+  read of a three-offset column, after folding preprocessed values at
+  relative rows, cell facts and row facts.
+- LiftW: w_b2msg, w_fpwalk, w_urec (L >= 5) by decide +kernel; hardW is now
+  msg, sha, b2s, coin.
+- Lift: terms_congr_exprs (terms_congr is now a corollary).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lean/StarkedAir.lean                   |   2 +
+ lean/StarkedAir/Block/LiftW.lean       |  55 +-
+ lean/StarkedAir/Circuit/Lift.lean      |  30 +-
+ lean/StarkedAir/Circuit/LiftGuard.lean | 717 +++++++++++++++++++++++++
+ lean/StarkedAir/Circuit/LiftOffs.lean  | 212 ++++++++
+ 5 files changed, 991 insertions(+), 25 deletions(-)
+ create mode 100644 lean/StarkedAir/Circuit/LiftGuard.lean
+ create mode 100644 lean/StarkedAir/Circuit/LiftOffs.lean
+
+diff --git a/lean/StarkedAir.lean b/lean/StarkedAir.lean
+index bd0dd30..69d22f3 100644
+--- a/lean/StarkedAir.lean
++++ b/lean/StarkedAir.lean
+@@ -145,6 +145,8 @@ import StarkedAir.Circuit.Channel
+ import StarkedAir.Circuit.Transcript
+ import StarkedAir.Circuit.EndToEnd
+ import StarkedAir.Circuit.Lift
++import StarkedAir.Circuit.LiftOffs
++import StarkedAir.Circuit.LiftGuard
+ import StarkedAir.Block.LiftW
+ import StarkedAir.Circuit.Pow
+ import StarkedAir.Circuit.Oods
+diff --git a/lean/StarkedAir/Block/LiftW.lean b/lean/StarkedAir/Block/LiftW.lean
+index e55adc7..932ec11 100644
+--- a/lean/StarkedAir/Block/LiftW.lean
++++ b/lean/StarkedAir/Block/LiftW.lean
+@@ -2,18 +2,26 @@
+ **(W) for the block system's components.** `hashSysW` names the condition for each component of
+ `hashSys`, at own size `L` inside a `2^N` proof (`Circuit.Lift.LiftOK`).
+ 
+-- **Proven for eight components** (`w_bytes` … `w_undo`): bytes, fields, merkle, tables, walk, ctx,
+-  wmerkle and undo. Each reads every main column at no more than two distinct offsets (`offsOk`,
+-  checked by the kernel).
+-- **Assumed for seven** (`hardW`): msg, sha, b2msg, b2s, fpwalk, urec and coin. Each has a column read
+-  at three or more offsets, where lifting can fail in general. For these, (W) is evidence from
+-  stwo-zig's `lifting_wrapcheck.py`: all 115 checked (component, size) runs pass. A Lean proof is a
+-  later step.
++- **Proven for eight components by offset count** (`w_bytes` … `w_undo`): bytes, fields, merkle,
++  tables, walk, ctx, wmerkle and undo. Each reads every main column at no more than two distinct
++  offsets (`offsOk`, checked by the kernel).
++- **Proven for three more by guarded wraps** (`w_b2msg`, `w_fpwalk`, `w_urec`), at every own size
++  `L ≥ 5`. Each has one column read at three offsets (`−1, 0, +1`); every wrapped read of it sits under
++  a preprocessed guard that vanishes at that boundary row, or (fpwalk) under a factor that another
++  constraint forces to zero at that row (`Circuit.Lift.liftOK_of_guard`, checked by the kernel).
++- **Assumed for four** (`hardW`): msg, sha, b2s and coin. For these, (W) is evidence from stwo-zig's
++  `lifting_wrapcheck.py`: all 115 checked (component, size) runs pass. What the check above misses:
++  - coin: the wrapped reads are zero because a sum of boolean columns is forced to zero at the last
++    row, so each column is; the guard check does not reason about booleans;
++  - msg: two lookup values read a three-offset column at wrapped rows, unguarded (the lookup
++    multiplicity vanishes there, but the batch's denominators still see the values);
++  - sha, b2s: 96 and 194 three-or-more-offset columns, 250 and 258 wrapped instances.
+ 
+-`hashSysW_of_hard` reduces (W) for the whole system to the seven assumed components.
++`hashSysW_of_hard` reduces (W) for the whole system to the four assumed components.
+ -/
+ import StarkedAir.Block.Link
+-import StarkedAir.Circuit.Lift
++import StarkedAir.Circuit.LiftGuard
++import StarkedAir.Circuit.LiftOffs
+ 
+ namespace StarkedAir.Block
+ 
+@@ -34,17 +42,32 @@ theorem w_ctx (hLN : L ≤ N) : hashSysW 7 N L := liftOK_of_offsOk hLN (by decid
+ theorem w_wmerkle (hLN : L ≤ N) : hashSysW 8 N L := liftOK_of_offsOk hLN (by decide +kernel)
+ theorem w_undo (hLN : L ≤ N) : hashSysW 9 N L := liftOK_of_offsOk hLN (by decide +kernel)
+ 
++/-! Components with a three-offset column whose wrapped reads are guarded (`liftOK_of_guard`), at every
++own size `L ≥ 5`. -/
++
++theorem w_b2msg (hL : 5 ≤ L) (hLN : L ≤ N) : hashSysW 10 N L :=
++  liftOK_of_guard (K := 1) (cells := []) (rf := []) hL hLN (by decide +kernel)
++theorem w_fpwalk (hL : 5 ≤ L) (hLN : L ≤ N) : hashSysW 12 N L :=
++  liftOK_of_guard (K := 1) (cells := []) (rf := [(0, 6, true), (-1, 17, true)]) hL hLN (by decide +kernel)
++theorem w_urec (hL : 5 ≤ L) (hLN : L ≤ N) : hashSysW 13 N L :=
++  liftOK_of_guard (K := 1) (cells := []) (rf := []) hL hLN (by decide +kernel)
++
+ end
+ 
+-/-- The components whose (W) is assumed: msg, sha, b2msg, b2s, fpwalk, urec, coin. -/
+-def hardW : List ℕ := [2, 3, 10, 11, 12, 13, 14]
++/-- Every component reads only layout columns, so `mainOffs` matches the layout for every column it
++names (`lt_nMain_of_mem_mainOffs`, `mainOffs_length_eq_shape`). -/
++theorem hashSys_colsOk : ∀ i < hashSys.m, colsOk (hashSys.comp i) = true := by decide +kernel
++
++/-- The components whose (W) is assumed: msg, sha, b2s, coin. -/
++def hardW : List ℕ := [2, 3, 11, 14]
+ 
+-/-- **(W) for the whole block system from the seven assumed components.** -/
+-theorem hashSysW_of_hard {N : ℕ} {Ls : ℕ → ℕ} (hLs : ∀ i < hashSys.m, Ls i ≤ N)
++/-- **(W) for the whole block system from the four assumed components.** -/
++theorem hashSysW_of_hard {N : ℕ} {Ls : ℕ → ℕ} (hLs : ∀ i < hashSys.m, Ls i ≤ N) (h5 : ∀ i < hashSys.m, 5 ≤ Ls i)
+     (hard : ∀ i ∈ hardW, hashSysW i N (Ls i)) : ∀ i < hashSys.m, LiftOK (hashSys.comp i) N (Ls i) := by
+   intro i hi
+   have hm : hashSys.m = 15 := rfl
+   have hL := hLs i hi
++  have h5i := h5 i hi
+   rw [hm] at hi
+   interval_cases i
+   · exact w_bytes hL
+@@ -57,10 +80,10 @@ theorem hashSysW_of_hard {N : ℕ} {Ls : ℕ → ℕ} (hLs : ∀ i < hashSys.m,
+   · exact w_ctx hL
+   · exact w_wmerkle hL
+   · exact w_undo hL
+-  · exact hard 10 (by decide)
++  · exact w_b2msg h5i hL
+   · exact hard 11 (by decide)
+-  · exact hard 12 (by decide)
+-  · exact hard 13 (by decide)
++  · exact w_fpwalk h5i hL
++  · exact w_urec h5i hL
+   · exact hard 14 (by decide)
+ 
+ end StarkedAir.Block
+diff --git a/lean/StarkedAir/Circuit/Lift.lean b/lean/StarkedAir/Circuit/Lift.lean
+index 8b7d1a3..41be3e6 100644
+--- a/lean/StarkedAir/Circuit/Lift.lean
++++ b/lean/StarkedAir/Circuit/Lift.lean
+@@ -21,8 +21,12 @@ vanishes at every own row. It is a named hypothesis per component, not an axiom.
+   two distinct offsets:
+   - a two-offset column is periodic, so its wrapped reads agree with the own-size trace;
+   - a one-offset column is re-indexed, so the one row that reads each cell sees the big trace's value.
+-- Columns read at three or more offsets are where lifting can fail (the rotation counterexample). For
+-  those components (W) is evidence from `lifting_wrapcheck.py`, to be proven later.
++- Columns read at three or more offsets are where lifting can fail (the rotation counterexample).
++  `LiftGuard.lean` proves (W) when every wrapped read of such a column is guarded; for the remaining
++  components (W) is evidence from `lifting_wrapcheck.py`.
++- `LiftOffs.lean` proves that `mainOffs` is the verifier's offset set (`Composition.mainOffsets` over
++  the emitted DAG), so `PeriodicCols` asks periodicity of exactly the columns the verifier samples
++  twice.
+ 
+ **Results.**
+ - `liftExtract`: the per-component lemma.
+@@ -196,16 +200,13 @@ theorem evalR_congr {R : Type*} [CommRing R] (cst : ℕ → R) (pub : ℕ → R)
+     simp only [Expr.evalR]
+     rw [iha fun j o h => hmain j o (by simp [mainReads, h])]
+ 
+-/-- Two valuations agreeing on every preprocessed read, on main reads at the offsets `c` uses, on
+-interaction reads at offset `0`, and on the last batch at `−1`, give the same terms. -/
+-theorem terms_congr (c : Comp) (α z share : QM) (pub : ℕ → QM) (v v' : Val)
+-    (hpre : ∀ j off, v.leaf .pre j off = v'.leaf .pre j off)
+-    (hmain : ∀ j off, off ∈ mainOffs c j → v.leaf .main j off = v'.leaf .main j off)
++/-- Two valuations on which every expression of `c` has the same value, agreeing on interaction
++reads at offset `0` and on the last batch at `−1`, give the same terms. -/
++theorem terms_congr_exprs (c : Comp) (α z share : QM) (pub : ℕ → QM) (v v' : Val)
++    (hE : ∀ e ∈ exprs c, e.evalR cstQ v.leaf pub = e.evalR cstQ v'.leaf pub)
+     (hi0 : ∀ k, v.inter k 0 = v'.inter k 0)
+     (hi1 : c.lookups ≠ [] → ∀ k < 4, v.inter (4 * (nBatch c - 1) + k) (-1) = v'.inter (4 * (nBatch c - 1) + k) (-1)) :
+     terms c α z share pub v = terms c α z share pub v' := by
+-  have hE : ∀ e ∈ exprs c, e.evalR cstQ v.leaf pub = e.evalR cstQ v'.leaf pub := fun e he =>
+-    evalR_congr _ _ _ _ hpre e fun j off h => hmain j off (mem_mainOffs he h)
+   have hlk : ∀ j, ∀ e ∈ (lk c j).mult :: (lk c j).vals, e.evalR cstQ v.leaf pub = e.evalR cstQ v'.leaf pub := by
+     intro j e he
+     unfold lk at he
+@@ -240,6 +241,17 @@ theorem terms_congr (c : Comp) (α z share : QM) (pub : ℕ → QM) (v v' : Val)
+       rw [h 0 (by norm_num), h 1 (by norm_num), h 2 (by norm_num), h 3 (by norm_num)]
+     rw [hm, hd, hS, hp]
+ 
++/-- Two valuations agreeing on every preprocessed read, on main reads at the offsets `c` uses, on
++interaction reads at offset `0`, and on the last batch at `−1`, give the same terms. -/
++theorem terms_congr (c : Comp) (α z share : QM) (pub : ℕ → QM) (v v' : Val)
++    (hpre : ∀ j off, v.leaf .pre j off = v'.leaf .pre j off)
++    (hmain : ∀ j off, off ∈ mainOffs c j → v.leaf .main j off = v'.leaf .main j off)
++    (hi0 : ∀ k, v.inter k 0 = v'.inter k 0)
++    (hi1 : c.lookups ≠ [] → ∀ k < 4, v.inter (4 * (nBatch c - 1) + k) (-1) = v'.inter (4 * (nBatch c - 1) + k) (-1)) :
++    terms c α z share pub v = terms c α z share pub v' :=
++  terms_congr_exprs c α z share pub v v'
++    (fun e he => evalR_congr _ _ _ _ hpre e fun j off h => hmain j off (mem_mainOffs he h)) hi0 hi1
++
+ /-! ### (W) for components whose columns have at most two offsets -/
+ 
+ /-- The own-size column built from big column `f`: itself if it is read at two offsets (it is then
+diff --git a/lean/StarkedAir/Circuit/LiftGuard.lean b/lean/StarkedAir/Circuit/LiftGuard.lean
+new file mode 100644
+index 0000000..f683c72
+--- /dev/null
++++ b/lean/StarkedAir/Circuit/LiftGuard.lean
+@@ -0,0 +1,717 @@
++/-
++**(W) for components with guarded wrapped reads.** `liftOK_of_offsets` proves (W) when every main
++column is read at no more than two offsets. This file proves it for some components that read a column
++at three or more offsets, when every wrapped read of such a column is harmless.
++
++**The own-size trace.** Columns with at most two offsets are built as in `liftOK_of_offsets`; a column
++with three or more offsets is the window `T j` itself. At own row `r`, a read at offset `off` agrees
++with the big trace unless it wraps around the own size (`r + off ∉ [0, 2^L)`); this happens only in
++the first and last `K` rows, where `K` bounds the offsets.
++
++**The check (`guardOk`).** In those boundary rows, written as relative rows `ρ ∈ [−K, K)` (`ρ < 0` is
++row `2^L + ρ`), every expression of the component must not depend on a wrapped read (`dep`). The value
++of a subexpression can be known without the main trace (`kv`), which removes its reads:
++- preprocessed reads have known values at a relative row, for every size `2^L ≥ 2^L0` (`preSym`);
++- a *cell fact* `(j, σ)`: column `j` vanishes at every big row congruent to `σ` modulo `2^L`. It is
++  justified by a constraint `a · col j o` whose factor `a` is a known nonzero constant at relative row
++  `σ − o`, using the lifted preprocessed columns (`cellOk`);
++- a *row fact* `(ρ, g, side)`: a constraint `g = a · b` with `a` a known nonzero constant at row `ρ`
++  and `b` independent of wrapped reads there, so `b` vanishes at row `ρ` in both traces (`rowOk`).
++
++`liftOK_of_guard`: `guardOk` gives (W) at every own size `L ≥ L0`. The check is decidable, so a
++component is handled by `decide +kernel` with a certificate (the bound `K`, the cell and row facts).
++-/
++import StarkedAir.Circuit.Lift
++
++namespace StarkedAir.Circuit.Lift
++
++open StarkedAir StarkedAir.Circuit StarkedAir.Circuit.Composition StarkedAir.Circuit.EndToEnd StarkedAir.LogUpSZ
++open StarkedAir.Spec.QM31 (QM emb emb_add emb_sub emb_mul emb_zero)
++
++/-! ### Known values and dependence on chosen reads -/
++
++/-- The value of `e` when it is known without the main trace: from the preprocessed values `pv`, the
++constants, and the subexpressions `zx` marks as zero, folded through the arithmetic. -/
++def kv (pv : ℕ → ℤ → Option F) (zx : Expr → Bool) (e : Expr) : Option F :=
++  if zx e then some 0 else
++  match e with
++  | .col .pre j off => pv j off
++  | .col .main _ _ => none
++  | .const v => some (v : F)
++  | .pub _ => none
++  | .add a b => match kv pv zx a, kv pv zx b with
++    | some x, some y => some (x + y)
++    | _, _ => none
++  | .sub a b => match kv pv zx a, kv pv zx b with
++    | some x, some y => some (x - y)
++    | _, _ => none
++  | .mul a b => match kv pv zx a, kv pv zx b with
++    | some x, some y => some (x * y)
++    | some x, none => if x = 0 then some 0 else none
++    | none, some y => if y = 0 then some 0 else none
++    | none, none => none
++  | .neg a => (kv pv zx a).map (- ·)
++termination_by structural e
++
++/-- Whether `e` may depend on a main read `W` marks, once known subexpressions are folded. -/
++def dep (pv : ℕ → ℤ → Option F) (zx : Expr → Bool) (W : ℕ → ℤ → Bool) (e : Expr) : Bool :=
++  if (kv pv zx e).isSome then false else
++  match e with
++  | .col .main j off => W j off
++  | .col .pre _ _ => false
++  | .const _ => false
++  | .pub _ => false
++  | .add a b => dep pv zx W a || dep pv zx W b
++  | .sub a b => dep pv zx W a || dep pv zx W b
++  | .mul a b => dep pv zx W a || dep pv zx W b
++  | .neg a => dep pv zx W a
++termination_by structural e
++
++theorem emb_neg' (x : F) : emb (-x) = -emb x := by simp [emb]
++
++section Sound
++
++variable {pv : ℕ → ℤ → Option F} {zx : Expr → Bool} {pub : ℕ → QM}
++
++theorem kv_sound {l : Tree → ℕ → ℤ → QM}
++    (hpv : ∀ j off x, pv j off = some x → l .pre j off = emb x)
++    (hzx : ∀ e, zx e = true → e.evalR cstQ l pub = 0) :
++    ∀ e x, kv pv zx e = some x → e.evalR cstQ l pub = emb x := by
++  intro e
++  induction e with
++  | col t j off =>
++    intro x h
++    cases t <;> rw [kv] at h <;> split at h
++    · rename_i hz; cases h; rw [hzx _ hz, emb_zero]
++    · exact hpv j off x h
++    · rename_i hz; cases h; rw [hzx _ hz, emb_zero]
++    · cases h
++  | const v =>
++    intro x h
++    rw [kv] at h
++    split at h
++    · rename_i hz; cases h; rw [hzx _ hz, emb_zero]
++    · cases h; rfl
++  | pub i =>
++    intro x h
++    rw [kv] at h
++    split at h
++    · rename_i hz; cases h; rw [hzx _ hz, emb_zero]
++    · cases h
++  | neg a iha =>
++    intro x h
++    rw [kv] at h
++    split at h
++    · rename_i hz; cases h; rw [hzx _ hz, emb_zero]
++    · obtain ⟨x1, h1, rfl⟩ := Option.map_eq_some_iff.mp h
++      simp only [Expr.evalR, iha x1 h1, emb_neg']
++  | add a b iha ihb =>
++    intro x h
++    rw [kv] at h
++    split at h
++    · rename_i hz; cases h; rw [hzx _ hz, emb_zero]
++    · rcases ha : kv pv zx a with _ | x1 <;> rcases hb : kv pv zx b with _ | y1 <;> simp only [ha, hb] at h <;>
++        try cases h
++      simp only [Expr.evalR, iha x1 ha, ihb y1 hb, emb_add]
++  | sub a b iha ihb =>
++    intro x h
++    rw [kv] at h
++    split at h
++    · rename_i hz; cases h; rw [hzx _ hz, emb_zero]
++    · rcases ha : kv pv zx a with _ | x1 <;> rcases hb : kv pv zx b with _ | y1 <;> simp only [ha, hb] at h <;>
++        try cases h
++      simp only [Expr.evalR, iha x1 ha, ihb y1 hb, emb_sub]
++  | mul a b iha ihb =>
++    intro x h
++    rw [kv] at h
++    split at h
++    · rename_i hz; cases h; rw [hzx _ hz, emb_zero]
++    · rcases ha : kv pv zx a with _ | x1 <;> rcases hb : kv pv zx b with _ | y1 <;> simp only [ha, hb] at h
++      · cases h
++      · split_ifs at h with hy; cases h; subst hy
++        simp only [Expr.evalR, ihb 0 hb, emb_zero, mul_zero]
++      · split_ifs at h with hx; cases h; subst hx
++        simp only [Expr.evalR, iha 0 ha, emb_zero, zero_mul]
++      · cases h; simp only [Expr.evalR, iha x1 ha, ihb y1 hb, emb_mul]
++
++/-- **Independence.** Two valuations that agree on preprocessed reads and on every main read of `e`
++outside `W`, and on which `pv` and `zx` are sound, give `e` the same value when `dep` is false. -/
++theorem dep_sound {W : ℕ → ℤ → Bool} {l l' : Tree → ℕ → ℤ → QM}
++    (hpre : ∀ j off, l .pre j off = l' .pre j off)
++    (hpv : ∀ j off x, pv j off = some x → l .pre j off = emb x)
++    (hzx : ∀ e, zx e = true → e.evalR cstQ l pub = 0)
++    (hzx' : ∀ e, zx e = true → e.evalR cstQ l' pub = 0) :
++    ∀ e, (∀ j off, (j, off) ∈ mainReads e → W j off = false → l .main j off = l' .main j off) →
++      dep pv zx W e = false → e.evalR cstQ l pub = e.evalR cstQ l' pub := by
++  have hpv' : ∀ j off x, pv j off = some x → l' .pre j off = emb x := fun j off x h => by
++    rw [← hpre]; exact hpv j off x h
++  intro e hm hd
++  rcases hk : kv pv zx e with _ | x
++  · induction e with
++    | col t j off =>
++      cases t
++      · exact hpre j off
++      · simp only [dep, hk, Option.isSome_none, Bool.false_eq_true, if_false] at hd
++        exact hm j off (by simp [mainReads]) hd
++    | const v => rfl
++    | pub i => rfl
++    | neg a iha =>
++      simp only [dep, hk, Option.isSome_none, Bool.false_eq_true, if_false] at hd
++      simp only [Expr.evalR]
++      congr 1
++      rcases ha : kv pv zx a with _ | x
++      · exact iha (fun j o h => hm j o (by simpa [mainReads] using h)) hd ha
++      · rw [kv_sound hpv hzx a x ha, kv_sound hpv' hzx' a x ha]
++    | add a b iha ihb =>
++      simp only [dep, hk, Option.isSome_none, Bool.false_eq_true, if_false, Bool.or_eq_false_iff] at hd
++      simp only [Expr.evalR]
++      congr 1
++      · rcases ha : kv pv zx a with _ | x
++        · exact iha (fun j o h => hm j o (by simp [mainReads, h])) hd.1 ha
++        · rw [kv_sound hpv hzx a x ha, kv_sound hpv' hzx' a x ha]
++      · rcases hb : kv pv zx b with _ | x
++        · exact ihb (fun j o h => hm j o (by simp [mainReads, h])) hd.2 hb
++        · rw [kv_sound hpv hzx b x hb, kv_sound hpv' hzx' b x hb]
++    | sub a b iha ihb =>
++      simp only [dep, hk, Option.isSome_none, Bool.false_eq_true, if_false, Bool.or_eq_false_iff] at hd
++      simp only [Expr.evalR]
++      congr 1
++      · rcases ha : kv pv zx a with _ | x
++        · exact iha (fun j o h => hm j o (by simp [mainReads, h])) hd.1 ha
++        · rw [kv_sound hpv hzx a x ha, kv_sound hpv' hzx' a x ha]
++      · rcases hb : kv pv zx b with _ | x
++        · exact ihb (fun j o h => hm j o (by simp [mainReads, h])) hd.2 hb
++        · rw [kv_sound hpv hzx b x hb, kv_sound hpv' hzx' b x hb]
++    | mul a b iha ihb =>
++      simp only [dep, hk, Option.isSome_none, Bool.false_eq_true, if_false, Bool.or_eq_false_iff] at hd
++      simp only [Expr.evalR]
++      congr 1
++      · rcases ha : kv pv zx a with _ | x
++        · exact iha (fun j o h => hm j o (by simp [mainReads, h])) hd.1 ha
++        · rw [kv_sound hpv hzx a x ha, kv_sound hpv' hzx' a x ha]
++      · rcases hb : kv pv zx b with _ | x
++        · exact ihb (fun j o h => hm j o (by simp [mainReads, h])) hd.2 hb
++        · rw [kv_sound hpv hzx b x hb, kv_sound hpv' hzx' b x hb]
++  · rw [kv_sound hpv hzx e x hk, kv_sound hpv' hzx' e x hk]
++
++end Sound
++
++/-! ### Relative rows -/
++
++/-- Relative row `τ` of an `n`-row trace is `wrap n 0 τ`: row `τ` if `τ ≥ 0`, row `n + τ` if not. -/
++theorem wrap0_of_nonneg {n : ℕ} {τ : ℤ} (h0 : 0 ≤ τ) (h1 : τ < n) : (wrap n 0 τ : ℤ) = τ := by
++  rw [wrap_cast _ _ _ (by omega), Nat.cast_zero, zero_add, Int.emod_eq_of_lt h0 h1]
++
++theorem wrap0_of_neg {n : ℕ} {τ : ℤ} (h0 : τ < 0) (h1 : -τ ≤ n) : (wrap n 0 τ : ℤ) = n + τ := by
++  have hn : 0 < n := by omega
++  rw [wrap_cast _ _ _ hn, Nat.cast_zero, zero_add, ← Int.add_emod_right, add_comm,
++    Int.emod_eq_of_lt (by omega) (by omega)]
++
++/-- Reads from a row congruent to relative row `ρ`. -/
++theorem wrap_rel {n R : ℕ} (hn : 0 < n) {ρ : ℤ} (h : (R : ℤ) % n = ρ % n) (off : ℤ) :
++    wrap n R off = wrap n 0 (ρ + off) := by
++  apply Int.ofNat.inj
++  rw [Int.ofNat_eq_natCast, Int.ofNat_eq_natCast, wrap_cast _ _ _ hn, wrap_cast _ _ _ hn, Nat.cast_zero, zero_add,
++    ← Int.emod_add_emod, h, Int.emod_add_emod]
++
++/-! ### Preprocessed columns at relative rows -/
++
++/-- The bound a preprocessed column's parameter must respect. -/
++def preParam : PreCol → ℕ
++  | .rowLt m => m
++  | .rowGeEnd m => m
++  | _ => 0
++
++/-- A preprocessed column's value at relative row `τ`, valid for every size `2^L` with `L ≥ L0` large
++enough (`preSym_sound`). A periodic column is known at negative rows only when its period divides
++`2^L0`. -/
++def preSym (L0 : ℕ) : PreCol → ℤ → Option F
++  | .isFirst, τ => some (if τ = 0 then 1 else 0)
++  | .notLast, τ => some (if τ = -1 then 0 else 1)
++  | .rowLt m, τ => some (if 0 ≤ τ ∧ τ < m then 1 else 0)
++  | .rowGeEnd m, τ => some (if τ < 0 ∧ -τ ≤ m then 1 else 0)
++  | .periodic vs, τ =>
++    if 0 ≤ τ ∨ vs.length ∣ 2 ^ L0 then some ((vs.getD (τ % (vs.length : ℤ)).toNat 0 : ℕ) : F) else none
++
++theorem preSym_sound {L0 n K : ℕ} (hn : 8 * K + 8 < n) (hdiv : 2 ^ L0 ∣ n) {p : PreCol} (hp : preParam p ≤ K)
++    {τ : ℤ} (hτ : |τ| ≤ 4 * K) {x : F} (h : preSym L0 p τ = some x) : p.eval n (wrap n 0 τ) = x := by
++  have hτ' := abs_le.mp hτ
++  rcases le_or_gt 0 τ with h0 | h0
++  · have hw : wrap n 0 τ = τ.toNat := by have := wrap0_of_nonneg (n := n) h0 (by omega); omega
++    cases p with
++    | isFirst =>
++      simp only [preSym, Option.some.injEq] at h; subst h
++      simp only [PreCol.eval, hw]
++      by_cases hz : τ = 0
++      · rw [if_pos (by omega), if_pos hz]
++      · rw [if_neg (by omega), if_neg hz]
++    | notLast =>
++      simp only [preSym, Option.some.injEq] at h; subst h
++      simp only [PreCol.eval, hw]
++      rw [if_pos (by omega), if_neg (by omega)]
++    | rowLt m =>
++      simp only [preParam] at hp
++      simp only [preSym, Option.some.injEq] at h; subst h
++      simp only [PreCol.eval, hw]
++      by_cases hm : τ < m
++      · rw [if_pos (by omega), if_pos ⟨h0, hm⟩]
++      · rw [if_neg (by omega), if_neg (by omega)]
++    | rowGeEnd m =>
++      simp only [preParam] at hp
++      simp only [preSym, Option.some.injEq] at h; subst h
++      simp only [PreCol.eval, hw]
++      rw [if_neg (by omega), if_neg (by omega)]
++    | periodic vs =>
++      simp only [preSym, if_pos (Or.inl h0), Option.some.injEq] at h; subst h
++      simp only [PreCol.eval, hw]
++      rw [Int.toNat_emod h0 (by omega), Int.toNat_natCast]
++  · have hw : wrap n 0 τ = (n + τ).toNat := by have := wrap0_of_neg (n := n) h0 (by omega); omega
++    cases p with
++    | isFirst =>
++      simp only [preSym, Option.some.injEq] at h; subst h
++      simp only [PreCol.eval, hw]
++      rw [if_neg (by omega), if_neg (by omega)]
++    | notLast =>
++      simp only [preSym, Option.some.injEq] at h; subst h
++      simp only [PreCol.eval, hw]
++      by_cases hz : τ = -1
++      · rw [if_neg (by omega), if_pos hz]
++      · rw [if_pos (by omega), if_neg hz]
++    | rowLt m =>
++      simp only [preParam] at hp
++      simp only [preSym, Option.some.injEq] at h; subst h
++      simp only [PreCol.eval, hw]
++      rw [if_neg (by omega), if_neg (by omega)]
++    | rowGeEnd m =>
++      simp only [preParam] at hp
++      simp only [preSym, Option.some.injEq] at h; subst h
++      simp only [PreCol.eval, hw]
++      by_cases hm : -τ ≤ m
++      · rw [if_pos (by omega), if_pos ⟨h0, hm⟩]
++      · rw [if_neg (by omega), if_neg (by omega)]
++    | periodic vs =>
++      simp only [preSym, show ¬ (0 ≤ τ) by omega, false_or] at h
++      split_ifs at h with hd
++      cases h
++      simp only [PreCol.eval, hw]
++      have hlen : (vs.length : ℤ) ∣ n := by exact_mod_cast hd.trans hdiv
++      rw [← Int.toNat_natCast vs.length, ← Int.toNat_emod (by omega) (by omega), Int.toNat_natCast,
++        Int.add_emod, Int.emod_eq_zero_of_dvd hlen, zero_add,
++        Int.emod_emod_of_dvd _ (dvd_refl _)]
++
++/-! ### The check -/
++
++/-- Whether a read at offset `off` from relative row `ρ` wraps around the own size. -/
++def wraps (ρ off : ℤ) : Bool := if 0 ≤ ρ then decide (ρ + off < 0) else decide (0 ≤ ρ + off)
++
++/-- Main column `j` is read at three or more offsets. -/
++def big (c : Comp) (j : ℕ) : Bool := decide (3 ≤ (mainOffs c j).length)
++
++/-- Preprocessed values at relative row `ρ`, known within `4K` of the boundary. -/
++def pvAt (c : Comp) (L0 K : ℕ) (ρ : ℤ) (j : ℕ) (off : ℤ) : Option F :=
++  if |ρ + off| ≤ 4 * K then preSym L0 (c.air.pre.getD j (.periodic [0])) (ρ + off) else none
++
++/-- The wrapped reads at relative row `ρ`: reads of a three-offset column that wrap. -/
++def WAt (c : Comp) (ρ : ℤ) (j : ℕ) (off : ℤ) : Bool := big c j && wraps ρ off
++
++/-- Cell facts: a read from relative row `ρ` lands on a cell listed in `cells`. -/
++def zc (c : Comp) (cells : List (ℕ × ℤ)) (ρ : ℤ) : Expr → Bool
++  | .col .main j off => big c j && cells.contains (j, ρ + off)
++  | _ => false
++
++/-- A product constraint split as (guard, factor). -/
++def partsOf (g : Expr) (side : Bool) : Option (Expr × Expr) :=
++  match g with
++  | .mul a b => some (if side then (a, b) else (b, a))
++  | _ => none
++
++/-- Constraint `f.1` split at side `f.2`. -/
++def factOf (c : Comp) (f : ℕ × Bool) : Option (Expr × Expr) := (c.air.constraints[f.1]?).bind (partsOf · f.2)
++
++/-- All known zeros at relative row `ρ`: cell facts, and the factors of the row facts at `ρ`. -/
++def zx (c : Comp) (cells : List (ℕ × ℤ)) (rf : List (ℤ × ℕ × Bool)) (ρ : ℤ) (e : Expr) : Bool :=
++  zc c cells ρ e || rf.any fun f => f.1 == ρ && (factOf c f.2).any fun p => p.2 == e
++
++/-- A cell fact `(j, σ)` is justified by a constraint `a · col j o` with `a` a known nonzero constant at
++relative row `σ − o`. -/
++def cellOk (c : Comp) (L0 K : ℕ) (f : ℕ × ℤ) : Bool :=
++  c.air.constraints.any fun g => [true, false].any fun side =>
++    match partsOf g side with
++    | some (a, .col .main j o) => j == f.1 && (kv (pvAt c L0 K (f.2 - o)) (fun _ => false) a).any (· != 0)
++    | _ => false
++
++/-- A row fact `(ρ, g, side)`: the guard is a known nonzero constant at `ρ`, and the factor does not
++depend on wrapped reads there. -/
++def rowOk (c : Comp) (L0 K : ℕ) (cells : List (ℕ × ℤ)) (f : ℤ × ℕ × Bool) : Bool :=
++  match factOf c f.2 with
++  | some (a, b) => (kv (pvAt c L0 K f.1) (zc c cells f.1) a).any (· != 0) &&
++      !dep (pvAt c L0 K f.1) (zc c cells f.1) (WAt c f.1) b
++  | none => false
++
++/-- Every offset an expression reads at. -/
++def offsAll : Expr → List ℤ
++  | .col _ _ off => [off]
++  | .const _ => []
++  | .pub _ => []
++  | .add a b => offsAll a ++ offsAll b
++  | .sub a b => offsAll a ++ offsAll b
++  | .mul a b => offsAll a ++ offsAll b
++  | .neg a => offsAll a
++
++/-- Offsets and preprocessed parameters are bounded by `K`. -/
++def bndOk (c : Comp) (K : ℕ) : Bool :=
++  (exprs c).all (fun e => (offsAll e).all fun o => decide (|o| ≤ K)) &&
++    c.air.pre.all fun p => decide (preParam p ≤ K)
++
++/-- **The check.** Sizes, bounds, the facts, and: at every relative row `ρ ∈ [−K, K)`, no expression
++depends on a wrapped read. -/
++def guardOk (c : Comp) (L0 K : ℕ) (cells : List (ℕ × ℤ)) (rf : List (ℤ × ℕ × Bool)) : Bool :=
++  decide (8 * K + 8 < 2 ^ L0) && bndOk c K && cells.all (cellOk c L0 K) && rf.all (rowOk c L0 K cells) &&
++  (List.range (2 * K)).all fun i => (exprs c).all fun e =>
++    !dep (pvAt c L0 K ((i : ℤ) - K)) (zx c cells rf ((i : ℤ) - K)) (WAt c ((i : ℤ) - K)) e
++
++/-! ### Soundness -/
++
++/-- The own-size columns: as in `liftOK_of_offsets` for columns with at most two offsets, the window
++for the others. -/
++noncomputable def ownG (c : Comp) (N L : ℕ) (T : ℕ → ℕ → F) (j : ℕ) : ℕ → F :=
++  if (mainOffs c j).length ≤ 2 then ownCol N L (mainOffs c j) (T j) else T j
++
++theorem wrap_eq_of_mem {n r : ℕ} {off : ℤ} (h0 : 0 ≤ (r : ℤ) + off) (h1 : (r : ℤ) + off < n) :
++    (wrap n r off : ℤ) = r + off := by
++  rw [wrap_cast _ _ _ (by omega), Int.emod_eq_of_lt h0 h1]
++
++theorem wrap_modL {L N : ℕ} (hLN : L ≤ N) (R : ℕ) (off : ℤ) :
++    ((wrap (2 ^ N) R off : ℕ) : ℤ) % 2 ^ L = ((R : ℤ) + off) % 2 ^ L := by
++  have hdvd : (2 : ℤ) ^ L ∣ 2 ^ N := pow_dvd_pow _ hLN
++  rw [wrap_cast _ _ _ (pow_pos (by norm_num) _)]
++  push_cast
++  exact Int.emod_emod_of_dvd _ hdvd
++
++section
++variable {c : Comp} {N L L0 K : ℕ} {T S : ℕ → ℕ → F}
++
++theorem ownG_read (hLN : L ≤ N) (hper : PeriodicCols c N L T S) {r : ℕ} (hr : r < 2 ^ L) {j : ℕ} {off : ℤ}
++    (hoff : off ∈ mainOffs c j)
++    (h : (mainOffs c j).length ≤ 2 ∨ (0 ≤ (r : ℤ) + off ∧ (r : ℤ) + off < 2 ^ L)) :
++    ownG c N L T j (wrap (2 ^ L) r off) = T j (wrap (2 ^ N) r off) := by
++  have hN : 0 < 2 ^ N := pow_pos (by norm_num) _
++  have hL : 0 < 2 ^ L := pow_pos (by norm_num) _
++  unfold ownG
++  split_ifs with h2
++  · unfold ownCol
++    split_ifs with h3
++    · rw [hper.1 j h3 _ (wrap_lt _ _ _ hN), wrap_mod_pow hLN]
++    · have h1 : (mainOffs c j).length = 1 := by
++        have hpos := List.length_pos_of_mem hoff
++        omega
++      obtain ⟨o, ho⟩ := List.length_eq_one_iff.mp h1
++      rw [ho] at hoff ⊢
++      have : off = o := List.mem_singleton.mp hoff
++      subst this
++      simp only [List.headD_cons]
++      rw [wrap_wrap hL, add_neg_cancel, wrap_zero hr]
++  · obtain ⟨h0, h1⟩ := h.resolve_left h2
++    have hLN' : (2 : ℤ) ^ L ≤ 2 ^ N := pow_le_pow_right₀ (by norm_num) hLN
++    congr 1
++    apply Int.ofNat.inj
++    rw [Int.ofNat_eq_natCast, Int.ofNat_eq_natCast, wrap_eq_of_mem h0 (by exact_mod_cast h1),
++      wrap_eq_of_mem h0 (by push_cast; omega)]
++
++theorem pvAt_sound (hL0 : L0 ≤ L) (hK : 8 * K + 8 < 2 ^ L0) (hb : bndOk c K = true) {R : ℕ} {ρ : ℤ}
++    (hR : (R : ℤ) % 2 ^ L = ρ % 2 ^ L) {j : ℕ} {off : ℤ} {x : F} (h : pvAt c L0 K ρ j off = some x) :
++    (c.air.pre.getD j (.periodic [0])).eval (2 ^ L) (wrap (2 ^ L) R off) = x := by
++  unfold pvAt at h
++  split_ifs at h with hτ
++  have hL : 0 < 2 ^ L := pow_pos (by norm_num) _
++  have hle : 2 ^ L0 ≤ 2 ^ L := Nat.pow_le_pow_right (by norm_num) hL0
++  have hp : preParam (c.air.pre.getD j (.periodic [0])) ≤ K := by
++    have := List.all_eq_true.mp ((Bool.and_eq_true _ _).mp hb).2
++    by_cases hj : j < c.air.pre.length
++    · rw [List.getD_eq_getElem _ _ hj]
++      exact of_decide_eq_true (this _ (List.getElem_mem hj))
++    · rw [List.getD_eq_default _ _ (by omega)]; simp [preParam]
++  rw [wrap_rel hL (by exact_mod_cast hR)]
++  exact preSym_sound (by omega) (pow_dvd_pow _ hL0) hp hτ h
++
++end
++
++
++theorem partsOf_eval {g : Expr} {side : Bool} {a b : Expr} (h : partsOf g side = some (a, b))
++    (l : Tree → ℕ → ℤ → QM) (pub : ℕ → QM) :
++    g.evalR cstQ l pub = a.evalR cstQ l pub * b.evalR cstQ l pub := by
++  cases g <;> simp only [partsOf, reduceCtorEq] at h
++  rename_i x y
++  cases side <;> simp only [Option.some.injEq, Prod.mk.injEq, Bool.false_eq_true, if_false, if_true] at h <;>
++    obtain ⟨rfl, rfl⟩ := h <;> simp only [Expr.evalR, mul_comm]
++
++theorem partsOf_reads {g : Expr} {side : Bool} {a b : Expr} (h : partsOf g side = some (a, b)) {p : ℕ × ℤ}
++    (hp : p ∈ mainReads b) : p ∈ mainReads g := by
++  cases g <;> simp only [partsOf, reduceCtorEq] at h
++  rename_i x y
++  cases side <;> simp only [Option.some.injEq, Prod.mk.injEq, Bool.false_eq_true, if_false, if_true] at h <;>
++    obtain ⟨rfl, rfl⟩ := h <;> simp [mainReads, hp]
++
++theorem partsOf_offs {g : Expr} {side : Bool} {a b : Expr} (h : partsOf g side = some (a, b)) {o : ℤ}
++    (hp : o ∈ offsAll b) : o ∈ offsAll g := by
++  cases g <;> simp only [partsOf, reduceCtorEq] at h
++  rename_i x y
++  cases side <;> simp only [Option.some.injEq, Prod.mk.injEq, Bool.false_eq_true, if_false, if_true] at h <;>
++    obtain ⟨rfl, rfl⟩ := h <;> simp [offsAll, hp]
++
++theorem emb_ne_zero {y : F} (hy : y ≠ 0) : emb y ≠ 0 := fun h =>
++  hy (StarkedAir.Spec.QM31.emb_inj (h.trans emb_zero.symm))
++
++section
++variable {c : Comp} {N L L0 K : ℕ} {α z share : QM} {pub : ℕ → QM} {T S : ℕ → ℕ → F}
++
++theorem constraint_zero (hbig : BigOK c N L α z share pub T S) {R : ℕ} (hR : R < 2 ^ N) {g : Expr}
++    (hg : g ∈ c.air.constraints) : g.evalR cstQ (liftVal N L c.air.pre T S R).leaf pub = 0 :=
++  hbig R hR _ (List.mem_append_left _ (List.mem_map_of_mem hg))
++
++/-- A guard that is a known nonzero constant forces its factor to vanish. -/
++theorem factor_zero {pv : ℕ → ℤ → Option F} {zx : Expr → Bool} {l : Tree → ℕ → ℤ → QM}
++    (hpv : ∀ j off x, pv j off = some x → l .pre j off = emb x)
++    (hzx : ∀ e, zx e = true → e.evalR cstQ l pub = 0) {g a b : Expr} {side : Bool}
++    (hp : partsOf g side = some (a, b)) (hg : g.evalR cstQ l pub = 0) {y : F} (hka : kv pv zx a = some y)
++    (hy : y ≠ 0) : b.evalR cstQ l pub = 0 := by
++  rw [partsOf_eval hp, kv_sound hpv hzx a y hka] at hg
++  exact (mul_eq_zero.mp hg).resolve_left (emb_ne_zero hy)
++
++theorem hpv_big (hLN : L ≤ N) (hL0 : L0 ≤ L) (hK : 8 * K + 8 < 2 ^ L0) (hb : bndOk c K = true) {R : ℕ} {ρ : ℤ}
++    (hR : (R : ℤ) % 2 ^ L = ρ % 2 ^ L) :
++    ∀ j off x, pvAt c L0 K ρ j off = some x → (liftVal N L c.air.pre T S R).leaf .pre j off = emb x := by
++  intro j off x h
++  simp only [liftVal]
++  rw [wrap_mod_pow hLN, pvAt_sound hL0 hK hb hR h]
++
++theorem hpv_own (hL0 : L0 ≤ L) (hK : 8 * K + 8 < 2 ^ L0) (hb : bndOk c K = true) {main : ℕ → ℕ → F} {r : ℕ}
++    {ρ : ℤ} (hr : (r : ℤ) % 2 ^ L = ρ % 2 ^ L) :
++    ∀ j off x, pvAt c L0 K ρ j off = some x → (rowVal (2 ^ L) c.air.pre main S r).leaf .pre j off = emb x := by
++  intro j off x h
++  simp only [rowVal]
++  rw [pvAt_sound hL0 hK hb hr h]
++
++theorem modL_shift {L : ℕ} {X : ℕ} {R : ℕ} {ρ : ℤ} (off : ℤ) (hR : (R : ℤ) % 2 ^ L = ρ % 2 ^ L)
++    (hX : (X : ℤ) % 2 ^ L = ((R : ℤ) + off) % 2 ^ L) : (X : ℤ) % 2 ^ L = (ρ + off) % 2 ^ L := by
++  rw [hX, ← Int.emod_add_emod, hR, Int.emod_add_emod]
++
++/-- **Cell facts hold at every congruent big row.** -/
++theorem cell_zero (hLN : L ≤ N) (hL0 : L0 ≤ L) (hK : 8 * K + 8 < 2 ^ L0) (hb : bndOk c K = true)
++    (hbig : BigOK c N L α z share pub T S) {f : ℕ × ℤ} (hf : cellOk c L0 K f = true) {X : ℕ} (hX : X < 2 ^ N)
++    (hXm : (X : ℤ) % 2 ^ L = f.2 % 2 ^ L) : T f.1 X = 0 := by
++  have hN : 0 < 2 ^ N := pow_pos (by norm_num) _
++  obtain ⟨g, hg, hside⟩ := List.any_eq_true.mp hf
++  obtain ⟨side, -, hm⟩ := List.any_eq_true.mp hside
++  rcases hp : partsOf g side with _ | ⟨a, b⟩
++  · rw [hp] at hm; cases hm
++  rw [hp] at hm
++  rcases b with ⟨_ | _, j, o⟩ | _ | _ | _ | _ | _ | _ <;> simp only [reduceCtorEq] at hm
++  simp only [Bool.and_eq_true, beq_iff_eq] at hm
++  obtain ⟨rfl, hka⟩ := hm
++  rcases hk : kv (pvAt c L0 K (f.2 - o)) (fun _ => false) a with _ | y
++  · rw [hk] at hka; cases hka
++  rw [hk] at hka
++  have hy : y ≠ 0 := by simpa using hka
++  set R' := wrap (2 ^ N) X (-o) with hR'
++  have hR'm : (R' : ℤ) % 2 ^ L = (f.2 - o) % 2 ^ L := by
++    rw [hR', sub_eq_add_neg, wrap_modL hLN X (-o), ← Int.emod_add_emod, hXm, Int.emod_add_emod]
++  have h0 := factor_zero (hpv_big hLN hL0 hK hb (T := T) (S := S) hR'm) (fun _ h => by cases h) hp
++    (constraint_zero hbig (wrap_lt _ _ _ hN) hg) hk hy
++  simp only [Expr.evalR, liftVal] at h0
++  rw [hR', wrap_wrap hN, neg_add_cancel, wrap_zero hX] at h0
++  exact StarkedAir.Spec.QM31.emb_inj (h0.trans emb_zero.symm)
++
++end
++
++
++theorem mainReads_offs {e : Expr} {j : ℕ} {off : ℤ} (h : (j, off) ∈ mainReads e) : off ∈ offsAll e := by
++  induction e with
++  | col t i o => cases t <;> simp_all [mainReads, offsAll]
++  | const v => simp [mainReads] at h
++  | pub i => simp [mainReads] at h
++  | add a b iha ihb =>
++    simp only [mainReads, List.mem_append] at h
++    simp only [offsAll, List.mem_append]; exact h.imp iha ihb
++  | sub a b iha ihb =>
++    simp only [mainReads, List.mem_append] at h
++    simp only [offsAll, List.mem_append]; exact h.imp iha ihb
++  | mul a b iha ihb =>
++    simp only [mainReads, List.mem_append] at h
++    simp only [offsAll, List.mem_append]; exact h.imp iha ihb
++  | neg a iha => exact iha h
++
++section
++variable {c : Comp} {N L L0 K : ℕ} {α z share : QM} {pub : ℕ → QM} {T S : ℕ → ℕ → F}
++  {cells : List (ℕ × ℤ)} {rf : List (ℤ × ℕ × Bool)}
++
++theorem zc_big (hLN : L ≤ N) (hL0 : L0 ≤ L) (hK : 8 * K + 8 < 2 ^ L0) (hb : bndOk c K = true)
++    (hbig : BigOK c N L α z share pub T S) (hcells : cells.all (cellOk c L0 K) = true) {R : ℕ}
++    {ρ : ℤ} (hRρ : (R : ℤ) % 2 ^ L = ρ % 2 ^ L) :
++    ∀ e, zc c cells ρ e = true → e.evalR cstQ (liftVal N L c.air.pre T S R).leaf pub = 0 := by
++  have hN : 0 < 2 ^ N := pow_pos (by norm_num) _
++  intro e he
++  rcases e with ⟨_ | _, j, off⟩ | _ | _ | _ | _ | _ | _ <;> simp only [zc, reduceCtorEq] at he
++  simp only [Bool.and_eq_true, List.contains_iff_mem] at he
++  have := cell_zero hLN hL0 hK hb hbig (List.all_eq_true.mp hcells _ he.2) (wrap_lt _ _ _ hN)
++    (modL_shift off hRρ (wrap_modL hLN R off))
++  simp only [Expr.evalR, liftVal]
++  rw [this, emb_zero]
++
++theorem zc_own (hLN : L ≤ N) (hL0 : L0 ≤ L) (hK : 8 * K + 8 < 2 ^ L0) (hb : bndOk c K = true)
++    (hbig : BigOK c N L α z share pub T S) (hcells : cells.all (cellOk c L0 K) = true) {r : ℕ}
++    {ρ : ℤ} (hrρ : (r : ℤ) % 2 ^ L = ρ % 2 ^ L) :
++    ∀ e, zc c cells ρ e = true → e.evalR cstQ (rowVal (2 ^ L) c.air.pre (ownG c N L T) S r).leaf pub = 0 := by
++  have hL : 0 < 2 ^ L := pow_pos (by norm_num) _
++  intro e he
++  rcases e with ⟨_ | _, j, off⟩ | _ | _ | _ | _ | _ | _ <;> simp only [zc, reduceCtorEq] at he
++  simp only [Bool.and_eq_true, List.contains_iff_mem] at he
++  have h3 : ¬ (mainOffs c j).length ≤ 2 := by have := of_decide_eq_true he.1; omega
++  have := cell_zero hLN hL0 hK hb hbig (List.all_eq_true.mp hcells _ he.2)
++    (wrap_small hLN (wrap_lt _ _ _ hL)) (modL_shift off hrρ (wrap_modL le_rfl r off))
++  simp only [Expr.evalR, rowVal, ownG, h3, if_false]
++  rw [this, emb_zero]
++
++theorem pre_agree (hLN : L ≤ N) (main : ℕ → ℕ → F) (r j : ℕ) (off : ℤ) :
++    (rowVal (2 ^ L) c.air.pre main S r).leaf .pre j off = (liftVal N L c.air.pre T S r).leaf .pre j off := by
++  simp only [rowVal, liftVal]
++  rw [wrap_mod_pow hLN]
++
++/-- **Known zeros are sound** at own row `r`, relative row `ρ`, in both traces, given that reads outside
++`W` agree. -/
++theorem zx_sound (hLN : L ≤ N) (hL0 : L0 ≤ L) (hK : 8 * K + 8 < 2 ^ L0) (hb : bndOk c K = true)
++    (hbig : BigOK c N L α z share pub T S) (hcells : cells.all (cellOk c L0 K) = true)
++    (hrf : rf.all (rowOk c L0 K cells) = true) {r : ℕ} (hr : r < 2 ^ L) {ρ : ℤ}
++    (hrρ : (r : ℤ) % 2 ^ L = ρ % 2 ^ L)
++    (hag : ∀ j off, (∃ e ∈ exprs c, (j, off) ∈ mainReads e) → WAt c ρ j off = false →
++      (rowVal (2 ^ L) c.air.pre (ownG c N L T) S r).leaf .main j off = (liftVal N L c.air.pre T S r).leaf .main j off) :
++    (∀ e, zx c cells rf ρ e = true → e.evalR cstQ (rowVal (2 ^ L) c.air.pre (ownG c N L T) S r).leaf pub = 0) ∧
++    (∀ e, zx c cells rf ρ e = true → e.evalR cstQ (liftVal N L c.air.pre T S r).leaf pub = 0) := by
++  have hrN := wrap_small hLN hr
++  have hzo := zc_own (pub := pub) hLN hL0 hK hb hbig hcells hrρ
++  have hzb := zc_big (pub := pub) hLN hL0 hK hb hbig hcells hrρ
++  have hpo := hpv_own (main := ownG c N L T) (S := S) hL0 hK hb hrρ
++  have hpb := hpv_big (T := T) (S := S) hLN hL0 hK hb hrρ
++  -- a row fact's factor vanishes in both traces
++  have hfact : ∀ f ∈ rf, f.1 = ρ → ∀ a b, factOf c f.2 = some (a, b) →
++      b.evalR cstQ (rowVal (2 ^ L) c.air.pre (ownG c N L T) S r).leaf pub = 0 ∧
++      b.evalR cstQ (liftVal N L c.air.pre T S r).leaf pub = 0 := by
++    intro f hf hfρ a b hab
++    have hok := List.all_eq_true.mp hrf f hf
++    unfold rowOk at hok
++    rw [hab] at hok
++    simp only [Bool.and_eq_true, Bool.not_eq_true'] at hok
++    obtain ⟨hka, hd⟩ := hok
++    rw [hfρ] at hka hd
++    rcases hk : kv (pvAt c L0 K ρ) (zc c cells ρ) a with _ | y
++    · rw [hk] at hka; cases hka
++    rw [hk] at hka
++    have hy : y ≠ 0 := by simpa using hka
++    obtain ⟨g, hg, hp⟩ : ∃ g, c.air.constraints[f.2.1]? = some g ∧ partsOf g f.2.2 = some (a, b) := by
++      unfold factOf at hab
++      rcases hgi : c.air.constraints[f.2.1]? with _ | g
++      · rw [hgi] at hab; cases hab
++      · rw [hgi] at hab; exact ⟨g, rfl, hab⟩
++    have hgm : g ∈ c.air.constraints := List.mem_of_getElem? hg
++    have hbig0 := factor_zero hpb hzb hp (constraint_zero hbig hrN hgm) hk hy
++    refine ⟨?_, hbig0⟩
++    rw [dep_sound (pre_agree hLN _ r) hpo hzo hzb b (fun j off hjo hW => hag j off
++      ⟨g, List.mem_append_left _ hgm, partsOf_reads hp hjo⟩ hW) hd]
++    exact hbig0
++  have hsplit : ∀ e, zx c cells rf ρ e = true → zc c cells ρ e = true ∨
++      ∃ f ∈ rf, f.1 = ρ ∧ ∃ a, factOf c f.2 = some (a, e) := by
++    intro e he
++    unfold zx at he
++    simp only [Bool.or_eq_true, List.any_eq_true, Bool.and_eq_true, beq_iff_eq] at he
++    refine he.imp id fun ⟨f, hf, hfρ, hp⟩ => ⟨f, hf, hfρ, ?_⟩
++    rcases hq : factOf c f.2 with _ | ⟨a, b⟩
++    · rw [hq] at hp; cases hp
++    · rw [hq] at hp
++      simp only [Option.any_some, beq_iff_eq] at hp
++      exact ⟨a, hp ▸ rfl⟩
++  constructor
++  · intro e he
++    rcases hsplit e he with h | ⟨f, hf, hfρ, a, hab⟩
++    · exact hzo e h
++    · exact (hfact f hf hfρ a e hab).1
++  · intro e he
++    rcases hsplit e he with h | ⟨f, hf, hfρ, a, hab⟩
++    · exact hzb e h
++    · exact (hfact f hf hfρ a e hab).2
++
++end
++
++
++/-- **(W) from the check**, at every own size `L ≥ L0`. -/
++theorem liftOK_of_guard {c : Comp} {N L L0 K : ℕ} {cells : List (ℕ × ℤ)} {rf : List (ℤ × ℕ × Bool)}
++    (hL0 : L0 ≤ L) (hLN : L ≤ N) (h : guardOk c L0 K cells rf = true) : LiftOK c N L := by
++  unfold guardOk at h
++  simp only [Bool.and_eq_true, decide_eq_true_eq] at h
++  obtain ⟨⟨⟨⟨hK, hb⟩, hcells⟩, hrf⟩, hrows⟩ := h
++  intro α z share pub T S hbig hper
++  have hN : 0 < 2 ^ N := pow_pos (by norm_num) _
++  have hL : 0 < 2 ^ L := pow_pos (by norm_num) _
++  have hKL : 8 * K + 8 < 2 ^ L := lt_of_lt_of_le hK (Nat.pow_le_pow_right (by norm_num) hL0)
++  have hcL : ((2 ^ L : ℕ) : ℤ) = (2 : ℤ) ^ L := by push_cast; rfl
++  refine ⟨ownG c N L T, S, fun r hr t ht => ?_⟩
++  have hrN := wrap_small hLN hr
++  apply hbig r hrN
++  -- reads of the component: bounded offsets, in `mainOffs`
++  have hoffs : ∀ e ∈ exprs c, ∀ j off, (j, off) ∈ mainReads e → |off| ≤ K ∧ off ∈ mainOffs c j := by
++    intro e he j off hjo
++    have h1 := List.all_eq_true.mp ((Bool.and_eq_true _ _).mp hb).1 e he
++    exact ⟨of_decide_eq_true (List.all_eq_true.mp h1 off (mainReads_offs hjo)), mem_mainOffs he hjo⟩
++  have hread : ∀ j off, off ∈ mainOffs c j →
++      ((mainOffs c j).length ≤ 2 ∨ (0 ≤ (r : ℤ) + off ∧ (r : ℤ) + off < 2 ^ L)) →
++      (rowVal (2 ^ L) c.air.pre (ownG c N L T) S r).leaf .main j off = (liftVal N L c.air.pre T S r).leaf .main j off := by
++    intro j off hm hc
++    simp only [rowVal, liftVal]
++    rw [ownG_read hLN hper hr hm hc]
++  have hE : ∀ e ∈ exprs c, e.evalR cstQ (rowVal (2 ^ L) c.air.pre (ownG c N L T) S r).leaf pub =
++      e.evalR cstQ (liftVal N L c.air.pre T S r).leaf pub := by
++    intro e he
++    by_cases hmid : K ≤ r ∧ r + K < 2 ^ L
++    · refine evalR_congr _ _ _ _ (pre_agree hLN _ r) e fun j off hjo => ?_
++      obtain ⟨hK', hm⟩ := hoffs e he j off hjo
++      have := abs_le.mp hK'
++      exact hread j off hm (Or.inr ⟨by omega, by omega⟩)
++    -- a boundary row, at relative row `ρ`
++    obtain ⟨ρ, hρ1, hρ2, hrρ, hρa, hρb⟩ : ∃ ρ : ℤ, -(K : ℤ) ≤ ρ ∧ ρ < K ∧ (r : ℤ) % 2 ^ L = ρ % 2 ^ L ∧
++        (r < K → ρ = r) ∧ (¬ r < K → ρ = r - 2 ^ L) := by
++      by_cases h1 : r < K
++      · exact ⟨r, by omega, by omega, rfl, fun _ => rfl, fun h => absurd h1 h⟩
++      · refine ⟨r - 2 ^ L, by omega, by omega, ?_, fun h => absurd h h1, fun _ => rfl⟩
++        rw [Int.sub_emod, Int.emod_self, sub_zero, Int.emod_emod_of_dvd _ (dvd_refl _)]
++    have hag : ∀ j off, (∃ e ∈ exprs c, (j, off) ∈ mainReads e) → WAt c ρ j off = false →
++        (rowVal (2 ^ L) c.air.pre (ownG c N L T) S r).leaf .main j off =
++          (liftVal N L c.air.pre T S r).leaf .main j off := by
++      rintro j off ⟨e', he', hjo⟩ hW
++      obtain ⟨hK', hm⟩ := hoffs e' he' j off hjo
++      have := abs_le.mp hK'
++      unfold WAt at hW
++      rcases hbj : big c j
++      · exact hread j off hm (Or.inl (by unfold big at hbj; have := of_decide_eq_false hbj; omega))
++      · rw [hbj, Bool.true_and] at hW
++        refine hread j off hm (Or.inr ?_)
++        unfold wraps at hW
++        by_cases h1 : r < K
++        · rw [hρa h1] at hW
++          simp only [Nat.cast_nonneg, if_true, decide_eq_false_iff_not, not_lt] at hW
++          constructor <;> omega
++        · rw [hρb h1, if_neg (by omega), decide_eq_false_iff_not] at hW
++          constructor <;> omega
++    have hd : dep (pvAt c L0 K ρ) (zx c cells rf ρ) (WAt c ρ) e = false := by
++      have hi : (ρ + K).toNat < 2 * K := by omega
++      have := List.all_eq_true.mp (List.all_eq_true.mp hrows _ (List.mem_range.mpr hi)) e he
++      rwa [show (((ρ + K).toNat : ℕ) : ℤ) - K = ρ by omega, Bool.not_eq_true'] at this
++    obtain ⟨hzo, hzb⟩ := zx_sound hLN hL0 hK hb hbig hcells hrf hr hrρ hag
++    exact dep_sound (pre_agree hLN _ r) (hpv_own hL0 hK hb hrρ) hzo hzb e
++      (fun j off hjo hW => hag j off ⟨e, he, hjo⟩ hW) hd
++  rwa [← terms_congr_exprs c α z share pub _ _ hE]
++  · intro k
++    simp only [rowVal, liftVal, wrap_zero hr, wrap_zero hrN]
++  · intro hne k hk
++    simp only [rowVal, liftVal]
++    rw [hper.2 hne k hk _ (wrap_lt _ _ _ hN), wrap_mod_pow hLN]
++
++end StarkedAir.Circuit.Lift
+diff --git a/lean/StarkedAir/Circuit/LiftOffs.lean b/lean/StarkedAir/Circuit/LiftOffs.lean
+new file mode 100644
+index 0000000..e229141
+--- /dev/null
++++ b/lean/StarkedAir/Circuit/LiftOffs.lean
+@@ -0,0 +1,212 @@
++/-
++**`mainOffs` is the verifier's offset set.** `PeriodicCols` decides which main columns are two-sample
++from `Lift.mainOffs`, read off the component's expressions. The verifier's layout (`compShape`) reads
++them off the emitted DAG instead (`Composition.mainOffsets (pNodes c)`). This file proves the two agree:
++- `mem_mainOffsets_iff`: same members, for every column;
++- `mainOffsets_perm`: the lists are permutations of each other, so they have the same length, and a
++  column is two-sample for `PeriodicCols` exactly when the verifier samples it at two offsets
++  (`mainOffs_length_eq_shape`).
++
++The proof tracks, through the hash-consing emitter, which `(column, offset)` leaves the node array
++holds: emitting `e` adds exactly `e`'s main reads (`emitN_cols`), using the invariant that every
++shared key's reads are already emitted (`KeyOK`).
++-/
++import StarkedAir.Circuit.Lift
++
++namespace StarkedAir.Circuit.Lift
++
++open StarkedAir StarkedAir.Circuit StarkedAir.Circuit.Composition
++
++/-- The node array holds the main leaf `(j, off)`. -/
++def HasCol (out : Array Node) (j : ℕ) (off : ℤ) : Prop := Node.col .main j off ∈ out.toList
++
++/-- Every shared key's main reads are already emitted. -/
++def KeyOK (s : DagState) : Prop :=
++  ∀ e id, s.ids[e]? = some id → ∀ p ∈ mainReads e, HasCol s.out p.1 p.2
++
++theorem hasCol_push {out : Array Node} {nd : Node} {j : ℕ} {off : ℤ} :
++    HasCol (out.push nd) j off ↔ HasCol out j off ∨ nd = .col .main j off := by
++  unfold HasCol
++  rw [Array.toList_push, List.mem_append, List.mem_singleton, eq_comm (a := Node.col .main j off)]
++
++theorem keyOK_push {s : DagState} (hs : KeyOK s) (e : Expr) (nd : Node)
++    (hreads : ∀ p ∈ mainReads e, HasCol (s.out.push nd) p.1 p.2) :
++    KeyOK { ids := s.ids.insert e s.out.size, out := s.out.push nd } := by
++  intro e' id h p hp
++  simp only [Std.HashMap.getElem?_insert] at h
++  split at h
++  · rename_i heq
++    have : e = e' := by simpa using heq
++    subst this
++    exact hreads p hp
++  · exact hasCol_push.mpr (Or.inl (hs e' id h p hp))
++
++/-- **Emitting `e` adds exactly its main reads** to the node array. -/
++theorem emitN_cols (e : Expr) : ∀ s, KeyOK s →
++    KeyOK (emitN e s).2 ∧
++      ∀ j off, HasCol (emitN e s).2.out j off ↔ HasCol s.out j off ∨ (j, off) ∈ mainReads e := by
++  induction e with
++  | col t i o =>
++    intro s hs
++    unfold emitN
++    split
++    · rename_i id h
++      exact ⟨hs, fun j off => ⟨Or.inl, fun h' => h'.elim (fun x => x) fun hr => hs _ id h _ hr⟩⟩
++    · refine ⟨keyOK_push hs _ _ fun p hp => ?_, fun j off => ?_⟩
++      · cases t <;> simp [mainReads] at hp
++        subst hp; exact hasCol_push.mpr (Or.inr rfl)
++      · rw [hasCol_push]
++        cases t <;> simp [mainReads]
++        aesop
++  | const v =>
++    intro s hs
++    unfold emitN
++    split
++    · rename_i id h
++      exact ⟨hs, fun j off => ⟨Or.inl, fun h' => h'.elim (fun x => x) fun hr => hs _ id h _ hr⟩⟩
++    · exact ⟨keyOK_push hs _ _ fun p hp => by simp [mainReads] at hp,
++        fun j off => by rw [hasCol_push]; simp [mainReads]⟩
++  | pub i =>
++    intro s hs
++    unfold emitN
++    split
++    · rename_i id h
++      exact ⟨hs, fun j off => ⟨Or.inl, fun h' => h'.elim (fun x => x) fun hr => hs _ id h _ hr⟩⟩
++    · exact ⟨keyOK_push hs _ _ fun p hp => by simp [mainReads] at hp,
++        fun j off => by rw [hasCol_push]; simp [mainReads]⟩
++  | neg a iha =>
++    intro s hs
++    unfold emitN
++    split
++    · rename_i id h
++      exact ⟨hs, fun j off => ⟨Or.inl, fun h' => h'.elim (fun x => x) fun hr => hs _ id h _ hr⟩⟩
++    · obtain ⟨k1, c1⟩ := iha s hs
++      refine ⟨keyOK_push k1 _ _ fun p hp => ?_, fun j off => ?_⟩
++      · exact hasCol_push.mpr (Or.inl ((c1 p.1 p.2).mpr (Or.inr (by simpa [mainReads] using hp))))
++      · rw [hasCol_push, c1]; simp [mainReads]
++  | add a b iha ihb =>
++    intro s hs
++    unfold emitN
++    split
++    · rename_i id h
++      exact ⟨hs, fun j off => ⟨Or.inl, fun h' => h'.elim (fun x => x) fun hr => hs _ id h _ hr⟩⟩
++    · obtain ⟨k1, c1⟩ := iha s hs
++      obtain ⟨k2, c2⟩ := ihb _ k1
++      refine ⟨keyOK_push k2 _ _ fun p hp => ?_, fun j off => ?_⟩
++      · refine hasCol_push.mpr (Or.inl ((c2 p.1 p.2).mpr ?_))
++        rcases List.mem_append.mp (by simpa [mainReads] using hp) with h | h
++        · exact Or.inl ((c1 p.1 p.2).mpr (Or.inr h))
++        · exact Or.inr h
++      · rw [hasCol_push, c2, c1]; simp [mainReads, or_assoc]
++  | sub a b iha ihb =>
++    intro s hs
++    unfold emitN
++    split
++    · rename_i id h
++      exact ⟨hs, fun j off => ⟨Or.inl, fun h' => h'.elim (fun x => x) fun hr => hs _ id h _ hr⟩⟩
++    · obtain ⟨k1, c1⟩ := iha s hs
++      obtain ⟨k2, c2⟩ := ihb _ k1
++      refine ⟨keyOK_push k2 _ _ fun p hp => ?_, fun j off => ?_⟩
++      · refine hasCol_push.mpr (Or.inl ((c2 p.1 p.2).mpr ?_))
++        rcases List.mem_append.mp (by simpa [mainReads] using hp) with h | h
++        · exact Or.inl ((c1 p.1 p.2).mpr (Or.inr h))
++        · exact Or.inr h
++      · rw [hasCol_push, c2, c1]; simp [mainReads, or_assoc]
++  | mul a b iha ihb =>
++    intro s hs
++    unfold emitN
++    split
++    · rename_i id h
++      exact ⟨hs, fun j off => ⟨Or.inl, fun h' => h'.elim (fun x => x) fun hr => hs _ id h _ hr⟩⟩
++    · obtain ⟨k1, c1⟩ := iha s hs
++      obtain ⟨k2, c2⟩ := ihb _ k1
++      refine ⟨keyOK_push k2 _ _ fun p hp => ?_, fun j off => ?_⟩
++      · refine hasCol_push.mpr (Or.inl ((c2 p.1 p.2).mpr ?_))
++        rcases List.mem_append.mp (by simpa [mainReads] using hp) with h | h
++        · exact Or.inl ((c1 p.1 p.2).mpr (Or.inr h))
++        · exact Or.inr h
++      · rw [hasCol_push, c2, c1]; simp [mainReads, or_assoc]
++
++theorem emitAll_cols : ∀ (es : List Expr) (s : DagState), KeyOK s →
++    KeyOK (emitAll es s).2 ∧
++      ∀ j off, HasCol (emitAll es s).2.out j off ↔ HasCol s.out j off ∨ ∃ e ∈ es, (j, off) ∈ mainReads e
++  | [], s, hs => ⟨hs, fun j off => by simp [emitAll]⟩
++  | e :: es, s, hs => by
++    obtain ⟨k1, c1⟩ := emitN_cols e s hs
++    obtain ⟨k2, c2⟩ := emitAll_cols es _ k1
++    refine ⟨k2, fun j off => ?_⟩
++    change HasCol (emitAll es (emitN e s).2).2.out j off ↔ _
++    rw [c2, c1]
++    simp [or_assoc]
++
++/-- The emitted DAG of `c` holds exactly the main leaves its expressions read. -/
++theorem hasCol_pNodes (c : Comp) (j : ℕ) (off : ℤ) :
++    HasCol (pNodes c) j off ↔ ∃ e ∈ exprs c, (j, off) ∈ mainReads e := by
++  have h0 : KeyOK ({} : DagState) := fun e id h => by simp at h
++  have := (emitAll_cols (compRoots c) {} h0).2 j off
++  simp only [HasCol, List.not_mem_nil, false_or] at this
++  simpa [HasCol, pNodes, compDag, exprs, compRoots] using this
++
++theorem mem_mainOffsets_nodes (nodes : Array Node) (j : ℕ) (off : ℤ) :
++    off ∈ mainOffsets nodes j ↔ Node.col .main j off ∈ nodes.toList := by
++  unfold mainOffsets
++  rw [List.mem_mergeSort, List.mem_dedup, List.mem_filterMap]
++  constructor
++  · rintro ⟨nd, hnd, h⟩
++    rcases nd with ⟨_ | _, i, o⟩ | _ | _ | _ | _ | _ | _ <;> simp at h
++    obtain ⟨rfl, rfl⟩ := h
++    exact hnd
++  · intro h
++    exact ⟨_, h, by simp⟩
++
++/-- **The verifier's offsets are `mainOffs`**, as sets. -/
++theorem mem_mainOffsets_iff (c : Comp) (j : ℕ) (off : ℤ) :
++    off ∈ mainOffsets (pNodes c) j ↔ off ∈ mainOffs c j := by
++  rw [mem_mainOffsets_nodes]
++  have h := hasCol_pNodes c j off
++  simp only [HasCol] at h
++  rw [h]
++  unfold mainOffs
++  rw [List.mem_dedup, List.mem_flatMap]
++  constructor
++  · rintro ⟨e, he, hr⟩; exact ⟨e, he, List.mem_filterMap.mpr ⟨(j, off), hr, by simp⟩⟩
++  · rintro ⟨e, he, hr⟩
++    obtain ⟨⟨j', o⟩, hp, hs⟩ := List.mem_filterMap.mp hr
++    by_cases hj : j' = j
++    · subst hj; simp at hs; subst hs; exact ⟨e, he, hp⟩
++    · simp [hj] at hs
++
++/-- **…and as lists up to order.** Both are duplicate-free. -/
++theorem mainOffsets_perm (c : Comp) (j : ℕ) : (mainOffsets (pNodes c) j).Perm (mainOffs c j) := by
++  have n1 : (mainOffsets (pNodes c) j).Nodup := by
++    unfold mainOffsets
++    exact (List.mergeSort_perm _ _).symm.nodup_iff.mp (List.nodup_dedup _)
++  have n2 : (mainOffs c j).Nodup := List.nodup_dedup _
++  exact (List.perm_ext_iff_of_nodup n1 n2).mpr fun off => mem_mainOffsets_iff c j off
++
++/-- **Two-sample columns are the verifier's.** For every main column of the layout (`compShape`), the
++number of offsets the verifier samples is `(mainOffs c j).length`; in particular `PeriodicCols`
++requires periodicity exactly of the columns the verifier samples at two offsets. -/
++theorem mainOffs_length_eq_shape (c : Comp) (nPub : ℕ) {j : ℕ} (hj : j < c.air.nMain) :
++    ((compShape c nPub).offs.getD j []).length = (mainOffs c j).length := by
++  have : (compShape c nPub).offs.getD j [] = mainOffsets (pNodes c) j := by
++    simp [compShape, pNodes, hj]
++  rw [this]
++  exact (mainOffsets_perm c j).length_eq
++
++/-- Every main read of `c` is of a layout column (`j < nMain`). -/
++def colsOk (c : Comp) : Bool := (exprs c).all fun e => (mainReads e).all fun p => decide (p.1 < c.air.nMain)
++
++/-- **Every column `PeriodicCols` constrains is in the layout.** With `colsOk`, a column with any
++offset is below `nMain`, so `mainOffs_length_eq_shape` covers it. -/
++theorem lt_nMain_of_mem_mainOffs {c : Comp} (h : colsOk c = true) {j : ℕ} {off : ℤ} (hoff : off ∈ mainOffs c j) :
++    j < c.air.nMain := by
++  unfold mainOffs at hoff
++  rw [List.mem_dedup, List.mem_flatMap] at hoff
++  obtain ⟨e, he, hp⟩ := hoff
++  obtain ⟨p, hp, hpe⟩ := List.mem_filterMap.mp hp
++  have hpj : p.1 = j := by by_contra hne; simp [hne] at hpe
++  have := of_decide_eq_true (List.all_eq_true.mp (List.all_eq_true.mp h e he) p hp)
++  rwa [hpj] at this
++
++end StarkedAir.Circuit.Lift
+-- 
+2.54.0 (Apple Git-157)
+
