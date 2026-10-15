@@ -21,6 +21,35 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-10-15 (session 17) — Full-chain data: `replay`; its coin sets equal Core's UTXO set at all four assumeUTXO heights
+Who: Claude (agent, Opus 5.5), with the owner (scope: the 10k-block rehearsal, data first; node resized to 64 GB)
+Roadmap: full-chain data preparation built and run to 970,000; rehearsal data ready (960,001–970,000)
+Done:
+- 3435d0f: `fetch_undo.py --ctx` reads the creating block by the prevout's height, batched (382 s -> 29 s for
+  block 969000; same bytes on ten blocks). Still ~21 s per recent block: about 1 GB of JSON.
+- c0cc5df, 859fa9f: `replay` (src/block/replay.zig, src/bin/replay.zig) and scripts/stream_blocks.py. Raw
+  blocks in, in order, each checked against its pinned header, Merkle root (mutation rule) and witness
+  commitment; per block the undo stream and `.ctx`, and coin sets in `prove-epoch`'s format. The coin
+  table is rehashed in place every capacity/4 removals.
+- 5b08f4d, f59cb81, 732b1ff: scripts/replay_run.sh (on the node, `/data/replay`, `-Dcpu=neoverse_v1`).
+- docs/design/block-data.md § Full-chain data.
+- The stwo-zig pin d34b26903 is fetchable now (stwo-zig pushed it; a fetch by SHA from the submodule URL works).
+Evidence:
+- 0–1000: undo, ctx, blocks, set-170, set-1000 byte-identical to the node-fetched and `prove-epoch`
+  files, also resumed from set-170. 0–250,000 over the tunnel: BIP30 undo streams equal testdata/undo.
+- Whole chain on the node: `hash_serialized` equals `chainparams.cpp` at 840,000 (`a2a5521b…`, 176,948,713
+  coins), 880,000 (`dbd19098…`), 910,000 (`4daf8a17…`), 935,000 (`e4b90ef9…`). Window 960,001–970,000 and
+  set-960000 (166,295,599 coins) written; 969000–969008 equal the RPC-fetched files.
+- `zig build test -Doptimize=ReleaseFast`: exit 0.
+Problems / lessons:
+- A generic aarch64 build lacks the SHA-256 instructions: 10x slower on the Graviton.
+- `std.HashMap` tombstones under churn slowed the pass tenfold past 700k (fixed: periodic `rehash`).
+- The checkpoints went to ~/replay on the node's 30 GB root disk and filled it (`WriteFailed`). Freed at
+  once (recomputable checkpoints deleted); bitcoind, whose data is on /data, stayed in sync. Moved to /data.
+- `pkill -f <pattern>` over ssh matched the ssh command line itself and killed the session: kill by PID.
+Next: the 10k-block rehearsal (`cuda-epoch --from 960001 set-960000.bin`, ~7.2 GPU-h by the survey; the host
+needs ~100 GB RAM for the epoch's raws and sets), then `chainproof verify-epoch` on it.
+
 ## 2026-10-15 (session 16) — Block prover: device witness phase 2 and batch proving; full chain's block proofs ≈ 325 H100-hours
 Who: Claude (agent, Opus 5.5), with the owner (scope: "1 and 3", merge + push when verified, GPU budget $30)
 Roadmap: GPU step 3 (CUDA): device witness phase 2 done; batch proving (`cuda-epoch`) done

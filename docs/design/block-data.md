@@ -535,11 +535,31 @@ index per input), and per epoch the previous coin set (`epoch_run.zig`).
     and `prove-epoch` files byte for byte, including a resume from `set-170.bin`.
   - **0–250,000, streamed from the node over the tunnel:** 335 s (29 MB/s), 6.8 M coins, 2.3 GB peak
     RSS. The undo streams of 91722, 91812, 91842 and 91880 equal `testdata/undo`.
-- **Next check:** Core pins `hash_serialized` at 840k (`a2a5521b…`), 880k (`dbd19098…`), 910k
-  (`4daf8a17…`) and 935k (`e4b90ef9…`) (`chainparams.cpp`). `replay` prints the same hash for every set
-  it writes, so a full pass can be checked against Core at those heights.
-- **Sizing:** about 180 M coins at the tip means roughly 20–28 GB of RAM: more than the Mac (24 GB) or the
-  node (16 GB) can spare. The whole chain is about 700 GB of raw blocks, about 7 h at the tunnel's rate.
+- **The whole chain, 0–970,000, on the node (2026-10-15):** the node resized to 64 GB / 8 vCPU,
+  `scripts/replay_run.sh` in `/data/replay` (raw blocks over local read-only RPC with the node's
+  cookie; `nice 10`).
+  - **The sets equal Core's UTXO set at all four assumeUTXO heights.** `hash_serialized` equals the
+    value `chainparams.cpp` pins:
+
+    | after block | coins | `hash_serialized` |
+    |---|---|---|
+    | 840,000 | 176,948,713 | `a2a5521b…10768f96` |
+    | 880,000 | 184,821,030 | `dbd19098…fbadcea9` |
+    | 910,000 | 167,821,142 | `4daf8a17…da2f1568` |
+    | 935,000 | 164,241,311 | `e4b90ef9…a6025050` |
+
+  - **The window 960,001–970,000** (blocks, undo, ctx: 18 GB) and `set-960000.bin` (166,295,599 coins,
+    14.4 GB, `612e36bd…`) for the 10k-block rehearsal; 969000–969008 equal the RPC-fetched files.
+  - **Time:** 700,000–970,000 (410 GB) in 6,143 s; the whole pass about 3 h of run time.
+  - **Lessons:**
+    - Build for the CPU (`-Dcpu=neoverse_v1`): with the SHA-256 instructions, 0–250,000 took 67 s
+      instead of 673 s.
+    - `std.HashMap` keeps a tombstone per removed coin; under the chain's churn they filled the table and
+      the pass slowed tenfold past 700k. The table is now rehashed in place every capacity/4 removals.
+    - The sets (up to 15.8 GB each) belong on the data volume: the checkpoints filled the node's 30 GB
+      root disk once (bitcoind was unaffected; its data is on `/data`).
+- **Sizing:** about 185 M coins at the peak: a 2^28-slot table (16 GB) plus a heap of up to ~11 GB, about
+  20 GB RSS. More than the Mac (24 GB) can spare.
 
 ## Cost (rough, to be measured)
 
