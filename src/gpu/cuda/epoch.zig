@@ -128,6 +128,7 @@ pub fn main() !void {
         } else blk: {
             const inputs = try ba.create(res.witness.Inputs);
             inputs.* = try res.witness.Inputs.ofBlock(ba, b);
+            inputs.fixed_capacity = true; // one memory plan per size class: one prepared arena each
             const in = prover.Input{ .parts = parts, .mains = mains, .config = cfg, .catalog = &catalog, .witness = inputs, .runtime = &runtime.? };
             var prepared = try prover.Prepared.initWitness(ba, parts, &catalog, cfg, .device_logup, inputs);
             defer prepared.deinit();

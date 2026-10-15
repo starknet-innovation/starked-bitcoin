@@ -196,13 +196,18 @@ fn expectColumns(what: []const u8, want: []const []const M31, got: []const commo
 
 /// Kernels vs CPU generators for one block.
 fn checkSample(host: *const Host, cat: *const catalog_mod.Catalog, airs: *const [bs.N_COMP]sb.air.ir.Air, s: sb.block.checks.Sample, profile: bs.Profile, min_log: u32, pre: bool) !void {
+    return checkSampleOpts(host, cat, airs, s, profile, min_log, pre, false);
+}
+
+fn checkSampleOpts(host: *const Host, cat: *const catalog_mod.Catalog, airs: *const [bs.N_COMP]sb.air.ir.Air, s: sb.block.checks.Sample, profile: bs.Profile, min_log: u32, pre: bool, fixed: bool) !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const x = arena.allocator();
     const b = try x.create(bs.Built);
     b.* = try bs.buildFull(x, s.raw, s.undo, s.ctx, .{ .min_log = min_log, .profile = profile });
     const parts = bs.parts(airs, b);
-    const inputs = try witness.Inputs.ofBlock(x, b);
+    var inputs = try witness.Inputs.ofBlock(x, b);
+    inputs.fixed_capacity = fixed;
     var plan = try witness.Plan.init(x, &parts, &inputs);
     // Device memory: the generated columns (tree 0, the two components) and dummies elsewhere.
     const staging0 = try x.alloc(common.Words, plan.pre_logs.len);
@@ -300,6 +305,8 @@ test "cuda witness: the AOT generators (host C++) reproduce block_sha, block_b2s
     try checkSample(&host, &cat, airs, small[0], .tiered, bs.TIERED_MIN_L, true);
     try checkSample(&host, &cat, airs, small[1], .tiered, bs.TIERED_MIN_L, true);
     try checkSample(&host, &cat, airs, small[3], .tiered, bs.TIERED_MIN_L, true);
+    // The fixed-capacity inputs layout (`cuda-epoch`): the same columns.
+    try checkSampleOpts(&host, &cat, airs, small[1], .tiered, bs.TIERED_MIN_L, true, true);
     if (std.process.getEnvVarOwned(a, "STARKED_WITNESS_SAMPLES")) |list| {
         var it = std.mem.tokenizeScalar(u8, list, ',');
         while (it.next()) |tok| try checkSample(&host, &cat, airs, small[try std.fmt.parseInt(usize, tok, 10)], .tiered, bs.TIERED_MIN_L, true);

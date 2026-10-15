@@ -692,6 +692,10 @@ pub const Inputs = struct {
     sigops: u32,
     /// `block_bytes`: the reads per block position.
     byte_mults: []const u32,
+    /// Size the inputs slot by the components' log sizes (the largest inputs they admit) instead of
+    /// this block's: every block of a size class then has the same memory plan, so a batch run
+    /// reuses one prepared device arena per class (`cuda-epoch`, `prover.Input.runtime`).
+    fixed_capacity: bool = false,
 
     /// From a built block (`block.system.buildFull`: `sha_plan`, `undo`, `raw`, `msgs`, `walk_recs`).
     pub fn ofBlock(allocator: std.mem.Allocator, built: anytype) !Inputs {
@@ -842,18 +846,26 @@ pub const Plan = struct {
                 return start;
             }
         }.f;
+        // The variable regions' sizes: this block's, or the bounds the checks above enforce.
+        const fixed = inputs.fixed_capacity;
+        const bytes_rows = @as(usize, 1) << @intCast(bytes_part.log_size);
+        const n_comps = if (fixed) shaw.capacity(sha_part.log_size) else inputs.compressions.len;
+        const n_blocks = if (fixed) b2s_rows / b2.PERIOD else inputs.blocks.len;
+        const raw_len = if (fixed) bytes_rows else inputs.raw.len;
+        const msg_words = if (fixed) bmsg.DESC_WORDS * (msg_rows / 64) else inputs.msgs.len;
+        const n_recs = if (fixed) walk_rows else inputs.walk_recs.len;
         l.sigma = region(&at, 160);
-        l.comps = region(&at, inputs.compressions.len * SHA_COMP_WORDS);
-        l.meta = region(&at, 64 + inputs.meta.len * SHA_META_WORDS);
-        l.periods = region(&at, (inputs.blocks.len + 1) * B2S_PERIOD_WORDS);
+        l.comps = region(&at, n_comps * SHA_COMP_WORDS);
+        l.meta = region(&at, 64 + n_comps * SHA_META_WORDS);
+        l.periods = region(&at, (n_blocks + 1) * B2S_PERIOD_WORDS);
         l.pre_desc = region(&at, n_pre * PRE_DESC_WORDS);
         l.pre_values = region(&at, @max(values, 1));
         l.sha_columns = region(&at, 2 * SHA_COLUMNS);
         l.b2s_columns = region(&at, 2 * B2S_COLUMNS);
-        l.raw = region(&at, @max((inputs.raw.len + 3) / 4, 1));
-        l.msgs = region(&at, inputs.msgs.len);
-        l.walk = region(&at, WALK_REC_WORDS * (1 + inputs.walk_recs.len));
-        l.mults = region(&at, inputs.byte_mults.len);
+        l.raw = region(&at, @max((raw_len + 3) / 4, 1));
+        l.msgs = region(&at, msg_words);
+        l.walk = region(&at, WALK_REC_WORDS * (1 + n_recs));
+        l.mults = region(&at, raw_len);
         l.msg_columns = region(&at, 2 * MSG_COLUMNS);
         l.walk_columns = region(&at, 2 * WALK_COLUMNS);
         l.bytes_columns = region(&at, 2 * BYTES_COLUMNS);
