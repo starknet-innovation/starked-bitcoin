@@ -49,6 +49,11 @@ pub const Epoch = struct {
     dir: []const u8,
     from: u32,
     to: u32,
+    /// Block `i`'s height: `from + i` in an epoch; listed in a standalone run (`loadHeights`).
+    heights: []const u32,
+    /// A standalone run: the testing challenge, no coin set; the proofs are not bound to an epoch
+    /// (`chainproof verify-epoch` rejects them). For measurements over chosen blocks.
+    standalone: bool = false,
     /// The chain proof's header count, and the headers 0..n−1 (and their hashes: the MMR leaves).
     n: u32,
     all: []const [80]u8,
@@ -66,7 +71,7 @@ pub const Epoch = struct {
 
     /// Block `i`'s context (height, previous MTP, ancestors).
     pub fn ctxOf(self: *const Epoch, i: usize) checks.Ctx {
-        const hh: u32 = self.from + @as(u32, @intCast(i));
+        const hh = self.heights[i];
         return .{ .height = hh, .prev_mtp = PF.prevMtp(self.all, hh), .anc = PF.ancestors(self.all, hh) };
     }
 
@@ -84,21 +89,34 @@ pub const Epoch = struct {
 
     /// Block `i`'s proof file: the proof, its public inputs and its header window.
     pub fn encode(self: *const Epoch, a: std.mem.Allocator, i: usize, b: *const bs.Built, proof: system.Proof) ![]u8 {
-        const hh: u32 = self.from + @as(u32, @intCast(i));
+        const hh = self.heights[i];
         const window = try PF.bindWindowPaths(a, self.all, &self.paths, hh);
         return PF.encode(a, &.{ .log_size = b.log_size, .profile = b.profile, .pubs = b.pubs, .proof = proof, .provenance = provenance, .chain_len = self.n, .window = window });
     }
 
     pub fn writeProof(self: *const Epoch, a: std.mem.Allocator, i: usize, bytes: []const u8) !void {
-        try S.writeFileAtomic(try pathOf(a, self.dir, "proofs", self.from + @as(u32, @intCast(i)), "sbblock"), bytes);
+        try S.writeFileAtomic(try pathOf(a, self.dir, "proofs", self.heights[i], "sbblock"), bytes);
     }
 
     pub fn writeSet(self: *const Epoch, a: std.mem.Allocator) !void {
+        if (self.standalone) return error.StandaloneHasNoSet;
         try S.writeFileAtomic(try std.fmt.allocPrint(a, "{s}/set-{d}.bin", .{ self.dir, self.to }), try EP.encodeSet(a, self.set));
     }
 };
 
 pub const Size = enum { auto, uniform, tiered };
+
+/// Block `hh`'s files: the raw block (checked against the header), its fetched undo stream and the
+/// creating transactions' indices.
+fn readBlock(a: std.mem.Allocator, all: []const [80]u8, dir: []const u8, hh: u32) !struct { raw: []const u8, undo: []const u8, ctx: []const u32 } {
+    const raw = try S.readFile(a, try pathOf(a, dir, "blocks", hh, "bin"));
+    if (raw.len < 80 or !std.mem.eql(u8, raw[0..80], &all[hh])) return error.HeaderMismatch;
+    const undo = try S.readFile(a, try pathOf(a, dir, "undo", hh, "undo"));
+    const cb = try S.readFile(a, try pathOf(a, dir, "undo", hh, "ctx"));
+    const cx = try a.alloc(u32, cb.len / 4);
+    for (cx, 0..) |*x, j| x.* = std.mem.readInt(u32, cb[4 * j ..][0..4], .little);
+    return .{ .raw = raw, .undo = undo, .ctx = cx };
+}
 
 /// Reads the epoch `from..to` from `dir` against the chain's headers (`all`, at least `n`).
 pub fn load(a: std.mem.Allocator, all: []const [80]u8, n: u32, dir: []const u8, from: From, to: u32) !Epoch {
@@ -106,6 +124,7 @@ pub fn load(a: std.mem.Allocator, all: []const [80]u8, n: u32, dir: []const u8, 
     if (from.height > to) return error.EmptyEpoch;
     const init = try loadInit(a, from);
     const nb = to - from.height + 1;
+    const heights = try a.alloc(u32, nb);
     const raws = try a.alloc([]const u8, nb);
     const undos = try a.alloc([]const u8, nb);
     const ctxs = try a.alloc([]const u32, nb);
@@ -113,24 +132,41 @@ pub fn load(a: std.mem.Allocator, all: []const [80]u8, n: u32, dir: []const u8, 
     const commits = try a.alloc([32]u8, nb);
     for (0..nb) |i| {
         const hh: u32 = from.height + @as(u32, @intCast(i));
-        raws[i] = try S.readFile(a, try pathOf(a, dir, "blocks", hh, "bin"));
-        if (raws[i].len < 80 or !std.mem.eql(u8, raws[i][0..80], &all[hh])) return error.HeaderMismatch;
-        undos[i] = try S.readFile(a, try pathOf(a, dir, "undo", hh, "undo"));
-        const cb = try S.readFile(a, try pathOf(a, dir, "undo", hh, "ctx"));
-        const cx = try a.alloc(u32, cb.len / 4);
-        for (cx, 0..) |*x, j| x.* = std.mem.readInt(u32, cb[4 * j ..][0..4], .little);
-        ctxs[i] = cx;
+        heights[i] = hh;
+        const f = try readBlock(a, all, dir, hh);
+        raws[i] = f.raw;
+        undos[i] = f.undo;
+        ctxs[i] = f.ctx;
         var h1: [32]u8 = undefined;
         std.crypto.hash.sha2.Sha256.hash(raws[i][0..80], &h1, .{});
         std.crypto.hash.sha2.Sha256.hash(&h1, &hashes[i], .{});
         // The commitment is of the in-circuit stream, which holds the creating transactions' indices.
-        std.crypto.hash.blake2.Blake2s256.hash(try bs.undoStreamOf(a, raws[i], undos[i], cx, hh), &commits[i], .{});
+        std.crypto.hash.blake2.Blake2s256.hash(try bs.undoStreamOf(a, raws[i], undos[i], f.ctx, hh), &commits[i], .{});
     }
     // The final set is computed first: the seed binds it.
     const set = try EP.coinSetFrom(a, init.set, from.height, raws);
     const ch = EP.challenge(EP.seedFrom(from.height, to, init.digest, try EP.setDigest(a, set), hashes, commits));
+    return .{ .dir = dir, .from = from.height, .to = to, .heights = heights, .n = n, .all = all, .paths = try pathsOf(a, all, n), .raws = raws, .undos = undos, .ctxs = ctxs, .set = set, .ch = ch };
+}
+
+/// A standalone run over the listed heights (any order): each block under the testing challenge.
+pub fn loadHeights(a: std.mem.Allocator, all: []const [80]u8, n: u32, dir: []const u8, heights: []const u32) !Epoch {
+    if (heights.len == 0) return error.EmptyEpoch;
+    const raws = try a.alloc([]const u8, heights.len);
+    const undos = try a.alloc([]const u8, heights.len);
+    const ctxs = try a.alloc([]const u32, heights.len);
+    for (heights, 0..) |hh, i| {
+        if (hh >= n or all.len < n) return error.HeightBeyondChain;
+        const f = try readBlock(a, all, dir, hh);
+        raws[i] = f.raw;
+        undos[i] = f.undo;
+        ctxs[i] = f.ctx;
+    }
+    return .{ .dir = dir, .from = heights[0], .to = heights[heights.len - 1], .heights = heights, .standalone = true, .n = n, .all = all, .paths = try pathsOf(a, all, n), .raws = raws, .undos = undos, .ctxs = ctxs, .set = &.{}, .ch = coin.Challenge.testing() };
+}
+
+fn pathsOf(a: std.mem.Allocator, all: []const [80]u8, n: u32) !HT.Paths {
     const tree = try a.alloc(HT.Words, n);
     for (tree, all[0..n]) |*h, *hd| h.* = HT.blockHash(hd);
-    const paths = try HT.Paths.init(a, tree);
-    return .{ .dir = dir, .from = from.height, .to = to, .n = n, .all = all, .paths = paths, .raws = raws, .undos = undos, .ctxs = ctxs, .set = set, .ch = ch };
+    return HT.Paths.init(a, tree);
 }

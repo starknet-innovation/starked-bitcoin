@@ -5,6 +5,11 @@
 //!
 //!   zig-out/bin/cuda-epoch <headers.bin> <dir> <to> <file.sbchain> [--from <a> <prev-set.bin>]
 //!                          [--test-strength] [--uniform | --tiered] [--verify] [--mock]
+//!   zig-out/bin/cuda-epoch <headers.bin> <dir> - <file.sbchain> --heights <list> [options]
+//!
+//! `--heights`: a standalone run over the heights listed in a file (one per line), each block under
+//! the testing challenge and without a coin set: proofs not bound to an epoch, for measurements
+//! over chosen blocks (e.g. a sample per size class).
 //!
 //! Per process: the AIRs, the AOT catalog, a `NativeRuntime` (CUDA context and AOT loader, kept
 //! open: no per-block context creation or module load) and the twiddles of each size. Per block:
@@ -28,7 +33,7 @@ const S = sb.recursion.store;
 const M31 = core.fields.m31.M31;
 
 fn usage() noreturn {
-    std.debug.print("usage: cuda-epoch <headers.bin> <dir> <to> <file.sbchain> [--from <a> <prev-set.bin>] [--test-strength] [--uniform | --tiered] [--verify] [--mock]\n", .{});
+    std.debug.print("usage: cuda-epoch <headers.bin> <dir> <to> <file.sbchain> [--from <a> <prev-set.bin>] [--test-strength] [--uniform | --tiered] [--verify] [--mock]\n       cuda-epoch <headers.bin> <dir> - <file.sbchain> --heights <list> [options]\n", .{});
     std.process.exit(2);
 }
 
@@ -51,15 +56,18 @@ pub fn main() !void {
     var weak = false;
     var verify = false;
     var mock = false;
+    var heights_path: ?[]const u8 = null;
     var i: usize = 5;
     while (i < args.len) : (i += 1) {
         const x = args[i];
         if (std.mem.eql(u8, x, "--test-strength")) weak = true else if (std.mem.eql(u8, x, "--tiered")) size = .tiered else if (std.mem.eql(u8, x, "--uniform")) size = .uniform else if (std.mem.eql(u8, x, "--verify")) verify = true else if (std.mem.eql(u8, x, "--mock")) mock = true else if (std.mem.eql(u8, x, "--from") and i + 2 < args.len) {
             from = .{ .height = try std.fmt.parseInt(u32, args[i + 1], 10), .prev_set = args[i + 2] };
             i += 2;
+        } else if (std.mem.eql(u8, x, "--heights") and i + 1 < args.len) {
+            heights_path = args[i + 1];
+            i += 1;
         } else usage();
     }
-    const to = try std.fmt.parseInt(u32, args[3], 10);
     const dir = args[2];
     var timer = try std.time.Timer.start();
 
@@ -69,14 +77,19 @@ pub fn main() !void {
     const raw_headers = try S.readFile(a, args[1]);
     if (raw_headers.len % 80 != 0) return error.BadHeaderFile;
     const all = std.mem.bytesAsSlice([80]u8, raw_headers);
-    const ep = try ER.load(a, @alignCast(all), n, dir, from, to);
+    const ep = if (heights_path) |path| blk: {
+        var list = std.ArrayList(u32).empty;
+        var it = std.mem.tokenizeAny(u8, try S.readFile(a, path), " \r\n\t,");
+        while (it.next()) |tok| try list.append(a, try std.fmt.parseInt(u32, tok, 10));
+        break :blk try ER.loadHeights(a, @alignCast(all), n, dir, list.items);
+    } else try ER.load(a, @alignCast(all), n, dir, from, try std.fmt.parseInt(u32, args[3], 10));
     const fri = if (weak) PF.testFri() else PF.productionFri();
     const airs = try a.create([bs.N_COMP]sb.air.ir.Air);
     airs.* = try bs.parseAirs(a);
     var catalog = try res.catalog.Catalog.init(a, airs);
     defer catalog.deinit();
     std.fs.cwd().makePath(try std.fmt.allocPrint(a, "{s}/proofs", .{dir})) catch {};
-    std.debug.print("epoch {d}..{d}: {d} blocks loaded, challenge derived ({d:.1} s); {s}, {s}\n", .{ ep.from, ep.to, ep.count(), secs(timer.lap()), if (weak) "test strength" else "production", if (mock) "--mock (CPU proofs)" else "device proofs, one CUDA session" });
+    std.debug.print("{s} {d}..{d}: {d} blocks loaded ({d:.1} s); {s}, {s}\n", .{ if (ep.standalone) "standalone (testing challenge)" else "epoch", ep.from, ep.to, ep.count(), secs(timer.lap()), if (weak) "test strength" else "production", if (mock) "--mock (CPU proofs)" else "device proofs, one CUDA session" });
 
     var runtime: ?cuda.runtime.NativeRuntime = if (mock) null else try cuda.runtime.NativeRuntime.open(&prover.accepted_sms);
     defer if (runtime) |*r| r.close() catch |err| std.debug.print("cuda-epoch: runtime close failed: {s}\n", .{@errorName(err)});
@@ -142,11 +155,11 @@ pub fn main() !void {
         c.value_ptr.n += 1;
         c.value_ptr.total += secs(t_total);
         c.value_ptr.device += secs(t_device);
-        std.debug.print("{d} {d} {s} {d:.3} {d:.3} {d:.3} {d:.3} {d}{s}\n", .{ ep.from + k, b.log_size, @tagName(b.profile), secs(t_witness), secs(t_plans), secs(t_device), secs(t_total), bytes.len, if (verify) " verified" else "" });
+        std.debug.print("{d} {d} {s} {d:.3} {d:.3} {d:.3} {d:.3} {d}{s}\n", .{ ep.heights[k], b.log_size, @tagName(b.profile), secs(t_witness), secs(t_plans), secs(t_device), secs(t_total), bytes.len, if (verify) " verified" else "" });
     }
-    try ep.writeSet(a);
+    if (!ep.standalone) try ep.writeSet(a);
     const elapsed = secs(run.read());
-    std.debug.print("epoch {d}..{d}: {d} block proofs ({d:.1} MB), coin set of {d} coins written; {d:.1} s, {d:.3} s/block\n", .{ ep.from, ep.to, ep.count(), @as(f64, @floatFromInt(proof_bytes)) / 1e6, ep.set.len, elapsed, elapsed / @as(f64, @floatFromInt(ep.count())) });
+    std.debug.print("{s} {d}..{d}: {d} block proofs ({d:.1} MB), coin set of {d} coins{s}; {d:.1} s, {d:.3} s/block\n", .{ if (ep.standalone) "standalone" else "epoch", ep.from, ep.to, ep.count(), @as(f64, @floatFromInt(proof_bytes)) / 1e6, ep.set.len, if (ep.standalone) " (none written)" else " written", elapsed, elapsed / @as(f64, @floatFromInt(ep.count())) });
     var it = classes.iterator();
     while (it.next()) |e| {
         const v = e.value_ptr.*;
