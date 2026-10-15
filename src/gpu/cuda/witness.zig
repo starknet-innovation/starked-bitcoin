@@ -9,12 +9,17 @@
 //! | `sha_columns` | one thread per row | `block_sha`'s 144 columns | `witness.columns` (shaRole), `block/sha.zig Extra` |
 //! | `b2s` | one thread per row (recomputes its period's G steps) | `block_b2s`'s 312 columns | `hash/blake2s_air.zig fillPeriod`, `block/commit.zig B2sFill` |
 //! | `pre` | one thread per (row, column), one launch per tree-0 cohort | every preprocessed column | `ir.PreCol.at` |
+//! | `bytes` | one thread per row | `block_bytes`' 12 columns | `block/bytes.zig generate` (multiplicities from the host) |
+//! | `msg` | one thread per row (binary search for its message) | `block_msg`'s 38 columns | `block/msg.zig generate`, `setUses`, `merkle.addHeaderUses` |
+//! | `walk` | one thread per row (its record from the host's sequential pass) | `block_walk`'s 51 columns | `block/walk.zig columns` |
 //!
 //! Ingress uploads only their small inputs into one slot (`witness_inputs`, `Layout`): the SHA-256
 //! round constants and Blake2s σ table, per `block_sha` period its compression (input state, block)
 //! and final `Meta`, per `block_b2s` period its compression input (chaining value, block, counter,
-//! last flag) plus one dummy, the preprocessed column descriptors and periodic values, and the
-//! device address of every generated column (pointer tables). The SHA word trace (3 words per row)
+//! last flag) plus one dummy, the preprocessed column descriptors and periodic values, the block's
+//! bytes, the reads per block position (`bytes.multiplicities`), one descriptor per hash message (`msg.descriptors`), the walker's row records
+//! (`walk.Rec`, 16 bytes per walked row), and the device address of every generated column
+//! (pointer tables). The SHA word trace (3 words per row)
 //! lives in `witness_scratch` (`.trace_generation` only).
 //!
 //! Each kernel is one fixed AOT `witness` product under stwo-zig's native-authenticated identity
@@ -33,6 +38,9 @@ const spec = sb.sha256;
 const bsha = sb.block.sha;
 const commit = sb.block.commit;
 const b2 = sb.blake2s_air;
+const bmsg = sb.block.msg;
+const bwalk = sb.block.walk;
+const bbytes = sb.block.bytes;
 const P = @import("stwo_core").fields.m31.Modulus;
 
 pub const version: u32 = 1;
@@ -46,12 +54,16 @@ pub const max_columns_per_launch: u32 = 65_535;
 
 pub const SHA_COLUMNS: usize = bsha.N_MAIN;
 pub const B2S_COLUMNS: usize = 312;
+pub const MSG_COLUMNS: usize = bmsg.N_MAIN;
+pub const BYTES_COLUMNS: usize = bbytes.N_MAIN;
+pub const WALK_COLUMNS: usize = bwalk.N_MAIN;
+const WALK_REC_WORDS = 4;
 const SHA_COMP_WORDS = 24;
 const SHA_META_WORDS = 6;
 const B2S_PERIOD_WORDS = 27;
 const PRE_DESC_WORDS = 8;
 
-pub const Which = enum { b2s, pre, sha_columns, sha_words };
+pub const Which = enum { b2s, bytes, msg, pre, sha_columns, sha_words, walk };
 
 /// One fixed kernel and its AOT identity (as `reorder.Kernel`).
 pub const Kernel = struct {
@@ -92,19 +104,22 @@ pub const Kernel = struct {
     }
 };
 
-/// The four kernels, in manifest (label) order.
+/// The seven kernels, in manifest (label) order.
 pub const Kernels = struct {
     b2s: Kernel,
+    bytes: Kernel,
+    msg: Kernel,
     pre: Kernel,
     sha_columns: Kernel,
     sha_words: Kernel,
+    walk: Kernel,
 
     pub fn deinit(self: *Kernels, allocator: std.mem.Allocator) void {
-        inline for (.{ &self.b2s, &self.pre, &self.sha_columns, &self.sha_words }) |k| k.deinit(allocator);
+        inline for (.{ &self.b2s, &self.bytes, &self.msg, &self.pre, &self.sha_columns, &self.sha_words, &self.walk }) |k| k.deinit(allocator);
     }
 
-    pub fn all(self: *const Kernels) [4]*const Kernel {
-        return .{ &self.b2s, &self.pre, &self.sha_columns, &self.sha_words };
+    pub fn all(self: *const Kernels) [7]*const Kernel {
+        return .{ &self.b2s, &self.bytes, &self.msg, &self.pre, &self.sha_columns, &self.sha_words, &self.walk };
     }
 };
 
@@ -119,6 +134,9 @@ fn contract(allocator: std.mem.Allocator, which: Which) ![]u8 {
         .sha_words => std.fmt.allocPrint(allocator, "starked-bitcoin/witness-sha-words/v{d};args=ktab(meta region: K[64], then meta),comps,count,words,rows;per 72-row period p: Words.place(comps[p] or zero dummy) -> a,e,w at words[0|rows|2rows + r];grid=periods/{d};threads={d}", .{ version, period_threads, period_threads }),
         .sha_columns => std.fmt.allocPrint(allocator, "starked-bitcoin/witness-sha-columns/v{d};args=words,meta,count,columns,rows;block_sha 144 natural columns: sha256 columns(shaRole, K=meta[0..64]) + Extra(meta[64+6p]: mid,blk,flags,lid,rid,ym);columns=u64 pointers;grid=rows/{d};threads={d}", .{ version, threads, threads }),
         .b2s => std.fmt.allocPrint(allocator, "starked-bitcoin/witness-b2s/v{d};args=sigma,periods,count,columns,rows;block_b2s 312 natural columns: fillPeriod(periods[min(p,count)]: h8,m16,tlo,thi,last) + B2sFill extras;columns=u64 pointers;grid=rows/{d};threads={d}", .{ version, threads, threads }),
+        .bytes => std.fmt.allocPrint(allocator, "starked-bitcoin/witness-bytes/v{d};args=raw,mults,len,columns,rows;block_bytes 12 natural columns: bytes.generate (pos, byte, bits, active, mult) from raw (bytes, little-endian words) and mults[r] for r < len;columns=u64 pointers;grid=rows/{d};threads={d}", .{ version, threads, threads }),
+        .msg => std.fmt.allocPrint(allocator, "starked-bitcoin/witness-msg/v{d};args=raw,msgs,count,columns,rows;block_msg 38 natural columns: msg.generate + setUses + merkle.addHeaderUses from raw (bytes, little-endian words) and msgs[{d}m]: row,id,flags(hdr,wtx,seg,split),i,a,w,l,dl,prev_dl;columns=u64 pointers;grid=rows/{d};threads={d}", .{ version, bmsg.DESC_WORDS, threads, threads }),
+        .walk => std.fmt.allocPrint(allocator, "starked-bitcoin/witness-walk/v{d};args=raw,recs,count,columns,rows;block_walk 51 natural columns: walk.columns from raw and recs[0]=sigops, recs[4+4r..]: w0(pos,kind,li,lk,first),rem,val,sums;columns=u64 pointers;grid=rows/{d};threads={d}", .{ version, threads, threads }),
         .pre => std.fmt.allocPrint(allocator, "starked-bitcoin/witness-pre/v{d};args=desc,values,first,log_size,columns;out[i]=PreCol.at(i,2^log) natural;desc=kind,k,voff,vlen,ptr_lo,ptr_hi,0,0;grid=rows/{d},columns;threads={d}", .{ version, threads, threads }),
     };
 }
@@ -150,11 +168,17 @@ pub fn kernels(allocator: std.mem.Allocator) !Kernels {
     var out: Kernels = undefined;
     out.b2s = try kernelOf(allocator, .b2s);
     errdefer out.b2s.deinit(allocator);
+    out.bytes = try kernelOf(allocator, .bytes);
+    errdefer out.bytes.deinit(allocator);
+    out.msg = try kernelOf(allocator, .msg);
+    errdefer out.msg.deinit(allocator);
     out.pre = try kernelOf(allocator, .pre);
     errdefer out.pre.deinit(allocator);
     out.sha_columns = try kernelOf(allocator, .sha_columns);
     errdefer out.sha_columns.deinit(allocator);
     out.sha_words = try kernelOf(allocator, .sha_words);
+    errdefer out.sha_words.deinit(allocator);
+    out.walk = try kernelOf(allocator, .walk);
     return out;
 }
 
@@ -445,6 +469,176 @@ fn sourceOf(allocator: std.mem.Allocator, which: Which, name: []const u8) ![]u8 
             \\}}
             \\
         , .{ version, header, threads, name }),
+        .bytes => std.fmt.allocPrint(allocator,
+            \\// starked-bitcoin device witness v{d} (src/gpu/cuda/witness.zig): block_bytes columns.
+            \\// Row r: POS = r; for r < len its byte raw[r], the byte's bits, ACTIVE and MULT = mults[r]
+            \\// (the reads of position r); zero past the block (block/bytes.zig generate).
+            \\{s}
+            \\extern "C" __global__ void __launch_bounds__({d}) {s}(
+            \\    const unsigned *raw, const unsigned *mults, unsigned len, const u64 *columns, unsigned rows) {{
+            \\    const unsigned r = blockIdx.x * blockDim.x + threadIdx.x;
+            \\    if (r >= rows) return;
+            \\#define PUT(c, v) (((unsigned *)columns[(c)])[r] = (v))
+            \\    const unsigned active = r < len ? 1u : 0u;
+            \\    const unsigned b = active ? (raw[r >> 2u] >> (8u * (r & 3u))) & 0xffu : 0u;
+            \\    PUT(0u, r);
+            \\    PUT(1u, b);
+            \\    for (unsigned i = 0; i < 8u; ++i) PUT(2u + i, (b >> i) & 1u);
+            \\    PUT(10u, active);
+            \\    PUT(11u, active ? mults[r] : 0u);
+            \\#undef PUT
+            \\}}
+            \\
+        , .{ version, header, threads, name }),
+        .msg => std.fmt.allocPrint(allocator,
+            \\// starked-bitcoin device witness v{d} (src/gpu/cuda/witness.zig): block_msg columns.
+            \\// Row r belongs to the last message m with msgs[10m] <= r (row, id, flags hdr|wtx|seg|split,
+            \\// i, a, w, l, dl, prev_dl); past the last message's padded length the row is padding (NIL,
+            \\// the last message's tuple, IDX counting on). As block/msg.zig generate, setUses and
+            \\// merkle.addHeaderUses: data bytes at a + j (split txid: a + j, a + 2 + j, l + j - (dl - 4)),
+            \\// 0x80, zeros, the 64-bit bit length; derived EZ, Z, INV, CONT, SW, ENDD; the running DLC.
+            \\{s}{s}
+            \\extern "C" __global__ void __launch_bounds__({d}) {s}(
+            \\    const unsigned *raw, const unsigned *msgs, unsigned count, const u64 *columns, unsigned rows) {{
+            \\    const unsigned r = blockIdx.x * blockDim.x + threadIdx.x;
+            \\    if (r >= rows) return;
+            \\#define PUT(c, v) (((unsigned *)columns[(c)])[r] = (v))
+            \\    unsigned lo = 0u, hi = count - 1u;
+            \\    while (lo < hi) {{ const unsigned mid = (lo + hi + 1u) / 2u; if (msgs[(u64)mid * {d}u] <= r) lo = mid; else hi = mid - 1u; }}
+            \\    const unsigned *d = msgs + (u64)lo * {d}u;
+            \\    const unsigned id = d[1], fl = d[2], ti = d[3], ta = d[4], tw = d[5], tl = d[6], dl = d[7], prev = d[8];
+            \\    const unsigned padded = (dl + 9u + 63u) / 64u * 64u;
+            \\    const unsigned j = r - d[0];
+            \\    const unsigned mt = (fl >> 3u) & 1u;
+            \\    unsigned v[38];
+            \\    for (unsigned c = 0; c < 38u; ++c) v[c] = 0u;
+            \\    v[10] = fl & 1u; v[11] = (fl >> 1u) & 1u; v[12] = (fl >> 2u) & 1u;
+            \\    v[13] = ti; v[14] = ta; v[15] = tw; v[16] = tl; v[9] = mt; v[17] = id; v[18] = j;
+            \\    const unsigned nil = j < padded ? 0u : 1u;
+            \\    if (!nil) {{
+            \\        if (j == 0u) v[5] = 1u;
+            \\        unsigned byte = 0u;
+            \\        if (j < dl) {{
+            \\            v[0] = 1u;
+            \\            const unsigned piece = !mt ? 0u : (j < 4u ? 0u : (j < dl - 4u ? 1u : 2u));
+            \\            const unsigned pos = piece == 0u ? ta + j : (piece == 1u ? ta + 2u + j : tl + j - (dl - 4u));
+            \\            v[19] = pos;
+            \\            byte = (raw[pos >> 2u] >> (8u * (pos & 3u))) & 0xffu;
+            \\            v[6u + piece] = 1u;
+            \\        }} else if (j == dl) {{
+            \\            v[1] = 1u; byte = 0x80u;
+            \\        }} else if (j < padded - 8u) {{
+            \\            v[2] = 1u;
+            \\        }} else {{
+            \\            v[3] = 1u;
+            \\            const u64 bits = 8ull * (u64)dl;
+            \\            byte = (unsigned)((bits >> (8u * (padded - 1u - j))) & 0xffull);
+            \\        }}
+            \\        v[20] = byte;
+            \\        for (unsigned b = 0; b < 8u; ++b) v[21u + b] = (byte >> b) & 1u;
+            \\        v[35] = j >= dl ? dl : prev;
+            \\    }} else {{
+            \\        v[4] = 1u;
+            \\        v[35] = dl;
+            \\    }}
+            \\    // Derived (msg.zig Derived.rows).
+            \\    const unsigned pos = v[19];
+            \\    const unsigned tl3 = m31_add(tl, 3u);
+            \\    const unsigned ez = m31_add(m31_mul(mt, m31_add(m31_add(m31_mul(v[6], m31_sub(j, 3u)), m31_mul(v[7], m31_add(m31_sub(pos, tw), 1u))), m31_mul(v[8], m31_sub(pos, tl3)))),
+            \\                       m31_mul(m31_sub(1u, mt), m31_sub(pos, tl3)));
+            \\    const unsigned z = ez == 0u ? 1u : 0u;
+            \\    v[29] = ez; v[30] = z; v[31] = ez == 0u ? 0u : m31_inv(ez);
+            \\    v[32] = m31_mul(v[0], m31_sub(1u, z));
+            \\    v[33] = m31_mul(m31_mul(z, mt), m31_add(v[6], v[7]));
+            \\    v[34] = m31_sub(m31_mul(v[0], z), v[33]);
+            \\    // Uses (setUses, merkle.addHeaderUses: the header's eight words read twice).
+            \\    if (!nil) {{
+            \\        v[36] = ((r & 3u) == 3u ? 1u : 0u) + ((r >= 39u && r <= 67u && ((r - 39u) & 3u) == 0u) ? 1u : 0u);
+            \\        v[37] = ((r & 63u) == 63u && v[3]) ? 1u : 0u;
+            \\    }}
+            \\    for (unsigned c = 0; c < 38u; ++c) PUT(c, v[c]);
+            \\#undef PUT
+            \\}}
+            \\
+        , .{ version, header, m31, threads, name, bmsg.DESC_WORDS, bmsg.DESC_WORDS }),
+        .walk => std.fmt.allocPrint(allocator,
+            \\// starked-bitcoin device witness v{d} (src/gpu/cuda/witness.zig): block_walk columns.
+            \\// Row r < count expands record recs[4 + 4r] (w0: pos 0-23, kind 24-25 (op, ln, dt, inf),
+            \\// li 26-27, lk code 28-29 (0, 1, 2, 4), first 30; rem; val = dr or lacc; sums) with its byte
+            \\// raw[pos] as block/walk.zig columns: the row's state, the automaton step, the zero tests and
+            \\// their inverses. Rows past count are padding (SUMS = recs[0], ZA = 1, INVD = INVR = 1/(-1)).
+            \\{s}{s}
+            \\extern "C" __global__ void __launch_bounds__({d}) {s}(
+            \\    const unsigned *raw, const unsigned *recs, unsigned count, const u64 *columns, unsigned rows) {{
+            \\    const unsigned r = blockIdx.x * blockDim.x + threadIdx.x;
+            \\    if (r >= rows) return;
+            \\#define PUT(c, v) (((unsigned *)columns[(c)])[r] = (v))
+            \\    unsigned v[51];
+            \\    for (unsigned c = 0; c < 51u; ++c) v[c] = 0u;
+            \\    const unsigned inv_m1 = m31_inv(STARKED_P - 1u);
+            \\    if (r >= count) {{
+            \\        v[49] = recs[0]; v[30] = 1u; v[33] = inv_m1; v[35] = inv_m1;
+            \\    }} else {{
+            \\        const unsigned *rc = recs + 4ull + 4ull * (u64)r;
+            \\        const unsigned w0 = rc[0], rem = rc[1], val = rc[2], sums = rc[3];
+            \\        const unsigned pos = w0 & 0xffffffu, kind = (w0 >> 24u) & 3u, li = (w0 >> 26u) & 3u;
+            \\        const unsigned lkc = (w0 >> 28u) & 3u, first = (w0 >> 30u) & 1u;
+            \\        const unsigned lk = lkc == 3u ? 4u : lkc;
+            \\        const unsigned b = (raw[pos >> 2u] >> (8u * (pos & 3u))) & 0xffu;
+            \\        v[0] = 1u; v[1] = first; v[2] = pos; v[3] = rem; v[4] = b;
+            \\        v[34] = rem == 1u ? 1u : 0u;
+            \\        v[35] = rem == 1u ? 0u : m31_inv(m31_sub(rem, 1u));
+            \\        // The next state (walk.zig step): kind, dr, lk, li, lacc.
+            \\        unsigned nk = 0u, ndr = 0u, nlk = 0u, nli = 0u, nlacc = 0u;
+            \\        if (kind == 0u) {{
+            \\            v[5] = 1u;
+            \\            v[9] = b < 0x4cu ? b : 0u;
+            \\            v[10] = b == 0x4cu; v[11] = b == 0x4du; v[12] = b == 0x4eu;
+            \\            v[13] = (b == 0xacu || b == 0xadu) ? 1u : ((b == 0xaeu || b == 0xafu) ? 20u : 0u);
+            \\            v[14] = (b >= 1u && b < 0x4cu) ? 1u : 0u;
+            \\            if (b >= 1u && b < 0x4cu) {{ nk = 2u; ndr = b; }}
+            \\            else if (b >= 0x4cu && b <= 0x4eu) {{ nk = 1u; nlk = b == 0x4cu ? 1u : (b == 0x4du ? 2u : 4u); }}
+            \\        }} else if (kind == 1u) {{
+            \\            v[6] = 1u;
+            \\            v[15u + li] = 1u;
+            \\            if (lk == 1u) v[19] = 1u; else if (lk == 2u) v[20] = 1u; else v[21] = 1u;
+            \\            v[22] = val;
+            \\            const u64 acc2 = (u64)val + ((u64)b << (8u * li));
+            \\            if (li + 1u == lk) {{
+            \\                v[25] = 1u; v[26] = 1u;
+            \\                if (lk == 4u && b >= 2u) {{ v[28] = 1u; nk = 3u; }}
+            \\                else {{
+            \\                    v[27] = 1u;
+            \\                    if (lk == 4u) v[29] = 1u;
+            \\                    if (acc2 == 0ull) nk = 0u; else {{ nk = 2u; ndr = (unsigned)acc2; }}
+            \\                }}
+            \\            }} else {{ nk = 1u; nlk = lk; nli = li + 1u; nlacc = (unsigned)acc2; }}
+            \\            const unsigned a2 = (unsigned)(acc2 % (u64)STARKED_P);
+            \\            v[24] = a2; v[30] = a2 == 0u ? 1u : 0u; v[31] = a2 == 0u ? 0u : m31_inv(a2);
+            \\        }} else if (kind == 2u) {{
+            \\            v[7] = 1u; v[23] = val;
+            \\            if (val == 1u) nk = 0u; else {{ nk = 2u; ndr = val - 1u; }}
+            \\        }} else {{
+            \\            v[8] = 1u; nk = 3u;
+            \\        }}
+            \\        if (kind != 1u) {{ v[30] = 1u; v[31] = 0u; }}
+            \\        v[32] = v[23] == 1u ? 1u : 0u;
+            \\        v[33] = v[23] == 1u ? 0u : m31_inv(m31_sub(v[23], 1u));
+            \\        v[36] = nk == 0u; v[37] = nk == 1u; v[38] = nk == 2u; v[39] = nk == 3u;
+            \\        if (nk == 2u) v[40] = ndr;
+            \\        if (nk == 1u) {{
+            \\            v[41] = nlacc;
+            \\            v[42u + nli] = 1u;
+            \\            if (nlk == 1u) v[46] = 1u; else if (nlk == 2u) v[47] = 1u; else v[48] = 1u;
+            \\        }}
+            \\        v[50] = first ? 0u : 1u;
+            \\        v[49] = sums;
+            \\    }}
+            \\    for (unsigned c = 0; c < 51u; ++c) PUT(c, v[c]);
+            \\#undef PUT
+            \\}}
+            \\
+        , .{ version, header, m31, threads, name }),
         .pre => std.fmt.allocPrint(allocator,
             \\// starked-bitcoin device witness v{d} (src/gpu/cuda/witness.zig): preprocessed columns.
             \\// Column first + blockIdx.y (desc[8 c..]: kind, k, values offset, period, address lo, hi),
@@ -478,27 +672,47 @@ fn sourceOf(allocator: std.mem.Allocator, which: Which, name: []const u8) ![]u8 
 
 /// The block's witness inputs (host, small): what the generators read.
 pub const Inputs = struct {
-    /// Part indices of `block_sha` and `block_b2s`.
+    /// Part indices of `block_sha`, `block_b2s`, `block_msg` and `block_walk`.
     sha_component: usize,
     b2s_component: usize,
+    msg_component: usize,
+    walk_component: usize,
+    bytes_component: usize,
     /// `block_sha`: one compression and its final `Meta` per used period.
     compressions: []const shaw.Compression,
     meta: []const bsha.Meta,
     /// `block_b2s`: the undo stream's blocks and the chaining value after each.
     blocks: []const commit.Block,
     chain: []const [8]u32,
+    /// `block_msg` and `block_walk`: the block, the message descriptors (`msg.descriptors`), the
+    /// walker's row records (`walk.plan`) and its sigop total.
+    raw: []const u8,
+    msgs: []const u32,
+    walk_recs: []const bwalk.Rec,
+    sigops: u32,
+    /// `block_bytes`: the reads per block position.
+    byte_mults: []const u32,
 
-    /// From a built block (`block.system.buildFull`, `Built.sha_plan` and `Built.undo`).
+    /// From a built block (`block.system.buildFull`: `sha_plan`, `undo`, `raw`, `msgs`, `walk_recs`).
     pub fn ofBlock(allocator: std.mem.Allocator, built: anytype) !Inputs {
         const C = sb.block.system.C;
         const bl = try commit.blocks(allocator, built.undo);
         return .{
             .sha_component = C.sha,
             .b2s_component = C.b2s,
+            .msg_component = C.msg,
+            .walk_component = C.walk,
+            .bytes_component = C.bytes,
             .compressions = built.sha_plan.compressions,
             .meta = built.sha_plan.meta,
             .blocks = bl,
             .chain = try commit.chain(allocator, bl),
+            .raw = built.raw,
+            .msgs = try bmsg.descriptors(allocator, built.msgs),
+            .walk_recs = built.walk_recs,
+            .sigops = built.sigops,
+            // A full build (`skip_device_columns` off) keeps only the reads.
+            .byte_mults = if (built.byte_mults.len == built.raw.len) built.byte_mults else try bbytes.multiplicities(allocator, built.raw.len, built.reads),
         };
     }
 };
@@ -513,6 +727,13 @@ pub const Layout = struct {
     pre_values: usize = 0,
     sha_columns: usize = 0,
     b2s_columns: usize = 0,
+    raw: usize = 0,
+    msgs: usize = 0,
+    walk: usize = 0,
+    mults: usize = 0,
+    msg_columns: usize = 0,
+    walk_columns: usize = 0,
+    bytes_columns: usize = 0,
     words: usize = 0,
 };
 
@@ -521,9 +742,15 @@ pub const Plan = struct {
     layout: Layout,
     sha_log: u32,
     b2s_log: u32,
+    msg_log: u32,
+    walk_log: u32,
+    bytes_log: u32,
     /// First tree-1 column of each generated component.
     sha_first: usize,
     b2s_first: usize,
+    msg_first: usize,
+    walk_first: usize,
+    bytes_first: usize,
     /// Tree-1 columns whose values the device writes (the host skips them).
     generated_main: []bool,
     /// Every preprocessed definition in tree-0 order, and its periodic value offset.
@@ -533,22 +760,50 @@ pub const Plan = struct {
     scratch_words: usize,
 
     pub fn init(allocator: std.mem.Allocator, parts: []const system.Part, inputs: *const Inputs) !Plan {
-        if (inputs.sha_component >= parts.len or inputs.b2s_component >= parts.len) return error.InvalidWitnessPlan;
+        for ([_]usize{ inputs.sha_component, inputs.b2s_component, inputs.msg_component, inputs.walk_component, inputs.bytes_component }) |c| if (c >= parts.len) return error.InvalidWitnessPlan;
+        const bytes_part = parts[inputs.bytes_component];
+        if (bytes_part.air.n_main != BYTES_COLUMNS or bytes_part.log_size >= 30) return error.InvalidWitnessPlan;
+        if (inputs.raw.len == 0 or inputs.raw.len > @as(usize, 1) << @intCast(bytes_part.log_size) or inputs.byte_mults.len != inputs.raw.len) return error.InvalidWitnessPlan;
+        for (inputs.byte_mults) |m| if (m >= P) return error.InvalidWitnessPlan;
         const sha_part = parts[inputs.sha_component];
         const b2s_part = parts[inputs.b2s_component];
-        if (sha_part.air.n_main != SHA_COLUMNS or b2s_part.air.n_main != B2S_COLUMNS) return error.InvalidWitnessPlan;
+        const msg_part = parts[inputs.msg_component];
+        const walk_part = parts[inputs.walk_component];
+        if (sha_part.air.n_main != SHA_COLUMNS or b2s_part.air.n_main != B2S_COLUMNS or msg_part.air.n_main != MSG_COLUMNS or walk_part.air.n_main != WALK_COLUMNS) return error.InvalidWitnessPlan;
         const sha_rows = @as(usize, 1) << @intCast(sha_part.log_size);
         const b2s_rows = @as(usize, 1) << @intCast(b2s_part.log_size);
+        const msg_rows = @as(usize, 1) << @intCast(msg_part.log_size);
+        const walk_rows = @as(usize, 1) << @intCast(walk_part.log_size);
+        if (msg_rows >= 1 << 30 or walk_rows >= 1 << 30 or inputs.raw.len >= 1 << 24) return error.InvalidWitnessPlan;
+        // Messages: at least the header, in row order, each padded length inside the column.
+        const n_msgs = inputs.msgs.len / bmsg.DESC_WORDS;
+        if (n_msgs == 0 or inputs.msgs.len != n_msgs * bmsg.DESC_WORDS) return error.InvalidWitnessPlan;
+        {
+            var end: usize = 0;
+            for (0..n_msgs) |m| {
+                const d = inputs.msgs[bmsg.DESC_WORDS * m ..][0..bmsg.DESC_WORDS];
+                if (d[0] != end) return error.InvalidWitnessPlan;
+                end += (@as(usize, d[7]) + 9 + 63) / 64 * 64;
+            }
+            if (end >= msg_rows) return error.InvalidWitnessPlan;
+        }
+        if (inputs.walk_recs.len >= walk_rows) return error.InvalidWitnessPlan;
         if (inputs.compressions.len != inputs.meta.len or inputs.compressions.len > shaw.capacity(sha_part.log_size)) return error.InvalidWitnessPlan;
         if (inputs.blocks.len == 0 or inputs.blocks.len != inputs.chain.len or inputs.blocks.len * b2.PERIOD > b2s_rows) return error.InvalidWitnessPlan;
         if (sha_rows >= 1 << 30 or b2s_rows >= 1 << 30) return error.InvalidWitnessPlan;
         var n_main: usize = 0;
         var sha_first: usize = 0;
         var b2s_first: usize = 0;
+        var msg_first: usize = 0;
+        var walk_first: usize = 0;
+        var bytes_first: usize = 0;
         var n_pre: usize = 0;
         for (parts, 0..) |p, i| {
             if (i == inputs.sha_component) sha_first = n_main;
             if (i == inputs.b2s_component) b2s_first = n_main;
+            if (i == inputs.msg_component) msg_first = n_main;
+            if (i == inputs.walk_component) walk_first = n_main;
+            if (i == inputs.bytes_component) bytes_first = n_main;
             n_main += p.air.n_main;
             n_pre += p.air.preprocessed.len;
         }
@@ -557,6 +812,9 @@ pub const Plan = struct {
         @memset(generated, false);
         @memset(generated[sha_first..][0..SHA_COLUMNS], true);
         @memset(generated[b2s_first..][0..B2S_COLUMNS], true);
+        @memset(generated[msg_first..][0..MSG_COLUMNS], true);
+        @memset(generated[walk_first..][0..WALK_COLUMNS], true);
+        @memset(generated[bytes_first..][0..BYTES_COLUMNS], true);
         const defs = try allocator.alloc(ir.PreCol, n_pre);
         errdefer allocator.free(defs);
         const logs = try allocator.alloc(u32, n_pre);
@@ -592,14 +850,27 @@ pub const Plan = struct {
         l.pre_values = region(&at, @max(values, 1));
         l.sha_columns = region(&at, 2 * SHA_COLUMNS);
         l.b2s_columns = region(&at, 2 * B2S_COLUMNS);
+        l.raw = region(&at, @max((inputs.raw.len + 3) / 4, 1));
+        l.msgs = region(&at, inputs.msgs.len);
+        l.walk = region(&at, WALK_REC_WORDS * (1 + inputs.walk_recs.len));
+        l.mults = region(&at, inputs.byte_mults.len);
+        l.msg_columns = region(&at, 2 * MSG_COLUMNS);
+        l.walk_columns = region(&at, 2 * WALK_COLUMNS);
+        l.bytes_columns = region(&at, 2 * BYTES_COLUMNS);
         l.words = at;
         return .{
             .inputs = inputs,
             .layout = l,
             .sha_log = sha_part.log_size,
             .b2s_log = b2s_part.log_size,
+            .msg_log = msg_part.log_size,
+            .walk_log = walk_part.log_size,
+            .bytes_log = bytes_part.log_size,
             .sha_first = sha_first,
             .b2s_first = b2s_first,
+            .msg_first = msg_first,
+            .walk_first = walk_first,
+            .bytes_first = bytes_first,
             .generated_main = generated,
             .pre_defs = defs,
             .pre_logs = logs,
@@ -683,6 +954,31 @@ pub const Plan = struct {
             if (dst.len != b2s_rows) return error.InvalidWitnessPlan;
             out[l.b2s_columns + 2 * c] = @truncate(dst.address);
             out[l.b2s_columns + 2 * c + 1] = @truncate(dst.address >> 32);
+        }
+        // The block's bytes as little-endian words.
+        @memcpy(std.mem.sliceAsBytes(out[l.raw..])[0..in.raw.len], in.raw);
+        @memcpy(out[l.msgs..][0..in.msgs.len], in.msgs);
+        out[l.walk] = in.sigops;
+        const recs: [*]const u32 = @ptrCast(in.walk_recs.ptr);
+        @memcpy(out[l.walk + WALK_REC_WORDS ..][0 .. WALK_REC_WORDS * in.walk_recs.len], recs[0 .. WALK_REC_WORDS * in.walk_recs.len]);
+        @memcpy(out[l.mults..][0..in.byte_mults.len], in.byte_mults);
+        const msg_rows = @as(usize, 1) << @intCast(self.msg_log);
+        const walk_rows = @as(usize, 1) << @intCast(self.walk_log);
+        const bytes_rows = @as(usize, 1) << @intCast(self.bytes_log);
+        for (staging[1][self.bytes_first..][0..BYTES_COLUMNS], 0..) |dst, c| {
+            if (dst.len != bytes_rows) return error.InvalidWitnessPlan;
+            out[l.bytes_columns + 2 * c] = @truncate(dst.address);
+            out[l.bytes_columns + 2 * c + 1] = @truncate(dst.address >> 32);
+        }
+        for (staging[1][self.msg_first..][0..MSG_COLUMNS], 0..) |dst, c| {
+            if (dst.len != msg_rows) return error.InvalidWitnessPlan;
+            out[l.msg_columns + 2 * c] = @truncate(dst.address);
+            out[l.msg_columns + 2 * c + 1] = @truncate(dst.address >> 32);
+        }
+        for (staging[1][self.walk_first..][0..WALK_COLUMNS], 0..) |dst, c| {
+            if (dst.len != walk_rows) return error.InvalidWitnessPlan;
+            out[l.walk_columns + 2 * c] = @truncate(dst.address);
+            out[l.walk_columns + 2 * c + 1] = @truncate(dst.address >> 32);
         }
         return out;
     }
@@ -781,6 +1077,42 @@ pub const Bound = struct {
             };
             var pointers = args.pointers();
             try self.kernels.b2s.launch(session, .{ (b2s_rows + threads - 1) / threads, 1, 1 }, threads, &pointers);
+        }
+        {
+            const rows: u32 = @as(u32, 1) << @intCast(plan.msg_log);
+            var args = Args{
+                .p0 = try ptr(session, b.inputs, l.raw, (in.raw.len + 3) / 4),
+                .p1 = try ptr(session, b.inputs, l.msgs, in.msgs.len),
+                .n = @intCast(in.msgs.len / bmsg.DESC_WORDS),
+                .p2 = try ptr(session, b.inputs, l.msg_columns, 2 * MSG_COLUMNS),
+                .rows = rows,
+            };
+            var pointers = args.pointers();
+            try self.kernels.msg.launch(session, .{ (rows + threads - 1) / threads, 1, 1 }, threads, &pointers);
+        }
+        {
+            const rows: u32 = @as(u32, 1) << @intCast(plan.walk_log);
+            var args = Args{
+                .p0 = try ptr(session, b.inputs, l.raw, (in.raw.len + 3) / 4),
+                .p1 = try ptr(session, b.inputs, l.walk, WALK_REC_WORDS * (1 + in.walk_recs.len)),
+                .n = @intCast(in.walk_recs.len),
+                .p2 = try ptr(session, b.inputs, l.walk_columns, 2 * WALK_COLUMNS),
+                .rows = rows,
+            };
+            var pointers = args.pointers();
+            try self.kernels.walk.launch(session, .{ (rows + threads - 1) / threads, 1, 1 }, threads, &pointers);
+        }
+        {
+            const rows: u32 = @as(u32, 1) << @intCast(plan.bytes_log);
+            var args = Args{
+                .p0 = try ptr(session, b.inputs, l.raw, (in.raw.len + 3) / 4),
+                .p1 = try ptr(session, b.inputs, l.mults, in.byte_mults.len),
+                .n = @intCast(in.raw.len),
+                .p2 = try ptr(session, b.inputs, l.bytes_columns, 2 * BYTES_COLUMNS),
+                .rows = rows,
+            };
+            var pointers = args.pointers();
+            try self.kernels.bytes.launch(session, .{ (rows + threads - 1) / threads, 1, 1 }, threads, &pointers);
         }
         const desc = try ptr(session, b.inputs, l.pre_desc, plan.pre_defs.len * PRE_DESC_WORDS);
         const values = try ptr(session, b.inputs, l.pre_values, 1);

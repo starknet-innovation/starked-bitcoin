@@ -32,11 +32,21 @@ pub fn generate(a: std.mem.Allocator, log_size: u32, raw: []const u8, reads: []c
         for (0..8) |i| cols[BIT0 + i][r] = M31.fromCanonical((raw[r] >> @intCast(i)) & 1);
         cols[ACTIVE][r] = M31.one();
     }
-    for (reads) |p| {
-        if (p >= raw.len) return error.ReadOutOfRange;
-        cols[MULT][p] = cols[MULT][p].add(M31.one());
-    }
+    for (try multiplicities(a, raw.len, reads), 0..) |m, r| cols[MULT][r] = M31.fromCanonical(m);
     return cols;
+}
+
+/// The reads per block position (the `MULT` column on the active rows; the device witness
+/// generates the other columns from the block itself, src/gpu/cuda/witness.zig `bytes`).
+pub fn multiplicities(a: std.mem.Allocator, len: usize, reads: []const u32) ![]u32 {
+    const out = try a.alloc(u32, len);
+    @memset(out, 0);
+    for (reads) |p| {
+        if (p >= len) return error.ReadOutOfRange;
+        out[p] += 1;
+    }
+    for (out) |m| if (m >= @import("stwo_core").fields.m31.Modulus) return error.ReadOutOfRange;
+    return out;
 }
 
 /// The test reader's columns: `(pos, byte, use)` per read, padded with unused rows.

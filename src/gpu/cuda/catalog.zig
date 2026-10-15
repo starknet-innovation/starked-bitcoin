@@ -10,7 +10,7 @@
 //!
 //! Each AIR with lookups also has a LogUp fraction kernel (`logup.zig`), a `witness` entry under
 //! stwo-zig's native-authenticated identity, the system one natural → storage reorder kernel
-//! (`reorder.zig`) and the four device witness generators (`witness.zig`, the last `witness`
+//! (`reorder.zig`) and the seven device witness generators (`witness.zig`, the last `witness`
 //! entries).
 //!
 //! `gpu/cuda_aot/` holds the generated sources, an `aot_manifest.json` that stwo-zig's CUDA build
@@ -314,7 +314,7 @@ pub const Catalog = struct {
                 \\
             , .{ label, reorder.abi_schema_name, r.kernel_name, r.cache_key, r.semantic_hash, &r.program_identity, file, reorder.identity_scheme, reorder.semantic_contract, if (self.witness == null) "" else "," });
         }
-        // The device witness generators: labels `starked_witness_{b2s,pre,sha_columns,sha_words}_*`
+        // The device witness generators: labels `starked_witness_{b2s,bytes,msg,pre,sha_columns,sha_words,walk}_*`
         // sort after `starked_reorder_*`, in this order.
         if (self.witness) |*ws| for (ws.all(), 0..) |g, n| {
             const file = try g.fileName(allocator);
@@ -426,7 +426,7 @@ test "cuda catalog: generated sources and manifest match gpu/cuda_aot (drift che
         if (catalog.witness) |*ws| for (ws.all()) |g| try dir.writeFile(.{ .sub_path = try g.fileName(a), .data = g.source });
         try dir.writeFile(.{ .sub_path = "aot_manifest.json", .data = manifest });
         try dir.writeFile(.{ .sub_path = "catalog.json", .data = try catalog.sidecar(a) });
-        std.debug.print("cuda catalog: wrote {d} constraint, {d} LogUp, {d} reorder and {d} witness kernels to {s}\n", .{ catalog.bodies.len, catalog.logupCount(), @intFromBool(catalog.reorder != null), 4 * @as(usize, @intFromBool(catalog.witness != null)), directory });
+        std.debug.print("cuda catalog: wrote {d} constraint, {d} LogUp, {d} reorder and {d} witness kernels to {s}\n", .{ catalog.bodies.len, catalog.logupCount(), @intFromBool(catalog.reorder != null), if (catalog.witness) |*ws| ws.all().len else 0, directory });
         return;
     }
     var dir = std.fs.cwd().openDir(directory, .{ .iterate = true }) catch |e| {
@@ -470,7 +470,7 @@ test "cuda catalog: generated sources and manifest match gpu/cuda_aot (drift che
             return error.CudaCatalogDrift;
         }
     }
-    std.debug.print("cuda catalog: {d} constraint, {d} LogUp, {d} reorder and {d} witness kernels ({d} KiB of CUDA) match {s}\n", .{ catalog.bodies.len, catalog.logupCount(), @intFromBool(catalog.reorder != null), 4 * @as(usize, @intFromBool(catalog.witness != null)), total / 1024, directory });
+    std.debug.print("cuda catalog: {d} constraint, {d} LogUp, {d} reorder and {d} witness kernels ({d} KiB of CUDA) match {s}\n", .{ catalog.bodies.len, catalog.logupCount(), @intFromBool(catalog.reorder != null), if (catalog.witness) |*ws| ws.all().len else 0, total / 1024, directory });
 }
 
 // The catalog's own kernels (parametric, wide trace offsets, constants from the live program)
