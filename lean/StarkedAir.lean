@@ -145,6 +145,8 @@ import StarkedAir.Circuit.Channel
 import StarkedAir.Circuit.Transcript
 import StarkedAir.Circuit.EndToEnd
 import StarkedAir.Circuit.Lift
+import StarkedAir.Circuit.LiftOffs
+import StarkedAir.Circuit.LiftGuard
 import StarkedAir.Block.LiftW
 import StarkedAir.Circuit.Pow
 import StarkedAir.Circuit.Oods

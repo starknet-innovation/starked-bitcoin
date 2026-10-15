@@ -21,8 +21,12 @@ vanishes at every own row. It is a named hypothesis per component, not an axiom.
   two distinct offsets:
   - a two-offset column is periodic, so its wrapped reads agree with the own-size trace;
   - a one-offset column is re-indexed, so the one row that reads each cell sees the big trace's value.
-- Columns read at three or more offsets are where lifting can fail (the rotation counterexample). For
-  those components (W) is evidence from `lifting_wrapcheck.py`, to be proven later.
+- Columns read at three or more offsets are where lifting can fail (the rotation counterexample).
+  `LiftGuard.lean` proves (W) when every wrapped read of such a column is guarded; for the remaining
+  components (W) is evidence from `lifting_wrapcheck.py`.
+- `LiftOffs.lean` proves that `mainOffs` is the verifier's offset set (`Composition.mainOffsets` over
+  the emitted DAG), so `PeriodicCols` asks periodicity of exactly the columns the verifier samples
+  twice.
 
 **Results.**
 - `liftExtract`: the per-component lemma.
@@ -196,16 +200,13 @@ theorem evalR_congr {R : Type*} [CommRing R] (cst : ℕ → R) (pub : ℕ → R)
     simp only [Expr.evalR]
     rw [iha fun j o h => hmain j o (by simp [mainReads, h])]
 
-/-- Two valuations agreeing on every preprocessed read, on main reads at the offsets `c` uses, on
-interaction reads at offset `0`, and on the last batch at `−1`, give the same terms. -/
-theorem terms_congr (c : Comp) (α z share : QM) (pub : ℕ → QM) (v v' : Val)
-    (hpre : ∀ j off, v.leaf .pre j off = v'.leaf .pre j off)
-    (hmain : ∀ j off, off ∈ mainOffs c j → v.leaf .main j off = v'.leaf .main j off)
+/-- Two valuations on which every expression of `c` has the same value, agreeing on interaction
+reads at offset `0` and on the last batch at `−1`, give the same terms. -/
+theorem terms_congr_exprs (c : Comp) (α z share : QM) (pub : ℕ → QM) (v v' : Val)
+    (hE : ∀ e ∈ exprs c, e.evalR cstQ v.leaf pub = e.evalR cstQ v'.leaf pub)
     (hi0 : ∀ k, v.inter k 0 = v'.inter k 0)
     (hi1 : c.lookups ≠ [] → ∀ k < 4, v.inter (4 * (nBatch c - 1) + k) (-1) = v'.inter (4 * (nBatch c - 1) + k) (-1)) :
     terms c α z share pub v = terms c α z share pub v' := by
-  have hE : ∀ e ∈ exprs c, e.evalR cstQ v.leaf pub = e.evalR cstQ v'.leaf pub := fun e he =>
-    evalR_congr _ _ _ _ hpre e fun j off h => hmain j off (mem_mainOffs he h)
   have hlk : ∀ j, ∀ e ∈ (lk c j).mult :: (lk c j).vals, e.evalR cstQ v.leaf pub = e.evalR cstQ v'.leaf pub := by
     intro j e he
     unfold lk at he
@@ -239,6 +240,17 @@ theorem terms_congr (c : Comp) (α z share : QM) (pub : ℕ → QM) (v v' : Val)
       beta_reduce
       rw [h 0 (by norm_num), h 1 (by norm_num), h 2 (by norm_num), h 3 (by norm_num)]
     rw [hm, hd, hS, hp]
+
+/-- Two valuations agreeing on every preprocessed read, on main reads at the offsets `c` uses, on
+interaction reads at offset `0`, and on the last batch at `−1`, give the same terms. -/
+theorem terms_congr (c : Comp) (α z share : QM) (pub : ℕ → QM) (v v' : Val)
+    (hpre : ∀ j off, v.leaf .pre j off = v'.leaf .pre j off)
+    (hmain : ∀ j off, off ∈ mainOffs c j → v.leaf .main j off = v'.leaf .main j off)
+    (hi0 : ∀ k, v.inter k 0 = v'.inter k 0)
+    (hi1 : c.lookups ≠ [] → ∀ k < 4, v.inter (4 * (nBatch c - 1) + k) (-1) = v'.inter (4 * (nBatch c - 1) + k) (-1)) :
+    terms c α z share pub v = terms c α z share pub v' :=
+  terms_congr_exprs c α z share pub v v'
+    (fun e he => evalR_congr _ _ _ _ hpre e fun j off h => hmain j off (mem_mainOffs he h)) hi0 hi1
 
 /-! ### (W) for components whose columns have at most two offsets -/
 
