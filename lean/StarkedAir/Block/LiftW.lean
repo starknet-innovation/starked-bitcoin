@@ -17,7 +17,9 @@
     multiplicity vanishes there, but the batch's denominators still see the values);
   - sha, b2s: 96 and 194 three-or-more-offset columns, 250 and 258 wrapped instances.
 
-`hashSysW_of_hard` reduces (W) for the whole system to the four assumed components.
+`hashSysW_of_hard4` reduces (W) for the whole system to the four assumed components (own sizes at
+least `2^5`). `hashSysW_of_hard` keeps its statement from before the guarded proofs: (W) for the whole
+system from seven assumed components, at any own size.
 -/
 import StarkedAir.Block.Link
 import StarkedAir.Circuit.LiftGuard
@@ -59,11 +61,11 @@ names (`lt_nMain_of_mem_mainOffs`, `mainOffs_length_eq_shape`). -/
 theorem hashSys_colsOk : ∀ i < hashSys.m, colsOk (hashSys.comp i) = true := by decide +kernel
 
 /-- The components whose (W) is assumed: msg, sha, b2s, coin. -/
-def hardW : List ℕ := [2, 3, 11, 14]
+def hardW4 : List ℕ := [2, 3, 11, 14]
 
 /-- **(W) for the whole block system from the four assumed components.** -/
-theorem hashSysW_of_hard {N : ℕ} {Ls : ℕ → ℕ} (hLs : ∀ i < hashSys.m, Ls i ≤ N) (h5 : ∀ i < hashSys.m, 5 ≤ Ls i)
-    (hard : ∀ i ∈ hardW, hashSysW i N (Ls i)) : ∀ i < hashSys.m, LiftOK (hashSys.comp i) N (Ls i) := by
+theorem hashSysW_of_hard4 {N : ℕ} {Ls : ℕ → ℕ} (hLs : ∀ i < hashSys.m, Ls i ≤ N) (h5 : ∀ i < hashSys.m, 5 ≤ Ls i)
+    (hard : ∀ i ∈ hardW4, hashSysW i N (Ls i)) : ∀ i < hashSys.m, LiftOK (hashSys.comp i) N (Ls i) := by
   intro i hi
   have hm : hashSys.m = 15 := rfl
   have hL := hLs i hi
@@ -84,6 +86,35 @@ theorem hashSysW_of_hard {N : ℕ} {Ls : ℕ → ℕ} (hLs : ∀ i < hashSys.m, 
   · exact hard 11 (by decide)
   · exact w_fpwalk h5i hL
   · exact w_urec h5i hL
+  · exact hard 14 (by decide)
+
+/-- The components whose (W) `hashSysW_of_hard` assumes (its statement as first merged): msg, sha,
+b2msg, b2s, fpwalk, urec, coin. -/
+def hardW : List ℕ := [2, 3, 10, 11, 12, 13, 14]
+
+/-- **(W) for the whole block system from the seven assumed components**, at any own size (the
+statement as first merged; `hashSysW_of_hard4` assumes four, for own sizes at least `2^5`). -/
+theorem hashSysW_of_hard {N : ℕ} {Ls : ℕ → ℕ} (hLs : ∀ i < hashSys.m, Ls i ≤ N)
+    (hard : ∀ i ∈ hardW, hashSysW i N (Ls i)) : ∀ i < hashSys.m, LiftOK (hashSys.comp i) N (Ls i) := by
+  intro i hi
+  have hm : hashSys.m = 15 := rfl
+  have hL := hLs i hi
+  rw [hm] at hi
+  interval_cases i
+  · exact w_bytes hL
+  · exact w_fields hL
+  · exact hard 2 (by decide)
+  · exact hard 3 (by decide)
+  · exact w_merkle hL
+  · exact w_tables hL
+  · exact w_walk hL
+  · exact w_ctx hL
+  · exact w_wmerkle hL
+  · exact w_undo hL
+  · exact hard 10 (by decide)
+  · exact hard 11 (by decide)
+  · exact hard 12 (by decide)
+  · exact hard 13 (by decide)
   · exact hard 14 (by decide)
 
 end StarkedAir.Block
