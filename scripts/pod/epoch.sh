@@ -48,7 +48,7 @@ case ${1:-} in
     ;;
   sample-check)
     max=${SAMPLE_CPU_MAX_L:-19}
-    awk -v m="$max" '$2 ~ /^[0-9]+$/ && $2 <= m {print $1}' "$LOGS/sample-dev.log" > "$WORK/sample-small.txt"
+    awk -v m="$max" '$1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ && $2 <= m {print $1}' "$LOGS/sample-dev.log" > "$WORK/sample-small.txt"
     d=$WORK/sample-cpu; rm -rf "$d"; mkdir -p "$d"; ln -s "$DATA/sample/blocks" "$d/blocks"; ln -s "$DATA/sample/undo" "$d/undo"
     timed sample-cpu "$DATA/headers.bin" "$d" - "$DATA/chain.sbchain" --heights "$WORK/sample-small.txt" --mock || exit 1
     for f in "$d"/proofs/*.sbblock; do cmp "$f" "$WORK/sample-dev/proofs/$(basename "$f")" || { echo "   DIFFER: $(basename "$f")"; exit 1; }; done
