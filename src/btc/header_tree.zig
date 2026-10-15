@@ -187,6 +187,72 @@ pub fn inclusionProof(a: std.mem.Allocator, leaves: []const Words, h: usize) ![]
     return steps.toOwnedSlice(a);
 }
 
+/// Every leaf's inclusion proof in `mmrRoot(leaves)` from one fold: the merges are recorded as a
+/// tree (each element is merged once), and `proof(h)` walks from leaf `h` to the root. It equals
+/// `inclusionProof(leaves, h)` (a fold per call) in O(log n) per leaf.
+pub const Paths = struct {
+    n: usize,
+    hashes: []Words,
+    parent: []u32,
+    sibling: []u32,
+    /// The node is its parent's left child (its step's sibling is on the right).
+    left: []bool,
+
+    const none = std.math.maxInt(u32);
+
+    pub fn init(a: std.mem.Allocator, leaves: []const Words) !Paths {
+        if (leaves.len == 0 or leaves.len >= 1 << 30) return error.OutOfRange;
+        const cap = 2 * leaves.len;
+        var self = Paths{ .n = leaves.len, .hashes = try a.alloc(Words, cap), .parent = try a.alloc(u32, cap), .sibling = try a.alloc(u32, cap), .left = try a.alloc(bool, cap) };
+        @memset(self.parent, none);
+        @memcpy(self.hashes[0..leaves.len], leaves);
+        const E = struct { w: Words, id: u32 };
+        const Ctx = struct {
+            p: *Paths,
+            next: *u32,
+            fn merge(c: @This(), l: E, r: E) anyerror!E {
+                const k = c.next.*;
+                c.next.* += 1;
+                const w = node(l.w, r.w);
+                c.p.hashes[k] = w;
+                c.p.parent[l.id] = k;
+                c.p.parent[r.id] = k;
+                c.p.sibling[l.id] = r.id;
+                c.p.sibling[r.id] = l.id;
+                c.p.left[l.id] = true;
+                c.p.left[r.id] = false;
+                return .{ .w = w, .id = k };
+            }
+        };
+        const items = try a.alloc(E, leaves.len);
+        defer a.free(items);
+        for (items, leaves, 0..) |*e, l, i| e.* = .{ .w = l, .id = @intCast(i) };
+        const ones = try a.alloc(usize, leaves.len);
+        defer a.free(ones);
+        @memset(ones, 1);
+        var next: u32 = @intCast(leaves.len);
+        _ = try mmrFold(E, a, items, ones, Ctx{ .p = &self, .next = &next }, Ctx.merge);
+        return self;
+    }
+
+    pub fn deinit(self: *Paths, a: std.mem.Allocator) void {
+        a.free(self.hashes);
+        a.free(self.parent);
+        a.free(self.sibling);
+        a.free(self.left);
+    }
+
+    pub fn proof(self: *const Paths, a: std.mem.Allocator, h: usize) ![]Step {
+        if (h >= self.n) return error.OutOfRange;
+        var steps = std.ArrayList(Step).empty;
+        errdefer steps.deinit(a);
+        var x: u32 = @intCast(h);
+        while (self.parent[x] != none) : (x = self.parent[x])
+            try steps.append(a, .{ .sibling = self.hashes[self.sibling[x]], .left = !self.left[x] });
+        return steps.toOwnedSlice(a);
+    }
+};
+
 /// Checks an inclusion proof of `leaf` against the root `t`.
 pub fn verifyInclusion(leaf: Words, steps: []const Step, t: Words) bool {
     var x = leaf;
@@ -487,4 +553,26 @@ test "header tree: inclusion sides match the Lean spec (Spec/Mmr.lean, n <= 64)"
         count += 1;
     }
     try std.testing.expectEqual(@as(usize, 64 * 65 / 2), count);
+}
+
+test "header tree: Paths.proof equals inclusionProof for every leaf" {
+    const a = std.testing.allocator;
+    for ([_]usize{ 1, 2, 3, 5, 8, 13, 64, 100 }) |n| {
+        const leaves = try a.alloc(Words, n);
+        defer a.free(leaves);
+        for (leaves, 0..) |*l, i| l.* = .{ @intCast(i), 7, 0, 0, 0, 0, 0, @intCast(n) };
+        var paths = try Paths.init(a, leaves);
+        defer paths.deinit(a);
+        for (0..n) |h| {
+            const want = try inclusionProof(a, leaves, h);
+            defer a.free(want);
+            const got = try paths.proof(a, h);
+            defer a.free(got);
+            try std.testing.expectEqual(want.len, got.len);
+            for (want, got) |x, y| {
+                try std.testing.expectEqual(x.left, y.left);
+                try std.testing.expectEqualSlices(u32, &x.sibling, &y.sibling);
+            }
+        }
+    }
 }

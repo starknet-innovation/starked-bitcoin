@@ -424,7 +424,8 @@ fn pathOf(a: std.mem.Allocator, dir: []const u8, sub: []const u8, h: u32, ext: [
     return std.fmt.allocPrint(a, "{s}/{s}/{d}.{s}", .{ dir, sub, h, ext });
 }
 
-const SizeChoice = enum { auto, uniform, tiered };
+const ER = sb.block.epoch_run;
+const SizeChoice = ER.Size;
 
 /// An epoch's start: genesis, or block `height` from the coin set after `height − 1` (`prev_set`).
 const EpochFrom = struct {
@@ -437,73 +438,29 @@ const EpochFrom = struct {
     weak: bool = false,
 };
 
-/// The initial set of an epoch from a previous set: decoded, strictly sorted, created before `from`.
-fn loadInit(a: std.mem.Allocator, from: EpochFrom) !struct { set: []const EP.Coin, hash: ?[32]u8, digest: ?[32]u8 } {
-    const path = from.prev_set orelse {
-        if (from.height != 0) return error.PrevSetRequired;
-        return .{ .set = &.{}, .hash = null, .digest = null };
-    };
-    if (from.height == 0) return error.GenesisHasNoPrevSet;
-    const set = try EP.decodeSet(a, try S.readFile(a, path));
-    if (!EP.sortedStrict(set)) return error.SetNotSorted;
-    if (!EP.createdBefore(set, from.height)) return error.PrevSetTooNew;
-    return .{ .set = set, .hash = EP.hashSerialized(set), .digest = try EP.setDigest(a, set) };
-}
-
 fn proveEpoch(gpa: std.mem.Allocator, a: std.mem.Allocator, headers_path: []const u8, dir: []const u8, to: u32, chain_path: []const u8, weak: bool, from: EpochFrom) !void {
     var c = try S.Chain.decode(gpa, a, try S.readFile(a, chain_path));
     const n = c.headers();
     c.deinit();
     const all = try loadHeaderFile(a, headers_path);
-    if (to >= n or all.len < n) return error.HeightBeyondChain;
-    if (from.height > to) return error.EmptyEpoch;
-    const init = try loadInit(a, from);
-    const nb = to - from.height + 1;
-    const raws = try a.alloc([]const u8, nb);
-    const undos = try a.alloc([]const u8, nb);
-    const ctxs = try a.alloc([]const u32, nb);
-    const hashes = try a.alloc([32]u8, nb);
-    const commits = try a.alloc([32]u8, nb);
-    for (0..nb) |i| {
-        const hh: u32 = from.height + @as(u32, @intCast(i));
-        raws[i] = try S.readFile(a, try pathOf(a, dir, "blocks", hh, "bin"));
-        if (!std.mem.eql(u8, raws[i][0..80], &all[hh])) return error.HeaderMismatch;
-        undos[i] = try S.readFile(a, try pathOf(a, dir, "undo", hh, "undo"));
-        const cb = try S.readFile(a, try pathOf(a, dir, "undo", hh, "ctx"));
-        const cx = try a.alloc(u32, cb.len / 4);
-        for (cx, 0..) |*x, j| x.* = std.mem.readInt(u32, cb[4 * j ..][0..4], .little);
-        ctxs[i] = cx;
-        var h1: [32]u8 = undefined;
-        std.crypto.hash.sha2.Sha256.hash(raws[i][0..80], &h1, .{});
-        std.crypto.hash.sha2.Sha256.hash(&h1, &hashes[i], .{});
-        // The commitment is of the in-circuit stream, which holds the creating transactions' indices.
-        std.crypto.hash.blake2.Blake2s256.hash(try BS.undoStreamOf(a, raws[i], undos[i], cx, hh), &commits[i], .{});
-    }
-    // The final set is computed first: the seed binds it.
-    const set = try EP.coinSetFrom(a, init.set, from.height, raws);
-    const ch = EP.challenge(EP.seedFrom(from.height, to, init.digest, try EP.setDigest(a, set), hashes, commits));
-    const tree = try a.alloc(HT.Words, n);
-    for (tree, all[0..n]) |*h, *hd| h.* = HT.blockHash(hd);
+    const ep = try ER.load(a, all, @intCast(n), dir, .{ .height = from.height, .prev_set = from.prev_set }, to);
     const airs = try BS.parseAirs(a);
     const fri = blockFri(weak);
     const pdir = try std.fmt.allocPrint(a, "{s}/proofs", .{dir});
     std.fs.cwd().makePath(pdir) catch {};
     var timer = try std.time.Timer.start();
-    for (0..nb) |i| {
+    for (0..ep.count()) |i| {
         var arena = std.heap.ArenaAllocator.init(gpa);
         defer arena.deinit();
         const ba = arena.allocator();
         const hh: u32 = from.height + @as(u32, @intCast(i));
-        const ctx = sb.block.checks.Ctx{ .height = hh, .prev_mtp = PF.prevMtp(all, hh), .anc = PF.ancestors(all, hh) };
-        const b = try BS.buildFull(ba, raws[i], undos[i], ctx, .{ .chal = ch, .ctx = ctxs[i], .profile = if (from.size == .tiered) .tiered else .uniform, .auto = from.size == .auto });
+        const b = try ep.build(ba, i, from.size, false);
         const proof = try PF.prove(ba, &airs, &b, fri);
-        const window = try PF.bindWindow(ba, all, tree, hh);
-        const bytes = try PF.encode(ba, &.{ .log_size = b.log_size, .profile = b.profile, .pubs = b.pubs, .proof = proof, .provenance = "prove-epoch", .chain_len = @intCast(n), .window = window });
-        try S.writeFileAtomic(try pathOf(ba, dir, "proofs", hh, "sbblock"), bytes);
+        try ep.writeProof(ba, i, try ep.encode(ba, i, &b, proof));
         if (hh % 50 == 0 or hh == to) std.debug.print("block {d}: proved ({d:.0}s so far)\n", .{ hh, secs(timer.read()) });
     }
-    try S.writeFileAtomic(try std.fmt.allocPrint(a, "{s}/set-{d}.bin", .{ dir, to }), try EP.encodeSet(a, set));
-    std.debug.print("epoch {d}..{d}: {d} block proofs, coin set of {d} coins written\n", .{ from.height, to, nb, set.len });
+    try ep.writeSet(a);
+    std.debug.print("epoch {d}..{d}: {d} block proofs, coin set of {d} coins written\n", .{ from.height, to, ep.count(), ep.set.len });
 }
 
 fn verifyEpoch(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8, chain_path: []const u8, dir: []const u8, to: u32, min_work: u256, weak: bool, from: EpochFrom) !void {
@@ -517,7 +474,7 @@ fn verifyEpoch(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8
     if (min_work != 0 and s.work < min_work) return error.InsufficientWork;
     std.debug.print("chain proof verified: headers 0..{d} ({d:.1}s)\n", .{ s.headers - 1, secs(timer.lap()) });
     if (from.height > to) return error.EmptyEpoch;
-    const init = try loadInit(a, from);
+    const init = try ER.loadInit(a, .{ .height = from.height, .prev_set = from.prev_set });
     const airs = try BS.parseAirs(a);
     const nb = to - from.height + 1;
     const files = try a.alloc(PF.File, nb);
@@ -606,7 +563,7 @@ fn verifyEpochTree(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []cons
     var forest = try BF.Forest.decode(gpa, a, try S.readFile(a, try std.fmt.allocPrint(a, "{s}/forest-{d}.bin", .{ dir, to })));
     defer for (forest.roots) |*r| r.proved.proof.deinit();
     if (forest.from != from.height or forest.to != to) return error.WrongEpoch;
-    const init = try loadInit(a, from);
+    const init = try ER.loadInit(a, .{ .height = from.height, .prev_set = from.prev_set });
     const set = try EP.decodeSet(a, try S.readFile(a, try std.fmt.allocPrint(a, "{s}/set-{d}.bin", .{ dir, to })));
     if (!EP.sortedStrict(set)) return error.SetNotSorted;
     const v = try BF.verifyForest(gpa, a, tables, &bvk, &forest, s.headers, s.t, init.digest, try EP.setDigest(a, set));

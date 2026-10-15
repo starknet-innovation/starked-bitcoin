@@ -522,36 +522,43 @@ pub fn build(b: *std.Build) void {
             const plan_json = plan_cmd.captureStdOut();
             b.step("cuda-archive-plan", "Validate the CUDA archive selection (stwo-zig runtime + our 16 kernels) without NVIDIA tools").dependOn(&b.addInstallFile(plan_json, "cuda-archive-plan.json").step);
 
-            // `cuda-prove`: the runner (src/gpu/cuda/runner.zig). With the toolchain options it links
-            // the real archive; without them it links the stubs (CPU side and `--mock` only).
-            const runner_module = b.createModule(.{ .root_source_file = b.path("src/gpu/cuda/runner.zig"), .target = target, .optimize = optimize });
-            for (resident.import_table.keys(), resident.import_table.values()) |name, module| runner_module.addImport(name, module);
-            runner_module.addImport("cuda_resident", resident);
-            runner_module.addImport("stwo_postcard", stwo_postcard);
-            const runner = b.addExecutable(.{ .name = "cuda-prove", .root_module = runner_module });
-            if (tc.nvcc) |nvcc| {
+            // `cuda-prove`: the runner (src/gpu/cuda/runner.zig); `cuda-epoch`: an epoch's block proofs
+            // (src/gpu/cuda/epoch.zig). With the toolchain options they link the real archive (built
+            // once); without them the stubs (CPU side and `--mock` only).
+            const archive_dir: ?std.Build.LazyPath = if (tc.nvcc) |nvcc| blk: {
                 const missing = tc.host_cxx == null or tc.host_runtime == null or tc.host_unwind == null or tc.home == null or tc.lib == null;
                 if (missing) @panic("a device build needs -Dcuda-nvcc, -Dcuda-host-cxx, -Dcuda-host-runtime, -Dcuda-host-unwind-runtime, -Dcuda-home and -Dcuda-library-dir");
                 const archive = archiveCommand(b, aot_root.getDirectory(), native_set, .{ .nvcc = nvcc, .host_cxx = tc.host_cxx.?, .ar = tc.ar, .home = tc.home.?, .lib = tc.lib.?, .jobs = tc.jobs }, cuda_arch, false);
-                const archive_dir = archive.addOutputDirectoryArg("starked-cuda-runtime");
-                runner.step.dependOn(&archive.step);
-                runner.root_module.addLibraryPath(archive_dir);
-                runner.root_module.addLibraryPath(.{ .cwd_relative = tc.lib.? });
-                runner.root_module.addRPath(.{ .cwd_relative = tc.lib.? });
-                runner.root_module.addLibraryPath(.{ .cwd_relative = tc.driver orelse b.fmt("{s}/stubs", .{tc.lib.?}) });
-                runner.root_module.linkSystemLibrary("stwo_cuda_kernels", .{});
-                runner.root_module.linkSystemLibrary("cudart", .{});
-                runner.root_module.linkSystemLibrary("cuda", .{});
-                runner.root_module.addObjectFile(.{ .cwd_relative = tc.host_runtime.? });
-                runner.root_module.addObjectFile(.{ .cwd_relative = tc.host_unwind.? });
-            } else {
-                for (stubs) |stub| runner.root_module.addCSourceFile(.{ .file = stub, .flags = &.{ "-std=c11", "-Wno-strict-prototypes" } });
+                break :blk archive.addOutputDirectoryArg("starked-cuda-runtime");
+            } else null;
+            for ([_][3][]const u8{
+                .{ "cuda-prove", "src/gpu/cuda/runner.zig", "Resident CUDA block proof vs CPU (device build with -Dcuda-nvcc=...; stubs otherwise)" },
+                .{ "cuda-epoch", "src/gpu/cuda/epoch.zig", "An epoch's block proofs on the resident CUDA prover, one CUDA session (chainproof prove-epoch's files)" },
+            }) |spec| {
+                const runner_module = b.createModule(.{ .root_source_file = b.path(spec[1]), .target = target, .optimize = optimize });
+                for (resident.import_table.keys(), resident.import_table.values()) |name, module| runner_module.addImport(name, module);
+                runner_module.addImport("cuda_resident", resident);
+                runner_module.addImport("stwo_postcard", stwo_postcard);
+                const runner = b.addExecutable(.{ .name = spec[0], .root_module = runner_module });
+                if (archive_dir) |dir| {
+                    runner.root_module.addLibraryPath(dir);
+                    runner.root_module.addLibraryPath(.{ .cwd_relative = tc.lib.? });
+                    runner.root_module.addRPath(.{ .cwd_relative = tc.lib.? });
+                    runner.root_module.addLibraryPath(.{ .cwd_relative = tc.driver orelse b.fmt("{s}/stubs", .{tc.lib.?}) });
+                    runner.root_module.linkSystemLibrary("stwo_cuda_kernels", .{});
+                    runner.root_module.linkSystemLibrary("cudart", .{});
+                    runner.root_module.linkSystemLibrary("cuda", .{});
+                    runner.root_module.addObjectFile(.{ .cwd_relative = tc.host_runtime.? });
+                    runner.root_module.addObjectFile(.{ .cwd_relative = tc.host_unwind.? });
+                } else {
+                    for (stubs) |stub| runner.root_module.addCSourceFile(.{ .file = stub, .flags = &.{ "-std=c11", "-Wno-strict-prototypes" } });
+                }
+                runner.linkLibC();
+                b.installArtifact(runner);
+                const run_runner = b.addRunArtifact(runner);
+                if (b.args) |args| run_runner.addArgs(args);
+                b.step(spec[0], spec[2]).dependOn(&run_runner.step);
             }
-            runner.linkLibC();
-            b.installArtifact(runner);
-            const run_runner = b.addRunArtifact(runner);
-            if (b.args) |args| run_runner.addArgs(args);
-            b.step("cuda-prove", "Resident CUDA block proof vs CPU (device build with -Dcuda-nvcc=...; stubs otherwise)").dependOn(&run_runner.step);
 
             // `cuda-pack`: the leaf-packing spike on stwo-zig's resident circuit prover (src/gpu/cuda/pack.zig).
             // It links stwo-zig's own circuit archive (`zig build benchmark-circuit-cuda-resident` in

@@ -71,6 +71,9 @@ pub const Input = struct {
     /// Device witness (`witness.zig`): the inputs of the generated components, whose `mains` may
     /// then be empty; null: every column comes from `mains`.
     witness: ?*const witness.Inputs = null,
+    /// A process-owned CUDA runtime kept open across proofs (`cuda-epoch`): the context and the AOT
+    /// loader (and its loaded functions) are reused; null: one session per proof.
+    runtime: ?*cuda.runtime.NativeRuntime = null,
 };
 
 pub const Result = struct {
@@ -343,7 +346,14 @@ pub fn proofPass(
     if ((prepared.witness == null) != (host.generated_main == null) or host.device_tree0 != (prepared.witness != null)) return error.InvalidResidentInput;
     const plans = &prepared.plans;
     const blowup = input.config.fri_config.log_blowup_factor;
-    var tx = try Transaction.openPrepared(allocator, &accepted_sms, try prepared.memory.placement.clone(allocator));
+    var tx = if (input.runtime) |runtime| blk: {
+        var placement = try prepared.memory.placement.clone(allocator);
+        const retained = runtime.beginProof() catch |err| {
+            placement.deinit(allocator);
+            return err;
+        };
+        break :blk try Transaction.openPreparedRetained(allocator, retained, placement);
+    } else try Transaction.openPrepared(allocator, &accepted_sms, try prepared.memory.placement.clone(allocator));
     var finished = false;
     defer if (!finished) tx.abort() catch {};
     const session = tx.proofSession();

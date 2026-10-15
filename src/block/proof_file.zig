@@ -64,6 +64,15 @@ pub fn bindWindow(a: std.mem.Allocator, headers: []const [80]u8, hashes: []const
     return out;
 }
 
+/// `bindWindow` from the MMR's recorded paths (`HT.Paths`, one fold for every block of an epoch).
+pub fn bindWindowPaths(a: std.mem.Allocator, headers: []const [80]u8, paths: *const HT.Paths, h: u32) ![]Bound {
+    if (h >= paths.n or headers.len < paths.n) return error.HeightBeyondChain;
+    const lo: u32 = if (h >= 11) h - 11 else 0;
+    const out = try a.alloc(Bound, h - lo + 1);
+    for (out, lo..) |*b, i| b.* = .{ .height = @intCast(i), .header = headers[i], .steps = try paths.proof(a, i) };
+    return out;
+}
+
 /// Checks the window against a verified chain (length `n`, MMR root `t`): consecutive heights ending
 /// at the block's, starting at `max(0, h − 11)`, each header's hash included at its height.
 pub fn checkWindow(a: std.mem.Allocator, f: *const File, n: usize, t: HT.Words) ![]const [80]u8 {

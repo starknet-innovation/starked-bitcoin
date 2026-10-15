@@ -22,6 +22,7 @@ pub const block = struct {
     pub const anc = @import("block/anc.zig");
     pub const commit = @import("block/commit.zig");
     pub const proof_file = @import("block/proof_file.zig");
+    pub const epoch_run = @import("block/epoch_run.zig");
     pub const extsum = @import("block/extsum.zig");
     pub const coin = @import("block/coin.zig");
     pub const epoch = @import("block/epoch.zig");
