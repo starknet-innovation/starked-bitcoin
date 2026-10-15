@@ -323,6 +323,21 @@ pub fn build(b: *std.Build) void {
         survey.linkLibC();
         b.installArtifact(survey);
     }
+    // `replay`: full-chain data preparation (src/block/replay.zig): raw blocks in, undo streams,
+    // `.ctx` and coin sets out. CPU only; cross-compiles (e.g. -Dtarget=x86_64-linux-gnu).
+    {
+        const replay = b.addExecutable(.{
+            .name = "replay",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/bin/replay.zig"),
+                .target = target,
+                .optimize = optimize,
+                .imports = &.{.{ .name = "starked_bitcoin", .module = lib }},
+            }),
+        });
+        replay.linkLibC();
+        b.installArtifact(replay);
+    }
     // `blockleaf`: BLOCK-REC measurement (a block proof verified in-circuit).
     {
         const bl = b.addExecutable(.{

@@ -511,6 +511,36 @@ table's bytes. It extends `block_sound`'s statement.
 - **Not yet:** folding block proofs into the recursive chain proof (`BLOCK-REC`); blocks above ~3.5 MB
   (memory, needs lifting).
 
+### Full-chain data: `replay` (2026-10-15)
+
+The provers read, per block, the raw block, its undo stream and `.ctx` (the creating transaction's
+index per input), and per epoch the previous coin set (`epoch_run.zig`).
+
+- **Fetching undo and ctx from the node does not scale.** `fetch_undo.py --ctx` took 382 s for block
+  969000, from one `getrawtransaction` per input. Reading the creating block by the prevout's height,
+  batched, cut that to 29 s (21 s per block over a contiguous run; same bytes on ten blocks). That is
+  still about 1 GB of JSON per recent block, because a block's inputs come from about 3,400 distinct
+  blocks spread across the whole chain.
+- **`replay` derives both locally** (`src/block/replay.zig`, `zig-out/bin/replay`). Every coin of the set
+  already carries what the undo record and the ctx entry hold (height, coinbase, tx index,
+  `serTxOut`), so one in-order pass over raw blocks yields every block's undo stream and ctx, and the
+  coin set after any block (`prove-epoch`'s set format). Only raw blocks are needed:
+  `scripts/stream_blocks.py` streams `getblock <hash> 0` (hashes from `data/headers.bin`) as records.
+- **Each block is checked** against the pinned header at its height, its txid Merkle root (with Core's
+  mutation rule) and its witness commitment (`CheckWitnessMalleation`), so the source of raw blocks
+  need not be trusted. The semantics are `epoch.coinSetFrom`'s (BIP30's lost coinbases, unspendable
+  outputs skipped).
+- **Checked:**
+  - **0–1000:** every undo and ctx file, and `set-170.bin` and `set-1000.bin`, equal the node-fetched
+    and `prove-epoch` files byte for byte, including a resume from `set-170.bin`.
+  - **0–250,000, streamed from the node over the tunnel:** 335 s (29 MB/s), 6.8 M coins, 2.3 GB peak
+    RSS. The undo streams of 91722, 91812, 91842 and 91880 equal `testdata/undo`.
+- **Next check:** Core pins `hash_serialized` at 840k (`a2a5521b…`), 880k (`dbd19098…`), 910k
+  (`4daf8a17…`) and 935k (`e4b90ef9…`) (`chainparams.cpp`). `replay` prints the same hash for every set
+  it writes, so a full pass can be checked against Core at those heights.
+- **Sizing:** about 180 M coins at the tip means roughly 20–28 GB of RAM: more than the Mac (24 GB) or the
+  node (16 GB) can spare. The whole chain is about 700 GB of raw blocks, about 7 h at the tunnel's rate.
+
 ## Cost (rough, to be measured)
 
 A 4 MB block is about 4 M parser rows plus about 2.5 passes of SHA-256 over

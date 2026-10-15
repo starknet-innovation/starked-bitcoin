@@ -174,9 +174,9 @@ pub const Coin = struct {
     }
 };
 
-const Key = struct { txid: [32]u8, vout: u32 };
+pub const Key = struct { txid: [32]u8, vout: u32 };
 
-fn txidOf(raw: []const u8, start: usize, rows: []const fields.Row, lock_row: usize, seg: bool) [32]u8 {
+pub fn txidOf(raw: []const u8, start: usize, rows: []const fields.Row, lock_row: usize, seg: bool) [32]u8 {
     var h1: [32]u8 = undefined;
     var out: [32]u8 = undefined;
     if (!seg) {
@@ -202,7 +202,7 @@ fn txidOf(raw: []const u8, start: usize, rows: []const fields.Row, lock_row: usi
     return out;
 }
 
-fn unspendable(script: []const u8) bool {
+pub fn unspendable(script: []const u8) bool {
     return (script.len > 0 and script[0] == 0x6a) or script.len > 10000;
 }
 
