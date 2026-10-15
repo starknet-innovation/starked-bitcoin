@@ -123,18 +123,69 @@ pub fn rowsNeeded(scripts: []const [2]u32) usize {
     return n + 1;
 }
 
-pub fn generate(a: std.mem.Allocator, log_size: u32, raw: []const u8, scripts: []const [2]u32) !Out {
+/// A walked row's starting state, packed for the device witness (`gpu/cuda/witness.zig`, `walk`):
+/// `w0` = position (bits 0–23), kind (24–25: op, ln, dt, inf), `li` (26–27), `lk` code (28–29:
+/// 0 none, 1, 2, 3 = 4), first byte of its script (30); `val` = `dr` (dt) or `lacc` (ln); `sums`
+/// the running sigop count including this row. The row's columns are a function of the record and
+/// its byte (`expand`).
+pub const Rec = extern struct { w0: u32, rem: u32, val: u32, sums: u32 };
+
+/// The host's sequential pass: one record per walked row, and what the other components read.
+pub const Plan = struct {
+    recs: []Rec,
+    reads: []u32,
+    opcodes: []u8,
+    ranges: []u32,
+    sigops: u32,
+};
+
+fn lkCode(lk: u8) u32 {
+    return switch (lk) {
+        0 => 0,
+        1 => 1,
+        2 => 2,
+        else => 3,
+    };
+}
+
+fn lkOf(code: u32) u8 {
+    return switch (code) {
+        0 => 0,
+        1 => 1,
+        2 => 2,
+        else => 4,
+    };
+}
+
+/// The automaton's step from state `st` on byte `b` (`wstep`).
+fn step(st: State, b: u8) State {
+    return switch (st.kind) {
+        .op => if (b >= 1 and b < 0x4c)
+            .{ .kind = .dt, .dr = b }
+        else if (b >= 0x4c and b <= 0x4e)
+            .{ .kind = .ln, .lk = if (b == 0x4c) 1 else if (b == 0x4d) 2 else 4, .li = 0, .lacc = 0 }
+        else
+            .{ .kind = .op },
+        .ln => blk: {
+            const acc2 = st.lacc + (@as(u64, b) << @intCast(8 * @as(u6, @intCast(st.li))));
+            if (st.li + 1 != st.lk) break :blk .{ .kind = .ln, .lk = st.lk, .li = st.li + 1, .lacc = acc2 };
+            if (st.lk == 4 and b >= 2) break :blk .{ .kind = .inf };
+            break :blk if (acc2 == 0) .{ .kind = .op } else .{ .kind = .dt, .dr = acc2 };
+        },
+        .dt => if (st.dr == 1) .{ .kind = .op } else .{ .kind = .dt, .dr = st.dr - 1 },
+        .inf => .{ .kind = .inf },
+    };
+}
+
+pub fn plan(a: std.mem.Allocator, log_size: u32, raw: []const u8, scripts: []const [2]u32) !Plan {
     const n = @as(usize, 1) << @intCast(log_size);
-    if (rowsNeeded(scripts) > n) return error.TooManyRows;
-    const cols = try a.alloc([]M31, N_MAIN);
-    for (cols) |*c| {
-        c.* = try a.alloc(M31, n);
-        @memset(c.*, M31.zero());
-    }
-    var reads = std.ArrayList(u32).empty;
+    const active = rowsNeeded(scripts) - 1;
+    if (active + 1 > n) return error.TooManyRows;
+    if (raw.len >= 1 << 24) return error.TooManyRows;
+    const recs = try a.alloc(Rec, active);
+    const reads = try a.alloc(u32, active);
     var opcodes = std.ArrayList(u8).empty;
     var ranges = std.ArrayList(u32).empty;
-    const one = M31.one();
     var r: usize = 0;
     var sums: u32 = 0;
     for (scripts) |sp| {
@@ -142,122 +193,144 @@ pub fn generate(a: std.mem.Allocator, log_size: u32, raw: []const u8, scripts: [
         for (0..sp[1]) |j| {
             const pos: u32 = sp[0] + @as(u32, @intCast(j));
             const b = raw[pos];
-            const rem: u32 = sp[1] - @as(u32, @intCast(j));
-            cols[ACT][r] = one;
-            if (j == 0) cols[FS][r] = one;
-            cols[POS][r] = f(pos);
-            cols[REM][r] = f(rem);
-            cols[B][r] = f(b);
-            try reads.append(a, pos);
-            cols[ZR][r] = f(@intFromBool(rem == 1));
-            cols[INVR][r] = invOrZero(f(rem).sub(one));
-            // This row's state.
-            var nxt = State{};
+            reads[r] = pos;
             switch (st.kind) {
                 .op => {
-                    cols[OP][r] = one;
                     try opcodes.append(a, b);
-                    const pn: u32 = if (b < 0x4c) b else 0;
-                    cols[PN][r] = f(pn);
-                    if (b == 0x4c) cols[K1][r] = one;
-                    if (b == 0x4d) cols[K2][r] = one;
-                    if (b == 0x4e) cols[K4][r] = one;
-                    cols[SG][r] = f(sigW(b));
                     sums += sigW(b);
-                    const nzp = b >= 1 and b < 0x4c;
-                    cols[NZP][r] = f(@intFromBool(nzp));
-                    if (nzp) {
-                        nxt = .{ .kind = .dt, .dr = pn };
-                    } else if (b >= 0x4c and b <= 0x4e) {
-                        nxt = .{ .kind = .ln, .lk = if (b == 0x4c) 1 else if (b == 0x4d) 2 else 4, .li = 0, .lacc = 0 };
-                    } else nxt = .{ .kind = .op };
                 },
-                .ln => {
-                    cols[LN][r] = one;
-                    cols[LI0 + st.li][r] = one;
-                    switch (st.lk) {
-                        1 => cols[LK1][r] = one,
-                        2 => cols[LK2][r] = one,
-                        else => cols[LK4][r] = one,
-                    }
-                    cols[LACC][r] = f(st.lacc);
-                    const acc2 = st.lacc + (@as(u64, b) << @intCast(8 * @as(u6, @intCast(st.li))));
-                    const end = st.li + 1 == st.lk;
-                    if (end) {
-                        cols[ENDC][r] = one;
-                        cols[LE][r] = one;
-                        if (st.lk == 4 and b >= 2) {
-                            cols[TOPF][r] = one;
-                            try ranges.append(a, b - 2);
-                            nxt = .{ .kind = .inf };
-                        } else {
-                            cols[LEF][r] = one;
-                            if (st.lk == 4) cols[L4][r] = one;
-                            nxt = if (acc2 == 0) .{ .kind = .op } else .{ .kind = .dt, .dr = acc2 };
-                        }
-                    } else nxt = .{ .kind = .ln, .lk = st.lk, .li = st.li + 1, .lacc = acc2 };
-                    if (!(end and st.lk == 4 and b >= 2)) {
-                        cols[ACC2][r] = f(acc2);
-                        cols[ZA][r] = f(@intFromBool(acc2 == 0));
-                        cols[INVA][r] = invOrZero(f(acc2));
-                    } else {
-                        // acc2 ≥ 2^25 may exceed the field; the column still holds the field value.
-                        const v = M31.fromU64(acc2);
-                        cols[ACC2][r] = v;
-                        cols[ZA][r] = f(@intFromBool(v.isZero()));
-                        cols[INVA][r] = invOrZero(v);
-                    }
-                },
-                .dt => {
-                    cols[DT][r] = one;
-                    cols[DR][r] = f(st.dr);
-                    nxt = if (st.dr == 1) .{ .kind = .op } else .{ .kind = .dt, .dr = st.dr - 1 };
-                },
-                .inf => {
-                    cols[INF][r] = one;
-                    nxt = .{ .kind = .inf };
-                },
+                .ln => if (st.li + 1 == st.lk and st.lk == 4 and b >= 2) try ranges.append(a, b - 2),
+                else => {},
             }
-            if (st.kind != .ln) {
-                // Defaults for the zero tests on rows where they are unused.
-                cols[ZA][r] = f(@intFromBool(cols[ACC2][r].isZero()));
-                cols[INVA][r] = invOrZero(cols[ACC2][r]);
-            }
-            cols[ZD][r] = f(@intFromBool(cols[DR][r].eql(one)));
-            cols[INVD][r] = invOrZero(cols[DR][r].sub(one));
-            // The next state, as the AIR computes it (also after the script's last byte).
-            cols[NOP][r] = f(@intFromBool(nxt.kind == .op));
-            cols[NLN][r] = f(@intFromBool(nxt.kind == .ln));
-            cols[NDT][r] = f(@intFromBool(nxt.kind == .dt));
-            cols[NINF][r] = f(@intFromBool(nxt.kind == .inf));
-            if (nxt.kind == .dt) cols[NDR][r] = f(nxt.dr);
-            if (nxt.kind == .ln) {
-                cols[NLACC][r] = f(nxt.lacc);
-                cols[NLI0 + nxt.li][r] = one;
-                switch (nxt.lk) {
-                    1 => cols[NLK1][r] = one,
-                    2 => cols[NLK2][r] = one,
-                    else => cols[NLK4][r] = one,
-                }
-            }
-            cols[GC][r] = f(@intFromBool(j != 0));
-            cols[SUMS][r] = f(sums);
-            st = nxt;
+            const val: u64 = switch (st.kind) {
+                .dt => st.dr,
+                .ln => st.lacc,
+                else => 0,
+            };
+            if (val >= 1 << 32) return error.TooManyRows;
+            recs[r] = .{
+                .w0 = pos | @as(u32, @intFromEnum(st.kind)) << 24 | @as(u32, st.li) << 26 | lkCode(st.lk) << 28 | @as(u32, @intFromBool(j == 0)) << 30,
+                .rem = sp[1] - @as(u32, @intCast(j)),
+                .val = @intCast(val),
+                .sums = sums,
+            };
+            st = step(st, b);
             r += 1;
         }
     }
-    // Padding rows: inactive; zero tests on zero values.
-    while (r < n) : (r += 1) {
-        cols[SUMS][r] = f(sums);
-        cols[ZA][r] = one;
-        cols[INVD][r] = invOrZero(M31.zero().sub(one));
-        cols[INVR][r] = invOrZero(M31.zero().sub(one));
+    return .{ .recs = recs, .reads = reads, .opcodes = try opcodes.toOwnedSlice(a), .ranges = try ranges.toOwnedSlice(a), .sigops = sums };
+}
+
+/// Main columns in `2^log_size` rows from the plan (the device's `walk` kernel computes the same).
+pub fn columns(a: std.mem.Allocator, log_size: u32, raw: []const u8, p: Plan) ![][]M31 {
+    const n = @as(usize, 1) << @intCast(log_size);
+    if (p.recs.len + 1 > n) return error.TooManyRows;
+    const cols = try a.alloc([]M31, N_MAIN);
+    for (cols) |*c| {
+        c.* = try a.alloc(M31, n);
+        @memset(c.*, M31.zero());
     }
-    return .{
-        .cols = cols,
-        .reads = try reads.toOwnedSlice(a),
-        .opcodes = try opcodes.toOwnedSlice(a),
-        .ranges = try ranges.toOwnedSlice(a),
-        .sigops = sums,
-    };
+    const one = M31.one();
+    for (p.recs, 0..) |rc, r| {
+        const pos = rc.w0 & 0xffffff;
+        const st = State{
+            .kind = @enumFromInt((rc.w0 >> 24) & 3),
+            .li = @intCast((rc.w0 >> 26) & 3),
+            .lk = lkOf((rc.w0 >> 28) & 3),
+            .dr = if ((rc.w0 >> 24) & 3 == @intFromEnum(Kind.dt)) rc.val else 0,
+            .lacc = if ((rc.w0 >> 24) & 3 == @intFromEnum(Kind.ln)) rc.val else 0,
+        };
+        const b = raw[pos];
+        const rem = rc.rem;
+        cols[ACT][r] = one;
+        if ((rc.w0 >> 30) & 1 == 1) cols[FS][r] = one;
+        cols[POS][r] = f(pos);
+        cols[REM][r] = f(rem);
+        cols[B][r] = f(b);
+        cols[ZR][r] = f(@intFromBool(rem == 1));
+        cols[INVR][r] = invOrZero(f(rem).sub(one));
+        const nxt = step(st, b);
+        switch (st.kind) {
+            .op => {
+                cols[OP][r] = one;
+                const pn: u32 = if (b < 0x4c) b else 0;
+                cols[PN][r] = f(pn);
+                if (b == 0x4c) cols[K1][r] = one;
+                if (b == 0x4d) cols[K2][r] = one;
+                if (b == 0x4e) cols[K4][r] = one;
+                cols[SG][r] = f(sigW(b));
+                cols[NZP][r] = f(@intFromBool(b >= 1 and b < 0x4c));
+            },
+            .ln => {
+                cols[LN][r] = one;
+                cols[LI0 + st.li][r] = one;
+                switch (st.lk) {
+                    1 => cols[LK1][r] = one,
+                    2 => cols[LK2][r] = one,
+                    else => cols[LK4][r] = one,
+                }
+                cols[LACC][r] = f(st.lacc);
+                const acc2 = st.lacc + (@as(u64, b) << @intCast(8 * @as(u6, @intCast(st.li))));
+                const end = st.li + 1 == st.lk;
+                if (end) {
+                    cols[ENDC][r] = one;
+                    cols[LE][r] = one;
+                    if (st.lk == 4 and b >= 2) {
+                        cols[TOPF][r] = one;
+                    } else {
+                        cols[LEF][r] = one;
+                        if (st.lk == 4) cols[L4][r] = one;
+                    }
+                }
+                // acc2 ≥ 2^25 may exceed the field; the column holds the field value.
+                const v = M31.fromU64(acc2);
+                cols[ACC2][r] = v;
+                cols[ZA][r] = f(@intFromBool(v.isZero()));
+                cols[INVA][r] = invOrZero(v);
+            },
+            .dt => {
+                cols[DT][r] = one;
+                cols[DR][r] = f(st.dr);
+            },
+            .inf => cols[INF][r] = one,
+        }
+        if (st.kind != .ln) {
+            // Defaults for the zero tests on rows where they are unused.
+            cols[ZA][r] = one;
+            cols[INVA][r] = M31.zero();
+        }
+        cols[ZD][r] = f(@intFromBool(cols[DR][r].eql(one)));
+        cols[INVD][r] = invOrZero(cols[DR][r].sub(one));
+        // The next state, as the AIR computes it (also after the script's last byte).
+        cols[NOP][r] = f(@intFromBool(nxt.kind == .op));
+        cols[NLN][r] = f(@intFromBool(nxt.kind == .ln));
+        cols[NDT][r] = f(@intFromBool(nxt.kind == .dt));
+        cols[NINF][r] = f(@intFromBool(nxt.kind == .inf));
+        if (nxt.kind == .dt) cols[NDR][r] = f(nxt.dr);
+        if (nxt.kind == .ln) {
+            cols[NLACC][r] = f(nxt.lacc);
+            cols[NLI0 + nxt.li][r] = one;
+            switch (nxt.lk) {
+                1 => cols[NLK1][r] = one,
+                2 => cols[NLK2][r] = one,
+                else => cols[NLK4][r] = one,
+            }
+        }
+        cols[GC][r] = f(@intFromBool((rc.w0 >> 30) & 1 == 0));
+        cols[SUMS][r] = f(rc.sums);
+    }
+    // Padding rows: inactive; zero tests on zero values.
+    const inv_m1 = invOrZero(M31.zero().sub(one));
+    for (p.recs.len..n) |r| {
+        cols[SUMS][r] = f(p.sigops);
+        cols[ZA][r] = one;
+        cols[INVD][r] = inv_m1;
+        cols[INVR][r] = inv_m1;
+    }
+    return cols;
+}
+
+pub fn generate(a: std.mem.Allocator, log_size: u32, raw: []const u8, scripts: []const [2]u32) !Out {
+    const p = try plan(a, log_size, raw, scripts);
+    return .{ .cols = try columns(a, log_size, raw, p), .reads = p.reads, .opcodes = p.opcodes, .ranges = p.ranges, .sigops = p.sigops };
 }

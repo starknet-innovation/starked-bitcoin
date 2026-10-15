@@ -143,12 +143,17 @@ pub fn geometry(allocator: std.mem.Allocator, parts: []const system.Part, b: *co
     }) catch return error.InvalidResidentGeometry;
     const layers = try allocator.alloc(cc.geometry.FriLayer, fri.roundCount());
     errdefer allocator.free(layers);
-    for (layers, 0..) |*layer, i| layer.* = .{
-        .evaluation_log = try fri.evaluationLog(i),
-        .fold_step = try fri.roundFold(i),
-        .cumulative_fold = try fri.cumulativeFold(i),
-        .leaf_log = try fri.leafLog(i),
-    };
+    for (layers, 0..) |*layer, i| {
+        const evaluation_log = try fri.evaluationLog(i);
+        const leaf_log = try fri.leafLog(i);
+        layer.* = .{
+            .evaluation_log = evaluation_log,
+            .fold_step = try fri.roundFold(i),
+            .cumulative_fold = try fri.cumulativeFold(i),
+            .rows_per_leaf_log = evaluation_log - leaf_log,
+            .leaf_log = leaf_log,
+        };
+    }
     return .{
         .allocator = allocator,
         .trees = trees,

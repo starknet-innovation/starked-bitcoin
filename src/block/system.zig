@@ -116,6 +116,13 @@ pub const Built = struct {
     /// generator needs (src/gpu/cuda/witness.zig).
     sha_plan: bsha.Plan = .{ .compressions = &.{}, .meta = &.{}, .digests = &.{} },
     undo: []const u8 = &.{},
+    /// The `block_msg` and `block_walk` inputs: the block, its hash messages and the walker's row
+    /// records (`walk.plan`).
+    raw: []const u8 = &.{},
+    msgs: []const msg.Message = &.{},
+    walk_recs: []const walk.Rec = &.{},
+    /// The `block_bytes` multiplicities (reads per block position), with `skip_device_columns`.
+    byte_mults: []const u32 = &.{},
 };
 
 /// M3b options: the epoch's challenge and the spent coins' creating transaction indices.
@@ -130,8 +137,10 @@ pub const Opts = struct {
     /// when the uniform size is at least 2^TIERED_MIN_L (with its fallback), `uniform` below.
     /// Overrides `profile`.
     auto: bool = false,
-    /// Leave `mains[C.sha]` and `mains[C.b2s]` empty: a device generates them from `Built.sha_plan`
-    /// and `Built.undo` (src/gpu/cuda/witness.zig). Everything else is unchanged.
+    /// Leave `mains[C.sha]`, `mains[C.b2s]`, `mains[C.msg]`, `mains[C.walk]` and `mains[C.bytes]`
+    /// empty: a device generates them from `Built.sha_plan`, `Built.undo`, `Built.msgs`,
+    /// `Built.walk_recs` and `Built.byte_mults` (src/gpu/cuda/witness.zig). Everything else is
+    /// unchanged.
     skip_device_columns: bool = false,
 };
 
@@ -310,7 +319,8 @@ pub fn buildFull(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctx
 
     const fm = try fields.generate(a, logs[C.fields], raw, rows);
     const chk = try checks.fill(a, fm, raw, rows, ctx);
-    const wk = try walk.generate(a, logs[C.walk], raw, chk.scripts);
+    const wp = try walk.plan(a, logs[C.walk], raw, chk.scripts);
+    const wk = walk.Out{ .cols = if (opts.skip_device_columns) &.{} else try walk.columns(a, logs[C.walk], raw, wp), .reads = wp.reads, .opcodes = wp.opcodes, .ranges = wp.ranges, .sigops = wp.sigops };
     const cid = wmerkle.commitId(wnodes);
     const cx = try ctxw.generate(a, logs[C.ctx], .{ .raw = raw, .ctx = ctx, .tx0 = txs[0], .chk = chk, .sigops = wk.sigops, .cid = cid });
     if (cx.hc) {
@@ -345,9 +355,15 @@ pub fn buildFull(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctx
         break;
     };
     var reads = std.ArrayList(u32).empty;
-    const mm = try msg.generate(a, logs[C.msg], raw, msgs, &reads);
-    msg.setUses(mm);
-    merkle.addHeaderUses(mm);
+    const mm: [][]M31 = if (opts.skip_device_columns) blk: {
+        try msg.appendReads(a, msgs, &reads);
+        break :blk &.{};
+    } else blk: {
+        const cols = try msg.generate(a, logs[C.msg], raw, msgs, &reads);
+        msg.setUses(cols);
+        merkle.addHeaderUses(cols);
+        break :blk cols;
+    };
     const sm: [][]M31 = if (opts.skip_device_columns) &.{} else try bsha.generate(a, logs[C.sha], pl);
     const km = try merkle.generate(a, logs[C.merkle], ntx, nodes, root);
     const wm = try wmerkle.generate(a, logs[C.wmerkle], ntx, wnodes, cx.hc);
@@ -363,7 +379,8 @@ pub fn buildFull(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctx
     const b2m = try commit.msgColumns(a, logs[C.b2msg], undo, &undo_reads);
     const um = try commit.undoColumns(a, logs[C.undo], undo, undo_reads.items);
     const b2sm: [][]M31 = if (opts.skip_device_columns) &.{} else try commit.b2sColumns(a, logs[C.b2s], undo);
-    const bm = try bytes.generate(a, logs[C.bytes], raw, reads.items);
+    const bm: [][]M31 = if (opts.skip_device_columns) &.{} else try bytes.generate(a, logs[C.bytes], raw, reads.items);
+    const byte_mults: []const u32 = if (opts.skip_device_columns) try bytes.multiplicities(a, raw.len, reads.items) else &.{};
     var ranges = std.ArrayList(u32).empty;
     try ranges.appendSlice(a, chk.ranges);
     try ranges.appendSlice(a, wk.ranges);
@@ -395,6 +412,10 @@ pub fn buildFull(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctx
         .nin = co.nin,
         .sha_plan = pl,
         .undo = undo,
+        .raw = raw,
+        .msgs = msgs,
+        .walk_recs = wp.recs,
+        .byte_mults = byte_mults,
     };
 }
 

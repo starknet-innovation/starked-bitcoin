@@ -3,7 +3,8 @@
 //! whole grid with the launch's own argument array (as `cuLaunchKernel` passes it).
 //!
 //! 1. Kernels = CPU generators: for a block, `witness.Bound.upload` + `generate` over host memory
-//!    reproduce `block.system.buildFull`'s `block_sha` (144) and `block_b2s` (312) columns and
+//!    reproduce `block.system.buildFull`'s `block_sha` (144), `block_b2s` (312), `block_msg` (38),
+//!    `block_walk` (51) and `block_bytes` (12) columns and
 //!    `system.preprocessedNatural` (tree 0) exactly. Block 0 uniform and tiered, blocks 170 and
 //!    91812 tiered; `STARKED_WITNESS_SAMPLES=2,4,5` adds small samples, `STARKED_WITNESS_LARGE=400000`
 //!    a large block (tiered, its own L; SHA and Blake2s only; several GB of RAM).
@@ -69,7 +70,7 @@ const Host = struct {
 fn parameterTypes(which: ?witness.Which) [5][]const u8 {
     return if (which) |w| switch (w) {
         .sha_words => .{ "const unsigned *", "const unsigned *", "unsigned", "unsigned *", "unsigned" },
-        .sha_columns, .b2s => .{ "const unsigned *", "const unsigned *", "unsigned", "const u64 *", "unsigned" },
+        .sha_columns, .b2s, .msg, .walk, .bytes => .{ "const unsigned *", "const unsigned *", "unsigned", "const u64 *", "unsigned" },
         .pre => .{ "const unsigned *", "const unsigned *", "unsigned", "unsigned", "unsigned" },
     } else .{ "const unsigned *", "unsigned *", "unsigned", "unsigned", "" };
 }
@@ -195,13 +196,18 @@ fn expectColumns(what: []const u8, want: []const []const M31, got: []const commo
 
 /// Kernels vs CPU generators for one block.
 fn checkSample(host: *const Host, cat: *const catalog_mod.Catalog, airs: *const [bs.N_COMP]sb.air.ir.Air, s: sb.block.checks.Sample, profile: bs.Profile, min_log: u32, pre: bool) !void {
+    return checkSampleOpts(host, cat, airs, s, profile, min_log, pre, false);
+}
+
+fn checkSampleOpts(host: *const Host, cat: *const catalog_mod.Catalog, airs: *const [bs.N_COMP]sb.air.ir.Air, s: sb.block.checks.Sample, profile: bs.Profile, min_log: u32, pre: bool, fixed: bool) !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const x = arena.allocator();
     const b = try x.create(bs.Built);
     b.* = try bs.buildFull(x, s.raw, s.undo, s.ctx, .{ .min_log = min_log, .profile = profile });
     const parts = bs.parts(airs, b);
-    const inputs = try witness.Inputs.ofBlock(x, b);
+    var inputs = try witness.Inputs.ofBlock(x, b);
+    inputs.fixed_capacity = fixed;
     var plan = try witness.Plan.init(x, &parts, &inputs);
     // Device memory: the generated columns (tree 0, the two components) and dummies elsewhere.
     const staging0 = try x.alloc(common.Words, plan.pre_logs.len);
@@ -234,6 +240,9 @@ fn checkSample(host: *const Host, cat: *const catalog_mod.Catalog, airs: *const 
     const elapsed = timer.read();
     try expectColumns("block_sha", @ptrCast(b.mains[bs.C.sha]), staging1[plan.sha_first..][0..witness.SHA_COLUMNS]);
     try expectColumns("block_b2s", @ptrCast(b.mains[bs.C.b2s]), staging1[plan.b2s_first..][0..witness.B2S_COLUMNS]);
+    try expectColumns("block_msg", @ptrCast(b.mains[bs.C.msg]), staging1[plan.msg_first..][0..witness.MSG_COLUMNS]);
+    try expectColumns("block_walk", @ptrCast(b.mains[bs.C.walk]), staging1[plan.walk_first..][0..witness.WALK_COLUMNS]);
+    try expectColumns("block_bytes", @ptrCast(b.mains[bs.C.bytes]), staging1[plan.bytes_first..][0..witness.BYTES_COLUMNS]);
     if (pre) {
         const want = try system.preprocessedNatural(x, &parts);
         const cols = try x.alloc([]const M31, want.len);
@@ -241,16 +250,29 @@ fn checkSample(host: *const Host, cat: *const catalog_mod.Catalog, airs: *const 
         try expectColumns("preprocessed", cols, staging0);
     }
     if (pre and s.ctx.height == 0 and profile == .uniform) {
-        // Mutations: one message word of compression 1, one Blake2s counter:
-        // each must change the generated columns.
+        // Mutations: one message word of compression 1, one Blake2s counter, the first message's
+        // id, the first walked row's sigop sum: each must change the generated columns.
         const img = hostWords(bound.buffers.inputs);
         const l = plan.layout;
-        inline for (.{ l.comps + 24 + 8 + 5, l.periods + 24 }, .{ "block_sha", "block_b2s" }) |at, what| {
+        const C = bs.C;
+        inline for (.{ l.comps + 24 + 8 + 5, l.periods + 24, l.msgs + 1, l.walk + 4 + 3, l.mults }, .{ C.sha, C.b2s, C.msg, C.walk, C.bytes }) |at, comp| {
             img[at] ^= 1;
             try bound.generate(&session);
-            const first = if (std.mem.eql(u8, what, "block_sha")) plan.sha_first else plan.b2s_first;
-            const n = if (std.mem.eql(u8, what, "block_sha")) witness.SHA_COLUMNS else witness.B2S_COLUMNS;
-            const want: []const []const M31 = @ptrCast(b.mains[if (std.mem.eql(u8, what, "block_sha")) bs.C.sha else bs.C.b2s]);
+            const first = switch (comp) {
+                C.sha => plan.sha_first,
+                C.b2s => plan.b2s_first,
+                C.msg => plan.msg_first,
+                C.bytes => plan.bytes_first,
+                else => plan.walk_first,
+            };
+            const n = switch (comp) {
+                C.sha => witness.SHA_COLUMNS,
+                C.b2s => witness.B2S_COLUMNS,
+                C.msg => witness.MSG_COLUMNS,
+                C.bytes => witness.BYTES_COLUMNS,
+                else => witness.WALK_COLUMNS,
+            };
+            const want: []const []const M31 = @ptrCast(b.mains[comp]);
             var differs = false;
             for (want, staging1[first..][0..n]) |w, g| differs = differs or !std.mem.eql(u32, @ptrCast(w), hostWords(g));
             try std.testing.expect(differs);
@@ -258,9 +280,9 @@ fn checkSample(host: *const Host, cat: *const catalog_mod.Catalog, airs: *const 
         }
         try bound.generate(&session);
         try expectColumns("block_sha", @ptrCast(b.mains[bs.C.sha]), staging1[plan.sha_first..][0..witness.SHA_COLUMNS]);
-        std.debug.print("cuda witness: mutations (a message word, a Blake2s counter) are caught\n", .{});
+        std.debug.print("cuda witness: mutations (a message word, a Blake2s counter, a message id, a sigop sum, a byte multiplicity) are caught\n", .{});
     }
-    std.debug.print("cuda witness: block {d} {s} (L {d}, sha log {d}: {d} compressions; b2s log {d}: {d} blocks): kernels = CPU for block_sha (144), block_b2s (312){s}; {d} launches, {d} KiB uploaded, {d} ms on the host\n", .{
+    std.debug.print("cuda witness: block {d} {s} (L {d}, sha log {d}: {d} compressions; b2s log {d}: {d} blocks): kernels = CPU for block_sha (144), block_b2s (312), block_msg (38), block_walk (51), block_bytes (12){s}; {d} launches, {d} KiB uploaded, {d} ms on the host\n", .{
         s.ctx.height,                     @tagName(b.profile), b.log_size, plan.sha_log, inputs.compressions.len, plan.b2s_log, inputs.blocks.len,
         if (pre) " and tree 0" else "", session.launches,    session.context.uploaded / 1024, elapsed / std.time.ns_per_ms,
     });
@@ -283,6 +305,8 @@ test "cuda witness: the AOT generators (host C++) reproduce block_sha, block_b2s
     try checkSample(&host, &cat, airs, small[0], .tiered, bs.TIERED_MIN_L, true);
     try checkSample(&host, &cat, airs, small[1], .tiered, bs.TIERED_MIN_L, true);
     try checkSample(&host, &cat, airs, small[3], .tiered, bs.TIERED_MIN_L, true);
+    // The fixed-capacity inputs layout (`cuda-epoch`): the same columns.
+    try checkSampleOpts(&host, &cat, airs, small[1], .tiered, bs.TIERED_MIN_L, true, true);
     if (std.process.getEnvVarOwned(a, "STARKED_WITNESS_SAMPLES")) |list| {
         var it = std.mem.tokenizeScalar(u8, list, ',');
         while (it.next()) |tok| try checkSample(&host, &cat, airs, small[try std.fmt.parseInt(usize, tok, 10)], .tiered, bs.TIERED_MIN_L, true);
@@ -319,6 +343,9 @@ fn checkStage(a: std.mem.Allocator, host: *const Host, cat: *const catalog_mod.C
     full.* = try bs.buildFull(a, s.raw, s.undo, s.ctx, .{ .min_log = min_log, .profile = profile });
     try std.testing.expectEqual(@as(usize, 0), lean.mains[bs.C.sha].len);
     try std.testing.expectEqual(@as(usize, 0), lean.mains[bs.C.b2s].len);
+    try std.testing.expectEqual(@as(usize, 0), lean.mains[bs.C.msg].len);
+    try std.testing.expectEqual(@as(usize, 0), lean.mains[bs.C.walk].len);
+    try std.testing.expectEqual(@as(usize, 0), lean.mains[bs.C.bytes].len);
     const parts = bs.parts(airs, lean);
     var mains: [bs.N_COMP][]const []const M31 = undefined;
     for (&mains, lean.mains) |*m, y| m.* = @ptrCast(y);

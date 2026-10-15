@@ -1,6 +1,6 @@
 # GPU step 3: resident CUDA prover for the block system (2026-10-12)
 
-Status: **byte-identical on L40S and H100 up to 2^23 tiered (2026-10-13), with device LogUp (default) and host LogUp (`--host-logup`).** Device witness for `block_sha`, `block_b2s` and tree 0 (default; `--host-witness` for A/B): host-checked, device run pending (§ Device witness). Parent: [gpu.md](gpu.md), step 3.
+Status: **batch proving (`cuda-epoch`, one CUDA session) byte-identical on an H100, 2^23 tiered in 2.7 s per block (2026-10-15); byte-identical on L40S and H100 up to 2^23 tiered (2026-10-13), with device LogUp (default) and host LogUp (`--host-logup`).** Device witness for `block_sha`, `block_b2s`, `block_msg`, `block_walk`, `block_bytes` and tree 0 (default; `--host-witness` for A/B): validated on H100 (§ Device witness). Parent: [gpu.md](gpu.md), step 3.
 Code: `src/gpu/cuda/` (built only with `-Dcuda=true`). stwo-zig paths below are under
 `third_party/stwo-zig/src/` at 4afa09dbf; `cc/` is `integrations/circuit_cuda/`. Nothing in stwo-zig is modified.
 
@@ -133,6 +133,68 @@ Code: `src/gpu/cuda/witness.zig` (kernels, inputs, plan, launches), `witness_tes
 | peak memory footprint | **2.30 GB** | 7.16 GB | **4.50 GB** | 14.21 GB |
 
 Generated on the device: 4.47 GiB (2^22) / 8.94 GiB (2^23) of trees 0–1. Expected on the 16-vCPU H100 pod (witness 4× slower than the M4 Pro, ingress 1.4–4.1 s for 6.5–12.9 GiB): at 2^23 roughly 7–9 s less host witness and 1–3 s less ingress, against a few ms of kernels (a memory-bound 9 GiB write).
+
+### Phase 2: `block_msg`, `block_walk`, `block_bytes` (2026-10-15, branch `cuda/batch-witness`)
+
+After phase 1 the host witness at 2^23 was walk (0.70 s on the M4 Pro), msg (0.42 s), fields (0.15 s) and small parts; walk and msg were also 2.8 of the 3.9 GiB still uploaded. Three more generators (`witness.zig`):
+
+| Kernel | Grid | Inputs | Host reference |
+|---|---|---|---|
+| `msg` | one thread per row; binary search for its message | the block's bytes, 10 words per message (`msg.descriptors`: row, id, flags, tuple, data length, previous data length) | `msg.generate`, `setUses`, `merkle.addHeaderUses` |
+| `walk` | one thread per row | the block's bytes, the sigop total and one 16-byte record per walked row (`walk.plan`: position, automaton state, remaining length, running sigops) | `walk.columns` |
+| `bytes` | one thread per row | the block's bytes, the reads per position (`bytes.multiplicities`) | `bytes.generate` |
+
+The sigop automaton is sequential per script, so the host keeps that pass (`walk.plan`, a tight loop with no field inversions) and the kernel expands each record into the 51 columns (the next state, the zero tests and their inverses). `walk.generate` is now `plan` + `columns`, and `msg.generate` collects its reads through `appendReads`: the CPU columns are unchanged (golden hashes). With `skip_device_columns`, `buildFull` leaves the three mains empty and keeps `Built.raw`, `msgs`, `walk_recs` and `byte_mults`.
+
+Host checks (`witness_test.zig`): the kernels as host C++ equal the CPU columns of all five generated components for blocks 0 (uniform, tiered), 170, 91812, 91722, 91842, 91880 and 400000 (L 22); flipping a message id, a sigop sum or a byte multiplicity changes the output; `.trace_generation` over block 0's real plans equals the CPU storage order.
+
+M4 Pro, production, tiered, `cuda-prove --skip-cpu` (stops at session open):
+
+| | 400000 (2^22) phase 1 | phase 2 | 970347 (2^23) phase 1 | phase 2 |
+|---|---|---|---|---|
+| "witness built" lap | 0.79 s | **0.20 s** | 1.55 s | **0.40 s** |
+| planned H2D | 2.00 GiB | **0.43 GiB** | 3.99 GiB | **0.85 GiB** |
+| peak memory footprint | 2.30 GB | **0.62 GB** | 4.50 GB | **1.12 GB** |
+
+**Device run** (H100 SXM 80 GB, sm_90, 8 vCPUs, 2026-10-15): every `run.sh` step byte-identical to the CPU proof and verified (block 0, four profiles), 400000 and both 2^23 blocks equal to their saved CPU proofs' hashes. Time to proof (runner clock):
+
+| Block | Phase 1 (H100 PCIe, 2026-10-13) | Phase 2 | Host witness | H2D |
+|---|---|---|---|---|
+| 400000 (2^22) | 5.3 s | **1.95 s** | 0.41 s | 0.43 GiB |
+| 970347 (2^23) | 11.0 s | **3.62 s** | 0.95 s | 0.85 GiB |
+| 774628 (2^23) | 9.2 s | **3.13 s** | 0.60 s | 0.85 GiB |
+
+Host RSS at 2^23: 10.9 GB (14.2 in phase 1).
+
+## Batch proving: `cuda-epoch` (2026-10-15)
+
+`cuda-epoch` (src/gpu/cuda/epoch.zig) is the GPU twin of `chainproof prove-epoch`: the same inputs (`<dir>/blocks`, `<dir>/undo` with `.ctx`, the headers and the chain proof), the same epoch challenge and the same files (`<dir>/proofs/<h>.sbblock`, `<dir>/set-<to>.bin`). The shared part is `src/block/epoch_run.zig`. One process proves every block of the epoch:
+
+- per process: the AIRs, the AOT catalog, one `cuda.runtime.NativeRuntime` (the CUDA context and the AOT loader with its loaded functions stay open; each proof is a retained transaction, `prover.Input.runtime`), the twiddles per size, and the MMR over the headers folded once (`HT.Paths`);
+- per block: the lean witness (five components and tree 0 on the device), the plans, the device proof, the file.
+
+`HT.Paths` records the MMR fold once; each header's inclusion path is then a walk up the tree. Before, `bindWindow` folded all 970k leaves for each of the window's 12 headers, about 1 s per block in both provers. `Paths.proof` equals `inclusionProof` (test).
+
+`--mock` proves on the CPU through the same code: over blocks 0..30 it writes the same bytes as `chainproof prove-epoch` (proofs and coin set), and `chainproof verify-epoch` accepts them. `--heights <file>` is a standalone run over listed blocks under the testing challenge (no coin set; not bound to an epoch): for measurements over a sample of the chain. `scripts/pod/epoch.sh` runs both on a pod.
+
+**Batch proving run** (same pod, 2026-10-15). A retained session's per-proof arena stays reserved in the context's private pool (release threshold max), and the next proof's admission counts only driver-free memory, so on 80 GB a 2^23 proof failed after any large one. Batch proofs therefore use stwo-zig's prepared execution cache (`prepareExecution` + `openPreparedCachedRetained`, keyed on the placement; its admission counts pool-reusable memory and evicts LRU arenas), and `witness.Inputs.fixed_capacity` sizes the inputs slot by the components' log sizes so a size class has one plan.
+
+- **Epoch 0..100**, production: 101 device proofs and the coin set byte-identical to `--mock` (CPU): 0.089 s per block on the device (0.415 s on the pod's CPU); a single `cuda-prove` process took about 0.8 s for such a block.
+- **Sample** (`--heights`, 37 blocks: 3 per (L, profile) class from 2^11 to 2^21, 2 at 2^22 and 2^23, drawn from the survey with seed 15; production strength): all 37 verified on the host (`--verify`); the 27 up to 2^19 byte-identical to `--mock`. Mean time per block (witness, plans, device proof, file; one session):
+
+| L (tiered unless noted) | blocks in the chain | s / block | of which device |
+|---|---|---|---|
+| 11 (uniform) | 86,958 | 0.119 | 0.101 |
+| 12 – 16 | 87,898 | 0.092 – 0.118 | 0.077 – 0.098 |
+| 17 | 29,309 | 0.142 | 0.114 |
+| 18 | 43,593 | 0.177 | 0.140 |
+| 19 | 50,045 | 0.261 | 0.199 |
+| 20 | 76,633 | 0.412 | 0.308 |
+| 21 | 65,919 | 0.747 | 0.537 |
+| 22 | 293,931 | 1.413 | 1.030 |
+| 23 | 236,765 | 2.661 | 1.938 |
+
+Weighted by the survey (data/chain-sizes.csv), the whole chain's block proofs are about **325 H100-hours** (2^23: 175, 2^22: 115, the rest 35), against about 1,260 before (phase 1, one process per block, small-block times estimated). The GPU is busy about 70 % of the run; the rest is the host witness (0.7 s at 2^23 on these 8 vCPUs) and plans, which overlap nothing yet.
 
 ## Public inputs
 

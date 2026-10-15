@@ -120,10 +120,45 @@ fn f(x: anytype) M31 {
     return M31.fromCanonical(@intCast(x));
 }
 
+/// The byte positions the messages read, in row order (the bytes component's multiplicities).
+pub fn appendReads(a: std.mem.Allocator, msgs: []const Message, reads: *std.ArrayList(u32)) !void {
+    var n: usize = 0;
+    for (msgs) |m| n += m.positions.len;
+    try reads.ensureUnusedCapacity(a, n);
+    for (msgs) |m| reads.appendSliceAssumeCapacity(m.positions);
+}
+
+/// Words per message descriptor (`descriptors`).
+pub const DESC_WORDS = 10;
+
+/// One descriptor per message for the device witness (`gpu/cuda/witness.zig`, `msg`): first row,
+/// id, flags (hdr, wtx, seg, split), the tuple (i, a, w, l), data length, and the previous
+/// message's data length (the running `DLC` on this message's data rows). A row's columns are a
+/// function of its message's descriptor, its index and the block's bytes: the data positions are
+/// `a + j`, or for a split txid `a + j` (j < 4), `a + 2 + j` (j < dl − 4), `l + j − (dl − 4)`.
+pub fn descriptors(a: std.mem.Allocator, msgs: []const Message) ![]u32 {
+    const out = try a.alloc(u32, DESC_WORDS * msgs.len);
+    var row: usize = 0;
+    var prev: usize = 0;
+    for (msgs, 0..) |m, i| {
+        const dl = m.positions.len;
+        const t = m.tx;
+        for (m.positions, 0..) |p, j| {
+            const want: usize = if (!m.split) t.a + j else if (j < 4) t.a + j else if (j < dl - 4) t.a + 2 + j else t.l + j - (dl - 4);
+            if (p != want) return error.InvalidMessage;
+        }
+        out[DESC_WORDS * i ..][0..DESC_WORDS].* = .{ @intCast(row), m.id, @as(u32, @intFromBool(m.hdr)) | @as(u32, @intFromBool(m.wtx)) << 1 | @as(u32, @intFromBool(t.seg)) << 2 | @as(u32, @intFromBool(m.split)) << 3, t.i, t.a, t.w, t.l, @intCast(dl), @intCast(prev), 0 };
+        row += (dl + 9 + 63) / 64 * 64;
+        prev = dl;
+    }
+    return out;
+}
+
 /// Main columns in `2^log_size` rows; `reads` collects the byte positions read.
 pub fn generate(a: std.mem.Allocator, log_size: u32, raw: []const u8, msgs: []const Message, reads: *std.ArrayList(u32)) ![][]M31 {
     const n = @as(usize, 1) << @intCast(log_size);
     if (rowsNeeded(msgs) > n) return error.TooManyRows;
+    try appendReads(a, msgs, reads);
     const cols = try a.alloc([]M31, N_MAIN);
     for (cols) |*c| {
         c.* = try a.alloc(M31, n);
@@ -154,7 +189,6 @@ pub fn generate(a: std.mem.Allocator, log_size: u32, raw: []const u8, msgs: []co
                 const p = m.positions[j];
                 cols[POS][row] = f(p);
                 byte = raw[p];
-                try reads.append(a, p);
                 const piece: usize = if (!m.split) 0 else if (j < 4) 0 else if (j < dl - 4) 1 else 2;
                 cols[PC0 + piece][row] = one;
             } else if (j == dl) {

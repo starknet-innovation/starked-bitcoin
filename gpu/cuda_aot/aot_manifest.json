@@ -558,6 +558,32 @@
   },
   {
     "kind": "witness",
+    "label": "starked_witness_bytes_86e2ab807e2c566d",
+    "abi_schema": "native_indexed_recurrence_trace_v1",
+    "kernel_name": "starked_witness_bytes_v1_86e2ab807e2c566d",
+    "cache_key": "1bb30c701e520436",
+    "semantic_hash": "86e2ab807e2c566d",
+    "program_identity": "252391a42d9be3f49ffd70a4df2a4cc2424ef23c2572c6f6c994fde56a665030",
+    "file": "witness_starked_witness_bytes_86e2ab807e2c566d_1bb30c701e520436.cu",
+    "module_globals": "none",
+    "identity_scheme": "sha256-source-and-contract-v1",
+    "semantic_contract": "starked-bitcoin/witness-bytes/v1;args=raw,mults,len,columns,rows;block_bytes 12 natural columns: bytes.generate (pos, byte, bits, active, mult) from raw (bytes, little-endian words) and mults[r] for r < len;columns=u64 pointers;grid=rows/256;threads=256"
+  },
+  {
+    "kind": "witness",
+    "label": "starked_witness_msg_54b8bcb38815ef89",
+    "abi_schema": "native_indexed_recurrence_trace_v1",
+    "kernel_name": "starked_witness_msg_v1_54b8bcb38815ef89",
+    "cache_key": "6fda5c7da9135ac5",
+    "semantic_hash": "54b8bcb38815ef89",
+    "program_identity": "d522dceda48b2870e8823b5fee983b8f6da8c631b5ceb7e07157ee7b081584f2",
+    "file": "witness_starked_witness_msg_54b8bcb38815ef89_6fda5c7da9135ac5.cu",
+    "module_globals": "none",
+    "identity_scheme": "sha256-source-and-contract-v1",
+    "semantic_contract": "starked-bitcoin/witness-msg/v1;args=raw,msgs,count,columns,rows;block_msg 38 natural columns: msg.generate + setUses + merkle.addHeaderUses from raw (bytes, little-endian words) and msgs[10m]: row,id,flags(hdr,wtx,seg,split),i,a,w,l,dl,prev_dl;columns=u64 pointers;grid=rows/256;threads=256"
+  },
+  {
+    "kind": "witness",
     "label": "starked_witness_pre_34475ffbc38611b1",
     "abi_schema": "native_indexed_recurrence_trace_v1",
     "kernel_name": "starked_witness_pre_v1_34475ffbc38611b1",
@@ -594,5 +620,18 @@
     "module_globals": "none",
     "identity_scheme": "sha256-source-and-contract-v1",
     "semantic_contract": "starked-bitcoin/witness-sha-words/v1;args=ktab(meta region: K[64], then meta),comps,count,words,rows;per 72-row period p: Words.place(comps[p] or zero dummy) -> a,e,w at words[0|rows|2rows + r];grid=periods/64;threads=64"
+  },
+  {
+    "kind": "witness",
+    "label": "starked_witness_walk_54608d8c5ecee451",
+    "abi_schema": "native_indexed_recurrence_trace_v1",
+    "kernel_name": "starked_witness_walk_v1_54608d8c5ecee451",
+    "cache_key": "aa7cad89386fbcf7",
+    "semantic_hash": "54608d8c5ecee451",
+    "program_identity": "bbcd50495d58a444849da9fca02f12aa9ce35b9910eac9843d24708fa0310b2f",
+    "file": "witness_starked_witness_walk_54608d8c5ecee451_aa7cad89386fbcf7.cu",
+    "module_globals": "none",
+    "identity_scheme": "sha256-source-and-contract-v1",
+    "semantic_contract": "starked-bitcoin/witness-walk/v1;args=raw,recs,count,columns,rows;block_walk 51 natural columns: walk.columns from raw and recs[0]=sigops, recs[4+4r..]: w0(pos,kind,li,lk,first),rem,val,sums;columns=u64 pointers;grid=rows/256;threads=256"
   }
 ]

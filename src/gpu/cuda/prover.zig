@@ -71,6 +71,9 @@ pub const Input = struct {
     /// Device witness (`witness.zig`): the inputs of the generated components, whose `mains` may
     /// then be empty; null: every column comes from `mains`.
     witness: ?*const witness.Inputs = null,
+    /// A process-owned CUDA runtime kept open across proofs (`cuda-epoch`): the context and the AOT
+    /// loader (and its loaded functions) are reused; null: one session per proof.
+    runtime: ?*cuda.runtime.NativeRuntime = null,
 };
 
 pub const Result = struct {
@@ -343,7 +346,18 @@ pub fn proofPass(
     if ((prepared.witness == null) != (host.generated_main == null) or host.device_tree0 != (prepared.witness != null)) return error.InvalidResidentInput;
     const plans = &prepared.plans;
     const blowup = input.config.fri_config.log_blowup_factor;
-    var tx = try Transaction.openPrepared(allocator, &accepted_sms, try prepared.memory.placement.clone(allocator));
+    var tx = if (input.runtime) |runtime| blk: {
+        // One prepared, fixed-address arena per memory plan, kept across proofs (stwo-zig's
+        // execution cache, LRU eviction counting pool-reusable memory). A per-proof arena would
+        // stay reserved in the context's pool after its proof, and the next proof's admission
+        // (driver-free memory only) would refuse a 2^23 arena after any large one.
+        const key = arenaKey(&prepared.memory.placement);
+        // The cache keeps the plan beyond this proof (and frees it on eviction): a process
+        // allocator, not the caller's (often per-block) one.
+        if (!runtime.hasPreparedExecution(key)) try runtime.prepareExecution(std.heap.page_allocator, key, try prepared.memory.placement.clone(std.heap.page_allocator));
+        const retained = try runtime.beginProof();
+        break :blk try Transaction.openPreparedCachedRetained(allocator, retained, key);
+    } else try Transaction.openPrepared(allocator, &accepted_sms, try prepared.memory.placement.clone(allocator));
     var finished = false;
     defer if (!finished) tx.abort() catch {};
     const session = tx.proofSession();
@@ -492,6 +506,26 @@ pub fn proofPass(
         .verdict = verdict,
         .planned_arena_bytes = try prepared.memory.bytes(),
     };
+}
+
+/// The prepared-arena cache key of a placement (as stwo-zig's `resident_memory_plan.cacheKey`).
+fn arenaKey(plan: *const cuda.runtime.arena.Plan) [32]u8 {
+    var h = std.crypto.hash.sha2.Sha256.init(.{});
+    h.update("starked-bitcoin/cuda/block-arena/v1\x00");
+    const put = struct {
+        fn f(hh: *std.crypto.hash.sha2.Sha256, v: u64) void {
+            var b: [8]u8 = undefined;
+            std.mem.writeInt(u64, &b, v, .little);
+            hh.update(&b);
+        }
+    }.f;
+    put(&h, plan.total_words);
+    put(&h, plan.placements.len);
+    for (plan.placements) |p| {
+        const r = p.requirement;
+        inline for (.{ r.id, r.words, r.alignment_words, @intFromEnum(r.live_from), @intFromEnum(r.live_through), r.live_from_phase, r.live_through_phase, p.offset_words }) |v| put(&h, @intCast(v));
+    }
+    return h.finalResult();
 }
 
 /// Each column's destination inside a tree's coefficient buffer (`resident_commit` cohort order).
