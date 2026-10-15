@@ -18,11 +18,13 @@ Usage:
     python3 -I scripts/fetch_undo.py [--env FILE] [--url http://127.0.0.1:18332] [--out DIR] [--blocks]
         [--blocks-dir DIR] [--ctx] HEIGHT|FROM-TO...
 `--blocks` also saves the raw block (to testdata/blocks/, or `--blocks-dir`) when missing. `--ctx` also
-writes <out>/<height>.ctx: per record, the creating transaction's index in its block (LE32), found with
-`getrawtransaction` (needs txindex) and the creating block's transaction list.
+writes <out>/<height>.ctx: per record, the creating transaction's index in its block (LE32), from the
+prevout's height and the creating block's transaction list (`getblock <hash> 1`, batched; no txindex).
 Writes <out>/<height>.undo (default out: testdata/undo).
 """
 import base64, hashlib, json, os, sys, urllib.request
+from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 from pathlib import Path
 
@@ -55,6 +57,17 @@ class Rpc:
             raise RuntimeError(f"{method}: {resp['error']}")
         return resp["result"]
 
+    def batch(self, calls):
+        """Several calls in one JSON-RPC request (results in order)."""
+        body = json.dumps([{"jsonrpc": "1.0", "id": k, "method": m, "params": list(ps)} for k, (m, ps) in enumerate(calls)]).encode()
+        req = urllib.request.Request(self.url, data=body, headers={"Authorization": self.auth, "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=600) as r:
+            resps = sorted(json.loads(r.read(), parse_float=Decimal), key=lambda x: x["id"])
+        for (m, _), resp in zip(calls, resps):
+            if resp.get("error"):
+                raise RuntimeError(f"{m}: {resp['error']}")
+        return [resp["result"] for resp in resps]
+
 
 def compact_size(n):
     if n < 0xfd:
@@ -66,12 +79,40 @@ def compact_size(n):
     return b"\xff" + n.to_bytes(8, "little")
 
 
-def creator_index(rpc, txid, cache):
-    """The index of transaction `txid` in its block."""
-    bh = rpc("getrawtransaction", txid, True)["blockhash"]
-    if bh not in cache:
-        cache[bh] = {t: i for i, t in enumerate(rpc("getblock", bh, 1)["tx"])}
-    return cache[bh][txid]
+class Creators:
+    """Transaction index within its block, for the blocks that created a block's inputs. The creating
+    height is the prevout's (`getblock <hash> 3`), the block hash is data/headers.bin's, and each
+    creating block's txid list is read once (`getblock <hash> 1`, batched, several requests at a time)
+    and kept in a bounded cache: no `getrawtransaction` per input."""
+
+    def __init__(self, rpc, headers, keep=4096, chunk=16, workers=4):
+        self.rpc, self.headers, self.keep, self.chunk, self.workers = rpc, headers, keep, chunk, workers
+        self.cache = OrderedDict()
+
+    def ensure(self, heights):
+        missing = sorted(set(h for h in heights if h not in self.cache))
+        chunks = [missing[k:k + self.chunk] for k in range(0, len(missing), self.chunk)]
+        def fetch(hs):
+            res = self.rpc.batch([("getblock", (block_hash(self.headers, h), 1)) for h in hs])
+            for h, b in zip(hs, res):
+                if b["height"] != h:
+                    raise SystemExit(f"{h}: node's block at this hash has height {b['height']}; refusing")
+            return [(h, {t: i for i, t in enumerate(b["tx"])}) for h, b in zip(hs, res)]
+        with ThreadPoolExecutor(self.workers) as pool:
+            for part in pool.map(fetch, chunks):
+                for h, idx in part:
+                    self.cache[h] = idx
+        for h in heights:
+            self.cache.move_to_end(h)
+        while len(self.cache) > max(self.keep, len(set(heights))):
+            self.cache.popitem(last=False)
+
+    def index(self, height, txid):
+        return self.cache[height][txid]
+
+
+def block_hash(headers, h):
+    return hashlib.sha256(hashlib.sha256(headers[80 * h:80 * h + 80]).digest()).digest()[::-1].hex()
 
 
 def undo_stream(block):
@@ -122,7 +163,7 @@ def main():
     rpc = Rpc(url, env.get("BITCOIN_RPC_USER", "application"), env["BITCOIN_RPC_PASSWORD"])
     headers = HEADERS.read_bytes()
     out.mkdir(parents=True, exist_ok=True)
-    cache = {}
+    creators = Creators(rpc, headers)
     for h in heights:
         header = headers[80 * h:80 * h + 80]
         if len(header) != 80:
@@ -145,10 +186,11 @@ def main():
         u = undo_stream(block)
         (out / f"{h}.undo").write_bytes(u)
         if want_ctx:
+            ins = [vin for tx in block["tx"][1:] for vin in tx["vin"]]
+            creators.ensure([vin["prevout"]["height"] for vin in ins])
             ctx = bytearray()
-            for tx in block["tx"][1:]:
-                for vin in tx["vin"]:
-                    ctx += creator_index(rpc, vin["txid"], cache).to_bytes(4, "little")
+            for vin in ins:
+                ctx += creators.index(vin["prevout"]["height"], vin["txid"]).to_bytes(4, "little")
             (out / f"{h}.ctx").write_bytes(bytes(ctx))
         print(f"{h}: {n_in} spent outputs, undo stream {len(u)} bytes")
 
