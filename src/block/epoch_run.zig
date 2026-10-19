@@ -5,6 +5,11 @@
 //! final coin set, build each block's witness under it, and write `<dir>/proofs/<h>.sbblock` and the
 //! coin set `<dir>/set-<to>.bin`. The proof files are the same bytes whichever prover made them
 //! (the CUDA proof is byte-identical to the CPU's).
+//!
+//! Host memory does not grow with the epoch: `load` reads each block once (its hash and commitment, and
+//! its coin events applied to `replay.Set`, which streams the previous set in and the final set out), and
+//! `build` reads block `i`'s files again when it is proved. The peak is the coin table, ~25 GB at today's
+//! ~165 M coins, freed before proving.
 
 const std = @import("std");
 const bs = @import("system.zig");
@@ -15,6 +20,8 @@ const PF = @import("proof_file.zig");
 const S = @import("../recursion/store.zig");
 const HT = @import("../btc/header_tree.zig");
 const system = @import("../air/system.zig");
+const R = @import("replay.zig");
+const SF = @import("set_file.zig");
 
 /// The provenance both provers write (so their files are byte-identical).
 pub const provenance = "prove-epoch";
@@ -25,19 +32,17 @@ pub const From = struct {
     prev_set: ?[]const u8 = null,
 };
 
-pub const Init = struct { set: []const EP.Coin, hash: ?[32]u8, digest: ?[32]u8 };
+/// An epoch's initial set: none at genesis, else the previous set file's facts (streamed and checked:
+/// strictly sorted, every coin created before `from`).
+pub const Init = struct { info: ?SF.Info = null };
 
-/// The initial set of an epoch from a previous set: decoded, strictly sorted, created before `from`.
-pub fn loadInit(a: std.mem.Allocator, from: From) !Init {
+pub fn loadInit(gpa: std.mem.Allocator, from: From) !Init {
     const path = from.prev_set orelse {
         if (from.height != 0) return error.PrevSetRequired;
-        return .{ .set = &.{}, .hash = null, .digest = null };
+        return .{};
     };
     if (from.height == 0) return error.GenesisHasNoPrevSet;
-    const set = try EP.decodeSet(a, try S.readFile(a, path));
-    if (!EP.sortedStrict(set)) return error.SetNotSorted;
-    if (!EP.createdBefore(set, from.height)) return error.PrevSetTooNew;
-    return .{ .set = set, .hash = EP.hashSerialized(set), .digest = try EP.setDigest(a, set) };
+    return .{ .info = try SF.scan(gpa, path, from.height) };
 }
 
 pub fn pathOf(a: std.mem.Allocator, dir: []const u8, sub: []const u8, h: u32, ext: []const u8) ![]u8 {
@@ -59,14 +64,12 @@ pub const Epoch = struct {
     all: []const [80]u8,
     /// The MMR over the headers' hashes, folded once (every block's window paths).
     paths: HT.Paths,
-    raws: []const []const u8,
-    undos: []const []const u8,
-    ctxs: []const []const u32,
-    set: []const EP.Coin,
+    /// The final set, written to `<dir>/set-<to>.bin` by `load` (none in a standalone run).
+    fin: ?SF.Info = null,
     ch: coin.Challenge,
 
     pub fn count(self: *const Epoch) usize {
-        return self.raws.len;
+        return self.heights.len;
     }
 
     /// Block `i`'s context (height, previous MTP, ancestors).
@@ -78,9 +81,10 @@ pub const Epoch = struct {
     /// Block `i`'s witness under the epoch's challenge. `size`: the profile choice (prove-epoch's
     /// default `auto`); `skip_device_columns`: the lean build a device witness completes.
     pub fn build(self: *const Epoch, a: std.mem.Allocator, i: usize, size: Size, skip_device_columns: bool) !bs.Built {
-        return bs.buildFull(a, self.raws[i], self.undos[i], self.ctxOf(i), .{
+        const f = try readBlock(a, self.all, self.dir, self.heights[i]);
+        return bs.buildFull(a, f.raw, f.undo, self.ctxOf(i), .{
             .chal = self.ch,
-            .ctx = self.ctxs[i],
+            .ctx = f.ctx,
             .profile = if (size == .tiered) .tiered else .uniform,
             .auto = size == .auto,
             .skip_device_columns = skip_device_columns,
@@ -96,11 +100,6 @@ pub const Epoch = struct {
 
     pub fn writeProof(self: *const Epoch, a: std.mem.Allocator, i: usize, bytes: []const u8) !void {
         try S.writeFileAtomic(try pathOf(a, self.dir, "proofs", self.heights[i], "sbblock"), bytes);
-    }
-
-    pub fn writeSet(self: *const Epoch, a: std.mem.Allocator) !void {
-        if (self.standalone) return error.StandaloneHasNoSet;
-        try S.writeFileAtomic(try std.fmt.allocPrint(a, "{s}/set-{d}.bin", .{ self.dir, self.to }), try EP.encodeSet(a, self.set));
     }
 };
 
@@ -118,51 +117,51 @@ fn readBlock(a: std.mem.Allocator, all: []const [80]u8, dir: []const u8, hh: u32
     return .{ .raw = raw, .undo = undo, .ctx = cx };
 }
 
-/// Reads the epoch `from..to` from `dir` against the chain's headers (`all`, at least `n`).
+/// Reads the epoch `from..to` from `dir` against the chain's headers (`all`, at least `n`), and writes
+/// its final set to `<dir>/set-<to>.bin`.
 pub fn load(a: std.mem.Allocator, all: []const [80]u8, n: u32, dir: []const u8, from: From, to: u32) !Epoch {
     if (to >= n or all.len < n) return error.HeightBeyondChain;
     if (from.height > to) return error.EmptyEpoch;
-    const init = try loadInit(a, from);
+    const gpa = std.heap.page_allocator;
+    var set = try R.Set.init(gpa, 0);
+    defer set.deinit();
+    var prev: ?[32]u8 = null;
+    if (from.prev_set) |path| {
+        if (from.height == 0) return error.GenesisHasNoPrevSet;
+        prev = (try set.loadFile(path, from.height)).digest;
+    } else if (from.height != 0) return error.PrevSetRequired;
     const nb = to - from.height + 1;
     const heights = try a.alloc(u32, nb);
-    const raws = try a.alloc([]const u8, nb);
-    const undos = try a.alloc([]const u8, nb);
-    const ctxs = try a.alloc([]const u32, nb);
     const hashes = try a.alloc([32]u8, nb);
     const commits = try a.alloc([32]u8, nb);
+    var tmp = std.heap.ArenaAllocator.init(gpa);
+    defer tmp.deinit();
     for (0..nb) |i| {
+        _ = tmp.reset(.retain_capacity);
+        const ta = tmp.allocator();
         const hh: u32 = from.height + @as(u32, @intCast(i));
         heights[i] = hh;
-        const f = try readBlock(a, all, dir, hh);
-        raws[i] = f.raw;
-        undos[i] = f.undo;
-        ctxs[i] = f.ctx;
+        const f = try readBlock(ta, all, dir, hh);
         var h1: [32]u8 = undefined;
-        std.crypto.hash.sha2.Sha256.hash(raws[i][0..80], &h1, .{});
+        std.crypto.hash.sha2.Sha256.hash(f.raw[0..80], &h1, .{});
         std.crypto.hash.sha2.Sha256.hash(&h1, &hashes[i], .{});
         // The commitment is of the in-circuit stream, which holds the creating transactions' indices.
-        std.crypto.hash.blake2.Blake2s256.hash(try bs.undoStreamOf(a, raws[i], undos[i], f.ctx, hh), &commits[i], .{});
+        std.crypto.hash.blake2.Blake2s256.hash(try bs.undoStreamOf(ta, f.raw, f.undo, f.ctx, hh), &commits[i], .{});
+        _ = try set.apply(ta, f.raw, &all[hh], hh, false);
+        try set.maybeCompact();
     }
     // The final set is computed first: the seed binds it.
-    const set = try EP.coinSetFrom(a, init.set, from.height, raws);
-    const ch = EP.challenge(EP.seedFrom(from.height, to, init.digest, try EP.setDigest(a, set), hashes, commits));
-    return .{ .dir = dir, .from = from.height, .to = to, .heights = heights, .n = n, .all = all, .paths = try pathsOf(a, all, n), .raws = raws, .undos = undos, .ctxs = ctxs, .set = set, .ch = ch };
+    std.fs.cwd().makePath(dir) catch {};
+    const fin = try set.writeFile(try std.fmt.allocPrint(a, "{s}/set-{d}.bin", .{ dir, to }));
+    const ch = EP.challenge(EP.seedFrom(from.height, to, prev, fin.digest, hashes, commits));
+    return .{ .dir = dir, .from = from.height, .to = to, .heights = heights, .n = n, .all = all, .paths = try pathsOf(a, all, n), .fin = fin, .ch = ch };
 }
 
 /// A standalone run over the listed heights (any order): each block under the testing challenge.
 pub fn loadHeights(a: std.mem.Allocator, all: []const [80]u8, n: u32, dir: []const u8, heights: []const u32) !Epoch {
     if (heights.len == 0) return error.EmptyEpoch;
-    const raws = try a.alloc([]const u8, heights.len);
-    const undos = try a.alloc([]const u8, heights.len);
-    const ctxs = try a.alloc([]const u32, heights.len);
-    for (heights, 0..) |hh, i| {
-        if (hh >= n or all.len < n) return error.HeightBeyondChain;
-        const f = try readBlock(a, all, dir, hh);
-        raws[i] = f.raw;
-        undos[i] = f.undo;
-        ctxs[i] = f.ctx;
-    }
-    return .{ .dir = dir, .from = heights[0], .to = heights[heights.len - 1], .heights = heights, .standalone = true, .n = n, .all = all, .paths = try pathsOf(a, all, n), .raws = raws, .undos = undos, .ctxs = ctxs, .set = &.{}, .ch = coin.Challenge.testing() };
+    for (heights) |hh| if (hh >= n or all.len < n) return error.HeightBeyondChain;
+    return .{ .dir = dir, .from = heights[0], .to = heights[heights.len - 1], .heights = heights, .standalone = true, .n = n, .all = all, .paths = try pathsOf(a, all, n), .ch = coin.Challenge.testing() };
 }
 
 fn pathsOf(a: std.mem.Allocator, all: []const [80]u8, n: u32) !HT.Paths {

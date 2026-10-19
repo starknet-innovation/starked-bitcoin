@@ -158,9 +158,8 @@ pub fn main() !void {
         c.value_ptr.device += secs(t_device);
         std.debug.print("{d} {d} {s} {d:.3} {d:.3} {d:.3} {d:.3} {d}{s}\n", .{ ep.heights[k], b.log_size, @tagName(b.profile), secs(t_witness), secs(t_plans), secs(t_device), secs(t_total), bytes.len, if (verify) " verified" else "" });
     }
-    if (!ep.standalone) try ep.writeSet(a);
     const elapsed = secs(run.read());
-    std.debug.print("{s} {d}..{d}: {d} block proofs ({d:.1} MB), coin set of {d} coins{s}; {d:.1} s, {d:.3} s/block\n", .{ if (ep.standalone) "standalone" else "epoch", ep.from, ep.to, ep.count(), @as(f64, @floatFromInt(proof_bytes)) / 1e6, ep.set.len, if (ep.standalone) " (none written)" else " written", elapsed, elapsed / @as(f64, @floatFromInt(ep.count())) });
+    std.debug.print("{s} {d}..{d}: {d} block proofs ({d:.1} MB), coin set of {d} coins{s}; {d:.1} s, {d:.3} s/block\n", .{ if (ep.standalone) "standalone" else "epoch", ep.from, ep.to, ep.count(), @as(f64, @floatFromInt(proof_bytes)) / 1e6, if (ep.fin) |f| f.count else 0, if (ep.standalone) " (none written)" else " written", elapsed, elapsed / @as(f64, @floatFromInt(ep.count())) });
     var it = classes.iterator();
     while (it.next()) |e| {
         const v = e.value_ptr.*;

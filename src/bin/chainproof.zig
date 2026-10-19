@@ -459,8 +459,7 @@ fn proveEpoch(gpa: std.mem.Allocator, a: std.mem.Allocator, headers_path: []cons
         try ep.writeProof(ba, i, try ep.encode(ba, i, &b, proof));
         if (hh % 50 == 0 or hh == to) std.debug.print("block {d}: proved ({d:.0}s so far)\n", .{ hh, secs(timer.read()) });
     }
-    try ep.writeSet(a);
-    std.debug.print("epoch {d}..{d}: {d} block proofs, coin set of {d} coins written\n", .{ from.height, to, ep.count(), ep.set.len });
+    std.debug.print("epoch {d}..{d}: {d} block proofs, coin set of {d} coins written\n", .{ from.height, to, ep.count(), ep.fin.?.count });
 }
 
 fn verifyEpoch(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8, chain_path: []const u8, dir: []const u8, to: u32, min_work: u256, weak: bool, from: EpochFrom) !void {
@@ -474,18 +473,22 @@ fn verifyEpoch(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8
     if (min_work != 0 and s.work < min_work) return error.InsufficientWork;
     std.debug.print("chain proof verified: headers 0..{d} ({d:.1}s)\n", .{ s.headers - 1, secs(timer.lap()) });
     if (from.height > to) return error.EmptyEpoch;
-    const init = try ER.loadInit(a, .{ .height = from.height, .prev_set = from.prev_set });
+    const init = try ER.loadInit(gpa, .{ .height = from.height, .prev_set = from.prev_set });
     const airs = try BS.parseAirs(a);
     const nb = to - from.height + 1;
-    const files = try a.alloc(PF.File, nb);
+    // Only each proof's public inputs are kept: a proof file is decoded and verified in its own arena.
+    const pubs = try a.alloc([]const M31, nb);
     const hashes = try a.alloc([32]u8, nb);
     const commits = try a.alloc([32]u8, nb);
     var nin: u64 = 0;
     for (0..nb) |i| {
         const hh: u32 = from.height + @as(u32, @intCast(i));
-        const f = try PF.decode(a, try S.readFile(a, try pathOf(a, dir, "proofs", hh, "sbblock")));
-        const window = try PF.checkWindow(a, &f, s.headers, s.t);
-        try PF.verifyStark(a, &airs, &f, blockFri(weak));
+        var arena = std.heap.ArenaAllocator.init(gpa);
+        defer arena.deinit();
+        const pa = arena.allocator();
+        const f = try PF.decode(pa, try S.readFile(pa, try pathOf(pa, dir, "proofs", hh, "sbblock")));
+        const window = try PF.checkWindow(pa, &f, s.headers, s.t);
+        try PF.verifyStark(pa, &airs, &f, blockFri(weak));
         const st = try PF.checkPubs(&f.pubs, window);
         if (st.height != hh) return error.WrongHeight;
         var h1: [32]u8 = undefined;
@@ -493,30 +496,42 @@ fn verifyEpoch(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8
         std.crypto.hash.sha2.Sha256.hash(&h1, &hashes[i], .{});
         commits[i] = st.commitment;
         nin += f.pubs[sb.block.coin.PUB_NIN].toU32();
-        files[i] = f;
+        pubs[i] = try a.dupe(M31, &f.pubs);
     }
-    const set = try EP.decodeSet(a, try S.readFile(a, try std.fmt.allocPrint(a, "{s}/set-{d}.bin", .{ dir, to })));
-    if (!EP.sortedStrict(set)) return error.SetNotSorted;
-    const ch = EP.challenge(EP.seedFrom(from.height, to, init.digest, try EP.setDigest(a, set), hashes, commits));
+    const set_path = try std.fmt.allocPrint(a, "{s}/set-{d}.bin", .{ dir, to });
+    const fin_info = try SF.scan(gpa, set_path, null);
+    const ch = EP.challenge(EP.seedFrom(from.height, to, if (init.info) |x| x.digest else null, fin_info.digest, hashes, commits));
     var sum = @import("stwo_core").fields.qm31.QM31.zero();
-    for (files, 0..) |f, i| {
-        try EP.checkPubs(&f.pubs, ch, from.height + @as(u32, @intCast(i)));
-        sum = sum.add(EP.partialSum(&f.pubs));
+    for (pubs, 0..) |p, i| {
+        try EP.checkPubs(p, ch, from.height + @as(u32, @intCast(i)));
+        sum = sum.add(EP.partialSum(p));
     }
     std.debug.print("{d} block proofs verified, challenge recomputed from their hashes and commitments ({d:.1}s)\n", .{ nb, secs(timer.lap()) });
+    const init_count: u64 = if (init.info) |x| x.count else 0;
     // Events below p: initial + created + spent + final (the creations are at most the outputs).
-    if (nin + set.len + init.set.len >= 1 << 30) return error.EpochTooLarge;
+    if (nin + fin_info.count + init_count >= 1 << 30) return error.EpochTooLarge;
     // The initial set counts as created (Spec/UtxoEpochFrom.lean).
-    sum = sum.add(try EP.finalSum(ch, init.set));
-    const fin = try EP.finalSum(ch, set);
+    if (init.info) |x| sum = sum.add(try sumSet(gpa, from.prev_set.?, ch, x.digest));
+    const fin = try sumSet(gpa, set_path, ch, fin_info.digest);
     if (!sum.eql(fin)) {
         std.debug.print("REJECTED: the blocks' coin events do not end at this coin set\n", .{});
         return error.EpochUnbalanced;
     }
-    if (init.hash) |h| std.debug.print("  from the set after block {d}: {d} coins, hash_serialized {x}\n", .{ from.height - 1, init.set.len, h });
-    std.debug.print("VERIFIED epoch {d}..{d}: the coin set after block {d} is {d} coins ({d} inputs spent in the epoch)\n", .{ from.height, to, to, set.len, nin });
-    std.debug.print("  total amount     {d} sat\n", .{EP.totalAmount(set)});
-    std.debug.print("  hash_serialized  {x}  (Core's HASH_SERIALIZED of this set)\n", .{EP.hashSerialized(set)});
+    if (init.info) |x| std.debug.print("  from the set after block {d}: {d} coins, hash_serialized {x}\n", .{ from.height - 1, x.count, x.hash });
+    std.debug.print("VERIFIED epoch {d}..{d}: the coin set after block {d} is {d} coins ({d} inputs spent in the epoch)\n", .{ from.height, to, to, fin_info.count, nin });
+    std.debug.print("  total amount     {d} sat\n", .{fin_info.amount});
+    std.debug.print("  hash_serialized  {x}  (Core's HASH_SERIALIZED of this set)\n", .{fin_info.hash});
+}
+
+const SF = sb.block.set_file;
+const M31 = @import("stwo_core").fields.m31.M31;
+
+/// A set file's fractions under `ch` (a second, streamed pass); its digest must be the one the challenge
+/// was derived from (the file did not change between the passes).
+fn sumSet(gpa: std.mem.Allocator, path: []const u8, ch: sb.block.coin.Challenge, digest: [32]u8) !@import("stwo_core").fields.qm31.QM31 {
+    const r = try SF.sum(gpa, path, ch);
+    if (!std.mem.eql(u8, &r.digest, &digest)) return error.SetChanged;
+    return r.sum;
 }
 
 const BF = sb.recursion.block_forest;
@@ -563,21 +578,23 @@ fn verifyEpochTree(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []cons
     var forest = try BF.Forest.decode(gpa, a, try S.readFile(a, try std.fmt.allocPrint(a, "{s}/forest-{d}.bin", .{ dir, to })));
     defer for (forest.roots) |*r| r.proved.proof.deinit();
     if (forest.from != from.height or forest.to != to) return error.WrongEpoch;
-    const init = try ER.loadInit(a, .{ .height = from.height, .prev_set = from.prev_set });
-    const set = try EP.decodeSet(a, try S.readFile(a, try std.fmt.allocPrint(a, "{s}/set-{d}.bin", .{ dir, to })));
-    if (!EP.sortedStrict(set)) return error.SetNotSorted;
-    const v = try BF.verifyForest(gpa, a, tables, &bvk, &forest, s.headers, s.t, init.digest, try EP.setDigest(a, set));
+    const init = try ER.loadInit(gpa, .{ .height = from.height, .prev_set = from.prev_set });
+    const set_path = try std.fmt.allocPrint(a, "{s}/set-{d}.bin", .{ dir, to });
+    const fin_info = try SF.scan(gpa, set_path, null);
+    const v = try BF.verifyForest(gpa, a, tables, &bvk, &forest, s.headers, s.t, if (init.info) |x| x.digest else null, fin_info.digest);
     std.debug.print("{d} recursion trees verified: blocks {d}..{d}, the challenge from the seed over their roots, the block hashes the chain's ({d:.1}s)\n", .{ forest.roots.len, from.height, to, secs(timer.lap()) });
-    if (v.nin + set.len + init.set.len >= 1 << 30) return error.EpochTooLarge;
-    var sum = v.sum.add(try EP.finalSum(v.challenge, init.set));
-    const fin = try EP.finalSum(v.challenge, set);
+    const init_count: u64 = if (init.info) |x| x.count else 0;
+    if (v.nin + fin_info.count + init_count >= 1 << 30) return error.EpochTooLarge;
+    var sum = v.sum;
+    if (init.info) |x| sum = sum.add(try sumSet(gpa, from.prev_set.?, v.challenge, x.digest));
+    const fin = try sumSet(gpa, set_path, v.challenge, fin_info.digest);
     if (!sum.eql(fin)) {
         std.debug.print("REJECTED: the blocks' coin events do not end at this coin set\n", .{});
         return error.EpochUnbalanced;
     }
-    std.debug.print("VERIFIED epoch {d}..{d} (recursion): the coin set after block {d} is {d} coins ({d} inputs spent)\n", .{ from.height, to, to, set.len, v.nin });
-    std.debug.print("  total amount     {d} sat\n", .{EP.totalAmount(set)});
-    std.debug.print("  hash_serialized  {x}\n", .{EP.hashSerialized(set)});
+    std.debug.print("VERIFIED epoch {d}..{d} (recursion): the coin set after block {d} is {d} coins ({d} inputs spent)\n", .{ from.height, to, to, fin_info.count, v.nin });
+    std.debug.print("  total amount     {d} sat\n", .{fin_info.amount});
+    std.debug.print("  hash_serialized  {x}\n", .{fin_info.hash});
 }
 
 fn rebindBlock(gpa: std.mem.Allocator, a: std.mem.Allocator, in_path: []const u8, headers_path: []const u8, chain_path: []const u8, out: []const u8) !void {

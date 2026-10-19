@@ -27,6 +27,7 @@ pub const block = struct {
     pub const coin = @import("block/coin.zig");
     pub const epoch = @import("block/epoch.zig");
     pub const replay = @import("block/replay.zig");
+    pub const set_file = @import("block/set_file.zig");
     pub const system = @import("block/system.zig");
     pub const negative = @import("block/negative.zig");
 };

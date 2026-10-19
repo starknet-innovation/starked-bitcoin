@@ -16,6 +16,7 @@
 const std = @import("std");
 const EP = @import("epoch.zig");
 const fields = @import("fields.zig");
+const SF = @import("set_file.zig");
 const Sha256 = std.crypto.hash.sha2.Sha256;
 const Blake2s = std.crypto.hash.blake2.Blake2s256;
 
@@ -43,8 +44,8 @@ fn keyLess(_: void, x: Key, y: Key) bool {
 /// `.ctx` (per input, LE32 the creating transaction's index in its block).
 pub const Undo = struct { undo: []const u8, ctx: []const u8 };
 
-/// A written set: what `chainproof verify-epoch` reports for it.
-pub const SetInfo = struct { count: u64, amount: u64, hash: [32]u8, digest: [32]u8 };
+/// A written or loaded set: what `chainproof verify-epoch` reports for it.
+pub const SetInfo = SF.Info;
 
 pub const Set = struct {
     gpa: std.mem.Allocator,
@@ -252,62 +253,33 @@ pub const Set = struct {
         return info;
     }
 
-    /// Loads a set file (`epoch.decodeSet`'s checks, streamed): strictly sorted, every coin created
-    /// before block `from`.
+    /// Loads a set file (`set_file.Reader`'s checks: `epoch.decodeSet`'s, strictly sorted), every coin
+    /// created before block `from`.
     pub fn loadFile(self: *Set, path: []const u8, from: u32) !SetInfo {
-        const f = try std.fs.cwd().openFile(path, .{});
-        defer f.close();
-        var buf: [1 << 20]u8 = undefined;
-        var fr = f.reader(&buf);
-        const r = &fr.interface;
-        var b2 = Blake2s.init(.{});
+        var rd: SF.Reader = undefined;
+        try rd.init(self.gpa, path);
+        defer rd.deinit();
+        try self.map.ensureTotalCapacity(self.gpa, rd.n);
         var hs = Sha256.init(.{});
-        var nb: [4]u8 = undefined;
-        try r.readSliceAll(&nb);
-        b2.update(&nb);
-        const n = std.mem.readInt(u32, &nb, .little);
-        try self.map.ensureTotalCapacity(self.gpa, n);
-        var prev: ?Key = null;
         var amount: u64 = 0;
-        var s_buf = std.ArrayListUnmanaged(u8).empty;
-        defer s_buf.deinit(self.gpa);
-        for (0..n) |_| {
-            var head: [32 + 4 + 4 + 1 + 4 + 4]u8 = undefined;
-            try r.readSliceAll(&head);
-            b2.update(&head);
-            var k: Key = undefined;
-            @memcpy(&k.txid, head[0..32]);
-            k.vout = std.mem.readInt(u32, head[32..36], .little);
-            const height = std.mem.readInt(u32, head[36..40], .little);
-            const cb = head[40];
-            const txi = std.mem.readInt(u32, head[41..45], .little);
-            const l = std.mem.readInt(u32, head[45..49], .little);
-            if (cb > 1) return error.BadCoinbaseFlag;
-            if (height >= 1 << 31 or l >= 0x7fffffff) return error.CoinOutOfRange;
-            if (height >= from) return error.PrevSetTooNew;
-            if (prev) |p| if (!keyLess({}, p, k)) return error.SetNotSorted;
-            prev = k;
-            try s_buf.resize(self.gpa, l);
-            try r.readSliceAll(s_buf.items);
-            b2.update(s_buf.items);
-            if (l < 8) return error.CoinOutOfRange;
-            const code = 2 * height + cb;
-            try self.put(k, code, txi, s_buf.items);
+        while (try rd.next()) |c| {
+            if (c.height >= from) return error.PrevSetTooNew;
+            if (c.ser.len < 8) return error.CoinOutOfRange;
+            const code = 2 * c.height + @intFromBool(c.cb);
+            try self.put(.{ .txid = c.txid, .vout = c.vout }, code, c.txi, c.ser);
             var hb: [8]u8 = undefined;
-            hs.update(&k.txid);
-            std.mem.writeInt(u32, hb[0..4], k.vout, .little);
+            hs.update(&c.txid);
+            std.mem.writeInt(u32, hb[0..4], c.vout, .little);
             std.mem.writeInt(u32, hb[4..8], code, .little);
             hs.update(&hb);
-            hs.update(s_buf.items);
-            amount += std.mem.readInt(u64, s_buf.items[0..8], .little);
+            hs.update(c.ser);
+            amount += std.mem.readInt(u64, c.ser[0..8], .little);
         }
-        if (r.takeByte()) |_| return error.TrailingBytes else |e| if (e != error.EndOfStream) return e;
-        var info = SetInfo{ .count = n, .amount = amount, .hash = undefined, .digest = undefined };
+        var info = SetInfo{ .count = rd.n, .amount = amount, .hash = undefined, .digest = try rd.digest() };
         var h1: [32]u8 = undefined;
         hs.final(&h1);
         Sha256.hash(&h1, &info.hash, .{});
         std.mem.reverse(u8, &info.hash);
-        b2.final(&info.digest);
         return info;
     }
 };
