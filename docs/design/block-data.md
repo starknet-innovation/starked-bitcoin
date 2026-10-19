@@ -561,6 +561,30 @@ index per input), and per epoch the previous coin set (`epoch_run.zig`).
 - **Sizing:** about 185 M coins at the peak: a 2^28-slot table (16 GB) plus a heap of up to ~11 GB, about
   20 GB RSS. More than the Mac (24 GB) can spare.
 
+### Epochs in bounded host memory (2026-10-19)
+
+The first rehearsal (935,001–945,000, H100 pod, 251 GB host limit) was killed by the OOM killer while
+loading: `epoch_run.load` decoded the previous set into memory and kept every block's raw bytes, undo
+stream and ctx, plus every per-block temporary in one arena. Measured: 129.6 GB for 5 blocks, 197.7 GB for
+2,000; about 450 GB extrapolated for 10,000.
+
+- **`set_file.zig`** reads a set file coin by coin with `decodeSet`'s checks plus strict sortedness, and its
+  digest on the way: `scan` (count, amount, `hash_serialized`, digest), `sum` (the fractions under a
+  challenge).
+- **`epoch_run.load`** applies each block to a `replay.Set` (the previous set streamed in), keeps only its
+  hash and commitment, and streams the final set out (`Set.writeFile`) before deriving the challenge.
+  `Epoch.build` re-reads block `i`'s files when it is proved. The coin table is freed before proving.
+- **`chainproof verify-epoch`** decodes each proof in its own arena (keeping only the public inputs) and
+  streams both sets: `scan` for the facts, `sum` under the challenge, with the digest re-checked.
+- **Checked:**
+  - Byte-identical against main's binary: `prove-epoch` 0..170 and 171..1000 (from `set-170`), proofs
+    and sets; `cuda-epoch --mock` 0..170; `verify-epoch` and `verify-epoch-tree` output; tampered and
+    dropped sets rejected (`ChallengeMismatch`).
+  - At scale, on the node: `prove-epoch` 935,001..945,000 from `set-935000.bin` loaded in about 14 min
+    and wrote `set-945000.bin` byte-identical to `replay`'s. Peak RSS 46.7 GB over the load and the CPU
+    proofs that followed (22 GB two minutes into the load).
+  - RSS at 0..1000: `prove-epoch` 1.48 → 1.07 GB; `verify-epoch` 5.06 → 0.82 GB.
+
 ## Cost (rough, to be measured)
 
 A 4 MB block is about 4 M parser rows plus about 2.5 passes of SHA-256 over
