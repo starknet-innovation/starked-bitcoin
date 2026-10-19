@@ -5,11 +5,18 @@
 //!
 //!   zig-out/bin/cuda-epoch <headers.bin> <dir> <to> <file.sbchain> [--from <a> <prev-set.bin>]
 //!                          [--test-strength] [--uniform | --tiered] [--verify] [--mock]
+//!                          [--only <list>] [--skip <list>] [--resume]
 //!   zig-out/bin/cuda-epoch <headers.bin> <dir> - <file.sbchain> --heights <list> [options]
 //!
 //! `--heights`: a standalone run over the heights listed in a file (one per line), each block under
 //! the testing challenge and without a coin set: proofs not bound to an epoch, for measurements
 //! over chosen blocks (e.g. a sample per size class).
+//!
+//! An epoch's proofs can come from several runs (each loads the whole epoch: the challenge binds every
+//! block): `--only` proves just the listed heights (e.g. the blocks too large for an 80 GB device, on an
+//! H200), `--skip` all but them, `--resume` skips heights whose proof file exists. A block the device
+//! cannot hold (`InsufficientDeviceMemory`, checked before any allocation) is deferred, not fatal: the
+//! run goes on and lists the deferred heights in `<dir>/deferred-<to>.txt`, for an `--only` run.
 //!
 //! Per process: the AIRs, the AOT catalog, a `NativeRuntime` (CUDA context and AOT loader, kept
 //! open: no per-block context creation or module load) and the twiddles of each size. Per block:
@@ -33,12 +40,20 @@ const S = sb.recursion.store;
 const M31 = core.fields.m31.M31;
 
 fn usage() noreturn {
-    std.debug.print("usage: cuda-epoch <headers.bin> <dir> <to> <file.sbchain> [--from <a> <prev-set.bin>] [--test-strength] [--uniform | --tiered] [--verify] [--mock]\n       cuda-epoch <headers.bin> <dir> - <file.sbchain> --heights <list> [options]\n", .{});
+    std.debug.print("usage: cuda-epoch <headers.bin> <dir> <to> <file.sbchain> [--from <a> <prev-set.bin>] [--test-strength] [--uniform | --tiered] [--verify] [--mock] [--only <list>] [--skip <list>] [--resume]\n       cuda-epoch <headers.bin> <dir> - <file.sbchain> --heights <list> [options]\n", .{});
     std.process.exit(2);
 }
 
 fn secs(ns: u64) f64 {
     return @as(f64, @floatFromInt(ns)) / 1e9;
+}
+
+/// Heights listed in a file (one per line, or separated by spaces or commas).
+fn readHeights(a: std.mem.Allocator, path: []const u8) ![]const u32 {
+    var list = std.ArrayList(u32).empty;
+    var it = std.mem.tokenizeAny(u8, try S.readFile(a, path), " \r\n\t,");
+    while (it.next()) |tok| try list.append(a, try std.fmt.parseInt(u32, tok, 10));
+    return list.items;
 }
 
 /// Device seconds per (L, profile) class, for the summary.
@@ -57,13 +72,22 @@ pub fn main() !void {
     var verify = false;
     var mock = false;
     var heights_path: ?[]const u8 = null;
+    var only: ?[]const u32 = null;
+    var skip: []const u32 = &.{};
+    var resume_run = false;
     var i: usize = 5;
     while (i < args.len) : (i += 1) {
         const x = args[i];
         if (std.mem.eql(u8, x, "--test-strength")) weak = true else if (std.mem.eql(u8, x, "--tiered")) size = .tiered else if (std.mem.eql(u8, x, "--uniform")) size = .uniform else if (std.mem.eql(u8, x, "--verify")) verify = true else if (std.mem.eql(u8, x, "--mock")) mock = true else if (std.mem.eql(u8, x, "--from") and i + 2 < args.len) {
             from = .{ .height = try std.fmt.parseInt(u32, args[i + 1], 10), .prev_set = args[i + 2] };
             i += 2;
-        } else if (std.mem.eql(u8, x, "--heights") and i + 1 < args.len) {
+        } else if (std.mem.eql(u8, x, "--only") and i + 1 < args.len) {
+            only = try readHeights(a, args[i + 1]);
+            i += 1;
+        } else if (std.mem.eql(u8, x, "--skip") and i + 1 < args.len) {
+            skip = try readHeights(a, args[i + 1]);
+            i += 1;
+        } else if (std.mem.eql(u8, x, "--resume")) resume_run = true else if (std.mem.eql(u8, x, "--heights") and i + 1 < args.len) {
             heights_path = args[i + 1];
             i += 1;
         } else usage();
@@ -77,12 +101,9 @@ pub fn main() !void {
     const raw_headers = try S.readFile(a, args[1]);
     if (raw_headers.len % 80 != 0) return error.BadHeaderFile;
     const all = std.mem.bytesAsSlice([80]u8, raw_headers);
-    const ep = if (heights_path) |path| blk: {
-        var list = std.ArrayList(u32).empty;
-        var it = std.mem.tokenizeAny(u8, try S.readFile(a, path), " \r\n\t,");
-        while (it.next()) |tok| try list.append(a, try std.fmt.parseInt(u32, tok, 10));
-        break :blk try ER.loadHeights(a, @alignCast(all), n, dir, list.items);
-    } else try ER.load(a, @alignCast(all), n, dir, from, try std.fmt.parseInt(u32, args[3], 10));
+    const ep = if (heights_path) |path|
+        try ER.loadHeights(a, @alignCast(all), n, dir, try readHeights(a, path))
+    else try ER.load(a, @alignCast(all), n, dir, from, try std.fmt.parseInt(u32, args[3], 10));
     const fri = if (weak) PF.testFri() else PF.productionFri();
     const airs = try a.create([bs.N_COMP]sb.air.ir.Air);
     airs.* = try bs.parseAirs(a);
@@ -105,8 +126,28 @@ pub fn main() !void {
     defer classes.deinit();
     var run = try std.time.Timer.start();
     var proof_bytes: usize = 0;
+    var proved: usize = 0;
+    var passed: usize = 0;
+    var deferred = std.ArrayList(u32).empty;
     std.debug.print("height L profile witness_s plans_s device_s total_s bytes\n", .{});
     for (0..ep.count()) |k| {
+        const hh = ep.heights[k];
+        if (only) |l| if (std.mem.indexOfScalar(u32, l, hh) == null) {
+            passed += 1;
+            continue;
+        };
+        if (std.mem.indexOfScalar(u32, skip, hh) != null) {
+            passed += 1;
+            continue;
+        }
+        if (resume_run) {
+            const path = try ER.pathOf(a, dir, "proofs", hh, "sbblock");
+            defer a.free(path);
+            if (std.fs.cwd().access(path, .{})) |_| {
+                passed += 1;
+                continue;
+            } else |err| if (err != error.FileNotFound) return err;
+        }
         var block_arena = std.heap.ArenaAllocator.init(gpa);
         defer block_arena.deinit();
         const ba = block_arena.allocator();
@@ -141,7 +182,12 @@ pub fn main() !void {
                 return err;
             };
             t_plans = lap.lap();
-            const result = try prover.proofPass(ba, &prepared, &host, gop.value_ptr, in, null);
+            const result = prover.proofPass(ba, &prepared, &host, gop.value_ptr, in, null) catch |err| {
+                if (err != error.InsufficientDeviceMemory) return err;
+                std.debug.print("{d} {d} {s} deferred: InsufficientDeviceMemory\n", .{ hh, b.log_size, @tagName(b.profile) });
+                try deferred.append(a, hh);
+                continue;
+            };
             t_device = lap.lap();
             break :blk result.proof;
         };
@@ -150,6 +196,7 @@ pub fn main() !void {
         try ep.writeProof(ba, k, bytes);
         const t_total = t_witness + t_plans + t_device + lap.lap();
         proof_bytes += bytes.len;
+        proved += 1;
         const key = @as(u64, b.log_size) << 1 | @intFromEnum(b.profile);
         const c = try classes.getOrPut(key);
         if (!c.found_existing) c.value_ptr.* = .{};
@@ -159,7 +206,15 @@ pub fn main() !void {
         std.debug.print("{d} {d} {s} {d:.3} {d:.3} {d:.3} {d:.3} {d}{s}\n", .{ ep.heights[k], b.log_size, @tagName(b.profile), secs(t_witness), secs(t_plans), secs(t_device), secs(t_total), bytes.len, if (verify) " verified" else "" });
     }
     const elapsed = secs(run.read());
-    std.debug.print("{s} {d}..{d}: {d} block proofs ({d:.1} MB), coin set of {d} coins{s}; {d:.1} s, {d:.3} s/block\n", .{ if (ep.standalone) "standalone" else "epoch", ep.from, ep.to, ep.count(), @as(f64, @floatFromInt(proof_bytes)) / 1e6, if (ep.fin) |f| f.count else 0, if (ep.standalone) " (none written)" else " written", elapsed, elapsed / @as(f64, @floatFromInt(ep.count())) });
+    std.debug.print("{s} {d}..{d}: {d} block proofs ({d:.1} MB), coin set of {d} coins{s}; {d:.1} s, {d:.3} s/block\n", .{ if (ep.standalone) "standalone" else "epoch", ep.from, ep.to, proved, @as(f64, @floatFromInt(proof_bytes)) / 1e6, if (ep.fin) |f| f.count else 0, if (ep.standalone) " (none written)" else " written", elapsed, elapsed / @as(f64, @floatFromInt(@max(proved, 1))) });
+    if (passed > 0) std.debug.print("  {d} blocks not proved in this run (--only, --skip, --resume)\n", .{passed});
+    if (deferred.items.len > 0) {
+        var out = std.ArrayList(u8).empty;
+        for (deferred.items) |hh| try out.print(a, "{d}\n", .{hh});
+        const path = try std.fmt.allocPrint(a, "{s}/deferred-{d}.txt", .{ dir, ep.to });
+        try S.writeFileAtomic(path, out.items);
+        std.debug.print("  {d} blocks deferred (device memory), listed in {s}\n", .{ deferred.items.len, path });
+    }
     var it = classes.iterator();
     while (it.next()) |e| {
         const v = e.value_ptr.*;

@@ -31,7 +31,7 @@ if ! /workspace/zig/zig version 2>/dev/null | grep -q '^0.15.2$'; then
   curl -fsSL -o "/tmp/$tarball" "https://ziglang.org/download/0.15.2/$tarball"
   echo "$sum  /tmp/$tarball" | sha256sum -c -
   rm -rf /workspace/zig && mkdir -p /workspace/zig
-  tar xf "/tmp/$tarball" -C /workspace/zig --strip-components=1
+  tar xf "/tmp/$tarball" --no-same-owner -C /workspace/zig --strip-components=1
 fi
 zig version
 
