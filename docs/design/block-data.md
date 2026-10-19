@@ -584,6 +584,13 @@ stream and ctx, plus every per-block temporary in one arena. Measured: 129.6 GB 
     and wrote `set-945000.bin` byte-identical to `replay`'s. Peak RSS 46.7 GB over the load and the CPU
     proofs that followed (22 GB two minutes into the load).
   - RSS at 0..1000: `prove-epoch` 1.48 → 1.07 GB; `verify-epoch` 5.06 → 0.82 GB.
+- **`verify-epoch` checks the block proofs on `--jobs` threads** (default: the CPU count). The proofs are
+  independent; each thread decodes and checks one in its own arena and keeps its public inputs, hash and
+  commitment in that block's slot, and the epoch's checks (challenge, statements, sums) then run in order.
+  A failure stops the threads and is reported as `REJECTED: block <h>` (the lowest height seen). Same output
+  as the sequential verifier on 0..170 and 171..1000, tampered and dropped sets and a corrupted or missing
+  proof still rejected; 171..1000 on the M4 Pro: 37.3 s → 5.9 s. One thread checks a 2^23 proof in
+  13–17 s, so a 10,000-block epoch needs about 28 core-hours: ~2–3 h on 12 cores.
 
 ## Cost (rough, to be measured)
 

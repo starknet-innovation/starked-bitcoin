@@ -34,7 +34,7 @@
 //!       M3b (D-040): proves blocks 0..to from <dir>/blocks/<h>.bin, <dir>/undo/<h>.undo and .ctx
 //!       (scripts/fetch_undo.py --ctx) under the epoch's challenge (derived from the blocks' hashes and
 //!       commitments), writing <dir>/proofs/<h>.sbblock and the coin set <dir>/set-<to>.bin.
-//!   chainproof verify-epoch <vk> <file.sbchain> <dir> <to> [--min-work <hex> | --min-work 0] [--test-strength]
+//!   chainproof verify-epoch <vk> <file.sbchain> <dir> <to> [--min-work <hex> | --min-work 0] [--test-strength] [--jobs <n>]
 //!       Verifies every block proof against the chain, recomputes the challenge from their hashes and
 //!       commitments, and checks that their partial sums minus the coin set's fractions are zero, the
 //!       set strictly sorted: the coin set after block `to`. Prints Core's hash_serialized and total.
@@ -73,7 +73,7 @@ fn usage() noreturn {
         \\  chainproof verify-block <vk> <file.sbchain> <file.sbblock> [--min-work <hex> | --min-work 0] [--test-strength]
         \\  chainproof rebind-block <in.sbblock> <headers.bin> <file.sbchain> <out.sbblock>
         \\  chainproof prove-epoch <headers.bin> <dir> <to> <file.sbchain> [--from <a> <prev-set.bin>] [--test-strength]
-        \\  chainproof verify-epoch <vk> <file.sbchain> <dir> <to> [--from <a> <prev-set.bin>] [--min-work <hex> | --min-work 0] [--test-strength]
+        \\  chainproof verify-epoch <vk> <file.sbchain> <dir> <to> [--from <a> <prev-set.bin>] [--min-work <hex> | --min-work 0] [--test-strength] [--jobs <n>]
         \\
     , .{});
     std.process.exit(2);
@@ -163,8 +163,12 @@ pub fn main() !void {
                 min_work = try std.fmt.parseInt(u256, args[i + 1], 16);
                 i += 2;
             } else if (std.mem.eql(u8, args[i], "--from") and i + 2 < args.len) {
-                from = .{ .height = try std.fmt.parseInt(u32, args[i + 1], 10), .prev_set = args[i + 2] };
+                from = .{ .height = try std.fmt.parseInt(u32, args[i + 1], 10), .prev_set = args[i + 2], .jobs = from.jobs };
                 i += 3;
+            } else if (std.mem.eql(u8, args[i], "--jobs") and i + 1 < args.len) {
+                from.jobs = try std.fmt.parseInt(u32, args[i + 1], 10);
+                if (from.jobs == 0) usage();
+                i += 2;
             } else usage();
         }
         return verifyEpoch(gpa, a, args[2], args[3], args[4], try std.fmt.parseInt(u32, args[5], 10), min_work, weak, from);
@@ -436,6 +440,8 @@ const EpochFrom = struct {
     size: SizeChoice = .auto,
     /// prove-epoch-tree `--test-strength`: the block proofs were made at test strength.
     weak: bool = false,
+    /// verify-epoch `--jobs`: threads verifying block proofs (default: the CPU count).
+    jobs: ?u32 = null,
 };
 
 fn proveEpoch(gpa: std.mem.Allocator, a: std.mem.Allocator, headers_path: []const u8, dir: []const u8, to: u32, chain_path: []const u8, weak: bool, from: EpochFrom) !void {
@@ -476,37 +482,43 @@ fn verifyEpoch(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8
     const init = try ER.loadInit(gpa, .{ .height = from.height, .prev_set = from.prev_set });
     const airs = try BS.parseAirs(a);
     const nb = to - from.height + 1;
-    // Only each proof's public inputs are kept: a proof file is decoded and verified in its own arena.
-    const pubs = try a.alloc([]const M31, nb);
-    const hashes = try a.alloc([32]u8, nb);
-    const commits = try a.alloc([32]u8, nb);
-    var nin: u64 = 0;
-    for (0..nb) |i| {
-        const hh: u32 = from.height + @as(u32, @intCast(i));
-        var arena = std.heap.ArenaAllocator.init(gpa);
-        defer arena.deinit();
-        const pa = arena.allocator();
-        const f = try PF.decode(pa, try S.readFile(pa, try pathOf(pa, dir, "proofs", hh, "sbblock")));
-        const window = try PF.checkWindow(pa, &f, s.headers, s.t);
-        try PF.verifyStark(pa, &airs, &f, blockFri(weak));
-        const st = try PF.checkPubs(&f.pubs, window);
-        if (st.height != hh) return error.WrongHeight;
-        var h1: [32]u8 = undefined;
-        std.crypto.hash.sha2.Sha256.hash(&window[window.len - 1], &h1, .{});
-        std.crypto.hash.sha2.Sha256.hash(&h1, &hashes[i], .{});
-        commits[i] = st.commitment;
-        nin += f.pubs[sb.block.coin.PUB_NIN].toU32();
-        pubs[i] = try a.dupe(M31, &f.pubs);
+    // Only each proof's public inputs are kept: a proof file is decoded and verified in its own arena,
+    // on `jobs` threads (the proofs are independent; the epoch's checks below use them in order).
+    var w = VerifyWork{
+        .gpa = gpa,
+        .dir = dir,
+        .from = from.height,
+        .headers = s.headers,
+        .t = s.t,
+        .airs = &airs,
+        .fri = blockFri(weak),
+        .pubs = try a.alloc([BS.N_PUB]M31, nb),
+        .hashes = try a.alloc([32]u8, nb),
+        .commits = try a.alloc([32]u8, nb),
+    };
+    const jobs = @min(from.jobs orelse @as(u32, @intCast(std.Thread.getCpuCount() catch 1)), nb);
+    const threads = try a.alloc(std.Thread, jobs - 1);
+    for (threads) |*th| th.* = try std.Thread.spawn(.{}, VerifyWork.run, .{&w});
+    w.run();
+    for (threads) |th| th.join();
+    if (w.err) |e| {
+        std.debug.print("REJECTED: block {d}: {s}\n", .{ w.err_height, @errorName(e) });
+        return e;
     }
+    const pubs = w.pubs;
+    const hashes = w.hashes;
+    const commits = w.commits;
+    var nin: u64 = 0;
+    for (pubs) |*p| nin += p[sb.block.coin.PUB_NIN].toU32();
     const set_path = try std.fmt.allocPrint(a, "{s}/set-{d}.bin", .{ dir, to });
     const fin_info = try SF.scan(gpa, set_path, null);
     const ch = EP.challenge(EP.seedFrom(from.height, to, if (init.info) |x| x.digest else null, fin_info.digest, hashes, commits));
     var sum = @import("stwo_core").fields.qm31.QM31.zero();
     for (pubs, 0..) |p, i| {
-        try EP.checkPubs(p, ch, from.height + @as(u32, @intCast(i)));
-        sum = sum.add(EP.partialSum(p));
+        try EP.checkPubs(&p, ch, from.height + @as(u32, @intCast(i)));
+        sum = sum.add(EP.partialSum(&p));
     }
-    std.debug.print("{d} block proofs verified, challenge recomputed from their hashes and commitments ({d:.1}s)\n", .{ nb, secs(timer.lap()) });
+    std.debug.print("{d} block proofs verified on {d} threads, challenge recomputed from their hashes and commitments ({d:.1}s)\n", .{ nb, jobs, secs(timer.lap()) });
     const init_count: u64 = if (init.info) |x| x.count else 0;
     // Events below p: initial + created + spent + final (the creations are at most the outputs).
     if (nin + fin_info.count + init_count >= 1 << 30) return error.EpochTooLarge;
@@ -525,6 +537,60 @@ fn verifyEpoch(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8
 
 const SF = sb.block.set_file;
 const M31 = @import("stwo_core").fields.m31.M31;
+
+/// verify-epoch's block proofs, shared by its threads: each takes the next index, checks that proof
+/// (window, STARK, statement) in its own arena and fills that index's slots. The first failure (the
+/// lowest height among those seen) stops the others from taking more.
+const VerifyWork = struct {
+    gpa: std.mem.Allocator,
+    dir: []const u8,
+    from: u32,
+    headers: usize,
+    t: HT.Words,
+    airs: *const [BS.N_COMP]sb.air.ir.Air,
+    fri: FriConfigV2,
+    pubs: [][BS.N_PUB]M31,
+    hashes: [][32]u8,
+    commits: [][32]u8,
+    next: std.atomic.Value(usize) = .init(0),
+    failed: std.atomic.Value(bool) = .init(false),
+    mutex: std.Thread.Mutex = .{},
+    err: ?anyerror = null,
+    err_height: u32 = 0,
+
+    fn run(w: *VerifyWork) void {
+        while (!w.failed.load(.acquire)) {
+            const i = w.next.fetchAdd(1, .monotonic);
+            if (i >= w.pubs.len) return;
+            const hh = w.from + @as(u32, @intCast(i));
+            w.one(i, hh) catch |e| {
+                w.mutex.lock();
+                defer w.mutex.unlock();
+                if (w.err == null or hh < w.err_height) {
+                    w.err = e;
+                    w.err_height = hh;
+                }
+                w.failed.store(true, .release);
+            };
+        }
+    }
+
+    fn one(w: *VerifyWork, i: usize, hh: u32) !void {
+        var arena = std.heap.ArenaAllocator.init(w.gpa);
+        defer arena.deinit();
+        const pa = arena.allocator();
+        const f = try PF.decode(pa, try S.readFile(pa, try pathOf(pa, w.dir, "proofs", hh, "sbblock")));
+        const window = try PF.checkWindow(pa, &f, w.headers, w.t);
+        try PF.verifyStark(pa, w.airs, &f, w.fri);
+        const st = try PF.checkPubs(&f.pubs, window);
+        if (st.height != hh) return error.WrongHeight;
+        var h1: [32]u8 = undefined;
+        std.crypto.hash.sha2.Sha256.hash(&window[window.len - 1], &h1, .{});
+        std.crypto.hash.sha2.Sha256.hash(&h1, &w.hashes[i], .{});
+        w.commits[i] = st.commitment;
+        w.pubs[i] = f.pubs;
+    }
+};
 
 /// A set file's fractions under `ch` (a second, streamed pass); its digest must be the one the challenge
 /// was derived from (the file did not change between the passes).
