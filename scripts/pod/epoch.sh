@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# cuda-epoch on a pod (src/gpu/cuda/epoch.zig). Data in $DATA (default /workspace/data, see
+# cuda-epoch on a pod (src/gpu/cuda/epoch.zig). Data in $DATA (default /root/data, env.sh; see
 # docs/design/gpu-cuda.md § Batch proving): headers.bin, chain.sbchain, epoch/{blocks,undo} (heights
 # 0..E) and sample/{blocks,undo} with sample/heights.txt (any heights, e.g. a sample per size class).
 #   epoch.sh check [E]    epoch 0..E (default 100), production: device vs --mock (CPU) proofs, byte-identical
@@ -9,7 +9,7 @@
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 source "$here/env.sh"
-DATA=${DATA:-$WORK/data}
+DATA=${DATA:-/root/data}
 mkdir -p "$LOGS"
 bin=$SRC/zig-out/bin/cuda-epoch
 

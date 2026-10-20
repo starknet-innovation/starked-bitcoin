@@ -21,6 +21,38 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-10-19 (session 18) — First rehearsal (935,001–945,000): bounded host memory, split GPU runs, parallel verify-epoch
+Who: Claude (agent, Opus 5.5), with the owner (scope: the rehearsal, the H200 for the 6 large blocks, ship the fixes)
+Roadmap: rehearsal partly proved (4,476 + 6 of 10,000 blocks); epoch tooling hardened
+Done:
+- d8524de, 41cdeef: epochs in bounded host memory (`set_file.zig`; `epoch_run.load` streams the sets and
+  keeps per block only its hash and commitment; `verify-epoch` streams both sets).
+- 9afd51e: `cuda-epoch --only / --skip / --resume`; a block the device cannot hold is deferred to
+  `<dir>/deferred-<to>.txt`.
+- `verify-epoch --jobs` (block proofs checked on threads); scripts/pod `prove_epoch.sh`, `follow.sh`,
+  `xfer_epoch.sh`, and `env.sh` / `bootstrap.sh` fixes (container disk for inputs, cgroup CPUs, retried
+  submodule fetch).
+Evidence:
+- Bounded memory: proofs and sets byte-identical to the previous binary on 0..170, 171..1000 and
+  `cuda-epoch --mock` 0..170; on the node, 935,001..945,000 loaded with `set-945000.bin` equal to
+  `replay`'s; on the pods ~27 GB host memory for the 10,000-block load (was 244 GB and out of memory).
+- `--only`/`--skip`/`--resume` with `--mock`: a split 0..20 run equals the single run.
+- H200: the 6 large blocks proved and verified (`verify-block`), peak device memory 99 GiB; the set
+  equals `replay`'s (sha256 `881f50c5…`). H100: 4,476 proofs, a sample of 57 verified.
+- `verify-epoch --jobs`: same output as sequential on 0..170 and 171..1000; tampered and dropped sets,
+  a corrupted and a missing proof rejected; 37.3 s → 5.9 s on 171..1000. `zig build test
+  -Doptimize=ReleaseFast`: exit 0.
+- `follow.sh` against a stand-in pod: exits 0 at END, 4 without the process, 3 when unreachable.
+Problems / lessons:
+- RunPod removed the H100's container at 18:16 UTC (host-side; "container is unhealthy: dead"). The
+  run's log, measurements and the proofs after the last half-hourly copy were lost. Outputs now go to
+  the persistent volume, and `follow.sh` copies every 5 min and alerts within two missed checks.
+- Two pods pulling the same 33 GB through the Mac at once halve each other's transfer.
+- My node-side watcher waited for a log line `prove-epoch` never prints, so the node proved on its CPU
+  for 74 min after the load; kill on the set file's appearance, not on the log.
+Next: finish the epoch: a new H100 with `--skip` the 6 blocks and the 4,476 proofs (`--resume`,
+~3.75 h, ~$17), then `verify-epoch --jobs` over all 10,000 on the Mac.
+
 ## 2026-10-15 (session 17) — Full-chain data: `replay`; its coin sets equal Core's UTXO set at all four assumeUTXO heights
 Who: Claude (agent, Opus 5.5), with the owner (scope: the 10k-block rehearsal, data first; node resized to 64 GB)
 Roadmap: full-chain data preparation built and run to 970,000; rehearsal data ready (960,001–970,000)

@@ -14,7 +14,7 @@ exec > >(tee -a "$LOGS/bootstrap.log") 2>&1
 echo "== host =="
 nvidia-smi --query-gpu=name,compute_cap,driver_version,memory.total --format=csv,noheader
 nvcc --version | tail -1
-nproc; free -g | head -2
+echo "cpus $(cpus) (nproc $(nproc))"; free -g | head -2
 
 echo "== deps =="
 apt-get update -qq >/dev/null
@@ -22,7 +22,7 @@ apt-get install -y -qq build-essential git python3 xz-utils curl time >/dev/null
 ls -l "$CUDA_HOME/lib64/libcudart.so" "$CUDA_HOME/lib64/stubs/libcuda.so"
 
 echo "== zig 0.15.2 =="
-if ! /workspace/zig/zig version 2>/dev/null | grep -q '^0.15.2$'; then
+if ! "$ZIG_DIR/zig" version 2>/dev/null | grep -q '^0.15.2$'; then
   case "$(uname -m)" in
     x86_64) tarball=zig-x86_64-linux-0.15.2.tar.xz; sum=02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239 ;;
     aarch64) tarball=zig-aarch64-linux-0.15.2.tar.xz; sum=958ed7d1e00d0ea76590d27666efbf7a932281b3d7ba0c6b01b0ff26498f667f ;;
@@ -30,8 +30,8 @@ if ! /workspace/zig/zig version 2>/dev/null | grep -q '^0.15.2$'; then
   esac
   curl -fsSL -o "/tmp/$tarball" "https://ziglang.org/download/0.15.2/$tarball"
   echo "$sum  /tmp/$tarball" | sha256sum -c -
-  rm -rf /workspace/zig && mkdir -p /workspace/zig
-  tar xf "/tmp/$tarball" --no-same-owner -C /workspace/zig --strip-components=1
+  rm -rf "$ZIG_DIR" && mkdir -p "$ZIG_DIR"
+  tar xf "/tmp/$tarball" --no-same-owner -C "$ZIG_DIR" --strip-components=1
 fi
 zig version
 
@@ -46,8 +46,10 @@ if [ "${1:-}" = "--tarball" ]; then
   (cd "$SRC" && rm -rf .git && git init -q && echo third_party/stwo-zig/ >> .git/info/exclude && git add -A && git commit -q -m "starked-bitcoin (tarball)")
 else
   commit=${1:?usage: bootstrap.sh <commit> | --tarball <file>}
-  [ -d "$SRC/.git" ] || git clone -q --recurse-submodules https://github.com/starknet-innovation/starked-bitcoin "$SRC"
-  git -C "$SRC" fetch -q origin && git -C "$SRC" checkout -q "$commit" && git -C "$SRC" submodule update -q --init --recursive
+  [ -d "$SRC/.git" ] || git clone -q https://github.com/starknet-innovation/starked-bitcoin "$SRC"
+  git -C "$SRC" fetch -q origin && git -C "$SRC" checkout -q "$commit"
+  # GitHub fetches of the large stwo-zig history fail now and then (HTTP/2 early EOF): retry.
+  for i in 1 2 3 4; do git -C "$SRC" submodule update -q --init --recursive && break; echo "submodule fetch failed ($i), retrying"; sleep 10; done
   git -C "$SRC" log --oneline -1
 fi
 test -f "$SRC/third_party/stwo-zig/scripts/cuda_build.py" || { echo "stwo-zig submodule missing"; exit 1; }

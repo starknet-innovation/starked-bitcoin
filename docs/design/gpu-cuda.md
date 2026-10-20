@@ -255,6 +255,19 @@ Not checked on the host: the completion kernels themselves (batch inverse groups
 
 Estimate: 1–2 weeks with an H100 or H200, mostly steps 3–4. Later, device LogUp removes pass 1 (another 1–2 weeks).
 
+**First rehearsal: 935,001–945,000** (2026-10-19; 10,000 blocks after Core's last assumeUTXO height).
+- H100 SXM, `main` at f876665: the load ran out of host memory (244 GB of a 251 GB limit) before
+  proving; fixed by bounded host memory (docs/design/block-data.md). A partial run (935,001–937,000)
+  stopped at block 936,186: `InsufficientDeviceMemory`, one of 6 blocks in this epoch that need ~98 GiB.
+- Split run, `main` at 9afd51e (the load now ~27 GB of host memory, 9 min):
+  - H200 SXM, `--only` the 6 blocks: all L 22 uniform, 27 s each with `--verify` (witness 12 s, device
+    4 s); peak device memory 99 GiB; all 6 accepted by `chainproof verify-block`. Its `set-945000.bin`
+    equals `replay`'s (sha256 `881f50c5…`).
+  - H100 SXM, `--skip` the 6: 2.45 s per block over 4,476 blocks (935,001–939,478); no block deferred.
+    RunPod stopped and removed the container at 18:16 UTC ("container is unhealthy: dead"); the
+    proofs copied to the Mac until 16:53 survive. Hence `prove_epoch.sh` / `follow.sh` below.
+- Cost: $31.28 (H100 $8.48 and $19.41, H200 $3.40).
+
 ## Running on a pod
 
 **Build (`-Dcuda=true`).**
@@ -283,6 +296,20 @@ Big blocks use `--skip-cpu --cpu-sha <prefix> --cpu-len <bytes>`, or `--cpu-proo
   - Logs and `nvidia-smi` memory samples go to `/workspace/logs`.
 - `diag.sh`: device facts and a pass-1-only run.
 - `CUDA_ARCH=sm_89` (etc.) builds one target only, which is faster.
+- An epoch run (2026-10-20, after the first rehearsal):
+  - `env.sh` puts Zig (`$ZIG_DIR`), the source (`$SRC`) and the inputs (`$DATA`) on the container disk, at
+    `/root`; `/workspace` can be NFS, which refuses `chown` and is slow for many small files. Outputs and
+    logs go to `/workspace`. `-Dcuda-jobs` follows the cgroup quota (`cpu.max`), not `nproc`.
+  - `xfer_epoch.sh <from> <to> <set-dir> <blocks-dir> <chain>` (on the Mac, `NODE_SSH`, `POD_SSH`): the
+    previous set and the blocks with undo and ctx, node → Mac → pod in four zstd streams, then every
+    file's sha256 against the node's. Nothing is written on the node.
+  - `prove_epoch.sh <name> <from> <to> [--skip f | --only f]` (on the pod, under `nohup`): `cuda-epoch`
+    with `--resume`, so a relaunch proves only the missing blocks. Proofs, the final set and the logs
+    go to `/workspace/<name>` and `/workspace/logs`.
+  - `follow.sh <name> <local-dir>` (on the Mac, `POD_SSH`): every 5 min copies the new proofs and logs
+    off the pod. It exits 0 at the run's END, 3 when the pod misses two checks, 4 when `cuda-epoch` is
+    gone without END, with a desktop notification. The persistent volume survives a container restart,
+    not a host failure; the copies on the Mac survive both.
 
 ## Pod runs (2026-10-13, RunPod L40S, sm_89, driver 580.178.04, nvcc 12.8.93)
 
