@@ -133,7 +133,7 @@ pub const Vk = struct {
     }
 };
 
-fn identityOf(gpa: std.mem.Allocator, comptime V: type, ctx: *Context(V), target: ComponentSizes, log_blowup: u32) !struct { id: Id, trace_log: u32 } {
+pub fn identityOf(gpa: std.mem.Allocator, comptime V: type, ctx: *Context(V), target: ComponentSizes, log_blowup: u32) !struct { id: Id, trace_log: u32 } {
     try finalize.padToTargets(V, ctx, target);
     var pp = if (V == QM31)
         try preprocessed.PreprocessedCircuit.preprocessContext(QM31, gpa, ctx)

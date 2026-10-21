@@ -581,10 +581,11 @@ pub fn build(b: *std.Build) void {
             // libstwo_cuda_kernels.a>`; without it, the stubs (`--plan-only` only).
             // `cuda-widenode` (src/gpu/cuda/widenode.zig): the wide block node and a fold-1 leaf on the same
             // prover, linked the same way.
-            const circuit_archive = b.option([]const u8, "cuda-circuit-archive", "Directory with stwo-zig's circuit libstwo_cuda_kernels.a (cuda-pack, cuda-widenode)");
+            const circuit_archive = b.option([]const u8, "cuda-circuit-archive", "Directory with stwo-zig's circuit libstwo_cuda_kernels.a (cuda-pack, cuda-widenode, cuda-epoch-tree)");
             for ([_][2][]const u8{
                 .{ "cuda-pack", "src/gpu/cuda/pack.zig" },
                 .{ "cuda-widenode", "src/gpu/cuda/widenode.zig" },
+                .{ "cuda-epoch-tree", "src/gpu/cuda/epoch_tree.zig" },
             }) |spec| {
                 const pack_module = b.createModule(.{ .root_source_file = b.path(spec[1]), .target = target, .optimize = optimize });
                 for (resident.import_table.keys(), resident.import_table.values()) |name, module| pack_module.addImport(name, module);

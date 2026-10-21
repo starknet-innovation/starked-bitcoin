@@ -236,7 +236,13 @@ pub fn proveNode(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const le
 
 /// A block leaf from a block proof file: verified natively (with capture), its leaf circuit built.
 pub fn leafCircuitOf(gpa: std.mem.Allocator, a: std.mem.Allocator, airs: *const [bs.N_COMP]ir.Air, f: *const PF.File, fri: FriConfigV2) !Context(QM31) {
-    const in = try leafInputsOf(a, airs, f, fri);
+    return leafCircuitOfRoots(gpa, a, airs, f, fri, null);
+}
+
+/// `leafCircuitOf` with the block proof's preprocessed root from `roots` (computed once per block
+/// shape: at 2^23 it is ~10 GB and most of the native verification), when given.
+pub fn leafCircuitOfRoots(gpa: std.mem.Allocator, a: std.mem.Allocator, airs: *const [bs.N_COMP]ir.Air, f: *const PF.File, fri: FriConfigV2, roots: ?*PF.PreRoots) !Context(QM31) {
+    const in = try leafInputsOfRoots(a, gpa, airs, f, fri, roots);
     return buildLeafCircuit(gpa, &in.values, in.config, airs, &in.digests, in.pre_root, &f.pubs);
 }
 
@@ -250,16 +256,24 @@ pub const LeafInputs = struct {
 };
 
 pub fn leafInputsOf(a: std.mem.Allocator, airs: *const [bs.N_COMP]ir.Air, f: *const PF.File, fri: FriConfigV2) !LeafInputs {
+    return leafInputsOfRoots(a, a, airs, f, fri, null);
+}
+
+/// `leafInputsOf` with the preprocessed root from `roots` (same `airs` and `fri`) when given; `gpa`
+/// backs a root's one-off computation.
+pub fn leafInputsOfRoots(a: std.mem.Allocator, gpa: std.mem.Allocator, airs: *const [bs.N_COMP]ir.Air, f: *const PF.File, fri: FriConfigV2, roots: ?*PF.PreRoots) !LeafInputs {
     const parts = PF.partsOf(airs, f.log_size, f.profile, &f.pubs);
     const cfg = rec.Config.fromFriAndTraceSize(fri, f.log_size);
+    if (roots) |r| if (!std.meta.eql(r.fri, fri) or r.airs != airs) return error.ConfigMismatch;
+    const pre: ?rec.Hasher.Hash = if (roots) |r| try r.get(gpa, f) else null;
     var capture: core.verifier.ProofCapture(rec.Hasher) = undefined;
-    try system.verifyCaptureBorrowed(a, cfg, &parts, &.{}, &f.proof, &capture);
+    try system.verifyCaptureBorrowedPre(a, cfg, &parts, &.{}, &f.proof, &capture, pre);
     const pc = try bl.configOf(a, airs, f.log_size, f.profile, fri);
     var in: LeafInputs = .{
         .values = try pv.fromCapture(a, rec.Hasher, &f.proof.stark, &capture, pc, f.proof.claimed_sums),
         .config = pc,
         .digests = undefined,
-        .pre_root = std.mem.toBytes(try system.preprocessedRoot(a, cfg, &parts)),
+        .pre_root = std.mem.toBytes(pre orelse try system.preprocessedRoot(a, cfg, &parts)),
     };
     for (&in.digests, airs) |*d, *air| d.* = try air.digest(a);
     return in;

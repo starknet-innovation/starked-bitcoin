@@ -45,6 +45,12 @@
 //!       Verifies the chain proof, the forest against the block VK (identities, keys, proofs, ranges,
 //!       the challenge from the seed over the roots, the block hashes against the chain's T) and the
 //!       balance against <dir>/set-<to>.bin. Each block proof binds its previous MTP (D-043 part 3).
+//!   chainproof prove-epoch-wide <headers.bin> <dir> <to> <file.sbchain> [--from <a> <prev-set.bin>] [--test-strength]
+//!       BLOCK-REC with wide nodes and per-level shapes (src/recursion/block_tree.zig): writes the tree VK
+//!       <dir>/treevk.bin, each proof to <dir>/tree/<k>-<x>.sbproof (a stopped run resumes from them)
+//!       and the forest <dir>/forestk-<to>.bin.
+//!   chainproof verify-epoch-wide <vk> <file.sbchain> <dir> <to> [--from <a> <prev-set.bin>] [--min-work <hex> | --min-work 0]
+//!       As verify-epoch-tree, for prove-epoch-wide's forest.
 //!   chainproof rebind-block <in.sbblock> <headers.bin> <file.sbchain> <out.sbblock>
 //!       Rebuilds a block file's header window for another (longer) chain proof, without re-proving.
 //!
@@ -173,7 +179,9 @@ pub fn main() !void {
         }
         return verifyEpoch(gpa, a, args[2], args[3], args[4], try std.fmt.parseInt(u32, args[5], 10), min_work, weak, from);
     }
-    if ((std.mem.eql(u8, cmd, "prove-epoch-tree") or std.mem.eql(u8, cmd, "verify-epoch-tree")) and args.len >= 6) {
+    if ((std.mem.eql(u8, cmd, "prove-epoch-tree") or std.mem.eql(u8, cmd, "verify-epoch-tree") or
+        std.mem.eql(u8, cmd, "prove-epoch-wide") or std.mem.eql(u8, cmd, "verify-epoch-wide")) and args.len >= 6)
+    {
         var min_work: u256 = core_min_work;
         var from: EpochFrom = .{};
         var i: usize = 6;
@@ -192,6 +200,10 @@ pub fn main() !void {
         }
         if (std.mem.eql(u8, cmd, "prove-epoch-tree"))
             return proveEpochTree(gpa, a, args[2], args[3], try std.fmt.parseInt(u32, args[4], 10), args[5], from);
+        if (std.mem.eql(u8, cmd, "prove-epoch-wide"))
+            return proveEpochWide(gpa, a, args[2], args[3], try std.fmt.parseInt(u32, args[4], 10), args[5], from);
+        if (std.mem.eql(u8, cmd, "verify-epoch-wide"))
+            return verifyEpochWide(gpa, a, args[2], args[3], args[4], try std.fmt.parseInt(u32, args[5], 10), min_work, from);
         return verifyEpochTree(gpa, a, args[2], args[3], args[4], try std.fmt.parseInt(u32, args[5], 10), min_work, from);
     }
     if (std.mem.eql(u8, cmd, "rebind-block") and args.len == 6) return rebindBlock(gpa, a, args[2], args[3], args[4], args[5]);
@@ -662,6 +674,71 @@ fn verifyEpochTree(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []cons
     std.debug.print("VERIFIED epoch {d}..{d} (recursion): the coin set after block {d} is {d} coins ({d} inputs spent)\n", .{ from.height, to, to, fin_info.count, v.nin });
     std.debug.print("  total amount     {d} sat\n", .{fin_info.amount});
     std.debug.print("  hash_serialized  {x}\n", .{fin_info.hash});
+}
+
+const BT = sb.recursion.block_tree;
+
+fn proveEpochWide(gpa: std.mem.Allocator, a: std.mem.Allocator, headers_path: []const u8, dir: []const u8, to: u32, chain_path: []const u8, from: EpochFrom) !void {
+    var c = try S.Chain.decode(gpa, a, try S.readFile(a, chain_path));
+    const n = c.headers();
+    c.deinit();
+    const all = try loadHeaderFile(a, headers_path);
+    if (to >= n or all.len < n) return error.HeightBeyondChain;
+    if (from.height > to) return error.EmptyEpoch;
+    const nb = to - from.height + 1;
+    var timer = try std.time.Timer.start();
+    const keys = try BT.epochKeys(a, .{ .dir = dir }, from.height, nb);
+    const airs = try BS.parseAirs(a);
+    const tables = try L.Tables.init(gpa);
+    defer tables.deinit(gpa);
+    const bfri = blockFri(from.weak);
+    var roots = PF.PreRoots{ .airs = &airs, .fri = bfri };
+    var shapes = try BT.Shapes.init(gpa, &tables.table, try BT.leafStart(gpa, a, &airs, keys.firsts, bfri, &roots), BT.circuitFri());
+    defer shapes.deinit(gpa);
+    const tvk = try BT.loadOrSetupVk(gpa, a, tables, &airs, keys.firsts, bfri, &roots, &shapes, .{ .dir = dir });
+    std.debug.print("setup: {d} block sizes, leaves at 2^{d}, nodes at 2^{d}; tree VK in {d:.1}s\n", .{ keys.firsts.len, tvk.leaf_log, tvk.node_log, secs(timer.lap()) });
+    const leaves = try a.alloc(HT.Words, n);
+    for (leaves, all[0..n]) |*h, *hd| h.* = HT.blockHash(hd);
+    var prover: BT.CpuProver = .{ .gpa = gpa, .tables = tables, .shapes = &shapes, .airs = &airs, .bfri = bfri, .roots = &roots };
+    const forest = try BT.proveForest(&prover, gpa, a, .{ .dir = dir }, from.height, keys.logs, leaves);
+    defer for (forest.roots) |*r| r.proved.proof.deinit();
+    const out = try std.fmt.allocPrint(a, "{s}/forestk-{d}.bin", .{ dir, to });
+    try S.writeFileAtomic(out, try forest.encode(a));
+    std.debug.print("epoch {d}..{d}: {d} blocks in {d} recursion trees (wide nodes), written to {s} ({d:.0}s)\n", .{ from.height, to, nb, forest.roots.len, out, secs(timer.read()) });
+}
+
+fn verifyEpochWide(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8, chain_path: []const u8, dir: []const u8, to: u32, min_work: u256, from: EpochFrom) !void {
+    var timer = try std.time.Timer.start();
+    const vk = try loadVk(a, vk_path);
+    const tables = try L.Tables.init(gpa);
+    defer tables.deinit(gpa);
+    var c = try S.Chain.decode(gpa, a, try S.readFile(a, chain_path));
+    defer c.deinit();
+    const s = try S.verifyChain(gpa, a, tables, &vk, &c);
+    if (min_work != 0 and s.work < min_work) return error.InsufficientWork;
+    std.debug.print("chain proof verified: headers 0..{d} ({d:.1}s)\n", .{ s.headers - 1, secs(timer.lap()) });
+    const tvk = try BT.Vk.decode(try S.readFile(a, try std.fmt.allocPrint(a, "{s}/treevk.bin", .{dir})));
+    var forest = try BT.Forest.decode(gpa, a, try S.readFile(a, try std.fmt.allocPrint(a, "{s}/forestk-{d}.bin", .{ dir, to })));
+    defer for (forest.roots) |*r| r.proved.proof.deinit();
+    if (forest.from != from.height or forest.to != to) return error.WrongEpoch;
+    const init = try ER.loadInit(gpa, .{ .height = from.height, .prev_set = from.prev_set });
+    const set_path = try std.fmt.allocPrint(a, "{s}/set-{d}.bin", .{ dir, to });
+    const fin_info = try SF.scan(gpa, set_path, null);
+    const v = try BT.verifyForest(gpa, a, tables, &tvk, &forest, s.headers, s.t, if (init.info) |x| x.digest else null, fin_info.digest);
+    std.debug.print("{d} recursion trees (wide nodes) verified: blocks {d}..{d}, the challenge from the seed over their roots, the block hashes the chain's ({d:.1}s)\n", .{ forest.roots.len, from.height, to, secs(timer.lap()) });
+    const init_count: u64 = if (init.info) |x| x.count else 0;
+    if (v.nin + fin_info.count + init_count >= 1 << 30) return error.EpochTooLarge;
+    var sum = v.sum;
+    if (init.info) |x| sum = sum.add(try sumSet(gpa, from.prev_set.?, v.challenge, x.digest));
+    const fin = try sumSet(gpa, set_path, v.challenge, fin_info.digest);
+    if (!sum.eql(fin)) {
+        std.debug.print("REJECTED: the blocks' coin events do not end at this coin set\n", .{});
+        return error.EpochUnbalanced;
+    }
+    if (init.info) |x| std.debug.print("  from the set after block {d}: {d} coins, hash_serialized {x}\n", .{ from.height - 1, x.count, x.hash });
+    std.debug.print("VERIFIED epoch {d}..{d} (recursion, wide nodes): the coin set after block {d} is {d} coins ({d} inputs spent)\n", .{ from.height, to, to, fin_info.count, v.nin });
+    std.debug.print("  total amount     {d} sat\n", .{fin_info.amount});
+    std.debug.print("  hash_serialized  {x}  (Core's HASH_SERIALIZED of this set)\n", .{fin_info.hash});
 }
 
 fn rebindBlock(gpa: std.mem.Allocator, a: std.mem.Allocator, in_path: []const u8, headers_path: []const u8, chain_path: []const u8, out: []const u8) !void {

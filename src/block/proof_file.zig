@@ -139,7 +139,7 @@ pub const PreRoots = struct {
     mutex: std.Thread.Mutex = .{},
     roots: [2][25]?rec.Hasher.Hash = @splat(@splat(null)),
 
-    fn get(self: *PreRoots, gpa: std.mem.Allocator, f: *const File) !rec.Hasher.Hash {
+    pub fn get(self: *PreRoots, gpa: std.mem.Allocator, f: *const File) !rec.Hasher.Hash {
         self.mutex.lock();
         defer self.mutex.unlock();
         const slot = &self.roots[@intFromEnum(f.profile)][f.log_size];

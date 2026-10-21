@@ -701,6 +701,11 @@ pub fn verifyCaptureBorrowed(a: std.mem.Allocator, cfg: rec.Config, parts: []con
     return verifyImpl(a, cfg, parts, ext, proof.*, capture, true, null);
 }
 
+/// `verifyCaptureBorrowed` against a preprocessed root computed by the caller (`verifyExtPre`).
+pub fn verifyCaptureBorrowedPre(a: std.mem.Allocator, cfg: rec.Config, parts: []const Part, ext: []const PubEntry, proof: *const Proof, capture: *core.verifier.ProofCapture(rec.Hasher), pre_root: ?rec.Hasher.Hash) !void {
+    return verifyImpl(a, cfg, parts, ext, proof.*, capture, true, pre_root);
+}
+
 /// `Σ mult / (Σ eᵢ αⁱ − z)` over public entries.
 pub fn extSum(ext: []const PubEntry, el: lookup_transcript.LookupElements) !QM31 {
     var sum = QM31.zero();
