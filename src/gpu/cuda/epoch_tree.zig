@@ -19,7 +19,8 @@
 //!
 //! `--cpu-check n`: the first proof of each level and every n-th after it are also proved by the CPU
 //! circuit prover and must be byte-identical. `--cpu-prover`: no GPU at all, every proof by the CPU
-//! circuit prover through the same pipeline (to test it on a host without one).
+//! circuit prover through the same pipeline (to test it on a host without one). `--shapes-only`: print
+//! the leaf and node sizes and stop.
 //!
 //! Stdout: one line per proof, `<k> <x> <gpu s> <total s> <bytes>`; stderr: progress and the end.
 
@@ -69,6 +70,7 @@ const Opts = struct {
     jobs: u32 = 4,
     cpu_check: ?u32 = null,
     cpu_prover: bool = false,
+    shapes_only: bool = false,
 };
 
 /// The process's GPU: the AIR template (bound per circuit), the AOT catalog, one runtime whose device
@@ -307,7 +309,7 @@ pub fn main() !void {
     const gpa = std.heap.c_allocator;
     const args = try std.process.argsAlloc(gpa);
     defer std.process.argsFree(gpa, args);
-    const usage = "usage: cuda-epoch-tree <dir> <from> <to> [--test-strength] [--jobs n] [--cpu-check n] [--cpu-prover]\n";
+    const usage = "usage: cuda-epoch-tree <dir> <from> <to> [--test-strength] [--jobs n] [--cpu-check n] [--cpu-prover] [--shapes-only]\n";
     if (args.len < 4) {
         std.debug.print("{s}", .{usage});
         return error.Usage;
@@ -320,7 +322,7 @@ pub fn main() !void {
     var i: usize = 4;
     while (i < args.len) : (i += 1) {
         const x = args[i];
-        if (std.mem.eql(u8, x, "--test-strength")) opts.weak = true else if (std.mem.eql(u8, x, "--cpu-prover")) opts.cpu_prover = true else if (std.mem.eql(u8, x, "--jobs") and i + 1 < args.len) {
+        if (std.mem.eql(u8, x, "--test-strength")) opts.weak = true else if (std.mem.eql(u8, x, "--shapes-only")) opts.shapes_only = true else if (std.mem.eql(u8, x, "--cpu-prover")) opts.cpu_prover = true else if (std.mem.eql(u8, x, "--jobs") and i + 1 < args.len) {
             i += 1;
             opts.jobs = try std.fmt.parseInt(u32, args[i], 10);
             if (opts.jobs == 0) return error.Usage;
@@ -350,6 +352,16 @@ pub fn main() !void {
     defer tables.deinit(gpa);
     var shapes = try BT.Shapes.init(gpa, &tables.table, try BT.leafStart(gpa, a, airs, keys.firsts, bfri, &roots), BT.circuitFri());
     defer shapes.deinit(gpa);
+    if (opts.shapes_only) {
+        std.debug.print("shapes: {d} block sizes; leaves at 2^{d}, nodes at 2^{d} ({d:.1}s)\n", .{ keys.firsts.len, try BT.traceLogOf(shapes.leaf.target), try BT.traceLogOf(shapes.node.target), secs(timer.lap()) });
+        for ([_]BT.Kind{ .over_leaves, .over_nodes }) |kind| for (1..BT.MAX_A + 1) |ar| {
+            const view = shapes.nodeView(kind);
+            var topo = try wk.topology(gpa, &tables.table, @intCast(ar), &view.shared);
+            defer topo.deinit();
+            std.debug.print("  node {s} 2^{d} children: {d} vars, natural trace log {d}\n", .{ @tagName(kind), ar, topo.circuit.n_vars, try BT.traceLogOf(finalize.computePaddedSizes(.fromBuilder(&topo.circuit))) });
+        };
+        return;
+    }
     const vk = try BT.loadOrSetupVk(gpa, a, tables, airs, keys.firsts, bfri, &roots, &shapes, td);
     std.debug.print("setup: epoch {d}..{d}, {d} block sizes, leaves at 2^{d}, nodes at 2^{d} ({d:.1}s)\n", .{ from, to, keys.firsts.len, vk.leaf_log, vk.node_log, secs(timer.lap()) });
 
