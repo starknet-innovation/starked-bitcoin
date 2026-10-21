@@ -371,6 +371,39 @@ verifier as today: `K = Blake2s(h₀ ‖ k₀ ‖ … ‖ h_{2^a−1} ‖ k_{2^a
   2. cache the static preprocessed hash (0.3–0.4 s per leaf prove, 2.5 s per node prove here);
   3. the forest over `TreeK`.
 
+## The forest with wide nodes, on a GPU (2026-10-21)
+
+Built (`src/recursion/block_tree.zig`, `chainproof prove-epoch-wide` / `verify-epoch-wide`,
+`src/gpu/cuda/epoch_tree.zig`): the "Next" list of the wide-node section, items 1–3.
+
+- **Layout.** An aligned subtree of `2^k` blocks has a top node of arity `2^a`, `a = (k − 1) mod 3 + 1`,
+  over the subtrees of `2^(k−a)` blocks; every other node is 8-wide.
+- **Per-level shapes.** Leaves are padded to the leaf level's size (the elementwise maximum of the epoch's
+  leaf circuits). Every node variant is padded to one node size: the fixpoint of all node topologies.
+  There are two node circuits per arity, over leaves and over nodes: their hooks verify different child
+  shapes. The tree VK holds the leaf identity per block size key and the six node identities. The key
+  mechanism carries every child's circuit hash, so the outer verifier expects each node's variant from the
+  subtree's size alone. Lean: `TreeK.node a v cs`, `nodeH a v`, `TrustK`/`TrustKW` per arity and variant.
+- **Circuits** at FRI fold 4, last layer 0 (70 queries, 26 PoW bits).
+- **Sizes for the rehearsal epoch:** leaves 2^22 (13.5 GiB on the device); nodes at most 2^24 (the 8-wide
+  node: 51.6 M variables, ~46 GiB).
+- **Resumable.** Every proof is written to `<dir>/tree/<k>-<x>.sbproof`; `proveForest` reuses what is
+  there, and the forest file is assembled from them.
+- **On the GPU** (`cuda-epoch-tree`): level by level; host workers build, pad and preprocess each circuit,
+  the runtime's owner thread proves it with the VK's preprocessed root, the workers verify the device
+  proof natively, convert it and check it with the circuit verifier against the VK identity and the native
+  digest. `--cpu-check n` re-proves every n-th proof on the CPU (byte-identical required).
+
+**Rehearsal epoch 935,001–945,000** (H100 SXM, 2026-10-21): 10,000 leaves and 1,432 nodes in 67 min
+(leaves 0.23 s of GPU each, 39 min; nodes 19 min), CPU cross-checks byte-identical; the forest is 16
+trees, 9.1 MB. `verify-epoch-wide` gives the same coin set as `verify-epoch` (165,215,167 coins,
+`hash_serialized 5b2b0df7…`) with 0.5 GB of memory, against 14 GB.
+
+**Not yet one proof.** The verifier still checks 16 roots, the seed and challenge, the block-hash subtrees
+against `T`, and the balance against both coin sets natively. Next:
+1. a root circuit over an epoch's trees (different sizes), closing the seed and the challenge in-circuit;
+2. the segmented final-set pass (Sizing, above), so a verifier needs neither set file.
+
 ## Following the tip
 
 Three layers at three cadences:

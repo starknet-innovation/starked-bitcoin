@@ -21,6 +21,29 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-10-21 (session 19) — Rehearsal epoch verified flat, then aggregated on the GPU: 10,000 block proofs as 16 recursion trees
+Who: Claude (agent, Opus 5.5), with the owner (scope: run the rest of the rehearsal from the node, verify it, build the GPU aggregation tree, push)
+Roadmap: rehearsal 935,001–945,000 proved and verified (flat and through recursion); BLOCK-REC wide nodes and per-level shapes built, on the GPU
+Done:
+- d798305: `scripts/pod/node_run.sh` (an epoch run driven from the node: transfer, follow, final-set check, pod deletion, cost cap; `FOLLOW_ONLY` re-attaches after a node restart). The last 5,518 block proofs on an H100 from the node; final set equal to `replay`'s.
+- e5fa2c5: `verify-epoch` caches each block shape's preprocessed root (`PF.PreRoots`); before, every 2^23 proof cost ~15 s and ~10 GB to verify.
+- `rec/per-level` (bad788e..071e206): `src/recursion/block_tree.zig` (wide-node forest: leaves padded only to the leaf level, 8-wide nodes with the remainder arity at a subtree's top, node circuits per arity and child kind at one node size; tree VK, forest file, outer verifier, resumable `<dir>/tree`); `chainproof prove-epoch-wide` / `verify-epoch-wide`; `cuda-epoch-tree` (resident CUDA circuit prover, one runtime on its owner thread, host workers, cached preprocessed roots); leaves reuse the block proof's root per shape; pod scripts `prove_tree.sh`, `node_tree.sh`; Lean `TreeK.node a v` (node hash per arity and variant, `TrustK`/`TrustKW`).
+Evidence:
+- Flat: `verify-epoch --jobs 4` on the node (16 GB, temporary swap): 10,000 block proofs, 165,215,167 coins, `hash_serialized 5b2b0df7…`, 21 min, 14.4 GB.
+- Mac, epoch 0..3 production: forest verified (same set as `verify-epoch`); a dropped coin (`ChallengeMismatch`), a size key (`LeafSizeNotSetUp`), a summary limb (`WrongDigest`) and a swapped root (`WrongCircuit`) rejected; a resumed run and `cuda-epoch-tree --cpu-prover` byte-identical.
+- Shapes (`--shapes-only`, one block per class of the rehearsal): leaves 2^22, every node variant ≤ 2^24.
+- H100 SXM (EU-NL-1): 11,432 circuit proofs in 67 min (10,000 leaves at 0.23 s of GPU each, 1,432 nodes), CPU cross-checks byte-identical, peak device 47.9 GB, host 58 GB; forest 9.1 MB. `verify-epoch-wide` on the node: 16 trees, the same 165,215,167 coins and `5b2b0df7…`, 0.5 GB peak (15 min, the two set scans). Pod billing $5.48 (+ $1.61 for two failed starts).
+- `lake build` (8,873 jobs); `forestK_epochV`, `treeK_soundP`, `forestK_epochVW`: standard axioms.
+Problems / lessons:
+- `tar --exclude='.*'` excludes `.` itself: the first pod got no proofs (the node deleted it after a minute). Send files by name.
+- stwo-zig's CUDA runtime belongs to the thread that opened it: device proves from worker threads fail (`InvalidState`). Workers queue jobs to that thread.
+- The follower saw the forest's assembly (cuda-epoch-tree gone, no END yet) as a crash and relaunched once; `PROC` is now a pattern covering the assembly.
+- The large-block tests need ReleaseFast: a Debug `zig build test` ran 8 h.
+- The node was resized to 16 GB mid-run (it restarted); the driver re-attached with `FOLLOW_ONLY`.
+Next: the root circuit over an epoch's trees (one proof per epoch, seed and challenge in-circuit), then the segmented final-set pass; more host workers (the GPU was ~60 % busy).
+
+---
+
 ## 2026-10-19 (session 18) — First rehearsal (935,001–945,000): bounded host memory, split GPU runs, parallel verify-epoch
 Who: Claude (agent, Opus 5.5), with the owner (scope: the rehearsal, the H200 for the 6 large blocks, ship the fixes)
 Roadmap: rehearsal partly proved (4,476 + 6 of 10,000 blocks); epoch tooling hardened

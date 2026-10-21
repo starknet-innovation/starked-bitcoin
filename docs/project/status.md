@@ -4,12 +4,15 @@ Rewritten at the end of every session; see [README.md](README.md#ending-a-sessio
 If `HEAD at last update` doesn't match `git log -1`, this file is stale:
 follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work).
 
-- **Updated:** 2026-10-12, overnight (VL table done but FRI/NODE decisions; BLOCK-REC built end to end at small scale)
+- **Updated:** 2026-10-21 (session 19: rehearsal epoch verified flat and through recursion; GPU aggregation)
 - **HEAD at last update:** see `git log -1` (this file is committed with the work)
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
-- **Current item:** BLOCK-AIR complete: M3a.5 (`block_sound`) and M3a.6 (`commit_sound`) done and
-  proven (2026-10-10). Next: BLOCK-DATA. For the owner: D-035's amendments (8-bit range table; `prevMtp`
-  as two public limbs, a soundness fix) and D-038 (the commitment format, proposed).
+- **Current item:** BLOCK-REC. The rehearsal epoch 935,001–945,000 is proved (10,000 block proofs,
+  GPU) and verified two ways: flat (`verify-epoch`) and as 16 recursion trees with wide nodes made on an
+  H100 in 67 min (`cuda-epoch-tree`, `verify-epoch-wide`), both giving 165,215,167 coins,
+  `hash_serialized 5b2b0df7…`. Next: a root circuit over an epoch's trees (one proof per epoch, the seed
+  and challenge in-circuit), then the segmented final-set pass. See log.md, session 19, and
+  block-rec.md § The forest with wide nodes. (The paragraphs below date from 2026-10-12.)
 
 ## State in one paragraph
 

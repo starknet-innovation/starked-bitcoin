@@ -196,6 +196,19 @@ Host RSS at 2^23: 10.9 GB (14.2 in phase 1).
 
 Weighted by the survey (data/chain-sizes.csv), the whole chain's block proofs are about **325 H100-hours** (2^23: 175, 2^22: 115, the rest 35), against about 1,260 before (phase 1, one process per block, small-block times estimated). The GPU is busy about 70 % of the run; the rest is the host witness (0.7 s at 2^23 on these 8 vCPUs) and plans, which overlap nothing yet.
 
+## Aggregation: `cuda-epoch-tree` (2026-10-21)
+
+The epoch's recursion forest (docs/design/block-rec.md § The forest with wide nodes) on stwo-zig's resident
+CUDA circuit prover, from `cuda-epoch`'s block proofs; `scripts/pod/prove_tree.sh` builds and runs it and
+assembles the forest, and `scripts/pod/node_tree.sh` drives a run from the node. Gotchas:
+
+- the `NativeRuntime` belongs to the thread that opened it; workers queue device proves to that thread;
+- pass the circuit's preprocessed root (`Input.expected_preprocessed_root`, from the tree VK): the host
+  hash was 3 s per proof;
+- go level by level, so consecutive proofs share one circuit size.
+
+Rehearsal: 11,432 proofs in 67 min on an H100 SXM, GPU about 60 % busy (more host workers next).
+
 ## Public inputs
 
 The CPU path bakes public inputs into the program as literals. Our lowering deduplicates equal constants (`stwzeva.ProgramBuilder.constant`), so the program shape depends on the values. New `PubMode.slots`: one `constant` instruction per public input, never shared. stwo-zig's parametric normaliser (`cairo_cuda/parametric_eval.zig:18`) turns every base literal into a session constant and erases the domain size. The kernel then depends on the AIR only: one kernel per AIR, for every statement and log size. The statement reaches the kernel through `args->base_params`, exactly as the circuit binds its literals (`resident_composition.zig`, `writeConstants`). Base `param`s (`lowerTemplate`) are not needed: the parametric path rejects them (`parametric_eval.zig:20`).
