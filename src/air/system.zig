@@ -674,24 +674,31 @@ pub fn checkStwzevaProof(comptime E: type, a: std.mem.Allocator, cfg: rec.Config
 
 /// Verifies a system proof. `a` should be an arena.
 pub fn verify(a: std.mem.Allocator, cfg: rec.Config, parts: []const Part, proof: Proof) !void {
-    return verifyImpl(a, cfg, parts, &.{}, proof, null, false);
+    return verifyImpl(a, cfg, parts, &.{}, proof, null, false, null);
 }
 
 /// `verify` with public lookup entries: the relations balance with them included.
 pub fn verifyExt(a: std.mem.Allocator, cfg: rec.Config, parts: []const Part, ext: []const PubEntry, proof: Proof) !void {
-    return verifyImpl(a, cfg, parts, ext, proof, null, false);
+    return verifyImpl(a, cfg, parts, ext, proof, null, false, null);
+}
+
+/// `verifyExt` against a preprocessed root the caller computed with `preprocessedRoot(cfg, parts)`
+/// for these same `cfg` and parts' AIRs and sizes (it depends on nothing else), e.g. once for many
+/// proofs of one shape: computing it costs as much memory as committing the preprocessed columns.
+pub fn verifyExtPre(a: std.mem.Allocator, cfg: rec.Config, parts: []const Part, ext: []const PubEntry, proof: Proof, pre_root: rec.Hasher.Hash) !void {
+    return verifyImpl(a, cfg, parts, ext, proof, null, false, pre_root);
 }
 
 /// `verify`, also capturing what the in-circuit verifier needs (`plain_verifier.fromCapture`).
 /// Consumes `proof`; see `verifyCaptureBorrowed` to keep it.
 pub fn verifyCapture(a: std.mem.Allocator, cfg: rec.Config, parts: []const Part, ext: []const PubEntry, proof: Proof, capture: *core.verifier.ProofCapture(rec.Hasher)) !void {
-    return verifyImpl(a, cfg, parts, ext, proof, capture, false);
+    return verifyImpl(a, cfg, parts, ext, proof, capture, false, null);
 }
 
 /// `verifyCapture` without consuming `proof` (stwo-zig's borrowed capture), so the same proof can
 /// then be converted for the in-circuit verifier: one proof per segment instead of two.
 pub fn verifyCaptureBorrowed(a: std.mem.Allocator, cfg: rec.Config, parts: []const Part, ext: []const PubEntry, proof: *const Proof, capture: *core.verifier.ProofCapture(rec.Hasher)) !void {
-    return verifyImpl(a, cfg, parts, ext, proof.*, capture, true);
+    return verifyImpl(a, cfg, parts, ext, proof.*, capture, true, null);
 }
 
 /// `Σ mult / (Σ eᵢ αⁱ − z)` over public entries.
@@ -707,7 +714,7 @@ pub fn extSum(ext: []const PubEntry, el: lookup_transcript.LookupElements) !QM31
     return sum;
 }
 
-fn verifyImpl(a: std.mem.Allocator, cfg: rec.Config, parts: []const Part, ext: []const PubEntry, proof: Proof, capture: ?*core.verifier.ProofCapture(rec.Hasher), borrowed: bool) !void {
+fn verifyImpl(a: std.mem.Allocator, cfg: rec.Config, parts: []const Part, ext: []const PubEntry, proof: Proof, capture: ?*core.verifier.ProofCapture(rec.Hasher), borrowed: bool, pre_root: ?rec.Hasher.Hash) !void {
     _ = try maxLogSize(parts);
     const lookups = hasLookups(parts);
     const n_trees: usize = if (lookups) 3 else 2;
@@ -726,7 +733,7 @@ fn verifyImpl(a: std.mem.Allocator, cfg: rec.Config, parts: []const Part, ext: [
         try inter_logs.appendNTimes(a, p.log_size, 4 * component_mod.nBatches(p.air.*));
     }
     const roots = proof.stark.commitment_scheme_proof.commitments.items;
-    const expected_pre = try preprocessedRoot(a, cfg, parts);
+    const expected_pre = pre_root orelse try preprocessedRoot(a, cfg, parts);
     if (!std.mem.eql(u8, std.mem.asBytes(&expected_pre), std.mem.asBytes(&roots[0]))) return error.PreprocessedRootMismatch;
     try scheme.commit(a, roots[0], pre_logs.items, &channel);
     try mixStatements(&channel, a, parts);

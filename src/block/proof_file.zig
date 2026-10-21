@@ -116,14 +116,48 @@ pub fn proveOpts(a: std.mem.Allocator, airs: *const [bs.N_COMP]ir.Air, b: *const
 
 /// Verifies the STARK under the pinned `fri`: the proof's own configuration must match it.
 pub fn verifyStark(a: std.mem.Allocator, airs: *const [bs.N_COMP]ir.Air, f: *const File, fri: FriConfigV2) !void {
+    try checkShape(f, fri);
+    const ps = partsOf(airs, f.log_size, f.profile, &f.pubs);
+    try system.verifyExt(a, rec.Config.fromFriAndTraceSize(fri, f.log_size), &ps, &.{}, f.proof);
+}
+
+fn checkShape(f: *const File, fri: FriConfigV2) !void {
     if (f.log_size < 8 or f.log_size > 24) return error.LogSizeOutOfRange;
     if (f.profile == .tiered and f.log_size < bs.TIERED_MIN_L) return error.LogSizeOutOfRange;
     const c = f.proof.stark.commitment_scheme_proof.config;
     if (c.pow_bits != fri.pow_bits or c.fri_config.log_blowup_factor != fri.log_blowup_factor or
         c.fri_config.n_queries != fri.n_queries or c.fri_config.log_last_layer_degree_bound != fri.log_last_layer_degree_bound)
         return error.ConfigMismatch;
-    const ps = partsOf(airs, f.log_size, f.profile, &f.pubs);
-    try system.verifyExt(a, rec.Config.fromFriAndTraceSize(fri, f.log_size), &ps, &.{}, f.proof);
+}
+
+/// The preprocessed roots of block proofs by shape (L, profile), each computed once: under fixed AIRs
+/// and `fri` the root depends on nothing else (not on the block), and computing it is most of a
+/// proof's verification (~10 GB and ~15 s at 2^23). Shared by threads; one root is computed at a time.
+pub const PreRoots = struct {
+    airs: *const [bs.N_COMP]ir.Air,
+    fri: FriConfigV2,
+    mutex: std.Thread.Mutex = .{},
+    roots: [2][25]?rec.Hasher.Hash = @splat(@splat(null)),
+
+    fn get(self: *PreRoots, gpa: std.mem.Allocator, f: *const File) !rec.Hasher.Hash {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        const slot = &self.roots[@intFromEnum(f.profile)][f.log_size];
+        if (slot.*) |r| return r;
+        var arena = std.heap.ArenaAllocator.init(gpa);
+        defer arena.deinit();
+        const ps = partsOf(self.airs, f.log_size, f.profile, &f.pubs);
+        slot.* = try system.preprocessedRoot(arena.allocator(), rec.Config.fromFriAndTraceSize(self.fri, f.log_size), &ps);
+        return slot.*.?;
+    }
+};
+
+/// `verifyStark` with the preprocessed root from `roots` (same `airs` and `fri`).
+pub fn verifyStarkRoots(a: std.mem.Allocator, gpa: std.mem.Allocator, roots: *PreRoots, f: *const File) !void {
+    try checkShape(f, roots.fri);
+    const pre = try roots.get(gpa, f);
+    const ps = partsOf(roots.airs, f.log_size, f.profile, &f.pubs);
+    try system.verifyExtPre(a, rec.Config.fromFriAndTraceSize(roots.fri, f.log_size), &ps, &.{}, f.proof, pre);
 }
 
 pub fn encode(a: std.mem.Allocator, f: *const File) ![]u8 {
@@ -285,6 +319,19 @@ test "block proof file: round trip, verify, and the header checks (block 170, te
     var g = try decode(a, bytes);
     g.pubs[bs.PUB_HASH] = g.pubs[bs.PUB_HASH].add(M31.one());
     try std.testing.expect(std.meta.isError(verifyStark(a, &airs, &g, testFri())));
+    // The same through the per-shape root cache (verifying consumes a proof: fresh decodes): computed
+    // once, reused, and the tamper still fails.
+    var roots = PreRoots{ .airs = &airs, .fri = testFri() };
+    try verifyStarkRoots(a, std.testing.allocator, &roots, &try decode(a, bytes));
+    try std.testing.expect(roots.roots[@intFromEnum(f.profile)][f.log_size] != null);
+    try verifyStarkRoots(a, std.testing.allocator, &roots, &try decode(a, bytes));
+    var g2 = try decode(a, bytes);
+    g2.pubs[bs.PUB_HASH] = g2.pubs[bs.PUB_HASH].add(M31.one());
+    try std.testing.expect(std.meta.isError(verifyStarkRoots(a, std.testing.allocator, &roots, &g2)));
+    // A wrong cached root is rejected: the proof's root is checked against it.
+    var bad = PreRoots{ .airs = &airs, .fri = testFri() };
+    bad.roots[@intFromEnum(f.profile)][f.log_size] = std.mem.zeroes(rec.Hasher.Hash);
+    try std.testing.expectError(error.PreprocessedRootMismatch, verifyStarkRoots(a, std.testing.allocator, &bad, &try decode(a, bytes)));
     // The header checks, with block 170's 11 predecessors (testdata) and its header.
     var hs = try a.alloc([80]u8, 12);
     @memcpy(hs[0..11], checks.ancOf("170"));

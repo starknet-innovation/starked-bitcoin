@@ -482,6 +482,7 @@ fn verifyEpoch(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8
     const init = try ER.loadInit(gpa, .{ .height = from.height, .prev_set = from.prev_set });
     const airs = try BS.parseAirs(a);
     const nb = to - from.height + 1;
+    var roots = PF.PreRoots{ .airs = &airs, .fri = blockFri(weak) };
     // Only each proof's public inputs are kept: a proof file is decoded and verified in its own arena,
     // on `jobs` threads (the proofs are independent; the epoch's checks below use them in order).
     var w = VerifyWork{
@@ -491,7 +492,7 @@ fn verifyEpoch(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8
         .headers = s.headers,
         .t = s.t,
         .airs = &airs,
-        .fri = blockFri(weak),
+        .roots = &roots,
         .pubs = try a.alloc([BS.N_PUB]M31, nb),
         .hashes = try a.alloc([32]u8, nb),
         .commits = try a.alloc([32]u8, nb),
@@ -548,7 +549,7 @@ const VerifyWork = struct {
     headers: usize,
     t: HT.Words,
     airs: *const [BS.N_COMP]sb.air.ir.Air,
-    fri: FriConfigV2,
+    roots: *PF.PreRoots,
     pubs: [][BS.N_PUB]M31,
     hashes: [][32]u8,
     commits: [][32]u8,
@@ -581,7 +582,7 @@ const VerifyWork = struct {
         const pa = arena.allocator();
         const f = try PF.decode(pa, try S.readFile(pa, try pathOf(pa, w.dir, "proofs", hh, "sbblock")));
         const window = try PF.checkWindow(pa, &f, w.headers, w.t);
-        try PF.verifyStark(pa, w.airs, &f, w.fri);
+        try PF.verifyStarkRoots(pa, w.gpa, w.roots, &f);
         const st = try PF.checkPubs(&f.pubs, window);
         if (st.height != hh) return error.WrongHeight;
         var h1: [32]u8 = undefined;
