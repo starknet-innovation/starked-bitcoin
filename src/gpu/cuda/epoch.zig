@@ -5,7 +5,7 @@
 //!
 //!   zig-out/bin/cuda-epoch <headers.bin> <dir> <to> <file.sbchain> [--from <a> <prev-set.bin>]
 //!                          [--test-strength] [--uniform | --tiered] [--verify] [--mock]
-//!                          [--only <list>] [--skip <list>] [--resume]
+//!                          [--only <list>] [--skip <list>] [--resume] [--jobs <n>]
 //!   zig-out/bin/cuda-epoch <headers.bin> <dir> - <file.sbchain> --heights <list> [options]
 //!
 //! `--heights`: a standalone run over the heights listed in a file (one per line), each block under
@@ -21,7 +21,10 @@
 //! Per process: the AIRs, the AOT catalog, a `NativeRuntime` (CUDA context and AOT loader, kept
 //! open: no per-block context creation or module load) and the twiddles of each size. Per block:
 //! the lean witness (the device generates `block_sha`, `block_b2s`, `block_msg`, `block_walk`,
-//! `block_bytes` and tree 0), plans, the device proof, the file. `--verify` checks each proof on
+//! `block_bytes` and tree 0), plans, the device proof, the file. The witness and plans of the next
+//! blocks are built on `--jobs` worker threads (default 3) while the device proves, so the GPU waits
+//! on the host only when a block's host work outlasts the device work of the blocks before it; the
+//! device proofs stay on the main thread, which owns the runtime (CUDA contexts are per thread). `--verify` checks each proof on
 //! the host (`system.verifyExt`, slow); `--mock` proves on the CPU instead (any host: the plumbing).
 //! One line per block (`height L profile witness plans device total bytes`), a summary at the end.
 
@@ -40,7 +43,7 @@ const S = sb.recursion.store;
 const M31 = core.fields.m31.M31;
 
 fn usage() noreturn {
-    std.debug.print("usage: cuda-epoch <headers.bin> <dir> <to> <file.sbchain> [--from <a> <prev-set.bin>] [--test-strength] [--uniform | --tiered] [--verify] [--mock] [--only <list>] [--skip <list>] [--resume]\n       cuda-epoch <headers.bin> <dir> - <file.sbchain> --heights <list> [options]\n", .{});
+    std.debug.print("usage: cuda-epoch <headers.bin> <dir> <to> <file.sbchain> [--from <a> <prev-set.bin>] [--test-strength] [--uniform | --tiered] [--verify] [--mock] [--only <list>] [--skip <list>] [--resume] [--jobs <n>]\n       cuda-epoch <headers.bin> <dir> - <file.sbchain> --heights <list> [options]\n", .{});
     std.process.exit(2);
 }
 
@@ -59,6 +62,97 @@ fn readHeights(a: std.mem.Allocator, path: []const u8) ![]const u32 {
 /// Device seconds per (L, profile) class, for the summary.
 const Class = struct { n: usize = 0, total: f64 = 0, device: f64 = 0 };
 
+/// One block's host work, done by a worker: the witness and (on the device path) the plans and host
+/// trees. Owned by its arena; the main thread proves it and frees it.
+const Job = struct {
+    arena: std.heap.ArenaAllocator,
+    b: *bs.Built = undefined,
+    parts: *[bs.N_COMP]system.Part = undefined,
+    mains: *[bs.N_COMP][]const []const M31 = undefined,
+    cfg: rec.Config = undefined,
+    inputs: ?*res.witness.Inputs = null,
+    prepared: ?prover.Prepared = null,
+    host: ?prover.HostTrees = null,
+    t_witness: u64 = 0,
+    t_plans: u64 = 0,
+    err: ?anyerror = null,
+
+    fn deinit(self: *Job) void {
+        const ba = self.arena.allocator();
+        if (self.host) |*h| h.deinit(ba);
+        if (self.prepared) |*p| p.deinit();
+        var arena = self.arena;
+        arena.child_allocator.destroy(self);
+        arena.deinit();
+    }
+};
+
+/// A worker's hand-off slot: `ready` when its job is built, `free` when the main thread is done with it.
+const Slot = struct {
+    job: ?*Job = null,
+    ready: std.Thread.ResetEvent = .{},
+    free: std.Thread.ResetEvent = .{},
+};
+
+/// The host side of the run: worker `w` builds the jobs `todo[w], todo[w + jobs], …`, one at a time in
+/// its slot, so at most `jobs` blocks are built ahead of the device. Nothing here touches the runtime.
+const Pipe = struct {
+    gpa: std.mem.Allocator,
+    ep: *const ER.Epoch,
+    todo: []const usize,
+    slots: []Slot,
+    size: ER.Size,
+    mock: bool,
+    airs: *const [bs.N_COMP]sb.air.ir.Air,
+    catalog: *const res.catalog.Catalog,
+    fri: core.pcs.config_v2.FriConfigV2,
+    stop: std.atomic.Value(bool) = .init(false),
+
+    fn worker(self: *Pipe, w: usize) void {
+        const slot = &self.slots[w];
+        var j = w;
+        while (j < self.todo.len) : (j += self.slots.len) {
+            slot.free.wait();
+            slot.free.reset();
+            if (self.stop.load(.acquire)) return;
+            const job = self.gpa.create(Job) catch |e| {
+                std.debug.print("cuda-epoch: worker out of memory: {s}\n", .{@errorName(e)});
+                std.process.exit(1);
+            };
+            job.* = .{ .arena = std.heap.ArenaAllocator.init(self.gpa) };
+            self.build(job, self.todo[j]) catch |e| {
+                job.err = e;
+            };
+            slot.job = job;
+            slot.ready.set();
+        }
+    }
+
+    fn build(self: *Pipe, job: *Job, k: usize) !void {
+        const ba = job.arena.allocator();
+        var lap = try std.time.Timer.start();
+        const b = try ba.create(bs.Built);
+        b.* = try self.ep.build(ba, k, self.size, !self.mock);
+        job.b = b;
+        job.t_witness = lap.lap();
+        job.parts = try ba.create([bs.N_COMP]system.Part);
+        job.parts.* = bs.parts(self.airs, b);
+        job.mains = try ba.create([bs.N_COMP][]const []const M31);
+        for (job.mains, b.mains) |*m, x| m.* = @ptrCast(x);
+        job.cfg = rec.Config.fromFriAndTraceSize(self.fri, b.log_size);
+        if (self.mock) return;
+        const inputs = try ba.create(res.witness.Inputs);
+        inputs.* = try res.witness.Inputs.ofBlock(ba, b);
+        inputs.fixed_capacity = true; // one memory plan per size class: one prepared arena each
+        job.inputs = inputs;
+        // No runtime here: the host trees need only the plans; the device work runs on the main thread.
+        const in = prover.Input{ .parts = job.parts, .mains = job.mains, .config = job.cfg, .catalog = self.catalog, .witness = inputs, .runtime = null };
+        job.prepared = try prover.Prepared.initWitness(ba, job.parts, self.catalog, job.cfg, .device_logup, inputs);
+        job.host = try prover.hostTraceTreesFor(ba, in, job.prepared.?.witness);
+        job.t_plans = lap.lap();
+    }
+};
+
 pub fn main() !void {
     const gpa = std.heap.page_allocator;
     var arena_state = std.heap.ArenaAllocator.init(gpa);
@@ -75,6 +169,7 @@ pub fn main() !void {
     var only: ?[]const u32 = null;
     var skip: []const u32 = &.{};
     var resume_run = false;
+    var jobs: usize = 3;
     var i: usize = 5;
     while (i < args.len) : (i += 1) {
         const x = args[i];
@@ -86,6 +181,10 @@ pub fn main() !void {
             i += 1;
         } else if (std.mem.eql(u8, x, "--skip") and i + 1 < args.len) {
             skip = try readHeights(a, args[i + 1]);
+            i += 1;
+        } else if (std.mem.eql(u8, x, "--jobs") and i + 1 < args.len) {
+            jobs = try std.fmt.parseInt(usize, args[i + 1], 10);
+            if (jobs == 0) usage();
             i += 1;
         } else if (std.mem.eql(u8, x, "--resume")) resume_run = true else if (std.mem.eql(u8, x, "--heights") and i + 1 < args.len) {
             heights_path = args[i + 1];
@@ -130,6 +229,8 @@ pub fn main() !void {
     var passed: usize = 0;
     var deferred = std.ArrayList(u32).empty;
     std.debug.print("height L profile witness_s plans_s device_s total_s bytes\n", .{});
+    // The blocks this run proves.
+    var todo = std.ArrayList(usize).empty;
     for (0..ep.count()) |k| {
         const hh = ep.heights[k];
         if (only) |l| if (std.mem.indexOfScalar(u32, l, hh) == null) {
@@ -148,41 +249,50 @@ pub fn main() !void {
                 continue;
             } else |err| if (err != error.FileNotFound) return err;
         }
-        var block_arena = std.heap.ArenaAllocator.init(gpa);
-        defer block_arena.deinit();
-        const ba = block_arena.allocator();
+        try todo.append(a, k);
+    }
+    // Witness and plans (host) on `jobs` worker threads, up to `jobs` blocks ahead; the device proofs
+    // on this thread, which owns the runtime, in order.
+    const n_jobs: usize = @max(1, @min(jobs, todo.items.len));
+    var pipe: Pipe = .{ .gpa = gpa, .ep = &ep, .todo = todo.items, .slots = try a.alloc(Slot, n_jobs), .size = size, .mock = mock, .airs = airs, .catalog = &catalog, .fri = fri };
+    for (pipe.slots) |*sl| sl.* = .{};
+    for (pipe.slots) |*sl| sl.free.set();
+    const threads = try a.alloc(std.Thread, n_jobs);
+    for (threads, 0..) |*th, w| th.* = try std.Thread.spawn(.{}, Pipe.worker, .{ &pipe, w });
+    defer {
+        pipe.stop.store(true, .release);
+        for (pipe.slots) |*sl| sl.free.set();
+        for (threads) |th| th.join();
+    }
+    for (todo.items, 0..) |k, jj| {
+        const slot = &pipe.slots[jj % n_jobs];
+        slot.ready.wait();
+        slot.ready.reset();
+        const job = slot.job.?;
+        slot.job = null;
+        defer {
+            job.deinit();
+            slot.free.set();
+        }
+        if (job.err) |e| return e;
+        const hh = ep.heights[k];
+        const ba = job.arena.allocator();
+        const b = job.b;
         var lap = try std.time.Timer.start();
-        const b = try ba.create(bs.Built);
-        b.* = try ep.build(ba, k, size, !mock);
-        const t_witness = lap.lap();
-        const parts = try ba.create([bs.N_COMP]system.Part);
-        parts.* = bs.parts(airs, b);
-        const mains = try ba.create([bs.N_COMP][]const []const M31);
-        for (mains, b.mains) |*m, x| m.* = @ptrCast(x);
-        const cfg = rec.Config.fromFriAndTraceSize(fri, b.log_size);
-        var t_plans: u64 = 0;
         var t_device: u64 = 0;
         const proof = if (mock) blk: {
             const p = try PF.prove(ba, airs, b, fri);
             t_device = lap.lap();
             break :blk p;
         } else blk: {
-            const inputs = try ba.create(res.witness.Inputs);
-            inputs.* = try res.witness.Inputs.ofBlock(ba, b);
-            inputs.fixed_capacity = true; // one memory plan per size class: one prepared arena each
-            const in = prover.Input{ .parts = parts, .mains = mains, .config = cfg, .catalog = &catalog, .witness = inputs, .runtime = &runtime.? };
-            var prepared = try prover.Prepared.initWitness(ba, parts, &catalog, cfg, .device_logup, inputs);
-            defer prepared.deinit();
-            var host = try prover.hostTraceTreesFor(ba, in, prepared.witness);
-            defer host.deinit(ba);
-            const words = prepared.plans.twiddle_words;
+            const in = prover.Input{ .parts = job.parts, .mains = job.mains, .config = job.cfg, .catalog = &catalog, .witness = job.inputs, .runtime = &runtime.? };
+            const words = job.prepared.?.plans.twiddle_words;
             const gop = try twiddles.getOrPut(words);
             if (!gop.found_existing) gop.value_ptr.* = prover.Twiddles.init(gpa, words) catch |err| {
                 _ = twiddles.remove(words);
                 return err;
             };
-            t_plans = lap.lap();
-            const result = prover.proofPass(ba, &prepared, &host, gop.value_ptr, in, null) catch |err| {
+            const result = prover.proofPass(ba, &job.prepared.?, &job.host.?, gop.value_ptr, in, null) catch |err| {
                 if (err != error.InsufficientDeviceMemory) return err;
                 std.debug.print("{d} {d} {s} deferred: InsufficientDeviceMemory\n", .{ hh, b.log_size, @tagName(b.profile) });
                 try deferred.append(a, hh);
@@ -191,10 +301,10 @@ pub fn main() !void {
             t_device = lap.lap();
             break :blk result.proof;
         };
-        if (verify) try system.verifyExt(ba, cfg, parts, &.{}, proof);
+        if (verify) try system.verifyExt(ba, job.cfg, job.parts, &.{}, proof);
         const bytes = try ep.encode(ba, k, b, proof);
         try ep.writeProof(ba, k, bytes);
-        const t_total = t_witness + t_plans + t_device + lap.lap();
+        const t_total = job.t_witness + job.t_plans + t_device + lap.lap();
         proof_bytes += bytes.len;
         proved += 1;
         const key = @as(u64, b.log_size) << 1 | @intFromEnum(b.profile);
@@ -203,7 +313,7 @@ pub fn main() !void {
         c.value_ptr.n += 1;
         c.value_ptr.total += secs(t_total);
         c.value_ptr.device += secs(t_device);
-        std.debug.print("{d} {d} {s} {d:.3} {d:.3} {d:.3} {d:.3} {d}{s}\n", .{ ep.heights[k], b.log_size, @tagName(b.profile), secs(t_witness), secs(t_plans), secs(t_device), secs(t_total), bytes.len, if (verify) " verified" else "" });
+        std.debug.print("{d} {d} {s} {d:.3} {d:.3} {d:.3} {d:.3} {d}{s}\n", .{ hh, b.log_size, @tagName(b.profile), secs(job.t_witness), secs(job.t_plans), secs(t_device), secs(t_total), bytes.len, if (verify) " verified" else "" });
     }
     const elapsed = secs(run.read());
     std.debug.print("{s} {d}..{d}: {d} block proofs ({d:.1} MB), coin set of {d} coins{s}; {d:.1} s, {d:.3} s/block\n", .{ if (ep.standalone) "standalone" else "epoch", ep.from, ep.to, proved, @as(f64, @floatFromInt(proof_bytes)) / 1e6, if (ep.fin) |f| f.count else 0, if (ep.standalone) " (none written)" else " written", elapsed, elapsed / @as(f64, @floatFromInt(@max(proved, 1))) });
