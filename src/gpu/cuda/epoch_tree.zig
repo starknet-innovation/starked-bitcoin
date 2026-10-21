@@ -11,8 +11,8 @@
 //! The proofs go level by level (`block_tree.tasks`: every leaf, then the nodes over leaves, …), so the
 //! device arena of one circuit size is reused from proof to proof (one `NativeRuntime`). In a level,
 //! `--jobs` host threads (default 4) each build a circuit (a leaf: the block proof verified natively
-//! with capture; a node: its children read back), pad and preprocess it, take the GPU for the prove
-//! only, then verify the device proof natively, convert it to the verifier proof a node verifies
+//! with capture; a node: its children read back), pad and preprocess it, hand the prove to the main
+//! thread (the runtime's owner: every device call runs there), then verify the device proof natively, convert it to the verifier proof a node verifies
 //! in-circuit, and check that with stwo-zig's circuit verifier. Every proof must carry its identity
 //! from the tree VK (preprocessed root, which the GPU is given and still commits, and circuit hash)
 //! and the native output digest.
@@ -73,13 +73,63 @@ const Opts = struct {
     shapes_only: bool = false,
 };
 
-/// The process's GPU: the AIR template (bound per circuit), the AOT catalog, one runtime whose device
-/// arena is reused by consecutive proofs of one size, and the lock that makes the proves one at a time.
+/// One device prove, handed by a worker to the GPU thread.
+const GpuJob = struct {
+    input: cuda.resident_prover.Input,
+    result: ?cuda.resident_prover.Result = null,
+    err: ?anyerror = null,
+    gpu_s: f64 = 0,
+    done: std.Thread.ResetEvent = .{},
+};
+
+/// The process's GPU: the AIR template (bound per circuit), the AOT catalog, and one runtime whose device
+/// arena is reused by consecutive proofs of one size. The runtime belongs to the thread that opened it
+/// (CUDA contexts are per thread; the runtime checks its owner), so every prove runs there: workers
+/// queue jobs (`submit`) and that thread serves them (`serve`).
 const Gpu = struct {
     template: cpu.air.Bundle,
     catalog: cuda.air_aot.Catalog,
     runtime: ?cuda_backend.runtime.NativeRuntime,
     mutex: std.Thread.Mutex = .{},
+    cond: std.Thread.Condition = .{},
+    queue: std.ArrayList(*GpuJob) = .empty,
+    workers_left: usize = 0,
+
+    /// From a worker: queues `job` and waits for the GPU thread to prove it.
+    fn submit(self: *Gpu, gpa: std.mem.Allocator, job: *GpuJob) !void {
+        {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            try self.queue.append(gpa, job);
+            self.cond.signal();
+        }
+        job.done.wait();
+    }
+
+    /// From a worker, when it stops.
+    fn leave(self: *Gpu) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        self.workers_left -= 1;
+        self.cond.signal();
+    }
+
+    /// On the thread that opened the runtime: proves queued jobs until every worker has left.
+    fn serve(self: *Gpu, gpa: std.mem.Allocator) void {
+        while (true) {
+            const job = blk: {
+                self.mutex.lock();
+                defer self.mutex.unlock();
+                while (self.queue.items.len == 0 and self.workers_left > 0) self.cond.wait(&self.mutex);
+                if (self.queue.items.len == 0) return;
+                break :blk self.queue.orderedRemove(0);
+            };
+            var timer = std.time.Timer.start() catch unreachable;
+            if (cuda.resident_prover.prove(gpa, job.input)) |r| job.result = r else |e| job.err = e;
+            job.gpu_s = secs(timer.read());
+            job.done.set();
+        }
+    }
 
     fn init(gpa: std.mem.Allocator, open: bool) !Gpu {
         var template = try cpu.air.parse(gpa, leaf.bundle_bytes);
@@ -89,7 +139,8 @@ const Gpu = struct {
         return .{ .template = template, .catalog = catalog, .runtime = if (open) try cuda_backend.runtime.NativeRuntime.open(&.{ 80, 90 }) else null };
     }
 
-    fn deinit(self: *Gpu) void {
+    fn deinit(self: *Gpu, gpa: std.mem.Allocator) void {
+        self.queue.deinit(gpa);
         if (self.runtime) |*r| r.close() catch |err| std.debug.print("cuda-epoch-tree: runtime close failed: {s}\n", .{@errorName(err)});
         self.catalog.deinit();
         self.template.deinit();
@@ -121,14 +172,11 @@ fn gpuProve(gpa: std.mem.Allocator, a: std.mem.Allocator, g: *Gpu, ctx: *Context
         .expected_preprocessed_root = want.id.root,
         .runtime = if (g.runtime) |*r| r else null,
     };
-    var result = blk: {
-        g.mutex.lock();
-        defer g.mutex.unlock();
-        var timer = try std.time.Timer.start();
-        const r = try cuda.resident_prover.prove(gpa, input);
-        gpu_s.* = secs(timer.read());
-        break :blk r;
-    };
+    var job: GpuJob = .{ .input = input };
+    try g.submit(gpa, &job);
+    gpu_s.* = job.gpu_s;
+    if (job.err) |e| return e;
+    var result = job.result.?;
     defer result.deinit();
     if (!result.verdict.isResident() or result.verdict.counters.cpu_fallback_attempts != 0) return error.NonresidentCircuitProof;
     var verified = try cuda.resident_verifier.verify(gpa, input, &result);
@@ -216,6 +264,11 @@ const Run = struct {
         }
     }
 
+    fn gpuWorker(r: *Run) void {
+        defer r.g.leave();
+        r.worker();
+    }
+
     fn one(r: *Run, i: usize) !void {
         const t = r.level[i];
         var arena = std.heap.ArenaAllocator.init(r.gpa);
@@ -293,11 +346,21 @@ const Run = struct {
         r.level = level;
         r.next.store(0, .monotonic);
         const jobs = @min(r.opts.jobs, level.len);
-        const threads = try r.gpa.alloc(std.Thread, jobs -| 1);
-        defer r.gpa.free(threads);
-        for (threads) |*th| th.* = try std.Thread.spawn(.{}, worker, .{r});
-        r.worker();
-        for (threads) |th| th.join();
+        if (r.opts.cpu_prover) {
+            const threads = try r.gpa.alloc(std.Thread, jobs -| 1);
+            defer r.gpa.free(threads);
+            for (threads) |*th| th.* = try std.Thread.spawn(.{}, worker, .{r});
+            r.worker();
+            for (threads) |th| th.join();
+        } else {
+            // Every device prove on this thread, which opened the runtime.
+            const threads = try r.gpa.alloc(std.Thread, jobs);
+            defer r.gpa.free(threads);
+            r.g.workers_left = jobs;
+            for (threads) |*th| th.* = try std.Thread.spawn(.{}, gpuWorker, .{r});
+            r.g.serve(r.gpa);
+            for (threads) |th| th.join();
+        }
         if (r.err) |e| {
             std.debug.print("FAILED at k {d} x {d}: {s}\n", .{ r.err_task.k, r.err_task.x, @errorName(e) });
             return e;
@@ -366,7 +429,7 @@ pub fn main() !void {
     std.debug.print("setup: epoch {d}..{d}, {d} block sizes, leaves at 2^{d}, nodes at 2^{d} ({d:.1}s)\n", .{ from, to, keys.firsts.len, vk.leaf_log, vk.node_log, secs(timer.lap()) });
 
     var g = try Gpu.init(gpa, !opts.cpu_prover);
-    defer g.deinit();
+    defer g.deinit(gpa);
     std.debug.print("{s}; {d} jobs\n", .{ if (opts.cpu_prover) "CPU circuit prover (--cpu-prover)" else "GPU: CUDA runtime open", opts.jobs });
 
     const all = try BT.tasks(a, from, nb);
