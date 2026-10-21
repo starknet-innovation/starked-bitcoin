@@ -307,34 +307,34 @@ open StarkedAir.Circuit.BlockNodeK
 
 /-- **`TrustK` with explicit witnesses** (`TrustW` per arity). -/
 structure TrustKW (Acc SatC : List Word → List Word → Prop) (VGates : (ℕ → Q) → ℕ → List ℕ → List ℕ → Prop)
-    (leafH : ℕ → List Word) (nodeH : ℕ → List Word) (LeafW : List Word → (ℕ → F) → Prop)
-    (nodeWit : ℕ → List Word → ℕ → Q) (leafWit : ℕ → List Word → ℕ → F) : Prop where
+    (leafH : ℕ → List Word) (nodeH : ℕ → ℕ → List Word) (LeafW : List Word → (ℕ → F) → Prop)
+    (nodeWit : ℕ → ℕ → List Word → ℕ → Q) (leafWit : ℕ → List Word → ℕ → F) : Prop where
   stwoSound : ∀ h d, Acc h d → SatC h d
-  nodeCircuit : ∀ a d, SatC (nodeH a) d →
-    Holds (nodeWit a d) (blockNodeK a).ops ∧ wordsOf (nodeWit a d) (blockNodeK a).results = d ∧
-      HookGates VGates (nodeWit a d) (blockNodeK a).ops
+  nodeCircuit : ∀ a v d, SatC (nodeH a v) d →
+    Holds (nodeWit a v d) (blockNodeK a).ops ∧ wordsOf (nodeWit a v d) (blockNodeK a).results = d ∧
+      HookGates VGates (nodeWit a v d) (blockNodeK a).ops
   recVerifies : ∀ ρ i args outs, VGates ρ i args outs → SatC (wordsOf ρ outs) (wordsOf ρ (args.drop 8))
   leafSound : ∀ L d, SatC (leafH L) d → LeafW d (leafWit L d)
 
 theorem TrustKW.toTrustK {Acc SatC : List Word → List Word → Prop} {VGates : (ℕ → Q) → ℕ → List ℕ → List ℕ → Prop}
-    {leafH : ℕ → List Word} {nodeH : ℕ → List Word} {LeafW : List Word → (ℕ → F) → Prop}
-    {nw : ℕ → List Word → ℕ → Q} {lw : ℕ → List Word → ℕ → F} (T : TrustKW Acc SatC VGates leafH nodeH LeafW nw lw) :
+    {leafH : ℕ → List Word} {nodeH : ℕ → ℕ → List Word} {LeafW : List Word → (ℕ → F) → Prop}
+    {nw : ℕ → ℕ → List Word → ℕ → Q} {lw : ℕ → List Word → ℕ → F} (T : TrustKW Acc SatC VGates leafH nodeH LeafW nw lw) :
     TrustK Acc SatC VGates leafH nodeH (fun d => ∃ p, LeafW d p) :=
-  ⟨T.stwoSound, fun a d h => ⟨nw a d, T.nodeCircuit a d h⟩, T.recVerifies, fun L d h => ⟨lw L d, T.leafSound L d h⟩⟩
+  ⟨T.stwoSound, fun a v d h => ⟨nw a v d, T.nodeCircuit a v d h⟩, T.recVerifies, fun L d h => ⟨lw L d, T.leafSound L d h⟩⟩
 
 /-- **The pairs a wide tree's soundness compares** (`pairs`, with `2^a` children per node). -/
-noncomputable def pairsK (leafH : ℕ → List Word) (nodeH : ℕ → List Word) (nw : ℕ → List Word → ℕ → Q) (lw : ℕ → List Word → ℕ → F) :
+noncomputable def pairsK (leafH : ℕ → List Word) (nodeH : ℕ → ℕ → List Word) (nw : ℕ → ℕ → List Word → ℕ → Q) (lw : ℕ → List Word → ℕ → F) :
     TreeK → (ℕ → F) → List (List Word × List Word)
   | .leaf L, v => [(zeroKey ++ vals v, zeroKey ++ vals (leafVec (lw L (sumDigest zeroKey v))))]
-  | .node a cs, v =>
-    let ρ := nw a (sumDigest ((TreeK.node a cs).key leafH nodeH) v)
-    (wordsOf ρ (kKey a).res ++ vals (outSumK ρ a), (TreeK.node a cs).key leafH nodeH ++ vals v) ::
+  | .node a w cs, v =>
+    let ρ := nw a w (sumDigest ((TreeK.node a w cs).key leafH nodeH) v)
+    (wordsOf ρ (kKey a).res ++ vals (outSumK ρ a), (TreeK.node a w cs).key leafH nodeH ++ vals v) ::
     ((List.range (2 ^ a)).flatMap (fun i => wordsOf ρ (kid i).res.chash ++ wordsOf ρ (kid i).res.key),
       (List.range (2 ^ a)).flatMap (fun i => (cs i).hash leafH nodeH ++ (cs i).key leafH nodeH)) ::
     (List.range (2 ^ a)).flatMap fun i => pairsK leafH nodeH nw lw (cs i) (childSum ρ (kid i))
 
 /-- The pairs of a forest of wide trees. -/
-noncomputable def forestPairsK (leafH : ℕ → List Word) (nodeH : ℕ → List Word) (nw : ℕ → List Word → ℕ → Q)
+noncomputable def forestPairsK (leafH : ℕ → List Word) (nodeH : ℕ → ℕ → List Word) (nw : ℕ → ℕ → List Word → ℕ → Q)
     (lw : ℕ → List Word → ℕ → F) (t0 : TreeK) (v0 : ℕ → F) (rest : List (TreeK × (ℕ → F))) :
     List (List Word × List Word) :=
   pairsK leafH nodeH nw lw t0 v0 ++ rest.flatMap fun tv => pairsK leafH nodeH nw lw tv.1 tv.2
@@ -351,11 +351,11 @@ theorem keyOfK_eqC {c : ℕ} {hs ks hs' ks' : ℕ → List Word}
   · exact Or.inr col
 
 variable {Acc SatC : List Word → List Word → Prop} {VGates : (ℕ → Q) → ℕ → List ℕ → List ℕ → Prop}
-  {leafH : ℕ → List Word} {nodeH : ℕ → List Word} {nw : ℕ → List Word → ℕ → Q} {lw : ℕ → List Word → ℕ → F}
+  {leafH : ℕ → List Word} {nodeH : ℕ → ℕ → List Word} {nw : ℕ → ℕ → List Word → ℕ → Q} {lw : ℕ → List Word → ℕ → F}
 
 /-- **A tree with wide nodes is sound, up to a named collision** (`treeK_soundP`). -/
 theorem treeK_soundW {ok : (ℕ → F) → Prop} (T : TrustKW Acc SatC VGates leafH nodeH (LeafAt ok) nw lw)
-    (hl : ∀ L, (leafH L).length = 8) (hn : ∀ a, (nodeH a).length = 8) :
+    (hl : ∀ L, (leafH L).length = 8) (hn : ∀ a v, (nodeH a v).length = 8) :
     ∀ (t : TreeK), t.Ok → ∀ (v : ℕ → F), SatC (t.hash leafH nodeH) (sumDigest (t.key leafH nodeH) v) →
       SumOkP ok v ∨ Collides (pairsK leafH nodeH nw lw t v)
   | .leaf L, _, v, hs => by
@@ -363,17 +363,17 @@ theorem treeK_soundW {ok : (ℕ → F) → Prop} (T : TrustKW Acc SatC VGates le
     rcases sumDigest_eqC (TreeK.key_length leafH nodeH (.leaf L)) (by simp [zeroKey]) hd with ⟨-, e⟩ | c
     · exact Or.inl (sumOk_congrP (fun i hi => (e i hi).symm) (BlockTree.sumOk_leafP hp hH h2 hlost hα hnin hlimbs))
     · exact Or.inr (collides_head c)
-  | .node a cs, hok, v, hs => by
-    obtain ⟨hρ, hres, hg⟩ := T.nodeCircuit a _ hs
-    set ρ := nw a (sumDigest ((TreeK.node a cs).key leafH nodeH) v) with eρ
-    have hp : pairsK leafH nodeH nw lw (.node a cs) v =
-        (wordsOf ρ (kKey a).res ++ vals (outSumK ρ a), (TreeK.node a cs).key leafH nodeH ++ vals v) ::
+  | .node a w cs, hok, v, hs => by
+    obtain ⟨hρ, hres, hg⟩ := T.nodeCircuit a w _ hs
+    set ρ := nw a w (sumDigest ((TreeK.node a w cs).key leafH nodeH) v) with eρ
+    have hp : pairsK leafH nodeH nw lw (.node a w cs) v =
+        (wordsOf ρ (kKey a).res ++ vals (outSumK ρ a), (TreeK.node a w cs).key leafH nodeH ++ vals v) ::
         ((List.range (2 ^ a)).flatMap (fun i => wordsOf ρ (kid i).res.chash ++ wordsOf ρ (kid i).res.key),
           (List.range (2 ^ a)).flatMap (fun i => (cs i).hash leafH nodeH ++ (cs i).key leafH nodeH)) ::
         (List.range (2 ^ a)).flatMap (fun i => pairsK leafH nodeH nw lw (cs i) (childSum ρ (kid i))) := by
       rw [pairsK]
     rw [hp]
-    by_cases col : Collides ((wordsOf ρ (kKey a).res ++ vals (outSumK ρ a), (TreeK.node a cs).key leafH nodeH ++ vals v) ::
+    by_cases col : Collides ((wordsOf ρ (kKey a).res ++ vals (outSumK ρ a), (TreeK.node a w cs).key leafH nodeH ++ vals v) ::
         ((List.range (2 ^ a)).flatMap (fun i => wordsOf ρ (kid i).res.chash ++ wordsOf ρ (kid i).res.key),
           (List.range (2 ^ a)).flatMap (fun i => (cs i).hash leafH nodeH ++ (cs i).key leafH nodeH)) ::
         (List.range (2 ^ a)).flatMap (fun i => pairsK leafH nodeH nw lw (cs i) (childSum ρ (kid i))))
@@ -382,7 +382,7 @@ theorem treeK_soundW {ok : (ℕ → F) → Prop} (T : TrustKW Acc SatC VGates le
     obtain ⟨h0, -, -, -⟩ := nodeK_parts hρ
     rw [nodeK_digest hρ] at hres
     have kl : (wordsOf ρ (kKey a).res).length = 8 := by rw [wordsOf_length]; exact blake2s_length _ _ _
-    obtain ⟨ek, ev⟩ := (sumDigest_eqC kl (TreeK.key_length leafH nodeH (.node a cs)) hres).resolve_right
+    obtain ⟨ek, ev⟩ := (sumDigest_eqC kl (TreeK.key_length leafH nodeH (.node a w cs)) hres).resolve_right
       fun c => col (collides_head c)
     rw [nodeK_key ha hρ] at ek
     have hkh : ∀ t : TreeK, (t.hash leafH nodeH).length = 8 := fun t => by cases t <;> simp [TreeK.hash, hl, hn]
@@ -400,7 +400,7 @@ theorem treeK_soundW {ok : (ℕ → F) → Prop} (T : TrustKW Acc SatC VGates le
 
 /-- **The outer verifier over wide trees, up to a named collision** (`forestK_soundP`). -/
 theorem forestK_soundW {ok : (ℕ → F) → Prop} (T : TrustKW Acc SatC VGates leafH nodeH (LeafAt ok) nw lw)
-    (hl : ∀ L, (leafH L).length = 8) (hn : ∀ a, (nodeH a).length = 8)
+    (hl : ∀ L, (leafH L).length = 8) (hn : ∀ a v, (nodeH a v).length = 8)
     (t0 : TreeK) (v0 : ℕ → F) (rest : List (TreeK × (ℕ → F))) (hok0 : t0.Ok) (hok : ∀ tv ∈ rest, tv.1.Ok)
     (h0 : Acc (t0.hash leafH nodeH) (sumDigest (t0.key leafH nodeH) v0))
     (hs : ∀ tv ∈ rest, Acc (tv.1.hash leafH nodeH) (sumDigest (tv.1.key leafH nodeH) tv.2))
@@ -423,7 +423,7 @@ theorem forestK_soundW {ok : (ℕ → F) → Prop} (T : TrustKW Acc SatC VGates 
 
 /-- **The epoch's blocks are proven over wide trees, up to a named collision** (`forestK_epochV`). -/
 theorem forestK_epochVW (T : TrustKW Acc SatC VGates leafH nodeH (LeafAt BlockPubOk') nw lw)
-    (hl : ∀ L, (leafH L).length = 8) (hn : ∀ a, (nodeH a).length = 8)
+    (hl : ∀ L, (leafH L).length = 8) (hn : ∀ a v, (nodeH a v).length = 8)
     (t0 : TreeK) (v0 : ℕ → F) (rest : List (TreeK × (ℕ → F))) (hok0 : t0.Ok) (hok : ∀ tv ∈ rest, tv.1.Ok)
     (h0 : Acc (t0.hash leafH nodeH) (sumDigest (t0.key leafH nodeH) v0))
     (hs : ∀ tv ∈ rest, Acc (tv.1.hash leafH nodeH) (sumDigest (tv.1.key leafH nodeH) tv.2))

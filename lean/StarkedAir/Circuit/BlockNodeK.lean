@@ -209,48 +209,49 @@ theorem nodeK_sound {ok : (ℕ → F) → Prop} {a : ℕ} (ha : a < 26) (h : Hol
 /-! ### Trees with wide nodes, under named hypotheses -/
 
 /-- A recursion tree's shape: block leaves (by block trace size key) and wide nodes of `2^a` children
-(children `cs 0 … cs (2^a − 1)`). -/
+(children `cs 0 … cs (2^a − 1)`) of circuit variant `v` (per-level shapes: the node over leaves and the
+node over nodes are different circuits, both running `blockNodeK a`). -/
 inductive TreeK where
   | leaf (L : ℕ)
-  | node (a : ℕ) (cs : ℕ → TreeK)
+  | node (a v : ℕ) (cs : ℕ → TreeK)
 
 section
-variable (leafH : ℕ → List Word) (nodeH : ℕ → List Word)
+variable (leafH : ℕ → List Word) (nodeH : ℕ → ℕ → List Word)
 
 /-- The circuit hash the outer verifier expects at a tree's root. -/
 def TreeK.hash : TreeK → List Word
   | .leaf L => leafH L
-  | .node a _ => nodeH a
+  | .node a v _ => nodeH a v
 
 /-- The key the outer verifier expects: zero at a leaf. -/
 def TreeK.key : TreeK → List Word
   | .leaf _ => zeroKey
-  | .node a cs => keyOfK (2 ^ a) (fun i => (cs i).hash leafH nodeH) (fun i => (cs i).key)
+  | .node a _ cs => keyOfK (2 ^ a) (fun i => (cs i).hash leafH nodeH) (fun i => (cs i).key)
 
 /-- The arities are below `2^26` (the key's message length fits Blake2s's counter). -/
 def TreeK.Ok : TreeK → Prop
   | .leaf _ => True
-  | .node a cs => a < 26 ∧ ∀ i < 2 ^ a, (cs i).Ok
+  | .node a _ cs => a < 26 ∧ ∀ i < 2 ^ a, (cs i).Ok
 
 theorem TreeK.key_length : ∀ t : TreeK, (t.key leafH nodeH).length = 8
   | .leaf _ => by simp [TreeK.key, zeroKey]
-  | .node _ _ => by simp [TreeK.key, keyOfK, H_length]
+  | .node _ _ _ => by simp [TreeK.key, keyOfK, H_length]
 
 end
 
-/-- **The named hypotheses** (`BlockRec.Trust`), for wide nodes: the node circuit of arity `2^a` has hash
-`nodeH a` and runs `blockNodeK a`. -/
+/-- **The named hypotheses** (`BlockRec.Trust`), for wide nodes: the node circuit of arity `2^a` and
+variant `v` has hash `nodeH a v` and runs `blockNodeK a`. -/
 structure TrustK (Acc SatC : List Word → List Word → Prop) (VGates : (ℕ → Q) → ℕ → List ℕ → List ℕ → Prop)
-    (leafH : ℕ → List Word) (nodeH : ℕ → List Word) (LeafOk : List Word → Prop) : Prop where
+    (leafH : ℕ → List Word) (nodeH : ℕ → ℕ → List Word) (LeafOk : List Word → Prop) : Prop where
   stwoSound : ∀ h d, Acc h d → SatC h d
-  nodeCircuit : ∀ a d, SatC (nodeH a) d →
+  nodeCircuit : ∀ a v d, SatC (nodeH a v) d →
     ∃ ρ, Holds ρ (blockNodeK a).ops ∧ wordsOf ρ (blockNodeK a).results = d ∧ HookGates VGates ρ (blockNodeK a).ops
   recVerifies : ∀ ρ i args outs, VGates ρ i args outs → SatC (wordsOf ρ outs) (wordsOf ρ (args.drop 8))
   leafSound : ∀ L d, SatC (leafH L) d → LeafOk d
 
 section
 variable {Acc SatC : List Word → List Word → Prop} {VGates : (ℕ → Q) → ℕ → List ℕ → List ℕ → Prop}
-  {leafH : ℕ → List Word} {nodeH : ℕ → List Word}
+  {leafH : ℕ → List Word} {nodeH : ℕ → ℕ → List Word}
 
 theorem hookK_mem {a i : ℕ} (hi : i < 2 ^ a) : ∃ root : List ℕ, root.length = 8 ∧
     Op.hook i (root ++ (kid i).res.digest) (kid i).res.chash ∈ (blockNodeK a).ops := by
@@ -261,22 +262,22 @@ theorem hookK_mem {a i : ℕ} (hi : i < 2 ^ a) : ∃ root : List ℕ, root.lengt
 the hash and key of tree shape `t`, outputting `sumDigest key v`, has a proven summary `v` (or Blake2s has
 a collision). -/
 theorem treeK_soundP {ok : (ℕ → F) → Prop} (T : TrustK Acc SatC VGates leafH nodeH (LeafOutP ok))
-    (hl : ∀ L, (leafH L).length = 8) (hn : ∀ a, (nodeH a).length = 8) :
+    (hl : ∀ L, (leafH L).length = 8) (hn : ∀ a v, (nodeH a v).length = 8) :
     ∀ (t : TreeK), t.Ok → ∀ (v : ℕ → F), SatC (t.hash leafH nodeH) (sumDigest (t.key leafH nodeH) v) → SumOkP ok v ∨ Collision
   | .leaf L, _, v, hs => by
     obtain ⟨p, Hh, hp, hH, h2, hlost, hα, hnin, hlimbs, hd⟩ := T.leafSound L _ hs
     rcases sumDigest_eq (TreeK.key_length leafH nodeH (.leaf L)) (by simp [zeroKey]) hd with ⟨-, e⟩ | c
     · exact Or.inl (sumOk_congrP (fun i hi => (e i hi).symm) (BlockTree.sumOk_leafP hp hH h2 hlost hα hnin hlimbs))
     · exact Or.inr c
-  | .node a cs, hok, v, hs => by
+  | .node a w cs, hok, v, hs => by
     by_cases col : Collision
     · exact Or.inr col
     obtain ⟨ha, hok⟩ := hok
-    obtain ⟨ρ, hρ, hres, hg⟩ := T.nodeCircuit a _ hs
+    obtain ⟨ρ, hρ, hres, hg⟩ := T.nodeCircuit a w _ hs
     obtain ⟨h0, -, -, -⟩ := nodeK_parts hρ
     rw [nodeK_digest hρ] at hres
     have kl : (wordsOf ρ (kKey a).res).length = 8 := by rw [wordsOf_length]; exact blake2s_length _ _ _
-    obtain ⟨ek, ev⟩ := (sumDigest_eq kl (TreeK.key_length leafH nodeH (.node a cs)) hres).resolve_right col
+    obtain ⟨ek, ev⟩ := (sumDigest_eq kl (TreeK.key_length leafH nodeH (.node a w cs)) hres).resolve_right col
     rw [nodeK_key ha hρ] at ek
     have hb : 64 * 2 ^ a < 2 ^ 32 := by
       calc 64 * 2 ^ a < 64 * 2 ^ 26 := by gcongr; norm_num
@@ -295,7 +296,7 @@ theorem treeK_soundP {ok : (ℕ → F) → Prop} (T : TrustK Acc SatC VGates lea
 
 /-- **The outer verifier, composed**, over trees with wide nodes (`BlockRec.forest_soundP`). -/
 theorem forestK_soundP {ok : (ℕ → F) → Prop} (T : TrustK Acc SatC VGates leafH nodeH (LeafOutP ok))
-    (hl : ∀ L, (leafH L).length = 8) (hn : ∀ a, (nodeH a).length = 8)
+    (hl : ∀ L, (leafH L).length = 8) (hn : ∀ a v, (nodeH a v).length = 8)
     (t0 : TreeK) (v0 : ℕ → F) (rest : List (TreeK × (ℕ → F))) (hok0 : t0.Ok) (hok : ∀ tv ∈ rest, tv.1.Ok)
     (h0 : Acc (t0.hash leafH nodeH) (sumDigest (t0.key leafH nodeH) v0))
     (hs : ∀ tv ∈ rest, Acc (tv.1.hash leafH nodeH) (sumDigest (tv.1.key leafH nodeH) tv.2))
@@ -316,7 +317,7 @@ theorem forestK_soundP {ok : (ℕ → F) → Prop} (T : TrustK Acc SatC VGates l
 /-- **The epoch's blocks are proven, per-component sizes**, over trees with wide nodes
 (`BlockRec.forest_epochV`). -/
 theorem forestK_epochV (T : TrustK Acc SatC VGates leafH nodeH (LeafOutP BlockPubOk'))
-    (hl : ∀ L, (leafH L).length = 8) (hn : ∀ a, (nodeH a).length = 8)
+    (hl : ∀ L, (leafH L).length = 8) (hn : ∀ a v, (nodeH a v).length = 8)
     (t0 : TreeK) (v0 : ℕ → F) (rest : List (TreeK × (ℕ → F))) (hok0 : t0.Ok) (hok : ∀ tv ∈ rest, tv.1.Ok)
     (h0 : Acc (t0.hash leafH nodeH) (sumDigest (t0.key leafH nodeH) v0))
     (hs : ∀ tv ∈ rest, Acc (tv.1.hash leafH nodeH) (sumDigest (tv.1.key leafH nodeH) tv.2))
