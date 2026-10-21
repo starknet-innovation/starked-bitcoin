@@ -79,7 +79,8 @@ on_pod "rm -rf /root/starked-bitcoin; for i in 1 2 3; do git clone -q https://gi
 on_pod "mkdir -p /root/data/proofs /workspace/$name/tree"
 n_local=$(ls "$pdir" | wc -l)
 # The proofs go as one tar stream (10,000 files of ~1.2 MB), then are counted on the pod.
-(cd "$pdir" && tar cf - --exclude='.*' .) | on_pod "tar xf - --no-same-owner -C /root/data/proofs" || finish "block proof transfer failed" 1
+# By name: only finished proofs (an --exclude='.*' would also drop the directory '.' itself).
+(cd "$pdir" && ls | grep -E '^[0-9]+\.sbblock$' | tar cf - -T -) | on_pod "tar xf - --no-same-owner -C /root/data/proofs" || finish "block proof transfer failed" 1
 n_pod=$(on_pod "ls /root/data/proofs | wc -l")
 rsync -a --no-owner --no-group --timeout=300 -e "$rsh" "$headers" "root@$host:/root/data/headers.bin" || finish "headers transfer failed" 1
 rsync -a --no-owner --no-group --timeout=300 -e "$rsh" "$chain" "root@$host:/root/data/chain.sbchain" || finish "chain transfer failed" 1
