@@ -9,7 +9,8 @@
 #                <chain.sbchain> <local-dir> <deadline> [cuda-epoch-tree options]
 # The pod assembles the forest (prove_tree.sh); <local-dir> gets forestk-<to>.bin, treevk.bin, tree/
 # and logs/. Check it there with chainproof verify-epoch-wide (the coin sets live on this node). The RunPod API key is read from ~/.runpod_key and
-# never printed or put on a command line. Log: <local-dir>/logs/node_tree.log.
+# never printed or put on a command line. Log: <local-dir>/logs/node_tree.log. PATCH: a `git format-patch`
+# file on this node, applied on the pod on top of <commit> before the build (local fixes not pushed yet).
 set -uo pipefail
 [ $# -ge 12 ] || { sed -n '2,12p' "$0"; exit 2; }
 pod=$1 host=$2 port=$3 commit=$4 name=$5 from=$6 to=$7 pdir=$8 headers=$9 chain=${10} dst=${11} deadline=${12}
@@ -75,7 +76,12 @@ on_pod 'DEBIAN_FRONTEND=noninteractive apt-get update -qq > /dev/null && DEBIAN_
 on_pod "nproc; cat /sys/fs/cgroup/cpu.max; free -g | sed -n 2p; nvidia-smi --query-gpu=name,memory.total --format=csv,noheader; df -h / /workspace | tail -2" 2>&1 | tee -a "$logf"
 
 log "build (background on the pod) and the block proofs"
-on_pod "rm -rf /root/starked-bitcoin; for i in 1 2 3; do git clone -q https://github.com/starknet-innovation/starked-bitcoin /root/starked-bitcoin && break; sleep 10; done; cd /root/starked-bitcoin && git checkout -q $commit && (CUDA_ARCH=sm_90 nohup bash -c 'NO_BUILD=1 scripts/pod/bootstrap.sh $commit && scripts/pod/prove_tree.sh build' > /root/build.out 2>&1 &)" 2>&1 | tee -a "$logf"
+apply=true
+if [ -n "${PATCH:-}" ]; then
+  on_pod "cat > /root/fix.patch" < "$PATCH" || finish "patch upload failed" 1
+  apply="git -c user.email=pod@local -c user.name=pod am -q /root/fix.patch && git log --oneline -1"
+fi
+on_pod "rm -rf /root/starked-bitcoin; for i in 1 2 3; do git clone -q https://github.com/starknet-innovation/starked-bitcoin /root/starked-bitcoin && break; sleep 10; done; cd /root/starked-bitcoin && git checkout -q $commit && $apply && (CUDA_ARCH=sm_90 nohup bash -c 'NO_BUILD=1 scripts/pod/bootstrap.sh \$(git rev-parse HEAD) && scripts/pod/prove_tree.sh build' > /root/build.out 2>&1 &)" 2>&1 | tee -a "$logf"
 on_pod "mkdir -p /root/data/proofs /workspace/$name/tree"
 n_local=$(ls "$pdir" | wc -l)
 # The proofs go as one tar stream (10,000 files of ~1.2 MB), then are counted on the pod.
