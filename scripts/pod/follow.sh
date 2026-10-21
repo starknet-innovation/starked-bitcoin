@@ -29,7 +29,7 @@ alert() {
   command -v osascript > /dev/null && osascript -e "display notification \"$1\" with title \"prove_epoch $name\"" 2> /dev/null
 }
 # On the pod: the proof count, whether cuda-epoch runs, and whether the status has END.
-probe="echo \$(ls $WORK/$name/$sub 2>/dev/null | wc -l) \$(pgrep -x $proc_name > /dev/null && echo up || echo down) \$(grep -c ^END $WORK/logs/$name.status 2>/dev/null)"
+probe="echo \$(ls $WORK/$name/$sub 2>/dev/null | wc -l) \$(pgrep -x '$proc_name' > /dev/null && echo up || echo down) \$(grep -c ^END $WORK/logs/$name.status 2>/dev/null)"
 misses=0
 while true; do
   st=$($ssh_pre $opts "$dest" "$probe" 2> /dev/null)

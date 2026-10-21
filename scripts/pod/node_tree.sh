@@ -107,7 +107,7 @@ sleep 60
 fi
 relaunched=0
 while true; do
-  POD_SSH="$POD_SSH" WORK=/workspace SUBDIR=tree PROC=cuda-epoch-tree INTERVAL=${INTERVAL:-300} "$here/follow.sh" "$name" "$dst" >> "$dst/logs/follow.log" 2>&1
+  POD_SSH="$POD_SSH" WORK=/workspace SUBDIR=tree PROC='cuda-epoch-tree|chainproof' INTERVAL=${INTERVAL:-300} "$here/follow.sh" "$name" "$dst" >> "$dst/logs/follow.log" 2>&1
   rc=$?
   log "follow.sh exit $rc: $(tail -1 "$dst/logs/follow.log")"
   case $rc in
