@@ -5,12 +5,14 @@
 #   xfer_epoch.sh <from> <to> <set-dir> <blocks-dir> <chain.sbchain>
 #     set-dir:    the node's directory holding set-<from-1>.bin (e.g. /data/replay/out)
 #     blocks-dir: the node's directory holding blocks/ and undo/ (e.g. /data/replay/out935)
+# HEADERS: the node's headers file (default <set-dir>/../headers.bin); it must cover the chain proof.
 # NODE_SSH and POD_SSH: the ssh commands of the node and the pod. Fills the pod's $DATA (default
 # /root/data, scripts/pod/env.sh) and checks every file's sha256 against the node's.
 set -euo pipefail
 from=${1:?usage: xfer_epoch.sh <from> <to> <set-dir> <blocks-dir> <chain.sbchain>}
 to=${2:?to}
 setdir=${3:?set dir}
+hdr=${HEADERS:-$(dirname "$setdir")/headers.bin}
 bdir=${4:?blocks dir}
 chain=${5:?chain proof}
 : "${NODE_SSH:?set NODE_SSH}" "${POD_SSH:?set POD_SSH}"
@@ -30,11 +32,11 @@ for r in "$from $mid" "$((mid + 1)) $to"; do
   ( "${node[@]}" "cd $bdir && for h in \$(seq $1 $2); do echo blocks/\$h.bin; echo undo/\$h.undo; echo undo/\$h.ctx; done | tar cf - -T - | zstd -q -T2 -13 -c" | "${pod[@]}" "zstd -q -d -c | tar xf - -C $DATA --no-same-owner" ) &
 done
 wait
-"${node[@]}" "cat $(dirname "$setdir")/headers.bin" | "${pod[@]}" "cat > $DATA/headers.bin"
+"${node[@]}" "cat $hdr" | "${pod[@]}" "cat > $DATA/headers.bin"
 "${pod[@]}" "cat > $DATA/chain.sbchain" < "$chain"
 date -u +"copied %FT%TZ; checking"
 list="for h in \$(seq $from $to); do cat blocks/\$h.bin undo/\$h.undo undo/\$h.ctx; done | sha256sum"
-a=$("${node[@]}" "cd $bdir && $list; sha256sum < $set_file; sha256sum < $(dirname "$setdir")/headers.bin")
+a=$("${node[@]}" "cd $bdir && $list; sha256sum < $set_file; sha256sum < $hdr")
 b=$("${pod[@]}" "cd $DATA && $list; sha256sum < set-$((from - 1)).bin; sha256sum < headers.bin")
 c=$(shasum -a 256 < "$chain" | cut -d' ' -f1)
 d=$("${pod[@]}" "sha256sum < $DATA/chain.sbchain" | cut -d' ' -f1)
