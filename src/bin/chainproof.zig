@@ -792,8 +792,10 @@ const RootInputs = struct {
 
 fn rootInputs(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const L.Tables, dir: []const u8, to: u32, from: EpochFrom) !*RootInputs {
     var timer = try std.time.Timer.start();
-    const nb = to - from.height + 1;
-    const keys = try BT.epochKeys(a, .{ .dir = dir }, from.height, nb);
+    // The size keys as the forest records them, and one block proof per key.
+    const forest = try BT.Forest.decode(gpa, a, try S.readFile(a, try std.fmt.allocPrint(a, "{s}/forestk-{d}.bin", .{ dir, to })));
+    if (forest.from != from.height or forest.to != to or forest.logs.len != to - from.height + 1) return error.WrongEpoch;
+    const keys = .{ .logs = forest.logs, .firsts = try BT.firstsOf(a, .{ .dir = dir }, from.height, forest.logs) };
     const airs = try a.create([BS.N_COMP]sb.air.ir.Air);
     airs.* = try BS.parseAirs(a);
     const bfri = blockFri(from.weak);
@@ -803,8 +805,7 @@ fn rootInputs(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const L.Tab
     ri.shapes = try BT.Shapes.init(gpa, &tables.table, try BT.leafStart(gpa, a, airs, keys.firsts, bfri, roots), BT.circuitFri());
     errdefer ri.shapes.deinit(gpa);
     ri.logs = keys.logs;
-    ri.forest = try BT.Forest.decode(gpa, a, try S.readFile(a, try std.fmt.allocPrint(a, "{s}/forestk-{d}.bin", .{ dir, to })));
-    if (ri.forest.from != from.height or ri.forest.to != to) return error.WrongEpoch;
+    ri.forest = forest;
     ri.ep = if (from.digests) |d| blk: {
         if ((d.prev != null) != (from.height != 0)) return error.PrevSetRequired;
         break :blk .{ .from = from.height, .to = to, .prev = d.prev, .fin = d.fin };
@@ -976,18 +977,28 @@ fn proveChain(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8,
         const entry = try jvk.rootFor(ri.children.len, ri.ep.prev != null, EJ.nodeTag(tvk));
         const path = try std.fmt.allocPrint(a, "{s}/root-{d}.bin", .{ out, ri.ep.to });
         const head = try rootHead(a, ri);
-        if (S.readFile(a, path)) |bytes| {
-            f.* = try ERoot.File.decode(gpa, a, bytes);
+        // A root file already there (this run's, or the epoch's own root when it is at the chain's
+        // root shape) is reused; any other is proved again.
+        const reused = if (S.readFile(a, path)) |bytes| blk: {
+            var g = ERoot.File.decode(gpa, a, bytes) catch break :blk false;
+            if (std.mem.eql(u32, &g.proof.request.preprocessed_root, &entry.id.root) and std.mem.eql(u32, &g.proof.circuit_hash, &entry.id.hash) and g.head.from == ri.ep.from and g.head.to == ri.ep.to) {
+                f.* = g;
+                break :blk true;
+            }
+            g.proof.deinit();
+            std.debug.print("  epoch {d}: {s} is not at the chain's root shape: proving again\n", .{ i, path });
+            break :blk false;
+        } else |_| false;
+        if (reused) {
             n_files += 1;
             std.debug.print("  epoch {d}: root {s} (reused)\n", .{ i, path });
-        } else |_| {
+        } else {
             const r = try ERoot.proveRootAt(gpa, a, tables, &ri.shapes.node.shared, fri, ri.children, ri.ep, true, js.root.target);
             f.* = .{ .head = head, .proof = r.proof.? };
             n_files += 1;
             try S.writeFileAtomic(path, try f.encode(a));
             std.debug.print("  epoch {d}: {d}..{d}, {d} children, root proved at the root shape, {s} ({d:.1}s)\n", .{ i, ri.ep.from, ri.ep.to, ri.children.len, path, secs(timer.lap()) });
         }
-        if (!std.mem.eql(u32, &f.proof.request.preprocessed_root, &entry.id.root) or !std.mem.eql(u32, &f.proof.circuit_hash, &entry.id.hash)) return error.RootNotAtTheChainShape;
         const op = try ERoot.openHead(a, tvk, entry.lift.hash, &f.head, ri.ep, s.headers, s.t);
         o.* = .{ .key = op.key, .ep = ri.ep, .rest = op.rest };
     }

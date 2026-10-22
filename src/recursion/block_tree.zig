@@ -331,6 +331,23 @@ pub fn epochKeys(a: std.mem.Allocator, dir: Dir, from: u32, nb: u32) !struct { l
     return .{ .logs = logs, .firsts = firsts.items };
 }
 
+/// The first block proof of each size key in `logs` (an epoch's keys as its forest records them): all
+/// the setup needs (`leafStart`), without reading every block's proof.
+pub fn firstsOf(a: std.mem.Allocator, dir: Dir, from: u32, logs: []const u8) ![]*const PF.File {
+    var seen: [256]bool = @splat(false);
+    var firsts: std.ArrayList(*const PF.File) = .empty;
+    for (logs, 0..) |l, i| {
+        if (seen[l]) continue;
+        seen[l] = true;
+        const h = from + @as(u32, @intCast(i));
+        const f = try a.create(PF.File);
+        f.* = try dir.loadBlock(a, h);
+        if (try sizeKeyOfFile(try dir.blockPath(a, h)) != l) return error.WrongSizeKey;
+        try firsts.append(a, f);
+    }
+    return firsts.items;
+}
+
 /// The trace log of a padded size.
 pub fn traceLogOf(target: ComponentSizes) !u32 {
     const layout = try circuit.common.preprocessed.ColumnLayout.fromComponentSizes(target);
