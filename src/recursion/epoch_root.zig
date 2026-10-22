@@ -34,12 +34,14 @@ pub fn programJson(m: usize, prev: bool) ![]const u8 {
     if (prev) return switch (m) {
         1 => @embedFile("air:epoch_root_1_prev"),
         2 => @embedFile("air:epoch_root_2_prev"),
+        3 => @embedFile("air:epoch_root_3_prev"),
         16 => @embedFile("air:epoch_root_16_prev"),
         else => error.EpochRootNotExported,
     };
     return switch (m) {
         1 => @embedFile("air:epoch_root_1"),
         2 => @embedFile("air:epoch_root_2"),
+        3 => @embedFile("air:epoch_root_3"),
         else => error.EpochRootNotExported,
     };
 }
@@ -316,9 +318,10 @@ pub fn setupVk(gpa: std.mem.Allocator, tables: *const leaf.Tables, shapes: *cons
 /// root's path in the chain's header tree.
 pub const Child = struct { x: u32, k: u32, hash_root: [16]M31, path: []const HT.Step };
 
-/// An epoch's root proof: the range, the blocks' size keys (the identities the key commits to), the
-/// children, the public values and the circuit proof.
-pub const File = struct {
+/// An epoch root's public part (all but the proof): the range, the blocks' size keys (the identities
+/// the key commits to), the children and the public values. A chain of joined epochs carries one per
+/// epoch.
+pub const Head = struct {
     from: u32,
     to: u32,
     logs: []const u8,
@@ -326,12 +329,8 @@ pub const File = struct {
     s: [4]M31,
     nin: M31,
     challenge: [12]M31,
-    proof: leaf.CircuitProof,
 
-    pub fn encode(self: *const File, a: std.mem.Allocator) ![]u8 {
-        var e: store.Enc = .{ .a = a };
-        try e.buf.appendSlice(a, FILE_MAGIC);
-        try e.int(u32, store.VERSION);
+    pub fn encode(self: *const Head, e: *store.Enc) !void {
         try e.int(u32, self.from);
         try e.int(u32, self.to);
         try e.blob(self.logs);
@@ -349,14 +348,10 @@ pub const File = struct {
         for (self.s) |x| try e.int(u32, x.toU32());
         try e.int(u32, self.nin.toU32());
         for (self.challenge) |x| try e.int(u32, x.toU32());
-        try store.encodeCircuit(&e, &self.proof, leaf.zero_key, &.{});
-        return store.seal(&e);
     }
 
-    pub fn decode(gpa: std.mem.Allocator, a: std.mem.Allocator, bytes: []const u8) !File {
-        var d: store.Dec = .{ .bytes = try store.unseal(bytes) };
-        try d.magic(FILE_MAGIC);
-        var f: File = undefined;
+    pub fn decode(a: std.mem.Allocator, d: *store.Dec) !Head {
+        var f: Head = undefined;
         f.from = try d.int(u32);
         f.to = try d.int(u32);
         f.logs = try a.dupe(u8, try d.blob());
@@ -366,7 +361,7 @@ pub const File = struct {
         for (f.children) |*c| {
             c.x = try d.int(u32);
             c.k = try d.int(u32);
-            for (&c.hash_root) |*x| x.* = try m31(&d);
+            for (&c.hash_root) |*x| x.* = try m31(d);
             const steps = try a.alloc(HT.Step, try d.int(u32));
             for (steps) |*st| {
                 st.sibling = try d.words(8);
@@ -378,13 +373,9 @@ pub const File = struct {
             }
             c.path = steps;
         }
-        for (&f.s) |*x| x.* = try m31(&d);
-        f.nin = try m31(&d);
-        for (&f.challenge) |*x| x.* = try m31(&d);
-        var none: [0]M31 = .{};
-        const c = try store.decodeCircuit(gpa, a, &d, &none);
-        f.proof = c.proof;
-        if (d.pos != d.bytes.len) return error.TrailingBytes;
+        for (&f.s) |*x| x.* = try m31(d);
+        f.nin = try m31(d);
+        for (&f.challenge) |*x| x.* = try m31(d);
         return f;
     }
 
@@ -395,12 +386,39 @@ pub const File = struct {
     }
 };
 
+/// An epoch's root proof: its public part and the circuit proof.
+pub const File = struct {
+    head: Head,
+    proof: leaf.CircuitProof,
+
+    pub fn encode(self: *const File, a: std.mem.Allocator) ![]u8 {
+        var e: store.Enc = .{ .a = a };
+        try e.buf.appendSlice(a, FILE_MAGIC);
+        try e.int(u32, store.VERSION);
+        try self.head.encode(&e);
+        try store.encodeCircuit(&e, &self.proof, leaf.zero_key, &.{});
+        return store.seal(&e);
+    }
+
+    pub fn decode(gpa: std.mem.Allocator, a: std.mem.Allocator, bytes: []const u8) !File {
+        var d: store.Dec = .{ .bytes = try store.unseal(bytes) };
+        try d.magic(FILE_MAGIC);
+        var f: File = undefined;
+        f.head = try Head.decode(a, &d);
+        var none: [0]M31 = .{};
+        const c = try store.decodeCircuit(gpa, a, &d, &none);
+        f.proof = c.proof;
+        if (d.pos != d.bytes.len) return error.TrailingBytes;
+        return f;
+    }
+};
+
 /// The expected circuit hash and key of child `(x, k)` at block index `at`: the tree's, or for one
-/// block the lift's over the block's leaf.
-fn childId(tvk: *const BT.Vk, rvk: *const RootVk, logs: []const u8, at: usize, k: u32) !struct { hash: [8]u32, key: Key } {
+/// block the lift's (circuit hash `lift`) over the block's leaf.
+fn childId(tvk: *const BT.Vk, lift: [8]u32, logs: []const u8, at: usize, k: u32) !struct { hash: [8]u32, key: Key } {
     if (k == 0) {
         const l = try tvk.leafFor(logs[at]);
-        return .{ .hash = rvk.lift.hash, .key = wk.key(&.{l.hash}, &.{leaf.zero_key}) };
+        return .{ .hash = lift, .key = wk.key(&.{l.hash}, &.{leaf.zero_key}) };
     }
     const e = try BT.expected(tvk, logs, at, k);
     return .{ .hash = e.hash, .key = e.key };
@@ -408,20 +426,23 @@ fn childId(tvk: *const BT.Vk, rvk: *const RootVk, logs: []const u8, at: usize, k
 
 pub const Verified = struct { sum: QM31, nin: u64, challenge: coin.Challenge };
 
-/// **The epoch root's verifier.** Checks the file's children against the aligned decomposition of
-/// `from..to`, the root proof against the pinned identity for `M` (preprocessed root, circuit hash,
-/// configuration) with the output digest of the expected key (from the tree VK and the blocks' size
-/// keys), the epoch (both set digests) and the public values; each block-hash root against the chain's
-/// `T`. Returns the summed partial sum, input count and challenge, for the balance against the sets.
-pub fn verify(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const leaf.Tables, tvk: *const BT.Vk, rvk: *const RootVk, f: *const File, ep: Epoch, n_headers: usize, t: HT.Words) !Verified {
+/// What an epoch root's public part opens to: its key, `rest`, output digest (`outOf`), and the values
+/// for the balance against the sets.
+pub const Opened = struct { key: Key, rest: [8]u32, out: [8]u32, verified: Verified };
+
+/// **An epoch root's public part, checked.** The children against the aligned decomposition of
+/// `from..to`, their identities (the tree VK, the lift's circuit hash `lift`, the blocks' size keys)
+/// into the root's key, each block-hash root against the chain's `T`; returns the opening: the root
+/// proof (checked by the caller: alone, or through a join) must output `out`.
+pub fn openHead(a: std.mem.Allocator, tvk: *const BT.Vk, lift: [8]u32, f: *const Head, ep: Epoch, n_headers: usize, t: HT.Words) !Opened {
     if (f.from != ep.from or f.to != ep.to or f.to < f.from) return error.WrongEpoch;
+    if ((ep.prev != null) != (ep.from != 0)) return error.PrevSetRequired;
     if (f.to >= n_headers) return error.BeyondChain;
     const nb: usize = f.to - f.from + 1;
     if (f.logs.len != nb) return error.BadLogs;
-    if (!std.meta.eql(rvk.fri, BT.circuitFri()) or !std.meta.eql(tvk.fri, rvk.fri) or tvk.node_log != rvk.node_log) return error.ConfigNotPinned;
     var sizes_buf: [64]u8 = undefined;
     const sizes = EP.alignedSizes(f.from, nb, &sizes_buf);
-    if (sizes.len != f.children.len or sizes.len != rvk.m or (ep.prev != null) != rvk.prev) return error.WrongRoot;
+    if (sizes.len != f.children.len) return error.WrongRoot;
     const hashes = try a.alloc([8]u32, sizes.len);
     const keys = try a.alloc(Key, sizes.len);
     const roots = try a.alloc([16]M31, sizes.len);
@@ -429,7 +450,7 @@ pub fn verify(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const leaf.
     for (sizes, f.children, hashes, keys, roots) |k, c, *h, *ky, *r| {
         const x: u32 = f.from + @as(u32, @intCast(at));
         if (c.x != x or c.k != k) return error.WrongForest;
-        const id = try childId(tvk, rvk, f.logs, at, k);
+        const id = try childId(tvk, lift, f.logs, at, k);
         h.* = id.hash;
         ky.* = id.key;
         r.* = c.hash_root;
@@ -446,13 +467,28 @@ pub fn verify(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const leaf.
     }
     const key = wk.key(hashes, keys);
     const pubs: Public = .{ .s = f.s, .nin = f.nin, .challenge = f.challenge, .hash_roots = roots };
-    const want = digestOf(key, ep, &pubs);
+    const rest = restOf(&pubs);
+    return .{ .key = key, .rest = rest, .out = outOf(key, ep, rest), .verified = verifiedOf(f) };
+}
+
+/// **The epoch root's verifier.** The public part (`openHead`), then the root proof against the pinned
+/// identity for `M` (preprocessed root, circuit hash, configuration) with the opening's output digest.
+/// Returns the summed partial sum, input count and challenge, for the balance against the sets.
+pub fn verify(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const leaf.Tables, tvk: *const BT.Vk, rvk: *const RootVk, f: *const File, ep: Epoch, n_headers: usize, t: HT.Words) !Verified {
+    if (!std.meta.eql(rvk.fri, BT.circuitFri()) or !std.meta.eql(tvk.fri, rvk.fri) or tvk.node_log != rvk.node_log) return error.ConfigNotPinned;
+    if (f.head.children.len != rvk.m or (ep.prev != null) != rvk.prev) return error.WrongRoot;
+    const o = try openHead(a, tvk, rvk.lift.hash, &f.head, ep, n_headers, t);
     const p = &f.proof;
     if (!std.mem.eql(u32, &p.request.preprocessed_root, &rvk.root.root)) return error.WrongCircuit;
     if (!std.mem.eql(u32, &p.circuit_hash, &rvk.root.hash)) return error.WrongCircuit;
     if (!std.meta.eql(p.request.pcs_config, PcsConfigV2.fromFriAndTraceSize(rvk.fri, rvk.root_log))) return error.ConfigNotPinned;
     const out = try leaf.verifyCircuit(gpa, tables, p);
-    if (!std.mem.eql(u32, &out, &want)) return error.WrongDigest;
+    if (!std.mem.eql(u32, &out, &o.out)) return error.WrongDigest;
+    return o.verified;
+}
+
+/// The public part's values for the balance: the summed partial sum, the input count, the challenge.
+fn verifiedOf(f: *const Head) Verified {
     var ch: coin.Challenge = undefined;
     const q = struct {
         fn qm(l: []const M31) QM31 {

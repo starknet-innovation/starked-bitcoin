@@ -84,6 +84,8 @@ fn usage() noreturn {
         \\  chainproof verify-block <vk> <file.sbchain> <file.sbblock> [--min-work <hex> | --min-work 0] [--test-strength]
         \\  chainproof rebind-block <in.sbblock> <headers.bin> <file.sbchain> <out.sbblock>
         \\  chainproof prove-epoch <headers.bin> <dir> <to> <file.sbchain> [--from <a> <prev-set.bin>] [--test-strength]
+        \\  chainproof prove-chain <vk> <file.sbchain> <out-dir> [--max-m M] <dir>:<to>[:<from>:<prev-set.bin>][#<prev-hex|->,<fin-hex>]...
+        \\  chainproof verify-chain <vk> <file.sbchain> <out-dir> [--min-work <hex> | --min-work 0] <dir>:<to>[:<from>:<prev-set.bin>]...
         \\  chainproof verify-epoch <vk> <file.sbchain> <dir> <to> [--from <a> <prev-set.bin>] [--min-work <hex> | --min-work 0] [--test-strength] [--jobs <n>]
         \\
     , .{});
@@ -218,6 +220,37 @@ pub fn main() !void {
         if (std.mem.eql(u8, cmd, "verify-epoch-wide"))
             return verifyEpochWide(gpa, a, args[2], args[3], args[4], try std.fmt.parseInt(u32, args[5], 10), min_work, from);
         return verifyEpochTree(gpa, a, args[2], args[3], args[4], try std.fmt.parseInt(u32, args[5], 10), min_work, from);
+    }
+    if (std.mem.eql(u8, cmd, "prove-chain") and args.len >= 7) {
+        var max_m: ?usize = null;
+        var specs: std.ArrayList(ChainSpec) = .empty;
+        var i: usize = 5;
+        while (i < args.len) {
+            if (std.mem.eql(u8, args[i], "--max-m") and i + 1 < args.len) {
+                max_m = try std.fmt.parseInt(usize, args[i + 1], 10);
+                i += 2;
+            } else {
+                try specs.append(a, parseChainSpec(args[i]) catch usage());
+                i += 1;
+            }
+        }
+        return proveChain(gpa, a, args[2], args[3], args[4], max_m, specs.items);
+    }
+    if (std.mem.eql(u8, cmd, "verify-chain") and args.len >= 7) {
+        var min_work: u256 = core_min_work;
+        var specs: std.ArrayList(ChainSpec) = .empty;
+        var i: usize = 5;
+        while (i < args.len) {
+            if (std.mem.eql(u8, args[i], "--min-work") and i + 1 < args.len) {
+                min_work = try std.fmt.parseInt(u256, args[i + 1], 16);
+                i += 2;
+            } else {
+                try specs.append(a, parseChainSpec(args[i]) catch usage());
+                i += 1;
+            }
+        }
+        if (specs.items.len < 2) usage();
+        return verifyChainCmd(gpa, a, args[2], args[3], args[4], min_work, specs.items);
     }
     if (std.mem.eql(u8, cmd, "join-demo") and args.len == 8)
         return joinDemo(gpa, a, args[2], try std.fmt.parseInt(u32, args[3], 10), args[4], try std.fmt.parseInt(u32, args[5], 10), try std.fmt.parseInt(u32, args[6], 10), args[7]);
@@ -830,6 +863,204 @@ fn joinDemo(gpa: std.mem.Allocator, a: std.mem.Allocator, dir1: []const u8, to1:
     std.debug.print("  range {d}..{d}, start set genesis, end set {any}\n", .{ j.open.a, j.open.b, j.open.end });
 }
 
+/// One epoch of a chain on the command line: `<dir>:<to>` (from genesis) or
+/// `<dir>:<to>:<from>:<prev-set.bin>`, optionally followed by `#<prev-hex|->,<fin-hex>` (the sets'
+/// digests, for a prover without the set files).
+const ChainSpec = struct { dir: []const u8, to: u32, from: EpochFrom };
+
+fn parseChainSpec(s: []const u8) !ChainSpec {
+    var body = s;
+    var digests: ?[]const u8 = null;
+    if (std.mem.indexOfScalar(u8, s, '#')) |h| {
+        body = s[0..h];
+        digests = s[h + 1 ..];
+    }
+    var it = std.mem.splitScalar(u8, body, ':');
+    const dir = it.next() orelse return error.BadSpec;
+    const to = try parseU32(it.next() orelse return error.BadSpec);
+    var from: EpochFrom = .{};
+    if (it.next()) |f| {
+        from.height = try parseU32(f);
+        from.prev_set = it.next() orelse return error.BadSpec;
+    }
+    if (it.next() != null) return error.BadSpec;
+    if (digests) |d| {
+        var dit = std.mem.splitScalar(u8, d, ',');
+        const p = dit.next() orelse return error.BadSpec;
+        const f = dit.next() orelse return error.BadSpec;
+        from.digests = .{ .prev = if (std.mem.eql(u8, p, "-")) null else try parseDigest(p), .fin = try parseDigest(f) };
+    }
+    return .{ .dir = dir, .to = to, .from = from };
+}
+
+/// The public part of an epoch's root over `ri`'s children: the children (aligned subtrees, block-hash
+/// roots, paths), the summed partial sum and input count, the challenge.
+fn rootHead(a: std.mem.Allocator, ri: *const RootInputs) !ERoot.Head {
+    const n = ri.children.len;
+    const kids = try a.alloc(ERoot.Child, n);
+    for (kids, ri.forest.roots) |*k, fr| {
+        k.* = .{ .x = fr.x, .k = fr.k, .hash_root = undefined, .path = fr.path };
+        @memcpy(&k.hash_root, fr.proved.sum[19..35]);
+    }
+    const hs = try a.alloc([8]u32, n);
+    const ks = try a.alloc([8]u32, n);
+    const ss = try a.alloc(br_mod.Summary, n);
+    for (ri.children, hs, ks, ss) |c, *h, *k, *x| {
+        h.* = c.proof.circuit_hash;
+        k.* = c.key;
+        x.* = c.sum;
+    }
+    const want = ERoot.expected(hs, ks, ss, ri.ep);
+    var head: ERoot.Head = .{ .from = ri.ep.from, .to = ri.ep.to, .logs = ri.logs, .children = kids, .s = want.s, .nin = want.nin, .challenge = undefined };
+    @memcpy(&head.challenge, ri.children[0].sum[7..19]);
+    return head;
+}
+
+/// `prove-chain <vk> <file.sbchain> <out-dir> [--max-m M] <epoch>...` (epochs as `ChainSpec`, in chain
+/// order, each with `prove-epoch-wide`'s forest and tree VK in its dir): the chain's shapes (the root
+/// shape for up to `M` children, default the most any epoch has) and VK (`<out>/joinvk.bin`), each
+/// epoch's root at the root shape (`<out>/root-<to>.bin`, reused when present), then the joins, one
+/// epoch at a time: `<out>/chain-<to>.bin` after each, itself a chain proof up to that epoch.
+fn proveChain(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8, chain_path: []const u8, out: []const u8, max_m_opt: ?usize, specs: []const ChainSpec) !void {
+    var timer = try std.time.Timer.start();
+    if (specs.len < 2) return error.NeedTwoEpochs;
+    const vk = try loadVk(a, vk_path);
+    const tables = try L.Tables.init(gpa);
+    defer tables.deinit(gpa);
+    var c = try S.Chain.decode(gpa, a, try S.readFile(a, chain_path));
+    defer c.deinit();
+    const s = try S.verifyChain(gpa, a, tables, &vk, &c);
+    std.debug.print("chain proof verified: headers 0..{d} ({d:.1}s)\n", .{ s.headers - 1, secs(timer.lap()) });
+    const n = specs.len;
+    const ris = try a.alloc(*RootInputs, n);
+    var n_ri: usize = 0;
+    defer for (ris[0..n_ri]) |ri| ri.deinit(gpa);
+    const tvks = try a.alloc(BT.Vk, n);
+    var max_m: usize = 0;
+    for (specs, ris, tvks) |sp, *ri, *tvk| {
+        ri.* = try rootInputs(gpa, a, tables, sp.dir, sp.to, sp.from);
+        n_ri += 1;
+        tvk.* = try BT.Vk.decode(try S.readFile(a, try std.fmt.allocPrint(a, "{s}/treevk.bin", .{sp.dir})));
+        max_m = @max(max_m, ri.*.children.len);
+    }
+    if (max_m_opt) |m| {
+        if (m < max_m) return error.MaxMTooSmall;
+        max_m = m;
+    }
+    const fri = BT.circuitFri();
+    // The node configurations, each once.
+    var shareds: std.ArrayList(*const @TypeOf(ris[0].shapes.node.shared)) = .empty;
+    var tags: std.ArrayList([8]u32) = .empty;
+    for (ris, tvks) |ri, *tvk| {
+        const tag = EJ.nodeTag(tvk);
+        if (for (tags.items) |t| {
+            if (std.mem.eql(u32, &t, &tag)) break true;
+        } else false) continue;
+        try tags.append(a, tag);
+        try shareds.append(a, &ri.shapes.node.shared);
+    }
+    const rtarget = try EJ.rootTarget(gpa, &tables.table, max_m, shareds.items);
+    var js = try EJ.Shapes.init(gpa, &tables.table, rtarget, fri);
+    defer js.deinit(gpa);
+    const setups = try a.alloc(EJ.EpochSetup, n);
+    for (setups, ris, tvks) |*st, ri, *tvk| st.* = .{ .tshapes = &ri.shapes, .tvk = tvk, .m = ri.children.len, .prev = ri.ep.prev != null };
+    const jvk = try EJ.setupVk(gpa, a, tables, &js, setups);
+    try S.writeFileAtomic(try std.fmt.allocPrint(a, "{s}/joinvk.bin", .{out}), try jvk.encode(a));
+    std.debug.print("chain shapes: roots (up to {d} children) at 2^{d}, joins at 2^{d}; {d} node shape(s); join VK {s}/joinvk.bin ({d:.1}s)\n", .{ max_m, jvk.root_log, jvk.join_log, tags.items.len, out, secs(timer.lap()) });
+    // The epoch roots at the root shape.
+    const files = try a.alloc(ERoot.File, n);
+    var n_files: usize = 0;
+    defer for (files[0..n_files]) |*f| f.proof.deinit();
+    const opens = try a.alloc(EJ.RootOpen, n);
+    for (ris, tvks, files, opens, 0..) |ri, *tvk, *f, *o, i| {
+        const entry = try jvk.rootFor(ri.children.len, ri.ep.prev != null, EJ.nodeTag(tvk));
+        const path = try std.fmt.allocPrint(a, "{s}/root-{d}.bin", .{ out, ri.ep.to });
+        const head = try rootHead(a, ri);
+        if (S.readFile(a, path)) |bytes| {
+            f.* = try ERoot.File.decode(gpa, a, bytes);
+            n_files += 1;
+            std.debug.print("  epoch {d}: root {s} (reused)\n", .{ i, path });
+        } else |_| {
+            const r = try ERoot.proveRootAt(gpa, a, tables, &ri.shapes.node.shared, fri, ri.children, ri.ep, true, js.root.target);
+            f.* = .{ .head = head, .proof = r.proof.? };
+            n_files += 1;
+            try S.writeFileAtomic(path, try f.encode(a));
+            std.debug.print("  epoch {d}: {d}..{d}, {d} children, root proved at the root shape, {s} ({d:.1}s)\n", .{ i, ri.ep.from, ri.ep.to, ri.children.len, path, secs(timer.lap()) });
+        }
+        if (!std.mem.eql(u32, &f.proof.request.preprocessed_root, &entry.id.root) or !std.mem.eql(u32, &f.proof.circuit_hash, &entry.id.hash)) return error.RootNotAtTheChainShape;
+        const op = try ERoot.openHead(a, tvk, entry.lift.hash, &f.head, ri.ep, s.headers, s.t);
+        o.* = .{ .key = op.key, .ep = ri.ep, .rest = op.rest };
+    }
+    // The joins, one epoch at a time.
+    const heads = try a.alloc(ERoot.Head, n);
+    for (heads, files) |*h, f| h.* = f.head;
+    var left = try EJ.childOf(a, &files[0].proof, &js.root.shared, .{ .root = opens[0] });
+    var lh = files[0].proof.circuit_hash;
+    var prev_join: ?L.CircuitProof = null;
+    defer if (prev_join) |*p| p.deinit();
+    for (1..n) |i| {
+        const v = EJ.variantAt(i, ris[0].ep);
+        left.shared = js.leftShared(v);
+        const right = try EJ.childOf(a, &files[i].proof, &js.root.shared, .{ .root = opens[i] });
+        const j = try EJ.proveJoin(gpa, a, tables, v, left, lh, right, files[i].proof.circuit_hash, fri, js.join.target, true);
+        const cf: EJ.ChainFile = .{ .heads = heads[0 .. i + 1], .proof = j.proof.? };
+        const path = try std.fmt.allocPrint(a, "{s}/chain-{d}.bin", .{ out, ris[i].ep.to });
+        const bytes = try cf.encode(a);
+        try S.writeFileAtomic(path, bytes);
+        std.debug.print("  join {d} ({s}): blocks {d}..{d} in one proof, {s}, {d} bytes ({d:.1}s)\n", .{ i, @tagName(v), j.open.a, j.open.b, path, bytes.len, secs(timer.lap()) });
+        if (prev_join) |*p| p.deinit();
+        prev_join = j.proof.?;
+        left = try EJ.childOf(a, &prev_join.?, &js.join.shared, .{ .join = j.open });
+        lh = prev_join.?.circuit_hash;
+    }
+}
+
+/// `verify-chain <vk> <file.sbchain> <out-dir> <epoch>...`: the chain proof `<out>/chain-<to>.bin` (to:
+/// the last epoch's) under `<out>/joinvk.bin`, each epoch's tree VK from its dir, and each epoch's
+/// balance against its sets (the previous set given, the final `<dir>/set-<to>.bin`).
+fn verifyChainCmd(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8, chain_path: []const u8, out: []const u8, min_work: u256, specs: []const ChainSpec) !void {
+    var timer = try std.time.Timer.start();
+    const vk = try loadVk(a, vk_path);
+    const tables = try L.Tables.init(gpa);
+    defer tables.deinit(gpa);
+    var c = try S.Chain.decode(gpa, a, try S.readFile(a, chain_path));
+    defer c.deinit();
+    const s = try S.verifyChain(gpa, a, tables, &vk, &c);
+    if (min_work != 0 and s.work < min_work) return error.InsufficientWork;
+    std.debug.print("chain proof verified: headers 0..{d} ({d:.1}s)\n", .{ s.headers - 1, secs(timer.lap()) });
+    const jvk = try EJ.Vk.decode(a, try S.readFile(a, try std.fmt.allocPrint(a, "{s}/joinvk.bin", .{out})));
+    var file = try EJ.ChainFile.decode(gpa, a, try S.readFile(a, try std.fmt.allocPrint(a, "{s}/chain-{d}.bin", .{ out, specs[specs.len - 1].to })));
+    defer file.proof.deinit();
+    const ins = try a.alloc(EJ.EpochIn, specs.len);
+    const tvks = try a.alloc(BT.Vk, specs.len);
+    const inits = try a.alloc(@TypeOf(try ER.loadInit(gpa, .{})), specs.len);
+    const fins = try a.alloc(@TypeOf(try SF.scan(gpa, "", null)), specs.len);
+    for (specs, ins, tvks, inits, fins) |sp, *in, *tvk, *init, *fin| {
+        tvk.* = try BT.Vk.decode(try S.readFile(a, try std.fmt.allocPrint(a, "{s}/treevk.bin", .{sp.dir})));
+        init.* = try ER.loadInit(gpa, .{ .height = sp.from.height, .prev_set = sp.from.prev_set });
+        fin.* = try SF.scan(gpa, try std.fmt.allocPrint(a, "{s}/set-{d}.bin", .{ sp.dir, sp.to }), null);
+        in.* = .{ .tvk = tvk, .ep = .{ .from = sp.from.height, .to = sp.to, .prev = if (init.info) |x| x.digest else null, .fin = fin.digest } };
+    }
+    const vs = try EJ.verifyChain(gpa, a, tables, &jvk, &file, ins, s.headers, s.t);
+    std.debug.print("chain of epochs verified: ONE proof for blocks {d}..{d} ({d} epochs joined), the block hashes the chain's ({d:.1}s)\n", .{ specs[0].from.height, specs[specs.len - 1].to, specs.len, secs(timer.lap()) });
+    for (specs, vs, inits, fins) |sp, v, init, fin| {
+        const init_count: u64 = if (init.info) |x| x.count else 0;
+        if (v.nin + fin.count + init_count >= 1 << 30) return error.EpochTooLarge;
+        var sum = v.sum;
+        if (init.info) |x| sum = sum.add(try sumSet(gpa, sp.from.prev_set.?, v.challenge, x.digest));
+        const set_path = try std.fmt.allocPrint(a, "{s}/set-{d}.bin", .{ sp.dir, sp.to });
+        if (!sum.eql(try sumSet(gpa, set_path, v.challenge, fin.digest))) {
+            std.debug.print("REJECTED: epoch {d}..{d}: the blocks' coin events do not end at its coin set\n", .{ sp.from.height, sp.to });
+            return error.EpochUnbalanced;
+        }
+        std.debug.print("  epoch {d}..{d} balanced: {d} coins after block {d} ({d} inputs spent)\n", .{ sp.from.height, sp.to, fin.count, sp.to, v.nin });
+    }
+    const last = fins[fins.len - 1];
+    std.debug.print("VERIFIED blocks {d}..{d} as one chain proof: the coin set after block {d} is {d} coins\n", .{ specs[0].from.height, specs[specs.len - 1].to, specs[specs.len - 1].to, last.count });
+    std.debug.print("  total amount     {d} sat\n", .{last.amount});
+    std.debug.print("  hash_serialized  {x}  (Core's HASH_SERIALIZED of this set)\n", .{last.hash});
+}
+
 fn proveEpochRoot(gpa: std.mem.Allocator, a: std.mem.Allocator, headers_path: []const u8, dir: []const u8, to: u32, chain_path: []const u8, from: EpochFrom) !void {
     _ = headers_path;
     _ = chain_path;
@@ -859,7 +1090,7 @@ fn proveEpochRoot(gpa: std.mem.Allocator, a: std.mem.Allocator, headers_path: []
         k.* = .{ .x = fr.x, .k = fr.k, .hash_root = undefined, .path = fr.path };
         @memcpy(&k.hash_root, fr.proved.sum[19..35]);
     }
-    var file: ERoot.File = .{ .from = from.height, .to = to, .logs = keys.logs, .children = kids, .s = undefined, .nin = children[0].sum[6], .challenge = undefined, .proof = r.proof.? };
+    var file: ERoot.File = .{ .head = .{ .from = from.height, .to = to, .logs = keys.logs, .children = kids, .s = undefined, .nin = children[0].sum[6], .challenge = undefined }, .proof = r.proof.? };
     const want = blk: {
         const hs = try a.alloc([8]u32, children.len);
         const ks = try a.alloc([8]u32, children.len);
@@ -871,9 +1102,9 @@ fn proveEpochRoot(gpa: std.mem.Allocator, a: std.mem.Allocator, headers_path: []
         }
         break :blk ERoot.expected(hs, ks, ss, ep);
     };
-    file.s = want.s;
-    file.nin = want.nin;
-    @memcpy(&file.challenge, children[0].sum[7..19]);
+    file.head.s = want.s;
+    file.head.nin = want.nin;
+    @memcpy(&file.head.challenge, children[0].sum[7..19]);
     const out = try std.fmt.allocPrint(a, "{s}/epochroot-{d}.bin", .{ dir, to });
     try S.writeFileAtomic(out, try file.encode(a));
     std.debug.print("root VK {s}/rootvk.bin (root at 2^{d}); epoch root proof written to {s}\n", .{ dir, rvk.root_log, out });
@@ -898,7 +1129,7 @@ fn verifyEpochRoot(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []cons
     const fin_info = try SF.scan(gpa, set_path, null);
     const ep: ERoot.Epoch = .{ .from = from.height, .to = to, .prev = if (init.info) |x| x.digest else null, .fin = fin_info.digest };
     const v = try ERoot.verify(gpa, a, tables, &tvk, &rvk, &file, ep, s.headers, s.t);
-    std.debug.print("epoch root verified: ONE proof for blocks {d}..{d} ({d} subtrees), the seed and the challenge in-circuit, the block hashes the chain's ({d:.1}s)\n", .{ from.height, to, file.children.len, secs(timer.lap()) });
+    std.debug.print("epoch root verified: ONE proof for blocks {d}..{d} ({d} subtrees), the seed and the challenge in-circuit, the block hashes the chain's ({d:.1}s)\n", .{ from.height, to, file.head.children.len, secs(timer.lap()) });
     const init_count: u64 = if (init.info) |x| x.count else 0;
     if (v.nin + fin_info.count + init_count >= 1 << 30) return error.EpochTooLarge;
     var sum = v.sum;

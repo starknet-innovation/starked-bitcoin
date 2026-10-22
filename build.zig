@@ -176,6 +176,8 @@ pub fn build(b: *std.Build) void {
     lib.addAnonymousImport("air:epoch_root_1_prev", .{ .root_source_file = b.path("airs/epoch_root_1_prev.json") });
     lib.addAnonymousImport("air:epoch_root_2_prev", .{ .root_source_file = b.path("airs/epoch_root_2_prev.json") });
     lib.addAnonymousImport("air:epoch_root_16_prev", .{ .root_source_file = b.path("airs/epoch_root_16_prev.json") });
+    lib.addAnonymousImport("air:epoch_root_3", .{ .root_source_file = b.path("airs/epoch_root_3.json") });
+    lib.addAnonymousImport("air:epoch_root_3_prev", .{ .root_source_file = b.path("airs/epoch_root_3_prev.json") });
     lib.addAnonymousImport("air:epoch_join_base_prev", .{ .root_source_file = b.path("airs/epoch_join_base_prev.json") });
     lib.addAnonymousImport("air:epoch_join_base_genesis", .{ .root_source_file = b.path("airs/epoch_join_base_genesis.json") });
     lib.addAnonymousImport("air:epoch_join_step", .{ .root_source_file = b.path("airs/epoch_join_step.json") });

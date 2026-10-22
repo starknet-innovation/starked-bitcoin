@@ -448,6 +448,53 @@ one proof each, their sets those of `verify-epoch`; a different final set and a 
 rejected. Still to do: the Lean soundness of `epochRoot` (`root_sound`), the 16-child root at real size
 (2^25, on a pod's CPU or an H200).
 
+## The epoch join: a chain of epochs as one proof (2026-10-23)
+
+An epoch root is one proof per epoch. The join chains epochs of any lengths into one running proof, one
+epoch at a time, so the proof follows the chain: each new epoch (a day, a week, whatever closed) is one
+more join, never a re-proof.
+
+- **The program** (`Circuit/EpochJoin.lean`, `epochJoin v`): two children verified at hooks, their
+  output digests recomputed from guessed openings. Variants: `base_prev`/`base_genesis` (two epoch roots;
+  the left one from a previous set or from genesis) and `step` (a join, then an epoch root). The links:
+  the right root's previous set digest is the left's end set digest, it starts at the left's end + 1,
+  and ends below 2^30. The output: `key ‖ start ‖ end ‖ a ‖ b ‖ acc`, where `key` hashes the children's
+  circuit hashes and keys (so the identities are pinned) and `acc` is a running Blake2s over the epoch
+  roots' output digests (base: `H(out₀ ‖ out₁)`, step: `H(acc ‖ out)`).
+- **Shapes.** Every epoch root is proved padded to one **root shape** `R`, the chain's: the largest
+  root over up to `M` children under each epoch's node configuration (more children only add to a root).
+  The **join shape** `J` is the fixpoint over the three variants (a step verifies a join of its own
+  shape). Both are fixed for the chain: a later epoch must fit `R` (else a new chain VK).
+- **The chain VK** (`joinvk.bin`): the configuration, `R`'s and `J`'s logs, each epoch root identity at
+  `R` per (children `M`, variant, node shape) with its lift, and the three join identities.
+- **The chain proof** (`chain-<to>.bin`): every epoch root's public part (range, size keys, children
+  with block-hash roots and paths, partial sum, input count, challenge) and the last join's proof. Each
+  intermediate `chain-<to>.bin` is itself a chain proof up to that epoch.
+- **The verifier** (`verify-chain`) opens each epoch's public part as the epoch root's verifier does
+  (children against the aligned decomposition, identities from the tree VK into the key, block-hash
+  roots against the chain's `T`), replays the joins natively (links, keys from the pinned identities,
+  `acc`), checks the one proof against the pinned join identity with the replayed output digest, then
+  each epoch's balance against its sets. Until the set pass is proved, it needs the boundary sets.
+- **Real epochs.** 935001..945000 and 945001..972500 both decompose into 16 aligned subtrees and start
+  from a set, so with equal node shapes `R` is exactly the natural 16-child root (2^25): their roots
+  proved as standalone epoch roots are the chain's, and joining them is one `base_prev` join.
+
+`chainproof prove-chain <vk> <chain> <out> [--max-m M] <dir>:<to>[:<from>:<prev-set>][#<prev>,<fin>]...`
+proves the roots at `R` (reusing `<out>/root-<to>.bin`) and the joins; `verify-chain` checks them.
+
+**Built and tested (2026-10-23, Mac).** Epochs 0..3 (from genesis), 4..8 and 9..15 (each from the
+previous set; 1, 2 and 3 aligned subtrees): roots at the chain's root shape (2^22), then `base_genesis`
+over the first two and a `step` for the third, ~4 s each, 527 KB: **one proof for blocks 0..15**, its
+coin set (15 coins, `hash_serialized d6ab257d…`) the replay's; the 0..8 intermediate verifies as its
+own chain proof. Rejected: a wrong previous set (`SetsDoNotLink`), the 0..8 proof presented as 0..15,
+epochs out of order, a changed input count or partial sum (`WrongDigest`), a changed block-hash root
+(`HashesNotTheChain`), a flipped proof byte (`CircuitProofRejected`). Lean: `join_sound`
+(`Circuit/EpochJoinSound.lean`, all three variants, standard axioms): each child's digest from its
+opening and its hook, the links, `acc`, the key and the output; composing with the children's trust
+records (the left child's `b < 2^30` and `a`'s range come from its own proof) is still to do.
+Epoch roots are exported for M = 1, 2, 3, 16 (with a previous set) and 1, 2, 3 (without); each is a
+few seconds of `lake env lean --run Export.lean epoch_root <M> [prev]` and ~50 KB per child embedded.
+
 ## Following the tip
 
 Three layers at three cadences:
