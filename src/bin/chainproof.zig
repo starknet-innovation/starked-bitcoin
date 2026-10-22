@@ -219,6 +219,8 @@ pub fn main() !void {
             return verifyEpochWide(gpa, a, args[2], args[3], args[4], try std.fmt.parseInt(u32, args[5], 10), min_work, from);
         return verifyEpochTree(gpa, a, args[2], args[3], args[4], try std.fmt.parseInt(u32, args[5], 10), min_work, from);
     }
+    if (std.mem.eql(u8, cmd, "join-demo") and args.len == 8)
+        return joinDemo(gpa, a, args[2], try std.fmt.parseInt(u32, args[3], 10), args[4], try std.fmt.parseInt(u32, args[5], 10), try std.fmt.parseInt(u32, args[6], 10), args[7]);
     if (std.mem.eql(u8, cmd, "rebind-block") and args.len == 6) return rebindBlock(gpa, a, args[2], args[3], args[4], args[5]);
     if (std.mem.eql(u8, cmd, "inclusion") and args.len == 6) return inclusion(gpa, a, args[2], args[3], args[4], try std.fmt.parseInt(usize, args[5], 10));
     usage();
@@ -736,23 +738,41 @@ const ERoot = sb.recursion.epoch_root;
 /// The epoch root over `prove-epoch-wide`'s forest: one-block roots lifted (a one-child node), the root
 /// circuit checked against the native digest, then proved and verified on the CPU (Mac-sized epochs; a
 /// GPU driver for real ones). Needs both sets' digests: `<dir>/set-<to>.bin` and `--from`'s set.
-fn proveEpochRoot(gpa: std.mem.Allocator, a: std.mem.Allocator, headers_path: []const u8, dir: []const u8, to: u32, chain_path: []const u8, from: EpochFrom) !void {
-    _ = headers_path;
-    _ = chain_path;
+/// An epoch's root inputs: its shapes, forest, and the forest's roots as node-shaped children (one-block
+/// roots lifted), with the epoch's set digests. Owned by `a` (pointers stay valid); `deinit` frees the
+/// shapes and the proofs.
+const RootInputs = struct {
+    shapes: BT.Shapes,
+    forest: BT.Forest,
+    lifted: []br_mod.Proved,
+    n_lifted: usize,
+    children: []*const br_mod.Proved,
+    ep: ERoot.Epoch,
+    logs: []const u8,
+
+    fn deinit(self: *RootInputs, gpa: std.mem.Allocator) void {
+        for (self.lifted[0..self.n_lifted]) |*p| p.proof.deinit();
+        for (self.forest.roots) |*r| r.proved.proof.deinit();
+        self.shapes.deinit(gpa);
+    }
+};
+
+fn rootInputs(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const L.Tables, dir: []const u8, to: u32, from: EpochFrom) !*RootInputs {
     var timer = try std.time.Timer.start();
     const nb = to - from.height + 1;
     const keys = try BT.epochKeys(a, .{ .dir = dir }, from.height, nb);
-    const airs = try BS.parseAirs(a);
-    const tables = try L.Tables.init(gpa);
-    defer tables.deinit(gpa);
+    const airs = try a.create([BS.N_COMP]sb.air.ir.Air);
+    airs.* = try BS.parseAirs(a);
     const bfri = blockFri(from.weak);
-    var roots = PF.PreRoots{ .airs = &airs, .fri = bfri };
-    var shapes = try BT.Shapes.init(gpa, &tables.table, try BT.leafStart(gpa, a, &airs, keys.firsts, bfri, &roots), BT.circuitFri());
-    defer shapes.deinit(gpa);
-    const forest = try BT.Forest.decode(gpa, a, try S.readFile(a, try std.fmt.allocPrint(a, "{s}/forestk-{d}.bin", .{ dir, to })));
-    defer for (forest.roots) |*r| r.proved.proof.deinit();
-    if (forest.from != from.height or forest.to != to) return error.WrongEpoch;
-    const ep: ERoot.Epoch = if (from.digests) |d| blk: {
+    const roots = try a.create(PF.PreRoots);
+    roots.* = .{ .airs = airs, .fri = bfri };
+    const ri = try a.create(RootInputs);
+    ri.shapes = try BT.Shapes.init(gpa, &tables.table, try BT.leafStart(gpa, a, airs, keys.firsts, bfri, roots), BT.circuitFri());
+    errdefer ri.shapes.deinit(gpa);
+    ri.logs = keys.logs;
+    ri.forest = try BT.Forest.decode(gpa, a, try S.readFile(a, try std.fmt.allocPrint(a, "{s}/forestk-{d}.bin", .{ dir, to })));
+    if (ri.forest.from != from.height or ri.forest.to != to) return error.WrongEpoch;
+    ri.ep = if (from.digests) |d| blk: {
         if ((d.prev != null) != (from.height != 0)) return error.PrevSetRequired;
         break :blk .{ .from = from.height, .to = to, .prev = d.prev, .fin = d.fin };
     } else blk: {
@@ -760,19 +780,69 @@ fn proveEpochRoot(gpa: std.mem.Allocator, a: std.mem.Allocator, headers_path: []
         const fin_info = try SF.scan(gpa, try std.fmt.allocPrint(a, "{s}/set-{d}.bin", .{ dir, to }), null);
         break :blk .{ .from = from.height, .to = to, .prev = if (init.info) |x| x.digest else null, .fin = fin_info.digest };
     };
-    std.debug.print("epoch {d}..{d}: {d} forest roots; set digests {s} ({d:.1}s)\n", .{ from.height, to, forest.roots.len, if (from.digests != null) "given" else "scanned", secs(timer.lap()) });
-    // One-block roots are leaf-shaped: lift them to the node shape.
-    var lifted = std.ArrayList(br_mod.Proved).empty;
-    defer for (lifted.items) |*p| p.proof.deinit();
-    const children = try a.alloc(*const br_mod.Proved, forest.roots.len);
-    for (forest.roots, children) |*r, *c| {
+    std.debug.print("epoch {d}..{d}: {d} forest roots; set digests {s} ({d:.1}s)\n", .{ from.height, to, ri.forest.roots.len, if (from.digests != null) "given" else "scanned", secs(timer.lap()) });
+    // One-block roots are leaf-shaped: lift them to the node shape (the slice never moves).
+    ri.lifted = try a.alloc(br_mod.Proved, ri.forest.roots.len);
+    ri.n_lifted = 0;
+    ri.children = try a.alloc(*const br_mod.Proved, ri.forest.roots.len);
+    for (ri.forest.roots, ri.children) |*r, *c| {
         if (r.k == 0) {
-            const view = shapes.nodeView(.over_leaves);
-            try lifted.append(a, try sb.recursion.block_node_k.prove(gpa, a, tables, 0, &view, &.{&r.proved}));
-            c.* = &lifted.items[lifted.items.len - 1];
+            const view = ri.shapes.nodeView(.over_leaves);
+            ri.lifted[ri.n_lifted] = try sb.recursion.block_node_k.prove(gpa, a, tables, 0, &view, &.{&r.proved});
+            c.* = &ri.lifted[ri.n_lifted];
+            ri.n_lifted += 1;
             std.debug.print("  root at {d} (one block) lifted ({d:.1}s)\n", .{ r.x, secs(timer.lap()) });
         } else c.* = &r.proved;
     }
+    return ri;
+}
+
+const EJ = sb.recursion.epoch_join;
+
+/// `join-demo <dir1> <to1> <dir2> <from2> <to2> <prev-set-2>` (Mac test): epoch 0..to1 (from genesis)
+/// and epoch from2..to2 (from the set after from2 − 1) as roots at one shape, and the base join over
+/// them: satisfied, output digest = the native join's, proved and verified.
+fn joinDemo(gpa: std.mem.Allocator, a: std.mem.Allocator, dir1: []const u8, to1: u32, dir2: []const u8, from2: u32, to2: u32, prev2: []const u8) !void {
+    var timer = try std.time.Timer.start();
+    const tables = try L.Tables.init(gpa);
+    defer tables.deinit(gpa);
+    const r1 = try rootInputs(gpa, a, tables, dir1, to1, .{});
+    defer r1.deinit(gpa);
+    const r2 = try rootInputs(gpa, a, tables, dir2, to2, .{ .height = from2, .prev_set = prev2 });
+    defer r2.deinit(gpa);
+    if (!std.meta.eql(r1.shapes.node.target, r2.shapes.node.target)) return error.NodeShapesDiffer;
+    const fri = BT.circuitFri();
+    const nsh = &r1.shapes.node.shared;
+    // The chain's root shape: both roots' natural sizes, elementwise.
+    const target = (try ERoot.naturalSize(gpa, &tables.table, r1.children.len, false, nsh)).elementwiseMax(try ERoot.naturalSize(gpa, &tables.table, r2.children.len, true, nsh));
+    var p1 = try ERoot.proveRootAt(gpa, a, tables, nsh, fri, r1.children, r1.ep, true, target);
+    defer if (p1.proof) |*p| p.deinit();
+    var p2 = try ERoot.proveRootAt(gpa, a, tables, nsh, fri, r2.children, r2.ep, true, target);
+    defer if (p2.proof) |*p| p.deinit();
+    std.debug.print("both roots proved at one shape ({d:.1}s)\n", .{secs(timer.lap())});
+    var rshared = try EJ.sharedFor(gpa, target, fri);
+    defer rshared.deinit(gpa);
+    const left = try EJ.childOf(a, &p1.proof.?, &rshared, .{ .root = .{ .key = p1.key, .ep = r1.ep, .rest = p1.rest } });
+    const right = try EJ.childOf(a, &p2.proof.?, &rshared, .{ .root = .{ .key = p2.key, .ep = r2.ep, .rest = p2.rest } });
+    var j = try EJ.proveJoin(gpa, a, tables, .base_genesis, left, p1.proof.?.circuit_hash, right, p2.proof.?.circuit_hash, fri, null, true);
+    defer if (j.proof) |*p| p.deinit();
+    std.debug.print("base join over epochs 0..{d} and {d}..{d}: {d} vars, satisfied, output digest = the native one; proved and verified ({d:.1}s), {d} bytes\n", .{ to1, from2, to2, j.n_vars, secs(timer.lap()), j.proof.?.bytes.len });
+    std.debug.print("  range {d}..{d}, start set genesis, end set {any}\n", .{ j.open.a, j.open.b, j.open.end });
+}
+
+fn proveEpochRoot(gpa: std.mem.Allocator, a: std.mem.Allocator, headers_path: []const u8, dir: []const u8, to: u32, chain_path: []const u8, from: EpochFrom) !void {
+    _ = headers_path;
+    _ = chain_path;
+    var timer = try std.time.Timer.start();
+    const tables = try L.Tables.init(gpa);
+    defer tables.deinit(gpa);
+    const ri = try rootInputs(gpa, a, tables, dir, to, from);
+    defer ri.deinit(gpa);
+    const shapes = &ri.shapes;
+    const forest = &ri.forest;
+    const keys = .{ .logs = ri.logs };
+    const ep = ri.ep;
+    const children = ri.children;
     const ch = try ERoot.challengeOf(blk: {
         const sums = try a.alloc(br_mod.Summary, children.len);
         for (sums, children) |*s, c| s.* = c.sum;
@@ -782,7 +852,7 @@ fn proveEpochRoot(gpa: std.mem.Allocator, a: std.mem.Allocator, headers_path: []
     var r = try ERoot.proveRoot(gpa, a, tables, &shapes.node.shared, BT.circuitFri(), children, ep, true);
     defer if (r.proof) |*p| p.deinit();
     std.debug.print("epoch root: {d} children, {d} vars, satisfied, output digest = the native one; proved and verified ({d:.1}s), {d} bytes\n", .{ children.len, r.n_vars, secs(timer.lap()), r.proof.?.bytes.len });
-    const rvk = try ERoot.setupVk(gpa, tables, &shapes, children.len, ep.prev != null);
+    const rvk = try ERoot.setupVk(gpa, tables, shapes, children.len, ep.prev != null);
     try S.writeFileAtomic(try std.fmt.allocPrint(a, "{s}/rootvk.bin", .{dir}), try rvk.encode(a));
     const kids = try a.alloc(ERoot.Child, children.len);
     for (kids, forest.roots) |*k, fr| {

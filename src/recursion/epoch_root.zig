@@ -191,7 +191,14 @@ test "epoch root programs parse, one hook per child" {
 
 /// Builds the root over node-shaped `children` (forest roots, one-block ones already lifted), checks it
 /// is satisfied with the native digest, and proves it at its natural size (CPU) when `prove`.
-pub fn proveRoot(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const leaf.Tables, node_shared: *const multiverifier.SharedConfig, fri: core.pcs.config_v2.FriConfigV2, children: []const *const br.Proved, ep: Epoch, prove: bool) !struct { digest: [8]u32, n_vars: usize, proof: ?leaf.CircuitProof } {
+pub fn proveRoot(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const leaf.Tables, node_shared: *const multiverifier.SharedConfig, fri: core.pcs.config_v2.FriConfigV2, children: []const *const br.Proved, ep: Epoch, prove: bool) !RootProof {
+    return proveRootAt(gpa, a, tables, node_shared, fri, children, ep, prove, null);
+}
+
+pub const RootProof = struct { digest: [8]u32, n_vars: usize, proof: ?leaf.CircuitProof, key: Key, rest: [8]u32 };
+
+/// `proveRoot`, padded to `target` when given (a chain's fixed root shape, so a join verifies any root).
+pub fn proveRootAt(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const leaf.Tables, node_shared: *const multiverifier.SharedConfig, fri: core.pcs.config_v2.FriConfigV2, children: []const *const br.Proved, ep: Epoch, prove: bool, target: ?finalize.ComponentSizes) !RootProof {
     var scratch = std.heap.ArenaAllocator.init(gpa);
     defer scratch.deinit();
     const sa = scratch.allocator();
@@ -211,12 +218,24 @@ pub fn proveRoot(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const le
     const out = wk.outputDigest(&ctx);
     if (!std.mem.eql(u32, &out, &want.digest)) return error.RootDigestMismatch;
     const n_vars = ctx.circuit.n_vars;
-    if (!prove) return .{ .digest = out, .n_vars = n_vars, .proof = null };
-    var cp = try leaf.proveCircuit(gpa, a, &ctx, null, fri);
+    var roots: [64][16]M31 = undefined;
+    for (sums, 0..) |c, i| @memcpy(&roots[i], c[19..35]);
+    var pubs: Public = .{ .s = want.s, .nin = want.nin, .challenge = undefined, .hash_roots = roots[0..sums.len] };
+    @memcpy(&pubs.challenge, sums[0][7..19]);
+    const rest = restOf(&pubs);
+    if (!prove) return .{ .digest = out, .n_vars = n_vars, .proof = null, .key = want.key, .rest = rest };
+    var cp = try leaf.proveCircuit(gpa, a, &ctx, target, fri);
     errdefer cp.deinit();
     const got = try leaf.verifyCircuit(gpa, tables, &cp);
     if (!std.mem.eql(u32, &got, &want.digest)) return error.RootDigestMismatch;
-    return .{ .digest = out, .n_vars = n_vars, .proof = cp };
+    return .{ .digest = out, .n_vars = n_vars, .proof = cp, .key = want.key, .rest = rest };
+}
+
+/// The natural padded size of the root over `m` children (`prev` variant), for a chain's root shape.
+pub fn naturalSize(gpa: std.mem.Allocator, table: *const circuit.air_eval.component_table.Table, m: usize, prev: bool, node_shared: *const multiverifier.SharedConfig) !finalize.ComponentSizes {
+    var topo = try topology(gpa, table, m, prev, node_shared);
+    defer topo.deinit();
+    return finalize.computePaddedSizes(.fromBuilder(&topo.circuit));
 }
 
 const BF = @import("block_forest.zig");

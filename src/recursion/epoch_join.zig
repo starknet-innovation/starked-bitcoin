@@ -197,3 +197,36 @@ pub fn buildCircuit(comptime V: type, gpa: std.mem.Allocator, table: *const circ
     try glue.runOutputs(V, &ctx, &prog, ext, Hook(V){ .ctx = &ctx, .table = table, .proofs = &proofs, .shareds = &shareds });
     return ctx;
 }
+
+const circuit_cpu = @import("stwo_circuit_cpu_integration");
+const wk = @import("block_node_k.zig");
+
+/// A proved child as the join circuit takes it: its verifier values (allocated in `a`).
+pub fn childOf(a: std.mem.Allocator, cp: *const leaf.CircuitProof, shared: *const multiverifier.SharedConfig, open: Open) !ChildIn(QM31) {
+    const v = try a.create(stark_proof.Proof(QM31));
+    v.* = try circuit_cpu.verifier_proof.circuitVerifierValues(a, &cp.prepared.proof, cp.prepared.config);
+    return .{ .proof = v, .preprocessed_root = cp.request.preprocessed_root, .shared = shared, .open = open };
+}
+
+/// Builds the join over `left` (circuit hash `lh`) and `right` (an epoch root, circuit hash `rh`), checks
+/// it is satisfied with the native digest, and proves it (CPU) padded to `target` when `prove`.
+pub fn proveJoin(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const leaf.Tables, v: Variant, left: ChildIn(QM31), lh: [8]u32, right: ChildIn(QM31), rh: [8]u32, fri: core.pcs.config_v2.FriConfigV2, target: ?circuit.common.finalize.ComponentSizes, prove: bool) !struct { open: JoinOpen, n_vars: usize, proof: ?leaf.CircuitProof } {
+    const want = try expected(&left.open, lh, &right.open.root, rh);
+    var ctx = try buildCircuit(QM31, gpa, &tables.table, v, left, right);
+    defer ctx.deinit();
+    if (!try ctx.isCircuitValid()) return error.CircuitUnsatisfied;
+    const out = wk.outputDigest(&ctx);
+    if (!std.mem.eql(u32, &out, &joinOut(&want))) return error.JoinDigestMismatch;
+    const n_vars = ctx.circuit.n_vars;
+    if (!prove) return .{ .open = want, .n_vars = n_vars, .proof = null };
+    var cp = try leaf.proveCircuit(gpa, a, &ctx, target, fri);
+    errdefer cp.deinit();
+    const got = try leaf.verifyCircuit(gpa, tables, &cp);
+    if (!std.mem.eql(u32, &got, &joinOut(&want))) return error.JoinDigestMismatch;
+    return .{ .open = want, .n_vars = n_vars, .proof = cp };
+}
+
+/// The verifier configuration for children padded to `target` (a chain's root shape, or the join shape).
+pub fn sharedFor(gpa: std.mem.Allocator, target: circuit.common.finalize.ComponentSizes, fri: core.pcs.config_v2.FriConfigV2) !multiverifier.SharedConfig {
+    return multiverifier.foldSharedConfig(gpa, target, fri);
+}
