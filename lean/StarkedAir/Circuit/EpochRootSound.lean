@@ -707,4 +707,115 @@ theorem root_digest {M : ℕ} {prevV : Bool} (h : Holds ρ (epochRoot M prevV).o
   rw [hk8, hf8, hp8] at e
   exact e
 
+/-! ### The seed message, semantically -/
+
+theorem TAG_lt : ∀ w < 7, TAG.getD w 0 < 2 ^ 32 := by decide
+
+theorem m2u_word {o x : ℕ} (h : (Op.m2u o x).holds ρ) : word (ρ o) = BitVec.ofNat 32 (ρ x).a.val := by
+  simp only [Op.holds] at h
+  rw [h.2, word_m2u]
+
+/-- The words `seedOut` writes before hashing: the tag, `lo`, `hi`, each child's start and `k`. -/
+theorem seedOut_words {M rn lo hi : ℕ} {start k : ℕ → ℕ} {msg : List ℕ} (h : Holds ρ (seedOut M rn lo hi start k msg).ops) :
+    (∀ w < 7, word (ρ (rn + w)) = BitVec.ofNat 32 (TAG.getD w 0)) ∧
+    word (ρ (rn + 7)) = BitVec.ofNat 32 (ρ lo).a.val ∧ word (ρ (rn + 7 + 1)) = BitVec.ofNat 32 (ρ hi).a.val ∧
+    ∀ i < M, word (ρ (rn + 7 + 2 + 2 * i)) = BitVec.ofNat 32 (ρ (start i)).a.val ∧
+      word (ρ (rn + 7 + 3 + 2 * i)) = BitVec.ofNat 32 (ρ (k i)).a.val := by
+  dsimp only [seedOut] at h
+  have hm : ∀ o ∈ (List.range 7).map (fun w => constU32 (rn + w) (TAG.getD w 0)) ++
+      [Op.m2u (rn + 7) lo, Op.m2u (rn + 7 + 1) hi] ++
+      (List.range M).flatMap (fun i => [Op.m2u (rn + 7 + 2 + 2 * i) (start i), Op.m2u (rn + 7 + 3 + 2 * i) (k i)]),
+      o.holds ρ := fun o ho => h o (List.mem_append_left _ ho)
+  refine ⟨fun w hw => const_word (hm _ (List.mem_append_left _ (List.mem_append_left _
+      (List.mem_map.mpr ⟨w, List.mem_range.mpr hw, rfl⟩)))) (TAG_lt w hw),
+    m2u_word (hm _ (List.mem_append_left _ (List.mem_append_right _ List.mem_cons_self))),
+    m2u_word (hm _ (List.mem_append_left _ (List.mem_append_right _ (List.mem_cons_of_mem _ List.mem_cons_self)))),
+    fun i hi => ⟨m2u_word (hm _ (List.mem_append_right _ (List.mem_flatMap.mpr ⟨i, List.mem_range.mpr hi, List.mem_cons_self⟩))),
+      m2u_word (hm _ (List.mem_append_right _ (List.mem_flatMap.mpr ⟨i, List.mem_range.mpr hi,
+        List.mem_cons_of_mem _ List.mem_cons_self⟩)))⟩⟩
+
+/-- A seed-root word from two limbs. -/
+def limbWord (lo hi : F) : Spec.Blake2s.Word := BitVec.ofNat 32 (lo.val + 65536 * hi.val)
+
+/-- **`packRoot` is sound**: word `w` is `lo + 2^16 hi` of limbs `base + 2w`, `base + 2w + 1`, both below
+`2^16`. -/
+theorem packRoot_words {q : ℕ → ℕ} {base n : ℕ} (h : Holds ρ (packRoot q base n).ops) :
+    (packRoot q base n).res.length = 8 ∧ ∀ w < 8, word (ρ ((packRoot q base n).res.getD w 0)) =
+      limbWord (ρ (q (base + 2 * w))).a (ρ (q (base + 2 * w + 1))).a := by
+  refine ⟨by simp [packRoot], fun w hw => ?_⟩
+  dsimp only [packRoot] at h ⊢
+  have hc := h _ List.mem_cons_self
+  have hw' : ∀ o ∈ range16 (n + 1 + 4 * w) (q (base + 2 * w)) ++ range16 (n + 1 + 4 * w + 1) (q (base + 2 * w + 1)) ++
+      [Op.mul (n + 1 + 4 * w + 2) (q (base + 2 * w + 1)) n, Op.add (n + 1 + 4 * w + 3) (q (base + 2 * w)) (n + 1 + 4 * w + 2)],
+      o.holds ρ := fun o ho => h o (List.mem_cons_of_mem _ (List.mem_flatMap.mpr ⟨w, List.mem_range.mpr hw, ho⟩))
+  have r0 := range16_sound (fun o ho => hw' o (List.mem_append_left _ (List.mem_append_left _ ho)))
+  have r1 := range16_sound (fun o ho => hw' o (List.mem_append_left _ (List.mem_append_right _ ho)))
+  have m := hw' _ (List.mem_append_right _ List.mem_cons_self)
+  have a := hw' _ (List.mem_append_right _ (List.mem_cons_of_mem _ List.mem_cons_self))
+  simp only [Op.holds] at hc m a
+  rw [List.getD_eq_getElem _ _ (by simpa using hw)]
+  simp only [List.getElem_map, List.getElem_range]
+  rw [a, m, hc, Q.lohi r0.1 r1.1, Q.word_mk]; rfl
+
+/-- **The seed message, semantically** (`epoch.seedOfRoots`): the tag's words, `from`, `to`, the previous
+set's digest (`prevV`), the final set's, then per child its start, `k` and its seed root (limbs 35–50,
+two per word). -/
+def semSeed (ρ : ℕ → Q) (M : ℕ) (prevV : Bool) : List Spec.Blake2s.Word :=
+  let P := parts M prevV
+  let p : ℕ → ℕ → ℕ := fun i => (kid i).res.pubs
+  (List.range 7).map (fun w => BitVec.ofNat 32 (TAG.getD w 0)) ++
+    [BitVec.ofNat 32 (ρ P.inp.res.lo).a.val, BitVec.ofNat 32 (ρ P.inp.res.hi).a.val] ++
+    (if prevV then P.inp.res.prev.map (word ∘ ρ) else []) ++ P.inp.res.fin.map (word ∘ ρ) ++
+    (List.range M).flatMap fun i =>
+      [BitVec.ofNat 32 (ρ (p i BlockNode.LO)).a.val, BitVec.ofNat 32 (ρ (P.logs.getD i ⟨[], 0, 0⟩).res).a.val] ++
+        (List.range 8).map fun w => limbWord (ρ (p i (BlockNode.SR + 2 * w))).a (ρ (p i (BlockNode.SR + 2 * w + 1))).a
+
+theorem root_seedMsg {M : ℕ} {prevV : Bool} (h : Holds ρ (epochRoot M prevV).ops) :
+    (parts M prevV).smsg.map (word ∘ ρ) = semSeed ρ M prevV := by
+  obtain ⟨-, -, -, -, -, -, hroots, hs, -⟩ := root_parts h
+  have hs' : Holds ρ (seedOut M (parts M prevV).rn (parts M prevV).inp.res.lo (parts M prevV).inp.res.hi
+      (fun i => (kid i).res.pubs BlockNode.LO) (fun i => ((parts M prevV).logs.getD i ⟨[], 0, 0⟩).res) (parts M prevV).smsg).ops := hs
+  obtain ⟨wt, wlo, whi, wc⟩ := seedOut_words hs'
+  show (seedMsgOf M (parts M prevV).rn prevV (parts M prevV).inp.res.prev (parts M prevV).inp.res.fin
+    (fun i => ((parts M prevV).roots.getD i ⟨[], [], 0⟩).res)).map (word ∘ ρ) = _
+  simp only [seedMsgOf, semSeed, List.map_append, List.map_cons, List.map_nil, List.map_flatMap, List.map_map]
+  have hA : List.map ((word ∘ ρ) ∘ fun x => (parts M prevV).rn + x) (List.range 7) =
+      List.map (fun w => BitVec.ofNat 32 (TAG.getD w 0)) (List.range 7) :=
+    List.map_congr_left (fun w hw => wt w (List.mem_range.mp hw))
+  have hE : ((List.range M).flatMap fun a =>
+        [(word ∘ ρ) ((parts M prevV).rn + 7 + 2 + 2 * a), (word ∘ ρ) ((parts M prevV).rn + 7 + 3 + 2 * a)] ++
+          List.map (word ∘ ρ) ((parts M prevV).roots.getD a ⟨[], [], 0⟩).res) =
+      (List.range M).flatMap fun i =>
+        [BitVec.ofNat 32 (ρ ((kid i).res.pubs BlockNode.LO)).a.val,
+          BitVec.ofNat 32 (ρ ((parts M prevV).logs.getD i ⟨[], 0, 0⟩).res).a.val] ++
+          (List.range 8).map fun w => limbWord (ρ ((kid i).res.pubs (BlockNode.SR + 2 * w))).a
+            (ρ ((kid i).res.pubs (BlockNode.SR + 2 * w + 1))).a := by
+    refine List.flatMap_congr (fun i hi => ?_)
+    have hi' := List.mem_range.mp hi
+    obtain ⟨r, hr, hl⟩ := chainOuts_holds (f := fun i n => packRoot ((kid i).res.pubs) BlockNode.SR n)
+      (n := lastNext (parts M prevV).logs (parts M prevV).sm.next) hi' hroots
+    obtain ⟨hlen, hpw⟩ := packRoot_words hl
+    have hget : ((parts M prevV).roots.getD i ⟨[], [], 0⟩) = packRoot ((kid i).res.pubs) BlockNode.SR r := by
+      rw [List.getD_eq_getElem _ _ (by rw [show (parts M prevV).roots.length = M from chainOuts_length _ _ M]; exact hi')]
+      exact hr
+    rw [hget, map_eq_range_getD _ 0, hlen]
+    simp only [Function.comp_apply, (wc i hi').1, (wc i hi').2]
+    congr 1
+    exact List.map_congr_left (fun w hw => hpw w (List.mem_range.mp hw))
+  rw [hA, hE]
+  simp only [Function.comp_apply, wlo, whi]
+  cases prevV <;> simp
+
+theorem seedMsg_eq {M : ℕ} {prevV : Bool} : seedMsg M prevV = (parts M prevV).smsg := rfl
+
+/-- **The seed is Blake2s of the semantic message**, so the challenge stream (`streamWord`) is
+`epoch.challenge` of `epoch.seedOfRoots` over these fields. -/
+theorem root_seedWords {M : ℕ} {prevV : Bool} (h : Holds ρ (epochRoot M prevV).ops) :
+    seedWords ρ M prevV = (List.range 8).map (blake2sWords (semSeed ρ M prevV) (4 * (semSeed ρ M prevV).length)) := by
+  have e := root_seedMsg h
+  have hl : (seedMsg M prevV).length = (semSeed ρ M prevV).length := by
+    rw [seedMsg_eq, ← e, List.length_map]
+  unfold seedWords
+  rw [hl, seedMsg_eq, e]
+
 end StarkedAir.Circuit.EpochRoot
