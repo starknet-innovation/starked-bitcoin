@@ -51,7 +51,7 @@
 //!       and the forest <dir>/forestk-<to>.bin.
 //!   chainproof verify-epoch-wide <vk> <file.sbchain> <dir> <to> [--from <a> <prev-set.bin>] [--min-work <hex> | --min-work 0]
 //!       As verify-epoch-tree, for prove-epoch-wide's forest.
-//!   chainproof prove-epoch-root <headers.bin> <dir> <to> <file.sbchain> [--from <a> <prev-set.bin>]
+//!   chainproof prove-epoch-root <headers.bin> <dir> <to> <file.sbchain> [--from <a> <prev-set.bin>] [--set-digests <prev|-> <fin>]
 //!       The epoch root over prove-epoch-wide's forest (src/recursion/epoch_root.zig): one proof for the
 //!       epoch; writes <dir>/rootvk.bin and <dir>/epochroot-<to>.bin (CPU: small epochs).
 //!   chainproof verify-epoch-root <vk> <file.sbchain> <dir> <to> [--from <a> <prev-set.bin>] [--min-work <hex> | --min-work 0]
@@ -201,6 +201,9 @@ pub fn main() !void {
             } else if (std.mem.eql(u8, args[i], "--from") and i + 2 < args.len) {
                 from.height = try std.fmt.parseInt(u32, args[i + 1], 10);
                 from.prev_set = args[i + 2];
+                i += 3;
+            } else if (std.mem.eql(u8, args[i], "--set-digests") and i + 2 < args.len) {
+                from.digests = .{ .prev = if (std.mem.eql(u8, args[i + 1], "-")) null else try parseDigest(args[i + 1]), .fin = try parseDigest(args[i + 2]) };
                 i += 3;
             } else usage();
         }
@@ -464,7 +467,17 @@ const EpochFrom = struct {
     weak: bool = false,
     /// verify-epoch `--jobs`: threads verifying block proofs (default: the CPU count).
     jobs: ?u32 = null,
+    /// prove-epoch-root `--set-digests <prev> <fin>`: the sets' digests (hex; `-` for no previous set)
+    /// instead of scanning the set files (a pod without them).
+    digests: ?struct { prev: ?[32]u8, fin: [32]u8 } = null,
 };
+
+fn parseDigest(hex: []const u8) ![32]u8 {
+    var d: [32]u8 = undefined;
+    if (hex.len != 64) return error.BadDigest;
+    _ = try std.fmt.hexToBytes(&d, hex);
+    return d;
+}
 
 fn proveEpoch(gpa: std.mem.Allocator, a: std.mem.Allocator, headers_path: []const u8, dir: []const u8, to: u32, chain_path: []const u8, weak: bool, from: EpochFrom) !void {
     var c = try S.Chain.decode(gpa, a, try S.readFile(a, chain_path));
@@ -739,10 +752,15 @@ fn proveEpochRoot(gpa: std.mem.Allocator, a: std.mem.Allocator, headers_path: []
     const forest = try BT.Forest.decode(gpa, a, try S.readFile(a, try std.fmt.allocPrint(a, "{s}/forestk-{d}.bin", .{ dir, to })));
     defer for (forest.roots) |*r| r.proved.proof.deinit();
     if (forest.from != from.height or forest.to != to) return error.WrongEpoch;
-    const init = try ER.loadInit(gpa, .{ .height = from.height, .prev_set = from.prev_set });
-    const fin_info = try SF.scan(gpa, try std.fmt.allocPrint(a, "{s}/set-{d}.bin", .{ dir, to }), null);
-    const ep: ERoot.Epoch = .{ .from = from.height, .to = to, .prev = if (init.info) |x| x.digest else null, .fin = fin_info.digest };
-    std.debug.print("epoch {d}..{d}: {d} forest roots, sets scanned ({d:.1}s)\n", .{ from.height, to, forest.roots.len, secs(timer.lap()) });
+    const ep: ERoot.Epoch = if (from.digests) |d| blk: {
+        if ((d.prev != null) != (from.height != 0)) return error.PrevSetRequired;
+        break :blk .{ .from = from.height, .to = to, .prev = d.prev, .fin = d.fin };
+    } else blk: {
+        const init = try ER.loadInit(gpa, .{ .height = from.height, .prev_set = from.prev_set });
+        const fin_info = try SF.scan(gpa, try std.fmt.allocPrint(a, "{s}/set-{d}.bin", .{ dir, to }), null);
+        break :blk .{ .from = from.height, .to = to, .prev = if (init.info) |x| x.digest else null, .fin = fin_info.digest };
+    };
+    std.debug.print("epoch {d}..{d}: {d} forest roots; set digests {s} ({d:.1}s)\n", .{ from.height, to, forest.roots.len, if (from.digests != null) "given" else "scanned", secs(timer.lap()) });
     // One-block roots are leaf-shaped: lift them to the node shape.
     var lifted = std.ArrayList(br_mod.Proved).empty;
     defer for (lifted.items) |*p| p.proof.deinit();
