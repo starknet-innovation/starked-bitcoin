@@ -341,4 +341,95 @@ theorem logOf_sound {cnt n : ℕ} (h : Holds ρ (logOf cnt n).ops) :
       Finset.sum_congr rfl (fun i hi => by rw [hBk i (Finset.mem_range.mp hi)])]
     simp [Finset.sum_ite_eq', Finset.mem_range.mpr hk]
 
+/-! ### The links and the sums -/
+
+theorem lt30_holds {m x : ℕ} {ops : List Op} (h : Holds ρ ops) (hs : BlockNode.lt30 m x ⊆ ops) :
+    IsBase (ρ x) ∧ (ρ x).a.val < 2 ^ 30 := BlockNode.lt30_sound (fun o ho => h o (hs ho))
+
+/-- **The links are sound.** Child 0 starts at `lo`, each child starts where the previous one ends, the
+last ends at `hi + 1`; `lo` and `hi + 1` are below `2^30`. -/
+theorem links_sound {M : ℕ} {p : ℕ → ℕ → ℕ} {lo hi n : ℕ} (hM : 0 < M) (h : Holds ρ (links M p lo hi n).ops) :
+    ρ (p 0 BlockNode.LO) = ρ lo ∧
+    (∀ i, i + 1 < M → ρ (p (i + 1) BlockNode.LO) = ρ (p i BlockNode.LO) + ρ (p i BlockNode.NN)) ∧
+    ρ (p (M - 1) BlockNode.LO) + ρ (p (M - 1) BlockNode.NN) = ρ hi + lit 1 0 0 0 ∧
+    (IsBase (ρ lo) ∧ (ρ lo).a.val < 2 ^ 30) ∧ (IsBase (ρ hi + lit 1 0 0 0) ∧ (ρ hi + lit 1 0 0 0).a.val < 2 ^ 30) := by
+  unfold links at h
+  have e0 := h _ (by
+    apply List.mem_append_left; apply List.mem_append_left; apply List.mem_append_left; apply List.mem_append_left
+    apply List.mem_append_left; exact List.mem_singleton.mpr rfl)
+  have ends : ∀ i < M, ρ (n + i) = ρ (p i BlockNode.LO) + ρ (p i BlockNode.NN) := fun i hi => by
+    have := h _ (by
+      apply List.mem_append_left; apply List.mem_append_left; apply List.mem_append_left; apply List.mem_append_left
+      exact List.mem_append_right _ (List.mem_map.mpr ⟨i, List.mem_range.mpr hi, rfl⟩))
+    simpa [Op.holds] using this
+  have chain : ∀ i, i + 1 < M → ρ (p (i + 1) BlockNode.LO) = ρ (n + i) := fun i hi => by
+    have := h _ (by
+      apply List.mem_append_left; apply List.mem_append_left; apply List.mem_append_left
+      exact List.mem_append_right _ (List.mem_map.mpr ⟨i, List.mem_range.mpr (by omega), rfl⟩))
+    simpa [Op.holds] using this
+  have o1 := h _ (by
+    apply List.mem_append_left; apply List.mem_append_left
+    exact List.mem_append_right _ (List.mem_cons_self))
+  have a1 := h _ (by
+    apply List.mem_append_left; apply List.mem_append_left
+    exact List.mem_append_right _ (List.mem_cons_of_mem _ List.mem_cons_self))
+  have e1 := h _ (by
+    apply List.mem_append_left; apply List.mem_append_left
+    exact List.mem_append_right _ (List.mem_cons_of_mem _ (List.mem_cons_of_mem _ List.mem_cons_self)))
+  simp only [Op.holds, ONE] at e0 o1 a1 e1
+  have l1 := lt30_holds h (fun o ho => List.mem_append_left _ (List.mem_append_right _ ho))
+  have l2 := lt30_holds h (fun o ho => List.mem_append_right _ ho)
+  rw [a1, o1] at l2
+  refine ⟨e0, fun i hi => (chain i hi).trans (ends i (by omega)), ?_, l1, l2⟩
+  rw [← ends (M - 1) (by omega), show n + (M - 1) = n + M - 1 by omega, e1, a1, o1]
+
+theorem val_add_lt30 {x y : F} (hx : x.val < 2 ^ 30) (hy : y.val < 2 ^ 30) : (x + y).val = x.val + y.val := by
+  have hlt : x.val + y.val < 2 ^ 31 - 1 := by omega
+  exact ZMod.val_add_of_lt hlt
+
+/-- **The sums are sound.** With every child's limbs 2–6 base: the result limbs are base and their base
+coordinates are the children's sums; the input count's is also the integer sum, below `2^30`. -/
+theorem sums_sound {M : ℕ} {p : ℕ → ℕ → ℕ} {n : ℕ} (hM : 0 < M) (h : Holds ρ (sums M p n).ops)
+    (hb : ∀ i < M, ∀ j < 5, IsBase (ρ (p i (BlockNode.SS + j)))) (hn : ∀ i < M, (ρ (p i BlockNode.NIN)).a.val < 2 ^ 30) :
+    (∀ j < 5, IsBase (ρ (sumReg p n (M - 1) j)) ∧
+      (ρ (sumReg p n (M - 1) j)).a = ∑ i ∈ Finset.range M, (ρ (p i (BlockNode.SS + j))).a) ∧
+    (ρ (sumReg p n (M - 1) 4)).a.val = ∑ i ∈ Finset.range M, (ρ (p i BlockNode.NIN)).a.val ∧
+    (ρ (sumReg p n (M - 1) 4)).a.val < 2 ^ 30 := by
+  unfold sums at h
+  have first := lt30_holds h (fun o ho => List.mem_append_left _ ho)
+  have stepOp : ∀ i, i + 1 < M → ∀ o ∈ (List.range 5).map (fun j => Op.add (n + 14 * i + j) (sumReg p n i j) (p (i + 1) (BlockNode.SS + j))) ++
+      BlockNode.lt30 (n + 14 * i + 5) (n + 14 * i + 4), o.holds ρ := fun i hi o ho =>
+    h o (List.mem_append_right _ (List.mem_flatMap.mpr ⟨i, List.mem_range.mpr (by omega), ho⟩))
+  have claim : ∀ i < M, (∀ j < 5, IsBase (ρ (sumReg p n i j)) ∧
+      (ρ (sumReg p n i j)).a = ∑ l ∈ Finset.range (i + 1), (ρ (p l (BlockNode.SS + j))).a) ∧
+      (ρ (sumReg p n i 4)).a.val = ∑ l ∈ Finset.range (i + 1), (ρ (p l BlockNode.NIN)).a.val ∧
+      (ρ (sumReg p n i 4)).a.val < 2 ^ 30 := by
+    intro i
+    induction i with
+    | zero =>
+      intro _
+      simp only [sumReg, if_true, zero_add, Finset.sum_range_one]
+      exact ⟨fun j hj => ⟨hb 0 hM j hj, trivial⟩, rfl, first.2⟩
+    | succ i ih =>
+      intro hi
+      obtain ⟨ihv, ihn, ihl⟩ := ih (by omega)
+      have g := stepOp i hi
+      have reg : ∀ j, sumReg p n (i + 1) j = n + 14 * i + j := fun j => by simp [sumReg]
+      have addj : ∀ j < 5, ρ (n + 14 * i + j) = ρ (sumReg p n i j) + ρ (p (i + 1) (BlockNode.SS + j)) := fun j hj => by
+        have := g _ (List.mem_append_left _ (List.mem_map.mpr ⟨j, List.mem_range.mpr hj, rfl⟩))
+        simpa [Op.holds] using this
+      have l30 := lt30_holds (ops := _) (fun o ho => g o ho) (fun o ho => List.mem_append_right _ ho)
+      have vals : ∀ j < 5, IsBase (ρ (sumReg p n (i + 1) j)) ∧
+          (ρ (sumReg p n (i + 1) j)).a = ∑ l ∈ Finset.range (i + 1 + 1), (ρ (p l (BlockNode.SS + j))).a := fun j hj => by
+        rw [reg, addj j hj, Finset.sum_range_succ _ (i + 1), ← (ihv j hj).2]
+        exact ⟨isBase_add (ihv j hj).1 (hb (i + 1) hi j hj), rfl⟩
+      refine ⟨vals, ?_, ?_⟩
+      · rw [reg, addj 4 (by norm_num), add_a, val_add_lt30 ihl ?_, ihn, Finset.sum_range_succ _ (i + 1)]
+        · rfl
+        · exact hn (i + 1) hi
+      · rw [reg]; exact l30.2
+  obtain ⟨v, nv, nl⟩ := claim (M - 1) (by omega)
+  rw [show M - 1 + 1 = M by omega] at v nv
+  exact ⟨v, nv, nl⟩
+
 end StarkedAir.Circuit.EpochRoot
