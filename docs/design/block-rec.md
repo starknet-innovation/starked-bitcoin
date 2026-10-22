@@ -437,6 +437,17 @@ proof (and, until the set pass is proved, the two set files for the balance).
   (`treeK_soundP`), the seed and the challenge equal to `seedOfRoots`/`challenge`'s spec, giving
   `forestK_epochV`'s conclusion with the native seed check gone.
 
+**Built (2026-10-22, branch `rec/epoch-root`).** Lean program `Circuit/EpochRoot.lean` (`epochRoot M
+prevV`; exported for M = 1, 2 and 16 with a previous set, 1 and 2 without; the output digest also binds
+the challenge, which the verifier needs for the balance), the lift (`block_node_k0`),
+`src/recursion/epoch_root.zig` (circuit, native digest, root VK, proof file, verifier), `chainproof
+prove-epoch-root` (CPU; `--set-digests` when the set files are elsewhere) and `verify-epoch-root`; the pod
+runs it as the tree run's last step (`SET_DIGESTS`). Mac: epoch 0..3 (1 child, 2^21, 3.8 s, 499 KB)
+and epoch 4..8 from the set after 3 (2 children, one lifted, 2^22, 9.2 s, 521 KB) proved and verified as
+one proof each, their sets those of `verify-epoch`; a different final set and a changed input count are
+rejected. Still to do: the Lean soundness of `epochRoot` (`root_sound`), the 16-child root at real size
+(2^25, on a pod's CPU or an H200).
+
 ## Following the tip
 
 Three layers at three cadences:
