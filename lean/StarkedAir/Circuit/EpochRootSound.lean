@@ -9,6 +9,7 @@ import StarkedAir.Circuit.EpochRoot
 namespace StarkedAir.Circuit.EpochRoot
 
 open StarkedAir StarkedAir.Circuit Q
+open StarkedAir.Circuit.BlockNodeK (kid kidsOps kidsNext keyMsg)
 
 variable {ρ : ℕ → Q}
 
@@ -431,5 +432,155 @@ theorem sums_sound {M : ℕ} {p : ℕ → ℕ → ℕ} {n : ℕ} (hM : 0 < M) (h
   obtain ⟨v, nv, nl⟩ := claim (M - 1) (by omega)
   rw [show M - 1 + 1 = M by omega] at v nv
   exact ⟨v, nv, nl⟩
+
+/-! ### The whole program -/
+
+theorem chainOuts_length {α : Type} (f : ℕ → ℕ → Out α) (n : ℕ) : ∀ k, (chainOuts f n k).length = k
+  | 0 => rfl
+  | k + 1 => by simp [chainOuts, chainOuts_length f n k]
+
+/-- The `i`-th gadget of a chain is `f i` at some register. -/
+theorem chainOuts_get {α : Type} (f : ℕ → ℕ → Out α) (n : ℕ) :
+    ∀ k i (hi : i < k), ∃ r, (chainOuts f n k)[i]'(by rw [chainOuts_length]; exact hi) = f i r
+  | 0, _, hi => absurd hi (Nat.not_lt_zero _)
+  | k + 1, i, hi => by
+    by_cases hik : i < k
+    · obtain ⟨r, hr⟩ := chainOuts_get f n k i hik
+      refine ⟨r, ?_⟩
+      simp only [chainOuts]
+      rw [List.getElem_append_left (by rw [chainOuts_length]; exact hik)]
+      exact hr
+    · have hik' : i = k := by omega
+      subst hik'
+      refine ⟨match (chainOuts f n i).getLast? with | some o => o.next | none => n, ?_⟩
+      simp only [chainOuts]
+      rw [List.getElem_append_right (by rw [chainOuts_length])]
+      simp only [chainOuts_length, Nat.sub_self, List.getElem_singleton]
+      rfl
+
+/-- The ops of the `i`-th gadget of a chain hold when the chain's ops hold. -/
+theorem chainOuts_holds {α : Type} {f : ℕ → ℕ → Out α} {n k i : ℕ} (hi : i < k)
+    (h : Holds ρ ((chainOuts f n k).flatMap (·.ops))) :
+    ∃ r, (chainOuts f n k)[i]'(by rw [chainOuts_length]; exact hi) = f i r ∧ Holds ρ (f i r).ops := by
+  obtain ⟨r, hr⟩ := chainOuts_get f n k i hi
+  refine ⟨r, hr, fun o ho => h o (List.mem_flatMap.mpr ⟨_, List.getElem_mem _, by rw [hr]; exact ho⟩)⟩
+
+/-- The program's parts hold separately. -/
+theorem root_parts {M : ℕ} {prevV : Bool} (h : Holds ρ (epochRoot M prevV).ops) :
+    let P := parts M prevV
+    Holds ρ (kidsOps M) ∧ Holds ρ P.inp.ops ∧ Holds ρ P.lk.ops ∧
+    Holds ρ (sameChallenge M fun i => (kid i).res.pubs) ∧ Holds ρ P.sm.ops ∧
+    Holds ρ (P.logs.flatMap (·.ops)) ∧ Holds ρ (P.roots.flatMap (·.ops)) ∧ Holds ρ P.seed.ops ∧
+    Holds ρ [constU32 P.ctrs 0, constU32 (P.ctrs + 1) 1] ∧ Holds ρ P.s0.ops ∧ Holds ρ P.s1.ops ∧
+    Holds ρ [Op.const P.ci 0 1 0 0] ∧ Holds ρ (P.vals.flatMap (·.ops)) ∧
+    Holds ρ ((List.range 12).map fun j => Op.eq ((P.vals.getD j ⟨[], 0, 0⟩).res) ((kid 0).res.pubs (BlockNode.CH + j))) ∧
+    Holds ρ P.key.ops ∧ Holds ρ P.dg.ops := by
+  simp only [epochRoot, holds_append] at h
+  obtain ⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨h0, h1⟩, h2⟩, h3⟩, h4⟩, h5⟩, h6⟩, h7⟩, h8⟩, h9⟩, h10⟩, h11⟩, h12⟩, h13⟩, h14⟩, h15⟩ := h
+  exact ⟨h0, h1, h2, h3, h4, h5, h6, h7, h8, h9, h10, h11, h12, h13, h14, h15⟩
+
+/-! ### The seed and the challenge stream -/
+
+/-- The register after the children's root packings (`parts`' `rn`). -/
+def rootsNext (M : ℕ) (prevV : Bool) : ℕ :=
+  let P := parts M prevV
+  lastNext P.roots (lastNext P.logs P.sm.next)
+
+/-- The seed message's registers (as `parts` builds them): the tag, `from`, `to`, the previous set's
+digest (`prevV`), the final set's, then per child its start, `k` and seed-root words. -/
+def seedMsg (M : ℕ) (prevV : Bool) : List ℕ :=
+  let P := parts M prevV
+  let rn := rootsNext M prevV
+  let m2 := rn + 7
+  (List.range 7).map (rn + ·) ++ [m2, m2 + 1] ++ (if prevV then P.inp.res.prev else []) ++ P.inp.res.fin ++
+    (List.range M).flatMap fun i => [m2 + 2 + 2 * i, m2 + 3 + 2 * i] ++ (P.roots.getD i ⟨[], [], 0⟩).res
+
+/-- The seed's words: Blake2s of the message words. -/
+theorem root_seed {M : ℕ} {prevV : Bool} (h : Holds ρ (epochRoot M prevV).ops) (hB : 4 * (seedMsg M prevV).length < 2 ^ 32) :
+    ∀ i < 8, word (ρ ((parts M prevV).seed.res.getD i 0)) =
+      blake2sWords ((seedMsg M prevV).map (word ∘ ρ)) (4 * (seedMsg M prevV).length) i := by
+  have hs := (root_parts h).2.2.2.2.2.2.2.1
+  have hb : Holds ρ (blake2s (rootsNext M prevV + 7 + 2 + 2 * M) (seedMsg M prevV) (4 * (seedMsg M prevV).length)).ops :=
+    fun o ho => hs o (List.mem_append_right _ ho)
+  exact blake2s_words hb hB
+
+/-- The seed's 8 words. -/
+def seedWords (ρ : ℕ → Q) (M : ℕ) (prevV : Bool) : List Spec.Blake2s.Word :=
+  (List.range 8).map (blake2sWords ((seedMsg M prevV).map (word ∘ ρ)) (4 * (seedMsg M prevV).length))
+
+/-- The challenge stream's word `j`: word `j mod 8` of `Blake2s(seed ‖ j / 8)` (`epoch.challenge`'s
+counter mode, 36 bytes). -/
+def streamWord (ρ : ℕ → Q) (M : ℕ) (prevV : Bool) (j : ℕ) : Spec.Blake2s.Word :=
+  blake2sWords (seedWords ρ M prevV ++ [BitVec.ofNat 32 (j / 8)]) 36 (j % 8)
+
+theorem isU32_pack (w : Spec.Blake2s.Word) : IsU32 (pack w) := by
+  refine ⟨?_, ?_, rfl, rfl⟩
+  · show ((w.toNat % 65536 : ℕ) : F).val < 65536
+    rw [val_cast (by unfold P; omega)]; omega
+  · show ((w.toNat / 65536 : ℕ) : F).val < 65536
+    have := w.isLt
+    rw [val_cast (by unfold P; omega)]; omega
+
+theorem map_eq_range_getD {α β : Type} (f : α → β) (d : α) (l : List α) :
+    l.map f = (List.range l.length).map fun i => f (l.getD i d) := by
+  apply List.ext_getElem (by simp)
+  intro i h1 h2
+  have hi : i < l.length := by simpa using h1
+  simp [List.getElem?_eq_getElem hi]
+
+/-- **The challenge is the stream's.** Child 0's challenge limbs (7–18) are base, and their canonical
+values are the low 31 bits of the stream's words 0–11, none of them the rejected `2^31 − 1`. -/
+theorem root_challenge {M : ℕ} {prevV : Bool} (h : Holds ρ (epochRoot M prevV).ops)
+    (hB : 4 * (seedMsg M prevV).length < 2 ^ 32) :
+    ∀ j < 12, IsBase (ρ ((kid 0).res.pubs (BlockNode.CH + j))) ∧
+      (ρ ((kid 0).res.pubs (BlockNode.CH + j))).a.val = (streamWord ρ M prevV j).toNat % 2 ^ 31 ∧
+      (streamWord ρ M prevV j).toNat % 2 ^ 31 ≠ 2 ^ 31 - 1 := by
+  obtain ⟨-, -, -, -, -, -, -, -, hc, hs0, hs1, hci, hv, heq, -, -⟩ := root_parts h
+  set P := parts M prevV with hP
+  have c0 := const_word (hc _ List.mem_cons_self) (by norm_num)
+  have c1 := const_word (hc _ (List.mem_cons_of_mem _ List.mem_cons_self)) (by norm_num)
+  have ci : ρ P.ci = lit 0 1 0 0 := by simpa [Op.holds] using hci _ List.mem_cons_self
+  have seedW := root_seed h hB
+  -- The seed's result list mapped to words is `seedWords`.
+  have hseedlen : P.seed.res.length = 8 := BlockRec.blake2s_length (rootsNext M prevV + 7 + 2 + 2 * M) (seedMsg M prevV) (4 * (seedMsg M prevV).length)
+  have hsw : P.seed.res.map (word ∘ ρ) = seedWords ρ M prevV := by
+    rw [map_eq_range_getD _ 0, hseedlen, seedWords]
+    exact List.map_congr_left (fun i hi => seedW i (List.mem_range.mp hi))
+  -- The two stream blocks.
+  have w0 : ∀ i < 8, word (ρ (P.s0.res.getD i 0)) = streamWord ρ M prevV i := by
+    intro i hi
+    refine (blake2s_words hs0 (by norm_num) i hi).trans ?_
+    rw [streamWord, Nat.div_eq_of_lt hi, Nat.mod_eq_of_lt hi]
+    show blake2sWords ((P.seed.res ++ [P.ctrs]).map (word ∘ ρ)) 36 i = _
+    rw [List.map_append, hsw]; simp [c0]
+  have w1 : ∀ i < 8, word (ρ (P.s1.res.getD i 0)) = streamWord ρ M prevV (8 + i) := by
+    intro i hi
+    refine (blake2s_words hs1 (by norm_num) i hi).trans ?_
+    rw [streamWord, show (8 + i) / 8 = 1 by omega, show (8 + i) % 8 = i by omega]
+    show blake2sWords ((P.seed.res ++ [P.ctrs + 1]).map (word ∘ ρ)) 36 i = _
+    rw [List.map_append, hsw]; simp [c1]
+  have l0 : P.s0.res.length = 8 := BlockRec.blake2s_length (P.ctrs + 2) (P.seed.res ++ [P.ctrs]) 36
+  -- Each value: `low31` of the stream word, equal to child 0's limb.
+  intro j hj
+  obtain ⟨r, hr, hl⟩ := chainOuts_holds (f := fun j n => low31 ((P.s0.res ++ P.s1.res).getD j 0) P.ci n) (n := P.ci + 1) hj hv
+  have hwj : IsU32 (ρ ((P.s0.res ++ P.s1.res).getD j 0)) ∧ word (ρ ((P.s0.res ++ P.s1.res).getD j 0)) = streamWord ρ M prevV j := by
+    by_cases h8 : j < 8
+    · rw [List.getD_append _ _ _ _ (by omega)]
+      refine ⟨?_, w0 j h8⟩
+      exact (congrArg IsU32 (blake2s_res_pack hs0 j h8)).mpr (isU32_pack _)
+    · rw [List.getD_append_right _ _ _ _ (by omega), l0]
+      obtain ⟨i, rfl⟩ : ∃ i, j = 8 + i := ⟨j - 8, by omega⟩
+      rw [show 8 + i - 8 = i by omega]
+      refine ⟨?_, w1 i (by omega)⟩
+      exact (congrArg IsU32 (blake2s_res_pack hs1 i (by omega))).mpr (isU32_pack _)
+  have ls := low31_sound hl ci hwj.1
+  have e := heq _ (List.mem_map.mpr ⟨j, List.mem_range.mpr hj, rfl⟩)
+  simp only [Op.holds] at e
+  have hget : (P.vals.getD j ⟨[], 0, 0⟩) = low31 ((P.s0.res ++ P.s1.res).getD j 0) P.ci r := by
+    rw [List.getD_eq_getElem _ _ (by rw [show P.vals.length = 12 from chainOuts_length _ _ 12]; exact hj)]
+    exact hr
+  rw [hget] at e
+  rw [← e, ← hwj.2]
+  exact ls
 
 end StarkedAir.Circuit.EpochRoot
