@@ -818,4 +818,81 @@ theorem root_seedWords {M : ℕ} {prevV : Bool} (h : Holds ρ (epochRoot M prevV
   unfold seedWords
   rw [hl, seedMsg_eq, e]
 
+/-! ### The composition: the children are proven trees -/
+
+theorem kids_sub {M : ℕ} {prevV : Bool} {o : Op} (ho : o ∈ kidsOps M) : o ∈ (epochRoot M prevV).ops := by
+  simp only [epochRoot, List.mem_append, ho, true_or]
+
+theorem results_length {M : ℕ} {prevV : Bool} : (epochRoot M prevV).results.length = 8 := by
+  show ((List.range 8).map _).length = 8; simp
+
+theorem digestWords_length {M : ℕ} {prevV : Bool} :
+    (digestWords ρ M prevV).length = 8 + 8 + (if prevV then 8 else 0) + (parts M prevV).dpubs.length := by
+  have hk8 : (parts M prevV).key.res.length = 8 := by show ((List.range 8).map _).length = 8; simp
+  have hf8 : (parts M prevV).inp.res.fin.length = 8 := by show ((List.range 8).map _).length = 8; simp
+  have hp8 : (parts M prevV).inp.res.prev.length = 8 := by show ((List.range 8).map _).length = 8; simp
+  simp only [digestWords, List.length_append, List.length_map, hk8, hf8]
+  cases prevV <;> simp [hp8]
+
+section
+open StarkedAir.Circuit.BlockTree (SumOkP)
+open StarkedAir.Circuit.BlockRec (H H_eq H_length Collision HookGates LeafOutP childSum sumDigest wordsOf_eq wordsOf_length)
+open StarkedAir.Circuit.BlockNodeK (TrustK TreeK keyOfK kid_hook kid_digest kid_ops_mem kid_holds kid_chash_length
+  kid_key_length flat_length keyOfK_eq)
+variable {Acc SatC : List Spec.Blake2s.Word → List Spec.Blake2s.Word → Prop} {VGates : (ℕ → Q) → ℕ → List ℕ → List ℕ → Prop}
+  {leafH : ℕ → List Spec.Blake2s.Word} {nodeH : ℕ → ℕ → List Spec.Blake2s.Word}
+
+/-- **The children are proven.** If the root circuit's assignment `ρ` holds with its hook gates, and its
+output digest is `H (K ++ rest)` for `K` the key the verifier computes from the trees `ts` (their circuit
+hashes and keys), then every child's summary is proven (`SumOkP`) and the rest of the digest message is
+`rest`, or Blake2s has a collision. -/
+theorem root_children {ok : (ℕ → F) → Prop} (T : TrustK Acc SatC VGates leafH nodeH (LeafOutP ok))
+    (hl : ∀ L, (leafH L).length = 8) (hn : ∀ a v, (nodeH a v).length = 8)
+    {M : ℕ} {prevV : Bool} (hM : 64 * M < 2 ^ 32) (hB : 4 * (8 + 8 + (if prevV then 8 else 0) + (parts M prevV).dpubs.length) < 2 ^ 32)
+    (ts : ℕ → TreeK) (hok : ∀ i < M, (ts i).Ok) {ρ : ℕ → Q}
+    (h : Holds ρ (epochRoot M prevV).ops) (hg : HookGates VGates ρ (epochRoot M prevV).ops) (rest : List Spec.Blake2s.Word)
+    (hrest : 4 * (8 + rest.length) < 2 ^ 32)
+    (hd : wordsOf ρ (epochRoot M prevV).results =
+      H (keyOfK M (fun i => (ts i).hash leafH nodeH) (fun i => (ts i).key leafH nodeH) ++ rest)) :
+    ((∀ i < M, SumOkP ok (childSum ρ (kid i))) ∧ (digestWords ρ M prevV).drop 8 = rest) ∨ Collision := by
+  by_cases col : Collision
+  · exact Or.inr col
+  left
+  obtain ⟨hdig, hkey⟩ := root_digest h hB hM
+  have hdl := digestWords_length (ρ := ρ) (M := M) (prevV := prevV)
+  -- The circuit's digest is H of its message.
+  have hres : wordsOf ρ (epochRoot M prevV).results = H (digestWords ρ M prevV) := by
+    rw [wordsOf_eq results_length hdig, H, hdl]
+  rw [hres] at hd
+  have hlenK : (keyOfK M (fun i => (ts i).hash leafH nodeH) (fun i => (ts i).key leafH nodeH)).length = 8 := H_length _
+  obtain e := (H_eq (by rw [hdl]; exact hB) (by rw [List.length_append, hlenK]; exact hrest) hd).resolve_right col
+  -- Split off the key.
+  have hk8 : (parts M prevV).key.res.length = 8 := by show ((List.range 8).map _).length = 8; simp
+  have hsplit : digestWords ρ M prevV = (parts M prevV).key.res.map (word ∘ ρ) ++ (digestWords ρ M prevV).drop 8 := by
+    conv_lhs => rw [← List.take_append_drop 8 (digestWords ρ M prevV)]
+    congr 1
+  rw [hsplit] at e
+  obtain ⟨eK, eR⟩ := List.append_inj e (by rw [List.length_map, hk8, hlenK])
+  refine ⟨fun i hi => ?_, eR⟩
+  -- The circuit's key is keyOfK over the children's circuit hashes and keys.
+  have hKc : (parts M prevV).key.res.map (word ∘ ρ) =
+      keyOfK M (fun i => wordsOf ρ (kid i).res.chash) (fun i => wordsOf ρ (kid i).res.key) := by
+    have : (parts M prevV).key.res.map (word ∘ ρ) = wordsOf ρ (parts M prevV).key.res := rfl
+    rw [this, wordsOf_eq hk8 hkey, keyOfK, H, ← BlockNodeK.keyMsg_words M, List.length_map]
+    rw [show 4 * (keyMsg M).length = 64 * M by
+      have := congrArg List.length (BlockNodeK.keyMsg_words (ρ := ρ) M)
+      rw [List.length_map, flat_length (fun i => by simp [wordsOf, kid_chash_length]) (fun i => by simp [wordsOf, kid_key_length])] at this
+      omega]
+  rw [hKc] at eK
+  have hb64 : 64 * M < 2 ^ 32 := hM
+  have hkh : ∀ t : TreeK, (t.hash leafH nodeH).length = 8 := fun t => by cases t <;> simp [TreeK.hash, hl, hn]
+  obtain eks := (keyOfK_eq hb64 (fun i => by rw [wordsOf_length, kid_chash_length]) (fun i => by rw [wordsOf_length, kid_key_length])
+    (fun i => hkh (ts i)) (fun i => TreeK.key_length leafH nodeH (ts i)) eK).resolve_right col
+  -- Child i's hook.
+  obtain ⟨r, hr, hm⟩ := kid_hook i
+  have s := T.recVerifies ρ _ _ _ (hg _ _ _ (kids_sub (kid_ops_mem hi hm)))
+  rw [List.drop_left' hr, kid_digest (kid_holds hi (root_parts h).1), (eks i hi).1, (eks i hi).2] at s
+  exact (BlockNodeK.treeK_soundP T hl hn (ts i) (hok i hi) _ s).resolve_right col
+end
+
 end StarkedAir.Circuit.EpochRoot
