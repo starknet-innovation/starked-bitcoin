@@ -9,7 +9,8 @@
 #                <chain.sbchain> <local-dir> <deadline> [cuda-epoch-tree options]
 # The pod assembles the forest (prove_tree.sh); <local-dir> gets forestk-<to>.bin, treevk.bin, tree/
 # and logs/. Check it there with chainproof verify-epoch-wide (the coin sets live on this node). The RunPod API key is read from ~/.runpod_key and
-# never printed or put on a command line. Log: <local-dir>/logs/node_tree.log. PATCH: a `git format-patch`
+# never printed or put on a command line. Log: <local-dir>/logs/node_tree.log. SET_DIGESTS="<prev|-> <fin>":
+# also prove the epoch root (the sets' Blake2s digests, hex). PATCH: a `git format-patch`
 # file on this node, applied on the pod on top of <commit> before the build (local fixes not pushed yet).
 set -uo pipefail
 [ $# -ge 12 ] || { sed -n '2,12p' "$0"; exit 2; }
@@ -42,7 +43,7 @@ delete_pod() {
 }
 final_copy() {
   rsync -a --timeout=300 -e "$rsh" "root@$host:/workspace/$name/tree/" "$dst/tree/" 2>&1 | tail -2 | tee -a "$logf"
-  rsync -a --timeout=120 -e "$rsh" "root@$host:/workspace/$name/treevk.bin" "root@$host:/workspace/$name/forestk-$to.bin" "$dst/" 2>&1 | tail -2 | tee -a "$logf"
+  rsync -a --timeout=120 -e "$rsh" "root@$host:/workspace/$name/treevk.bin" "root@$host:/workspace/$name/forestk-$to.bin" "root@$host:/workspace/$name/rootvk.bin" "root@$host:/workspace/$name/epochroot-$to.bin" "$dst/" 2>&1 | tail -2 | tee -a "$logf"
   rsync -a --timeout=120 -e "$rsh" "root@$host:/workspace/logs/" "$dst/logs/pod/" 2>&1 | tail -2 | tee -a "$logf"
 }
 finish() {
@@ -68,7 +69,7 @@ trap 'log "stopped (deadline or signal)"; exit 5' TERM INT
 
 log "pod $pod ($host:$port), tree $from..$to, commit $commit, deadline $(date -u -d @"$deadline" +%FT%TZ)${FOLLOW_ONLY:+, re-attach}"
 opts=("$@")
-launch() { on_pod "cd /root/starked-bitcoin && (nohup scripts/pod/prove_tree.sh $name $from $to ${opts[*]} > /dev/null 2>&1 &)"; log "launched prove_tree.sh $name $from $to ${opts[*]}"; }
+launch() { on_pod "cd /root/starked-bitcoin && (SET_DIGESTS='${SET_DIGESTS:-}' nohup scripts/pod/prove_tree.sh $name $from $to ${opts[*]} > /dev/null 2>&1 &)"; log "launched prove_tree.sh $name $from $to ${opts[*]}${SET_DIGESTS:+ (with the epoch root)}"; }
 if [ -z "${FOLLOW_ONLY:-}" ]; then
 for i in $(seq 1 40); do on_pod true 2> /dev/null && break; sleep 15; done
 on_pod true || finish "no ssh after 10 min" 1

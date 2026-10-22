@@ -6,7 +6,8 @@
 # Input: the epoch's block proofs in $DATA/proofs/<h>.sbblock, and for the assembly $DATA/headers.bin
 # and $DATA/chain.sbchain. Outputs on the persistent volume: $WORK/<name>/treevk.bin,
 # tree/<k>-<x>.sbproof and, once every proof is made, the forest forestk-<to>.bin (chainproof
-# prove-epoch-wide, which then has nothing left to prove), and in $LOGS <name>.log (stderr: levels, the end),
+# prove-epoch-wide, which then has nothing left to prove), with SET_DIGESTS the epoch root
+# epochroot-<to>.bin and rootvk.bin (prove-epoch-root, CPU), and in $LOGS <name>.log (stderr: levels, the end),
 # <name>.lines (one line per proof), <name>.status (START, END, exit code, peaks) and <name>.smi.csv.
 # A stopped run started again proves only what is missing. Detach it from the ssh session:
 #   nohup scripts/pod/prove_tree.sh t945000 935001 945000 --jobs 6 > /dev/null 2>&1 &
@@ -57,6 +58,12 @@ rc=$?
 if [ $rc = 0 ]; then
   # The assembly needs the epoch's start, not the previous set (only verification reads it).
   /usr/bin/time -v "$SRC/zig-out-cpu/bin/chainproof" prove-epoch-wide "$DATA/headers.bin" "$dir" "$to" "$DATA/chain.sbchain" --from "$from" not-read >> "$log" 2>&1
+  rc=$?
+fi
+# The epoch root (one proof for the epoch), on the CPU: SET_DIGESTS="<prev hex|-> <fin hex>".
+if [ $rc = 0 ] && [ -n "${SET_DIGESTS:-}" ]; then
+  # shellcheck disable=SC2086
+  /usr/bin/time -v "$SRC/zig-out-cpu/bin/chainproof" prove-epoch-root "$DATA/headers.bin" "$dir" "$to" "$DATA/chain.sbchain" --from "$from" not-read --set-digests $SET_DIGESTS >> "$log" 2>&1
   rc=$?
 fi
 kill $smi 2>/dev/null; wait $smi 2>/dev/null
