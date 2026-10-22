@@ -143,6 +143,11 @@ structure Parts where
   vals : List (Out ℕ)
   key : Out (List ℕ)
   dg : Out (List ℕ)
+  /-- The register after the roots' packings, the seed message's registers, the digest's public
+  registers (exposed for the soundness proofs; the ops do not depend on them). -/
+  rn : ℕ
+  smsg : List ℕ
+  dpubs : List ℕ
 
 /-- Registers after `j` items of a list of gadgets each starting where the previous ended. -/
 def chainOuts {α : Type} (f : ℕ → ℕ → Out α) (n : ℕ) : ℕ → List (Out α)
@@ -153,6 +158,30 @@ def chainOuts {α : Type} (f : ℕ → ℕ → Out α) (n : ℕ) : ℕ → List 
 
 def lastNext {α : Type} (l : List (Out α)) (n : ℕ) : ℕ := match l.getLast? with | some o => o.next | none => n
 
+/-- The seed message's registers from `rn`: the tag, `from`, `to`, the previous set's digest (`prevV`),
+the final set's, then per child its start, `k` and seed-root words (`roots i`). -/
+def seedMsgOf (M rn : ℕ) (prevV : Bool) (prev fin : List ℕ) (roots : ℕ → List ℕ) : List ℕ :=
+  let m2 := rn + 7
+  (List.range 7).map (rn + ·) ++ [m2, m2 + 1] ++ (if prevV then prev else []) ++ fin ++
+    (List.range M).flatMap fun i => [m2 + 2 + 2 * i, m2 + 3 + 2 * i] ++ roots i
+
+/-- The seed: the tag constants and the words of `from`, `to`, each child's start and `k`, then
+Blake2s of `msg` (`seedMsgOf`). -/
+def seedOut (M rn : ℕ) (lo hi : ℕ) (start k : ℕ → ℕ) (msg : List ℕ) : Out (List ℕ) :=
+  let m2 := rn + 7
+  let msgOps := (List.range 7).map (fun w => constU32 (rn + w) (TAG.getD w 0)) ++
+    [.m2u m2 lo, .m2u (m2 + 1) hi] ++
+    (List.range M).flatMap (fun i => [.m2u (m2 + 2 + 2 * i) (start i), .m2u (m2 + 3 + 2 * i) (k i)])
+  let seed := blake2s (m2 + 2 + 2 * M) msg (4 * msg.length)
+  ⟨msgOps ++ seed.ops, seed.res, seed.next⟩
+
+/-- The output digest from register `dn`: each public register through `m31_to_u32`, then Blake2s of
+the key, the final (and `prevV` previous) set digests and those words. -/
+def digestOut (key fin prev : List ℕ) (prevV : Bool) (pubs : List ℕ) (dn : ℕ) : Out (List ℕ) :=
+  let words := key ++ fin ++ (if prevV then prev else []) ++ (List.range pubs.length).map (dn + ·)
+  let h := blake2s (dn + pubs.length) words (4 * words.length)
+  ⟨(List.range pubs.length).map (fun j => .m2u (dn + j) (pubs.getD j 0)) ++ h.ops, h.res, h.next⟩
+
 def parts (M : ℕ) (prevV : Bool) : Parts :=
   let p : ℕ → ℕ → ℕ := fun i => (kid i).res.pubs
   let inp := inputs M (kidsNext M)
@@ -162,18 +191,11 @@ def parts (M : ℕ) (prevV : Bool) : Parts :=
   let roots := chainOuts (fun i n => packRoot (p i) SR n) (lastNext logs sm.next) M
   let rn := lastNext roots (lastNext logs sm.next)
   -- The seed message: tag, from, to, (prev), fin, then per child its start, k, seed root.
-  let tagR := (List.range 7).map (rn + ·)
-  let m2 := rn + 7
-  let perChild := (List.range M).flatMap fun i => [m2 + 2 + 2 * i, m2 + 3 + 2 * i] ++ (roots.getD i ⟨[], [], 0⟩).res
-  let msg := tagR ++ [m2, m2 + 1] ++ (if prevV then inp.res.prev else []) ++ inp.res.fin ++ perChild
-  let msgOps := (List.range 7).map (fun w => constU32 (rn + w) (TAG.getD w 0)) ++
-    [.m2u m2 inp.res.lo, .m2u (m2 + 1) inp.res.hi] ++
-    (List.range M).flatMap (fun i => [.m2u (m2 + 2 + 2 * i) (p i LO), .m2u (m2 + 3 + 2 * i) (logs.getD i ⟨[], 0, 0⟩).res])
-  let seed := blake2s (m2 + 2 + 2 * M) msg (4 * msg.length)
-  let seed' : Out (List ℕ) := ⟨msgOps ++ seed.ops, seed.res, seed.next⟩
-  let ctrs := seed.next
-  let s0 := blake2s (ctrs + 2) (seed.res ++ [ctrs]) 36
-  let s1 := blake2s s0.next (seed.res ++ [ctrs + 1]) 36
+  let msg := seedMsgOf M rn prevV inp.res.prev inp.res.fin (fun i => (roots.getD i ⟨[], [], 0⟩).res)
+  let seed' := seedOut M rn inp.res.lo inp.res.hi (fun i => p i LO) (fun i => (logs.getD i ⟨[], 0, 0⟩).res) msg
+  let ctrs := seed'.next
+  let s0 := blake2s (ctrs + 2) (seed'.res ++ [ctrs]) 36
+  let s1 := blake2s s0.next (seed'.res ++ [ctrs + 1]) 36
   let ci := s1.next
   let words := s0.res ++ s1.res
   let vals := chainOuts (fun j n => low31 (words.getD j 0) ci n) (ci + 1) 12
@@ -182,11 +204,8 @@ def parts (M : ℕ) (prevV : Bool) : Parts :=
   -- The output digest.
   let pubs := [inp.res.lo, inp.res.hi] ++ sm.res ++ (List.range 12).map (fun j => p 0 (CH + j)) ++
     (List.range M).flatMap (fun i => (List.range 16).map fun k => p i (HR + k))
-  let dn := key.next
-  let words := key.res ++ inp.res.fin ++ (if prevV then inp.res.prev else []) ++ (List.range pubs.length).map (dn + ·)
-  let h := blake2s (dn + pubs.length) words (4 * words.length)
-  let dg : Out (List ℕ) := ⟨(List.range pubs.length).map (fun j => .m2u (dn + j) (pubs.getD j 0)) ++ h.ops, h.res, h.next⟩
-  ⟨inp, lk, sm, logs, roots, seed', ctrs, s0, s1, ci, vals, key, dg⟩
+  let dg := digestOut key.res inp.res.fin inp.res.prev prevV pubs key.next
+  ⟨inp, lk, sm, logs, roots, seed', ctrs, s0, s1, ci, vals, key, dg, rn, msg, pubs⟩
 
 /-- **The epoch root program** over `M` children (`prevV`: the epoch starts from a previous set).
 Results: the output digest's 8 words. -/
