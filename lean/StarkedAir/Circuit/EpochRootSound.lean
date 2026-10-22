@@ -583,4 +583,71 @@ theorem root_challenge {M : ℕ} {prevV : Bool} (h : Holds ρ (epochRoot M prevV
   rw [← e, ← hwj.2]
   exact ls
 
+/-! ### The epoch root, assembled -/
+
+/-- A child section's summary limbs are guessed base values. -/
+theorem bchild_base {n i : ℕ} (h : Holds ρ (BlockNode.bchild n i).ops) :
+    ∀ k < BlockNode.NSUM, IsBase (ρ ((BlockNode.bchild n i).res.pubs k)) := by
+  intro k hk
+  dsimp only [BlockNode.bchild] at h ⊢
+  have := h _ (List.mem_append_left _ (List.mem_append_left _ (List.mem_append_left _ (List.mem_append_left _
+    (List.mem_map.mpr ⟨k, List.mem_range.mpr hk, rfl⟩)))))
+  simpa [Op.holds] using this
+
+theorem kid_base {i : ℕ} (h : Holds ρ (kid i).ops) : ∀ k < BlockNode.NSUM, IsBase (ρ ((kid i).res.pubs k)) := by
+  cases i with
+  | zero => exact bchild_base h
+  | succ i => exact bchild_base h
+
+/-- **The epoch root is sound** (given each child's input count below `2^30`, which a proven child
+summary has). With `p i` child `i`'s summary registers, `lo`/`hi` the epoch's range inputs:
+1. the ranges: child 0 starts at `lo`, each child where the previous ends, the last ends at `hi + 1`;
+   `lo`, `hi + 1` below `2^30`; each child's count is `2^k` with `k < 31`;
+2. one challenge: every child's limbs 7–18 equal child 0's, which are the low 31 bits of the
+   challenge stream over the seed (`streamWord`), never the rejected value;
+3. the sums: limbs 2–5 and 6 of the result are the children's sums, the input count's integer sum
+   below `2^30`. -/
+theorem root_sound {M : ℕ} {prevV : Bool} (hM : 0 < M) (h : Holds ρ (epochRoot M prevV).ops)
+    (hB : 4 * (seedMsg M prevV).length < 2 ^ 32)
+    (hn : ∀ i < M, (ρ ((kid i).res.pubs BlockNode.NIN)).a.val < 2 ^ 30) :
+    let P := parts M prevV
+    let p : ℕ → ℕ → ℕ := fun i => (kid i).res.pubs
+    -- 1. the ranges
+    (ρ (p 0 BlockNode.LO) = ρ P.inp.res.lo ∧
+      (∀ i, i + 1 < M → ρ (p (i + 1) BlockNode.LO) = ρ (p i BlockNode.LO) + ρ (p i BlockNode.NN)) ∧
+      ρ (p (M - 1) BlockNode.LO) + ρ (p (M - 1) BlockNode.NN) = ρ P.inp.res.hi + lit 1 0 0 0 ∧
+      (ρ P.inp.res.lo).a.val < 2 ^ 30 ∧ (ρ P.inp.res.hi + lit 1 0 0 0).a.val < 2 ^ 30 ∧
+      ∀ i < M, ∃ k < LOGS, (ρ (p i BlockNode.NN)).a = ((2 ^ k : ℕ) : F) ∧
+        (ρ (P.logs.getD i ⟨[], 0, 0⟩).res).a = (k : F)) ∧
+    -- 2. one challenge, the stream's
+    (∀ i < M, ∀ j < 12, ρ (p i (BlockNode.CH + j)) = ρ (p 0 (BlockNode.CH + j))) ∧
+    (∀ j < 12, (ρ (p 0 (BlockNode.CH + j))).a.val = (streamWord ρ M prevV j).toNat % 2 ^ 31 ∧
+      (streamWord ρ M prevV j).toNat % 2 ^ 31 ≠ 2 ^ 31 - 1) ∧
+    -- 3. the sums
+    ((∀ j < 5, (ρ (sumReg p P.lk.next (M - 1) j)).a = ∑ i ∈ Finset.range M, (ρ (p i (BlockNode.SS + j))).a) ∧
+      (ρ (sumReg p P.lk.next (M - 1) 4)).a.val = ∑ i ∈ Finset.range M, (ρ (p i BlockNode.NIN)).a.val ∧
+      (ρ (sumReg p P.lk.next (M - 1) 4)).a.val < 2 ^ 30) := by
+  intro P p
+  obtain ⟨hk, -, hlk, hsc, hsm, hlogs, -, -, -, -, -, -, -, -, -, -⟩ := root_parts h
+  have lk := links_sound (M := M) (p := p) hM hlk
+  have base : ∀ i < M, ∀ k < BlockNode.NSUM, IsBase (ρ (p i k)) := fun i hi => kid_base (BlockNodeK.kid_holds hi hk)
+  have sm := sums_sound (M := M) (p := p) (n := P.lk.next) hM hsm
+    (fun i hi j hj => base i hi _ (by unfold BlockNode.SS BlockNode.NSUM; omega)) hn
+  have ch := root_challenge h hB
+  refine ⟨⟨lk.1, lk.2.1, lk.2.2.1, lk.2.2.2.1.2, lk.2.2.2.2.2, fun i hi => ?_⟩, fun i hi j hj => ?_, fun j hj => (ch j hj).2,
+    fun j hj => (sm.1 j hj).2, sm.2.1, sm.2.2⟩
+  · obtain ⟨r, hr, hl⟩ := chainOuts_holds (f := fun i n => logOf (p i BlockNode.NN) n) (n := P.sm.next) hi hlogs
+    obtain ⟨k, hk', e1, e2⟩ := logOf_sound hl
+    refine ⟨k, hk', e1, ?_⟩
+    have hget : P.logs.getD i ⟨[], 0, 0⟩ = logOf (p i BlockNode.NN) r := by
+      rw [List.getD_eq_getElem _ _ (by rw [show P.logs.length = M from chainOuts_length _ _ M]; exact hi)]
+      exact hr
+    rw [hget]; exact e2
+  · cases i with
+    | zero => rfl
+    | succ i =>
+      have := hsc _ (List.mem_flatMap.mpr ⟨i, List.mem_range.mpr (by omega),
+        List.mem_map.mpr ⟨j, List.mem_range.mpr hj, rfl⟩⟩)
+      simpa [Op.holds] using this
+
 end StarkedAir.Circuit.EpochRoot
