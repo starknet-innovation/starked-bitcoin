@@ -837,6 +837,7 @@ theorem digestWords_length {M : ℕ} {prevV : Bool} :
 section
 open StarkedAir.Circuit.BlockTree (SumOkP)
 open StarkedAir.Circuit.BlockRec (H H_eq H_length Collision HookGates LeafOutP childSum sumDigest wordsOf_eq wordsOf_length)
+open StarkedAir.Block (RngOkP)
 open StarkedAir.Circuit.BlockNodeK (TrustK TreeK keyOfK kid_hook kid_digest kid_ops_mem kid_holds kid_chash_length
   kid_key_length flat_length keyOfK_eq)
 variable {Acc SatC : List Spec.Blake2s.Word → List Spec.Blake2s.Word → Prop} {VGates : (ℕ → Q) → ℕ → List ℕ → List ℕ → Prop}
@@ -893,6 +894,81 @@ theorem root_children {ok : (ℕ → F) → Prop} (T : TrustK Acc SatC VGates le
   have s := T.recVerifies ρ _ _ _ (hg _ _ _ (kids_sub (kid_ops_mem hi hm)))
   rw [List.drop_left' hr, kid_digest (kid_holds hi (root_parts h).1), (eks i hi).1, (eks i hi).2] at s
   exact (BlockNodeK.treeK_soundP T hl hn (ts i) (hok i hi) _ s).resolve_right col
+/-- Index-wise links make a `Linked'` chain. -/
+theorem linked_of_idx (w : ℕ → ℕ → F) : ∀ n s, (∀ i < n, (w (s + i + 1) 0).val = (w (s + i) 0).val + (w (s + i) 1).val) →
+    BlockTree.Linked' (w s) ((List.range n).map fun i => w (s + i + 1))
+  | 0, _, _ => trivial
+  | n + 1, s, h => by
+    rw [List.range_succ_eq_map, List.map_cons, List.map_map]
+    refine ⟨by simpa using h 0 (by omega), ?_⟩
+    have ih := linked_of_idx w n (s + 1) (fun i hi => by
+      have := h (i + 1) (by omega)
+      rwa [show s + (i + 1) + 1 = s + 1 + i + 1 by omega, show s + (i + 1) = s + 1 + i by omega] at this)
+    have e : (fun i => w (s + i + 1)) ∘ Nat.succ = fun i => w (s + 1 + i + 1) := by
+      funext i; simp only [Function.comp, Nat.succ_eq_add_one]; congr 1; omega
+    rw [e]
+    simpa [show s + 0 + 1 = s + 1 by omega] using ih
+
+/-- **The epoch root, composed.** With the hooks' gates under `TrustK` and the output digest
+`H (K ++ rest)` (`K` the verifier's key over the trees `ts`, `rest` its message after the key): the
+digest's rest is `rest`; the `M` children are proven ranges, consecutive from `lo` to `hi + 1`, so
+their union is a proven range (`RngOkP`) from `lo` with child 0's challenge; and that challenge is the
+low 31 bits of the stream over the seed, the seed being Blake2s of the semantic message `semSeed`.
+Or Blake2s has a collision. -/
+theorem rootK_epoch {ok : (ℕ → F) → Prop} (T : TrustK Acc SatC VGates leafH nodeH (LeafOutP ok))
+    (hl : ∀ L, (leafH L).length = 8) (hn : ∀ a v, (nodeH a v).length = 8)
+    {M : ℕ} {prevV : Bool} (hM0 : 0 < M) (hM : 64 * M < 2 ^ 32)
+    (hB : 4 * (8 + 8 + (if prevV then 8 else 0) + (parts M prevV).dpubs.length) < 2 ^ 32)
+    (hS : 4 * (seedMsg M prevV).length < 2 ^ 32)
+    (ts : ℕ → TreeK) (hok : ∀ i < M, (ts i).Ok) {ρ : ℕ → Q}
+    (h : Holds ρ (epochRoot M prevV).ops) (hg : HookGates VGates ρ (epochRoot M prevV).ops) (rest : List Spec.Blake2s.Word)
+    (hrest : 4 * (8 + rest.length) < 2 ^ 32)
+    (hd : wordsOf ρ (epochRoot M prevV).results =
+      H (keyOfK M (fun i => (ts i).hash leafH nodeH) (fun i => (ts i).key leafH nodeH) ++ rest)) :
+    let v : ℕ → ℕ → F := fun i => childSum ρ (kid i)
+    ((digestWords ρ M prevV).drop 8 = rest ∧
+      (∃ n, 0 < n ∧ RngOkP ok ⟨(ρ (parts M prevV).inp.res.lo).a.val, n,
+        Block.RunSum.pQ (v 0) 2 + (((List.range (M - 1)).map fun i => v (i + 1)).map fun w => Block.RunSum.pQ w 2).sum,
+        (v 0 6).val + (((List.range (M - 1)).map fun i => v (i + 1)).map fun w => (w 6).val).sum,
+        Block.RunSum.pQ (v 0) 7, Block.RunSum.pQ (v 0) 11, Block.RunSum.pQ (v 0) 15⟩) ∧
+      (ρ ((kid (M - 1)).res.pubs BlockNode.LO) + ρ ((kid (M - 1)).res.pubs BlockNode.NN) = ρ (parts M prevV).inp.res.hi + lit 1 0 0 0) ∧
+      (∀ j < 12, (v 0 (7 + j)).val = (streamWord ρ M prevV j).toNat % 2 ^ 31) ∧
+      seedWords ρ M prevV = (List.range 8).map (blake2sWords (semSeed ρ M prevV) (4 * (semSeed ρ M prevV).length))) ∨
+    Collision := by
+  intro v
+  by_cases col : Collision
+  · exact Or.inr col
+  obtain ⟨hkids, hrest'⟩ := (root_children T hl hn hM hB ts hok h hg rest hrest hd).resolve_right col
+  -- Each child's count and start are below 2^30 (a proven summary).
+  have bnd : ∀ i < M, (v i 0).val < 2 ^ 30 ∧ (v i 1).val < 2 ^ 30 ∧ (v i 6).val < 2 ^ 30 := fun i hi => by
+    obtain ⟨_, _, _, h0, h1, h6, _⟩ := hkids i hi
+    exact ⟨h0, h1, h6⟩
+  have rs := root_sound hM0 h hS (fun i hi => (bnd i hi).2.2)
+  obtain ⟨⟨e0, elink, eend, -, -, -⟩, ech, ech0, -⟩ := rs
+  left
+  refine ⟨hrest', ?_, eend, fun j hj => (ech0 j hj).1, root_seedWords h⟩
+  -- The union of the children's ranges.
+  have hlink : BlockTree.Linked' (v 0) ((List.range (M - 1)).map fun i => v (i + 1)) := by
+    have := linked_of_idx v (M - 1) 0 (fun i hi => by
+      have e := congrArg Q.a (elink i (by omega))
+      simp only [Nat.zero_add]
+      show ((ρ ((kid (i + 1)).res.pubs BlockNode.LO)).a).val = ((ρ ((kid i).res.pubs BlockNode.LO)).a).val + ((ρ ((kid i).res.pubs BlockNode.NN)).a).val
+      rw [e, add_a]
+      exact val_add_lt30 (bnd i (by omega)).1 (bnd i (by omega)).2.1)
+    simpa using this
+  have hch : ∀ w ∈ (List.range (M - 1)).map (fun i => v (i + 1)), ∀ j < 12, w (7 + j) = v 0 (7 + j) := by
+    intro w hw j hj
+    obtain ⟨i, hi, rfl⟩ := List.mem_map.mp hw
+    exact congrArg Q.a (ech (i + 1) (by have := List.mem_range.mp hi; omega) j hj)
+  obtain ⟨n, hn0, hr⟩ := BlockRec.forest_rng'P _ (v 0) (hkids 0 hM0)
+    (fun w hw => by obtain ⟨i, hi, rfl⟩ := List.mem_map.mp hw; exact hkids (i + 1) (by have := List.mem_range.mp hi; omega))
+    hlink hch
+  refine ⟨n, hn0, ?_⟩
+  have elo : (v 0 0).val = (ρ (parts M prevV).inp.res.lo).a.val := by
+    show ((ρ ((kid 0).res.pubs BlockNode.LO)).a).val = _
+    rw [e0]
+  rw [← elo]; exact hr
+
 end
 
 end StarkedAir.Circuit.EpochRoot
