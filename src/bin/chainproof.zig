@@ -51,6 +51,11 @@
 //!       and the forest <dir>/forestk-<to>.bin.
 //!   chainproof verify-epoch-wide <vk> <file.sbchain> <dir> <to> [--from <a> <prev-set.bin>] [--min-work <hex> | --min-work 0]
 //!       As verify-epoch-tree, for prove-epoch-wide's forest.
+//!   chainproof prove-epoch-root <headers.bin> <dir> <to> <file.sbchain> [--from <a> <prev-set.bin>]
+//!       The epoch root over prove-epoch-wide's forest (src/recursion/epoch_root.zig): one proof for the
+//!       epoch; writes <dir>/rootvk.bin and <dir>/epochroot-<to>.bin (CPU: small epochs).
+//!   chainproof verify-epoch-root <vk> <file.sbchain> <dir> <to> [--from <a> <prev-set.bin>] [--min-work <hex> | --min-work 0]
+//!       Verifies the chain proof, the epoch root proof and the balance against <dir>/set-<to>.bin.
 //!   chainproof rebind-block <in.sbblock> <headers.bin> <file.sbchain> <out.sbblock>
 //!       Rebuilds a block file's header window for another (longer) chain proof, without re-proving.
 //!
@@ -181,7 +186,7 @@ pub fn main() !void {
     }
     if ((std.mem.eql(u8, cmd, "prove-epoch-tree") or std.mem.eql(u8, cmd, "verify-epoch-tree") or
         std.mem.eql(u8, cmd, "prove-epoch-wide") or std.mem.eql(u8, cmd, "verify-epoch-wide") or
-        std.mem.eql(u8, cmd, "prove-epoch-root")) and args.len >= 6)
+        std.mem.eql(u8, cmd, "prove-epoch-root") or std.mem.eql(u8, cmd, "verify-epoch-root")) and args.len >= 6)
     {
         var min_work: u256 = core_min_work;
         var from: EpochFrom = .{};
@@ -205,6 +210,8 @@ pub fn main() !void {
             return proveEpochWide(gpa, a, args[2], args[3], try std.fmt.parseInt(u32, args[4], 10), args[5], from);
         if (std.mem.eql(u8, cmd, "prove-epoch-root"))
             return proveEpochRoot(gpa, a, args[2], args[3], try std.fmt.parseInt(u32, args[4], 10), args[5], from);
+        if (std.mem.eql(u8, cmd, "verify-epoch-root"))
+            return verifyEpochRoot(gpa, a, args[2], args[3], args[4], try std.fmt.parseInt(u32, args[5], 10), min_work, from);
         if (std.mem.eql(u8, cmd, "verify-epoch-wide"))
             return verifyEpochWide(gpa, a, args[2], args[3], args[4], try std.fmt.parseInt(u32, args[5], 10), min_work, from);
         return verifyEpochTree(gpa, a, args[2], args[3], args[4], try std.fmt.parseInt(u32, args[5], 10), min_work, from);
@@ -757,6 +764,66 @@ fn proveEpochRoot(gpa: std.mem.Allocator, a: std.mem.Allocator, headers_path: []
     var r = try ERoot.proveRoot(gpa, a, tables, &shapes.node.shared, BT.circuitFri(), children, ep, true);
     defer if (r.proof) |*p| p.deinit();
     std.debug.print("epoch root: {d} children, {d} vars, satisfied, output digest = the native one; proved and verified ({d:.1}s), {d} bytes\n", .{ children.len, r.n_vars, secs(timer.lap()), r.proof.?.bytes.len });
+    const rvk = try ERoot.setupVk(gpa, tables, &shapes, children.len, ep.prev != null);
+    try S.writeFileAtomic(try std.fmt.allocPrint(a, "{s}/rootvk.bin", .{dir}), try rvk.encode(a));
+    const kids = try a.alloc(ERoot.Child, children.len);
+    for (kids, forest.roots) |*k, fr| {
+        k.* = .{ .x = fr.x, .k = fr.k, .hash_root = undefined, .path = fr.path };
+        @memcpy(&k.hash_root, fr.proved.sum[19..35]);
+    }
+    var file: ERoot.File = .{ .from = from.height, .to = to, .logs = keys.logs, .children = kids, .s = undefined, .nin = children[0].sum[6], .challenge = undefined, .proof = r.proof.? };
+    const want = blk: {
+        const hs = try a.alloc([8]u32, children.len);
+        const ks = try a.alloc([8]u32, children.len);
+        const ss = try a.alloc(br_mod.Summary, children.len);
+        for (children, hs, ks, ss) |c, *h, *k, *x| {
+            h.* = c.proof.circuit_hash;
+            k.* = c.key;
+            x.* = c.sum;
+        }
+        break :blk ERoot.expected(hs, ks, ss, ep);
+    };
+    file.s = want.s;
+    file.nin = want.nin;
+    @memcpy(&file.challenge, children[0].sum[7..19]);
+    const out = try std.fmt.allocPrint(a, "{s}/epochroot-{d}.bin", .{ dir, to });
+    try S.writeFileAtomic(out, try file.encode(a));
+    std.debug.print("root VK {s}/rootvk.bin (root at 2^{d}); epoch root proof written to {s}\n", .{ dir, rvk.root_log, out });
+}
+
+fn verifyEpochRoot(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8, chain_path: []const u8, dir: []const u8, to: u32, min_work: u256, from: EpochFrom) !void {
+    var timer = try std.time.Timer.start();
+    const vk = try loadVk(a, vk_path);
+    const tables = try L.Tables.init(gpa);
+    defer tables.deinit(gpa);
+    var c = try S.Chain.decode(gpa, a, try S.readFile(a, chain_path));
+    defer c.deinit();
+    const s = try S.verifyChain(gpa, a, tables, &vk, &c);
+    if (min_work != 0 and s.work < min_work) return error.InsufficientWork;
+    std.debug.print("chain proof verified: headers 0..{d} ({d:.1}s)\n", .{ s.headers - 1, secs(timer.lap()) });
+    const tvk = try BT.Vk.decode(try S.readFile(a, try std.fmt.allocPrint(a, "{s}/treevk.bin", .{dir})));
+    const rvk = try ERoot.RootVk.decode(try S.readFile(a, try std.fmt.allocPrint(a, "{s}/rootvk.bin", .{dir})));
+    var file = try ERoot.File.decode(gpa, a, try S.readFile(a, try std.fmt.allocPrint(a, "{s}/epochroot-{d}.bin", .{ dir, to })));
+    defer file.proof.deinit();
+    const init = try ER.loadInit(gpa, .{ .height = from.height, .prev_set = from.prev_set });
+    const set_path = try std.fmt.allocPrint(a, "{s}/set-{d}.bin", .{ dir, to });
+    const fin_info = try SF.scan(gpa, set_path, null);
+    const ep: ERoot.Epoch = .{ .from = from.height, .to = to, .prev = if (init.info) |x| x.digest else null, .fin = fin_info.digest };
+    const v = try ERoot.verify(gpa, a, tables, &tvk, &rvk, &file, ep, s.headers, s.t);
+    std.debug.print("epoch root verified: ONE proof for blocks {d}..{d} ({d} subtrees), the seed and the challenge in-circuit, the block hashes the chain's ({d:.1}s)\n", .{ from.height, to, file.children.len, secs(timer.lap()) });
+    const init_count: u64 = if (init.info) |x| x.count else 0;
+    if (v.nin + fin_info.count + init_count >= 1 << 30) return error.EpochTooLarge;
+    var sum = v.sum;
+    if (init.info) |x| sum = sum.add(try sumSet(gpa, from.prev_set.?, v.challenge, x.digest));
+    const fin = try sumSet(gpa, set_path, v.challenge, fin_info.digest);
+    if (!sum.eql(fin)) {
+        std.debug.print("REJECTED: the blocks' coin events do not end at this coin set\n", .{});
+        return error.EpochUnbalanced;
+    }
+    if (init.info) |x| std.debug.print("  from the set after block {d}: {d} coins, hash_serialized {x}\n", .{ from.height - 1, x.count, x.hash });
+    std.debug.print("VERIFIED epoch {d}..{d} (one root proof): the coin set after block {d} is {d} coins ({d} inputs spent)\n", .{ from.height, to, to, fin_info.count, v.nin });
+    std.debug.print("  total amount     {d} sat\n", .{fin_info.amount});
+    std.debug.print("  hash_serialized  {x}  (Core's HASH_SERIALIZED of this set)\n", .{fin_info.hash});
 }
 
 fn verifyEpochWide(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8, chain_path: []const u8, dir: []const u8, to: u32, min_work: u256, from: EpochFrom) !void {

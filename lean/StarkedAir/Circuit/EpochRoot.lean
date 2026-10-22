@@ -16,8 +16,9 @@ hashes against the chain's `T`:
    must not be `2^31 − 1` (a rejection makes the prover fail); they equal child 0's limbs 7–18.
 
 The output digest is Blake2s over the key (the children's circuit hashes and keys), the final and
-(`prev`) previous set digests, then `from`, `to`, the summed partial sum, the summed input count and
-each child's block-hash root limbs (19–34), each through `m31_to_u32`.
+(`prev`) previous set digests, then `from`, `to`, the summed partial sum, the summed input count, the
+challenge `(γ, z, α)` (child 0's limbs 7–18, which the verifier needs for the balance against the sets)
+and each child's block-hash root limbs (19–34), each through `m31_to_u32`.
 
 External values: per child its 51 summary limbs, key and preprocessed root (`EXT_B` each, as the
 node); then `from`, `to`, the final set's digest (8 words) and the previous one's (8 words, read only
@@ -179,7 +180,8 @@ def parts (M : ℕ) (prevV : Bool) : Parts :=
   let vn := lastNext vals (ci + 1)
   let key := blake2s vn (keyMsg M) (64 * M)
   -- The output digest.
-  let pubs := [inp.res.lo, inp.res.hi] ++ sm.res ++ (List.range M).flatMap (fun i => (List.range 16).map fun k => p i (HR + k))
+  let pubs := [inp.res.lo, inp.res.hi] ++ sm.res ++ (List.range 12).map (fun j => p 0 (CH + j)) ++
+    (List.range M).flatMap (fun i => (List.range 16).map fun k => p i (HR + k))
   let dn := key.next
   let words := key.res ++ inp.res.fin ++ (if prevV then inp.res.prev else []) ++ (List.range pubs.length).map (dn + ·)
   let h := blake2s (dn + pubs.length) words (4 * words.length)

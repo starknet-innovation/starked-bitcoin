@@ -107,6 +107,22 @@ pub fn expected(hashes: []const [8]u32, keys: []const Key, sums: []const Summary
         for (&s, 0..) |*x, j| x.* = x.add(c[2 + j]);
         nin = nin.add(c[6]);
     }
+    var pubs: Public = .{ .s = s, .nin = nin, .challenge = undefined, .hash_roots = undefined };
+    if (sums.len > 0) @memcpy(&pubs.challenge, sums[0][7..19]);
+    var roots: [64][16]M31 = undefined;
+    for (sums, 0..) |c, i| @memcpy(&roots[i], c[19..35]);
+    pubs.hash_roots = roots[0..sums.len];
+    return .{ .key = key, .s = s, .nin = nin, .digest = digestOf(key, ep, &pubs) };
+}
+
+/// The root's public values besides the epoch: the summed partial sum and input count, the challenge
+/// (12 limbs, `(γ, z, α)`) and each child's block-hash root (16 limbs).
+pub const Public = struct { s: [4]M31, nin: M31, challenge: [12]M31, hash_roots: []const [16]M31 };
+
+/// The root's output digest (the Lean program's): Blake2s over the key, the final and previous set
+/// digests, then `from`, `to`, the partial sum, the input count, the challenge and the block-hash root
+/// limbs, one little-endian word each.
+pub fn digestOf(key: Key, ep: Epoch, pubs: *const Public) [8]u32 {
     var h = std.crypto.hash.blake2.Blake2s256.init(.{});
     var b: [4]u8 = undefined;
     const put = struct {
@@ -120,12 +136,13 @@ pub fn expected(hashes: []const [8]u32, keys: []const Key, sums: []const Summary
     if (ep.prev) |p| for (digestWords(p)) |w| put(&h, &b, w);
     put(&h, &b, ep.from);
     put(&h, &b, ep.to);
-    for (s) |x| put(&h, &b, x.toU32());
-    put(&h, &b, nin.toU32());
-    for (sums) |c| for (c[19..35]) |x| put(&h, &b, x.toU32());
+    for (pubs.s) |x| put(&h, &b, x.toU32());
+    put(&h, &b, pubs.nin.toU32());
+    for (pubs.challenge) |x| put(&h, &b, x.toU32());
+    for (pubs.hash_roots) |r| for (r) |x| put(&h, &b, x.toU32());
     var d: [32]u8 = undefined;
     h.final(&d);
-    return .{ .key = key, .s = s, .nin = nin, .digest = digestWords(d) };
+    return digestWords(d);
 }
 
 /// The challenge the root recomputes, from the children's seed roots: `epoch.challenge` of
@@ -185,4 +202,236 @@ pub fn proveRoot(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const le
     const got = try leaf.verifyCircuit(gpa, tables, &cp);
     if (!std.mem.eql(u32, &got, &want.digest)) return error.RootDigestMismatch;
     return .{ .digest = out, .n_vars = n_vars, .proof = cp };
+}
+
+const BF = @import("block_forest.zig");
+const BT = @import("block_tree.zig");
+const store = @import("store.zig");
+const HT = @import("../btc/header_tree.zig");
+const coin = @import("../block/coin.zig");
+const finalize = circuit.common.finalize;
+const PcsConfigV2 = core.pcs.config_v2.PcsConfigV2;
+const FriConfigV2 = core.pcs.config_v2.FriConfigV2;
+
+pub const VK_MAGIC = "SBROOTVK";
+pub const FILE_MAGIC = "SBEROOT1";
+
+/// The epoch root's verifying key, beside the tree VK: the one-child lift's identity (at the node size)
+/// and the root's for this epoch's `M` and variant, with its trace size.
+pub const RootVk = struct {
+    fri: FriConfigV2,
+    node_log: u32,
+    lift: BF.Id,
+    m: u32,
+    prev: bool,
+    root_log: u32,
+    root: BF.Id,
+
+    pub fn encode(self: *const RootVk, a: std.mem.Allocator) ![]u8 {
+        var e: store.Enc = .{ .a = a };
+        try e.buf.appendSlice(a, VK_MAGIC);
+        try e.int(u32, store.VERSION);
+        try e.fri(self.fri);
+        try e.int(u32, self.node_log);
+        try e.words(&self.lift.root);
+        try e.words(&self.lift.hash);
+        try e.int(u32, self.m);
+        try e.int(u8, @intFromBool(self.prev));
+        try e.int(u32, self.root_log);
+        try e.words(&self.root.root);
+        try e.words(&self.root.hash);
+        return store.seal(&e);
+    }
+
+    pub fn decode(bytes: []const u8) !RootVk {
+        var d: store.Dec = .{ .bytes = try store.unseal(bytes) };
+        try d.magic(VK_MAGIC);
+        var vk: RootVk = undefined;
+        vk.fri = try d.fri();
+        vk.node_log = try d.int(u32);
+        vk.lift = .{ .root = try d.words(8), .hash = try d.words(8) };
+        vk.m = try d.int(u32);
+        vk.prev = switch (try d.int(u8)) {
+            0 => false,
+            1 => true,
+            else => return error.BadVk,
+        };
+        vk.root_log = try d.int(u32);
+        vk.root = .{ .root = try d.words(8), .hash = try d.words(8) };
+        if (d.pos != d.bytes.len) return error.TrailingBytes;
+        return vk;
+    }
+};
+
+/// The lift's and the root's identities under `shapes`: the lift at the node size (over a leaf), the
+/// root at its own natural size (nothing verifies it in-circuit).
+pub fn setupVk(gpa: std.mem.Allocator, tables: *const leaf.Tables, shapes: *const BT.Shapes, m: usize, prev: bool) !RootVk {
+    const fri = shapes.node.fri;
+    const lview = shapes.nodeView(.over_leaves);
+    var ltopo = try wk.topology(gpa, &tables.table, 0, &lview.shared);
+    defer ltopo.deinit();
+    const lift = try BF.identityOf(gpa, NoValue, &ltopo, shapes.node.target, fri.log_blowup_factor);
+    var rtopo = try topology(gpa, &tables.table, m, prev, &shapes.node.shared);
+    defer rtopo.deinit();
+    const natural = finalize.computePaddedSizes(.fromBuilder(&rtopo.circuit));
+    const root = try BF.identityOf(gpa, NoValue, &rtopo, natural, fri.log_blowup_factor);
+    return .{ .fri = fri, .node_log = lift.trace_log, .lift = lift.id, .m = @intCast(m), .prev = prev, .root_log = root.trace_log, .root = root.id };
+}
+
+/// One child of the root as the file records it: its aligned subtree, its block-hash root and that
+/// root's path in the chain's header tree.
+pub const Child = struct { x: u32, k: u32, hash_root: [16]M31, path: []const HT.Step };
+
+/// An epoch's root proof: the range, the blocks' size keys (the identities the key commits to), the
+/// children, the public values and the circuit proof.
+pub const File = struct {
+    from: u32,
+    to: u32,
+    logs: []const u8,
+    children: []Child,
+    s: [4]M31,
+    nin: M31,
+    challenge: [12]M31,
+    proof: leaf.CircuitProof,
+
+    pub fn encode(self: *const File, a: std.mem.Allocator) ![]u8 {
+        var e: store.Enc = .{ .a = a };
+        try e.buf.appendSlice(a, FILE_MAGIC);
+        try e.int(u32, store.VERSION);
+        try e.int(u32, self.from);
+        try e.int(u32, self.to);
+        try e.blob(self.logs);
+        try e.int(u32, @intCast(self.children.len));
+        for (self.children) |c| {
+            try e.int(u32, c.x);
+            try e.int(u32, c.k);
+            for (c.hash_root) |x| try e.int(u32, x.toU32());
+            try e.int(u32, @intCast(c.path.len));
+            for (c.path) |st| {
+                try e.words(&st.sibling);
+                try e.int(u8, @intFromBool(st.left));
+            }
+        }
+        for (self.s) |x| try e.int(u32, x.toU32());
+        try e.int(u32, self.nin.toU32());
+        for (self.challenge) |x| try e.int(u32, x.toU32());
+        try store.encodeCircuit(&e, &self.proof, leaf.zero_key, &.{});
+        return store.seal(&e);
+    }
+
+    pub fn decode(gpa: std.mem.Allocator, a: std.mem.Allocator, bytes: []const u8) !File {
+        var d: store.Dec = .{ .bytes = try store.unseal(bytes) };
+        try d.magic(FILE_MAGIC);
+        var f: File = undefined;
+        f.from = try d.int(u32);
+        f.to = try d.int(u32);
+        f.logs = try a.dupe(u8, try d.blob());
+        const n = try d.int(u32);
+        if (n == 0 or n > 64) return error.BadFile;
+        f.children = try a.alloc(Child, n);
+        for (f.children) |*c| {
+            c.x = try d.int(u32);
+            c.k = try d.int(u32);
+            for (&c.hash_root) |*x| x.* = try m31(&d);
+            const steps = try a.alloc(HT.Step, try d.int(u32));
+            for (steps) |*st| {
+                st.sibling = try d.words(8);
+                st.left = switch (try d.int(u8)) {
+                    0 => false,
+                    1 => true,
+                    else => return error.BadStep,
+                };
+            }
+            c.path = steps;
+        }
+        for (&f.s) |*x| x.* = try m31(&d);
+        f.nin = try m31(&d);
+        for (&f.challenge) |*x| x.* = try m31(&d);
+        var none: [0]M31 = .{};
+        const c = try store.decodeCircuit(gpa, a, &d, &none);
+        f.proof = c.proof;
+        if (d.pos != d.bytes.len) return error.TrailingBytes;
+        return f;
+    }
+
+    fn m31(d: *store.Dec) !M31 {
+        const v = try d.int(u32);
+        if (v >= 0x7fffffff) return error.NonCanonical;
+        return M31.fromCanonical(v);
+    }
+};
+
+/// The expected circuit hash and key of child `(x, k)` at block index `at`: the tree's, or for one
+/// block the lift's over the block's leaf.
+fn childId(tvk: *const BT.Vk, rvk: *const RootVk, logs: []const u8, at: usize, k: u32) !struct { hash: [8]u32, key: Key } {
+    if (k == 0) {
+        const l = try tvk.leafFor(logs[at]);
+        return .{ .hash = rvk.lift.hash, .key = wk.key(&.{l.hash}, &.{leaf.zero_key}) };
+    }
+    const e = try BT.expected(tvk, logs, at, k);
+    return .{ .hash = e.hash, .key = e.key };
+}
+
+pub const Verified = struct { sum: QM31, nin: u64, challenge: coin.Challenge };
+
+/// **The epoch root's verifier.** Checks the file's children against the aligned decomposition of
+/// `from..to`, the root proof against the pinned identity for `M` (preprocessed root, circuit hash,
+/// configuration) with the output digest of the expected key (from the tree VK and the blocks' size
+/// keys), the epoch (both set digests) and the public values; each block-hash root against the chain's
+/// `T`. Returns the summed partial sum, input count and challenge, for the balance against the sets.
+pub fn verify(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const leaf.Tables, tvk: *const BT.Vk, rvk: *const RootVk, f: *const File, ep: Epoch, n_headers: usize, t: HT.Words) !Verified {
+    if (f.from != ep.from or f.to != ep.to or f.to < f.from) return error.WrongEpoch;
+    if (f.to >= n_headers) return error.BeyondChain;
+    const nb: usize = f.to - f.from + 1;
+    if (f.logs.len != nb) return error.BadLogs;
+    if (!std.meta.eql(rvk.fri, BT.circuitFri()) or !std.meta.eql(tvk.fri, rvk.fri) or tvk.node_log != rvk.node_log) return error.ConfigNotPinned;
+    var sizes_buf: [64]u8 = undefined;
+    const sizes = EP.alignedSizes(f.from, nb, &sizes_buf);
+    if (sizes.len != f.children.len or sizes.len != rvk.m or (ep.prev != null) != rvk.prev) return error.WrongRoot;
+    const hashes = try a.alloc([8]u32, sizes.len);
+    const keys = try a.alloc(Key, sizes.len);
+    const roots = try a.alloc([16]M31, sizes.len);
+    var at: usize = 0;
+    for (sizes, f.children, hashes, keys, roots) |k, c, *h, *ky, *r| {
+        const x: u32 = f.from + @as(u32, @intCast(at));
+        if (c.x != x or c.k != k) return error.WrongForest;
+        const id = try childId(tvk, rvk, f.logs, at, k);
+        h.* = id.hash;
+        ky.* = id.key;
+        r.* = c.hash_root;
+        // The block-hash root is the chain's.
+        var w: HT.Words = undefined;
+        for (&w, 0..) |*q, i| q.* = c.hash_root[2 * i].toU32() | (c.hash_root[2 * i + 1].toU32() << 16);
+        for (c.hash_root) |q| if (q.toU32() >= 1 << 16) return error.BadLimb;
+        const sides = try HT.inclusionSides(a, x, n_headers);
+        if (sides.len != k + c.path.len) return error.BadPath;
+        for (sides[0..k]) |sd| if (sd) return error.BadPath;
+        for (sides[k..], c.path) |sd, st| if (sd != st.left) return error.BadPath;
+        if (!HT.verifyInclusion(w, c.path, t)) return error.HashesNotTheChain;
+        at += @as(usize, 1) << @intCast(k);
+    }
+    const key = wk.key(hashes, keys);
+    const pubs: Public = .{ .s = f.s, .nin = f.nin, .challenge = f.challenge, .hash_roots = roots };
+    const want = digestOf(key, ep, &pubs);
+    const p = &f.proof;
+    if (!std.mem.eql(u32, &p.request.preprocessed_root, &rvk.root.root)) return error.WrongCircuit;
+    if (!std.mem.eql(u32, &p.circuit_hash, &rvk.root.hash)) return error.WrongCircuit;
+    if (!std.meta.eql(p.request.pcs_config, PcsConfigV2.fromFriAndTraceSize(rvk.fri, rvk.root_log))) return error.ConfigNotPinned;
+    const out = try leaf.verifyCircuit(gpa, tables, p);
+    if (!std.mem.eql(u32, &out, &want)) return error.WrongDigest;
+    var ch: coin.Challenge = undefined;
+    const q = struct {
+        fn qm(l: []const M31) QM31 {
+            return QM31.fromM31(l[0], l[1], l[2], l[3]);
+        }
+    }.qm;
+    ch.gamma = q(f.challenge[0..4]);
+    ch.z = q(f.challenge[4..8]);
+    const alpha = q(f.challenge[8..12]);
+    var x = QM31.one();
+    for (&ch.alpha) |*w| {
+        w.* = x;
+        x = x.mul(alpha);
+    }
+    return .{ .sum = QM31.fromM31(f.s[0], f.s[1], f.s[2], f.s[3]), .nin = f.nin.toU32(), .challenge = ch };
 }
