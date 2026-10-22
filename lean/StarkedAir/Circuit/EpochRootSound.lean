@@ -652,49 +652,92 @@ theorem root_sound {M : ℕ} {prevV : Bool} (hM : 0 < M) (h : Holds ρ (epochRoo
 
 /-! ### The output digest -/
 
-/-- **`digestOut` is sound**: its result words are Blake2s of the key, the set digests and each public
-register's base value as a word. -/
-theorem digestOut_sound {key fin prev : List ℕ} {prevV : Bool} {pubs : List ℕ} {dn : ℕ}
-    (h : Holds ρ (digestOut key fin prev prevV pubs dn).ops)
-    (hB : 4 * (key.length + fin.length + (if prevV then prev.length else 0) + pubs.length) < 2 ^ 32) :
-    ∀ i < 8, word (ρ ((digestOut key fin prev prevV pubs dn).res.getD i 0)) =
-      blake2sWords (key.map (word ∘ ρ) ++ fin.map (word ∘ ρ) ++ (if prevV then prev.map (word ∘ ρ) else []) ++
-        pubs.map (fun r => BitVec.ofNat 32 (ρ r).a.val))
-        (4 * (key.length + fin.length + (if prevV then prev.length else 0) + pubs.length)) i := by
-  dsimp only [digestOut] at h ⊢
+theorem m2u_word {o x : ℕ} (h : (Op.m2u o x).holds ρ) : word (ρ o) = BitVec.ofNat 32 (ρ x).a.val := by
+  simp only [Op.holds] at h
+  rw [h.2, word_m2u]
+
+
+/-- **`restOut` is sound**: its words are Blake2s of each public register's base value as a word. -/
+theorem restOut_sound {rpubs : List ℕ} {dn : ℕ} (h : Holds ρ (restOut rpubs dn).ops) (hB : 4 * rpubs.length < 2 ^ 32) :
+    ∀ i < 8, word (ρ ((restOut rpubs dn).res.getD i 0)) =
+      blake2sWords (rpubs.map (fun r => BitVec.ofNat 32 (ρ r).a.val)) (4 * rpubs.length) i := by
+  dsimp only [restOut] at h ⊢
   rw [holds_append] at h
   obtain ⟨hm, hb⟩ := h
-  have hlen : (key ++ fin ++ (if prevV then prev else []) ++ (List.range pubs.length).map (dn + ·)).length =
-      key.length + fin.length + (if prevV then prev.length else 0) + pubs.length := by
-    cases prevV <;> simp <;> omega
+  intro i hi
+  have e := blake2s_words hb (by simpa using hB) i hi
+  rw [e]
+  congr 1
+  rw [map_eq_range_getD (fun r => BitVec.ofNat 32 (ρ r).a.val) 0 rpubs, List.map_map]
+  refine List.map_congr_left (fun j hj => ?_)
+  have := hm _ (List.mem_map.mpr ⟨j, hj, rfl⟩)
+  simp only [Op.holds] at this
+  simp only [Function.comp, this.2, word_m2u]
+
+/-- **`digestOut` is sound**: the output words are Blake2s of the key, the set digests, `from` and `to`
+as words, then `rest`'s 8 words (Blake2s of the public values). -/
+theorem digestOut_sound {key fin prev : List ℕ} {prevV : Bool} {lo hi : ℕ} {rpubs : List ℕ} {dn : ℕ}
+    (h : Holds ρ (digestOut key fin prev prevV lo hi rpubs dn).ops) (hR : 4 * rpubs.length < 2 ^ 32)
+    (hB : 4 * (key.length + fin.length + (if prevV then prev.length else 0) + 2 + 8) < 2 ^ 32) :
+    (∀ i < 8, word (ρ ((restOut rpubs dn).res.getD i 0)) =
+      blake2sWords (rpubs.map (fun r => BitVec.ofNat 32 (ρ r).a.val)) (4 * rpubs.length) i) ∧
+    ∀ i < 8, word (ρ ((digestOut key fin prev prevV lo hi rpubs dn).res.getD i 0)) =
+      blake2sWords (key.map (word ∘ ρ) ++ fin.map (word ∘ ρ) ++ (if prevV then prev.map (word ∘ ρ) else []) ++
+        [BitVec.ofNat 32 (ρ lo).a.val, BitVec.ofNat 32 (ρ hi).a.val] ++
+        (List.range 8).map (blake2sWords (rpubs.map (fun r => BitVec.ofNat 32 (ρ r).a.val)) (4 * rpubs.length)))
+        (4 * (key.length + fin.length + (if prevV then prev.length else 0) + 2 + 8)) i := by
+  dsimp only [digestOut] at h ⊢
+  rw [holds_append, holds_append] at h
+  obtain ⟨⟨hr, hm⟩, hb⟩ := h
+  have rs := restOut_sound hr hR
+  refine ⟨rs, ?_⟩
+  have hrl : (restOut rpubs dn).res.length = 8 :=
+    BlockRec.blake2s_length (dn + rpubs.length) ((List.range rpubs.length).map (dn + ·)) (4 * rpubs.length)
+  have hlen : (key ++ fin ++ (if prevV then prev else []) ++ [(restOut rpubs dn).next, (restOut rpubs dn).next + 1] ++
+      (restOut rpubs dn).res).length = key.length + fin.length + (if prevV then prev.length else 0) + 2 + 8 := by
+    cases prevV <;> simp [hrl] <;> omega
   intro i hi
   rw [blake2s_words hb (by rw [hlen]; exact hB) i hi, hlen]
   congr 1
-  simp only [List.map_append]
+  have m0 := m2u_word (hm _ List.mem_cons_self)
+  have m1 := m2u_word (hm _ (List.mem_cons_of_mem _ List.mem_cons_self))
+  simp only [List.map_append, List.map_cons, List.map_nil, Function.comp_apply, m0, m1]
   congr 1
   · cases prevV <;> simp
-  · rw [map_eq_range_getD (fun r => BitVec.ofNat 32 (ρ r).a.val) 0 pubs, List.map_map]
-    refine List.map_congr_left (fun j hj => ?_)
-    have := hm _ (List.mem_map.mpr ⟨j, hj, rfl⟩)
-    simp only [Op.holds] at this
-    simp only [Function.comp, this.2, word_m2u]
+  · rw [map_eq_range_getD (word ∘ ρ) 0 (restOut rpubs dn).res, hrl]
+    exact List.map_congr_left (fun j hj => rs j (List.mem_range.mp hj))
 
-/-- The digest's word message. -/
+/-- The `rest` message's words: the summed partial sum and input count, child 0's challenge limbs, each
+child's block-hash root limbs (`parts`' `dpubs`), each as its base value. -/
+def restWords (ρ : ℕ → Q) (M : ℕ) (prevV : Bool) : List Spec.Blake2s.Word :=
+  (parts M prevV).dpubs.map (fun r => BitVec.ofNat 32 (ρ r).a.val)
+
+/-- The output digest's word message: the key, the final (and previous) set digests, `from`, `to`, then
+`rest`'s 8 words. -/
 def digestWords (ρ : ℕ → Q) (M : ℕ) (prevV : Bool) : List Spec.Blake2s.Word :=
   let P := parts M prevV
   P.key.res.map (word ∘ ρ) ++ P.inp.res.fin.map (word ∘ ρ) ++ (if prevV then P.inp.res.prev.map (word ∘ ρ) else []) ++
-    P.dpubs.map (fun r => BitVec.ofNat 32 (ρ r).a.val)
+    [BitVec.ofNat 32 (ρ P.inp.res.lo).a.val, BitVec.ofNat 32 (ρ P.inp.res.hi).a.val] ++
+    (List.range 8).map (blake2sWords (restWords ρ M prevV) (4 * (parts M prevV).dpubs.length))
 
-/-- **The output digest** is Blake2s of `digestWords` (the key, the set digests, then `from`, `to`, the
-summed partial sum and input count, child 0's challenge limbs and each child's block-hash root limbs,
-`parts`' `dpubs`); the key is Blake2s of the children's circuit hashes and keys. -/
+/-- **The output digest** is Blake2s of `digestWords` (8 + 8 + [8] + 2 + 8 words), `rest` being Blake2s of
+`restWords`; the key is Blake2s of the children's circuit hashes and keys. -/
 theorem root_digest {M : ℕ} {prevV : Bool} (h : Holds ρ (epochRoot M prevV).ops)
-    (hB : 4 * (8 + 8 + (if prevV then 8 else 0) + (parts M prevV).dpubs.length) < 2 ^ 32) (hK : 64 * M < 2 ^ 32) :
+    (hR : 4 * (parts M prevV).dpubs.length < 2 ^ 32) (hK : 64 * M < 2 ^ 32) :
     (∀ i < 8, word (ρ ((epochRoot M prevV).results.getD i 0)) =
-      blake2sWords (digestWords ρ M prevV) (4 * (8 + 8 + (if prevV then 8 else 0) + (parts M prevV).dpubs.length)) i) ∧
+      blake2sWords (digestWords ρ M prevV) (4 * (8 + 8 + (if prevV then 8 else 0) + 2 + 8)) i) ∧
+    (∀ i < 8, word (ρ ((restOut (parts M prevV).dpubs (parts M prevV).key.next).res.getD i 0)) =
+      blake2sWords (restWords ρ M prevV) (4 * (parts M prevV).dpubs.length) i) ∧
     (∀ i < 8, word (ρ ((parts M prevV).key.res.getD i 0)) = blake2sWords ((keyMsg M).map (word ∘ ρ)) (64 * M) i) := by
   obtain ⟨-, -, -, -, -, -, -, -, -, -, -, -, -, -, hkey, hdg⟩ := root_parts h
-  refine ⟨fun i hi => ?_, fun i hi => blake2s_words hkey hK i hi⟩
+  have hd0 : Holds ρ (digestOut (parts M prevV).key.res (parts M prevV).inp.res.fin (parts M prevV).inp.res.prev prevV
+      (parts M prevV).inp.res.lo (parts M prevV).inp.res.hi (parts M prevV).dpubs (parts M prevV).key.next).ops := hdg
+  refine ⟨fun i hi => ?_, fun i hi => ?_, fun i hi => blake2s_words hkey hK i hi⟩
+  rotate_left
+  · have hr : Holds ρ (restOut (parts M prevV).dpubs (parts M prevV).key.next).ops := by
+      dsimp only [digestOut] at hd0
+      exact fun o ho => hd0 o (List.mem_append_left _ (List.mem_append_left _ ho))
+    exact restOut_sound hr hR i hi
   have hk8 : (parts M prevV).key.res.length = 8 := by
     show ((List.range 8).map _).length = 8; simp
   have hf8 : (parts M prevV).inp.res.fin.length = 8 := by
@@ -702,18 +745,14 @@ theorem root_digest {M : ℕ} {prevV : Bool} (h : Holds ρ (epochRoot M prevV).o
   have hp8 : (parts M prevV).inp.res.prev.length = 8 := by
     show ((List.range 8).map _).length = 8; simp
   have hd : Holds ρ (digestOut (parts M prevV).key.res (parts M prevV).inp.res.fin (parts M prevV).inp.res.prev prevV
-      (parts M prevV).dpubs (parts M prevV).key.next).ops := hdg
-  have e := digestOut_sound hd (by rw [hk8, hf8, hp8]; exact hB) i hi
+      (parts M prevV).inp.res.lo (parts M prevV).inp.res.hi (parts M prevV).dpubs (parts M prevV).key.next).ops := hdg
+  have e := (digestOut_sound hd hR (by rw [hk8, hf8, hp8]; cases prevV <;> norm_num)).2 i hi
   rw [hk8, hf8, hp8] at e
   exact e
 
 /-! ### The seed message, semantically -/
 
 theorem TAG_lt : ∀ w < 7, TAG.getD w 0 < 2 ^ 32 := by decide
-
-theorem m2u_word {o x : ℕ} (h : (Op.m2u o x).holds ρ) : word (ρ o) = BitVec.ofNat 32 (ρ x).a.val := by
-  simp only [Op.holds] at h
-  rw [h.2, word_m2u]
 
 /-- The words `seedOut` writes before hashing: the tag, `lo`, `hi`, each child's start and `k`. -/
 theorem seedOut_words {M rn lo hi : ℕ} {start k : ℕ → ℕ} {msg : List ℕ} (h : Holds ρ (seedOut M rn lo hi start k msg).ops) :
@@ -827,11 +866,11 @@ theorem results_length {M : ℕ} {prevV : Bool} : (epochRoot M prevV).results.le
   show ((List.range 8).map _).length = 8; simp
 
 theorem digestWords_length {M : ℕ} {prevV : Bool} :
-    (digestWords ρ M prevV).length = 8 + 8 + (if prevV then 8 else 0) + (parts M prevV).dpubs.length := by
+    (digestWords ρ M prevV).length = 8 + 8 + (if prevV then 8 else 0) + 2 + 8 := by
   have hk8 : (parts M prevV).key.res.length = 8 := by show ((List.range 8).map _).length = 8; simp
   have hf8 : (parts M prevV).inp.res.fin.length = 8 := by show ((List.range 8).map _).length = 8; simp
   have hp8 : (parts M prevV).inp.res.prev.length = 8 := by show ((List.range 8).map _).length = 8; simp
-  simp only [digestWords, List.length_append, List.length_map, hk8, hf8]
+  simp only [digestWords, List.length_append, List.length_map, List.length_range, hk8, hf8, List.length_cons, List.length_nil]
   cases prevV <;> simp [hp8]
 
 section
@@ -849,7 +888,7 @@ hashes and keys), then every child's summary is proven (`SumOkP`) and the rest o
 `rest`, or Blake2s has a collision. -/
 theorem root_children {ok : (ℕ → F) → Prop} (T : TrustK Acc SatC VGates leafH nodeH (LeafOutP ok))
     (hl : ∀ L, (leafH L).length = 8) (hn : ∀ a v, (nodeH a v).length = 8)
-    {M : ℕ} {prevV : Bool} (hM : 64 * M < 2 ^ 32) (hB : 4 * (8 + 8 + (if prevV then 8 else 0) + (parts M prevV).dpubs.length) < 2 ^ 32)
+    {M : ℕ} {prevV : Bool} (hM : 64 * M < 2 ^ 32) (hR : 4 * (parts M prevV).dpubs.length < 2 ^ 32)
     (ts : ℕ → TreeK) (hok : ∀ i < M, (ts i).Ok) {ρ : ℕ → Q}
     (h : Holds ρ (epochRoot M prevV).ops) (hg : HookGates VGates ρ (epochRoot M prevV).ops) (rest : List Spec.Blake2s.Word)
     (hrest : 4 * (8 + rest.length) < 2 ^ 32)
@@ -859,14 +898,14 @@ theorem root_children {ok : (ℕ → F) → Prop} (T : TrustK Acc SatC VGates le
   by_cases col : Collision
   · exact Or.inr col
   left
-  obtain ⟨hdig, hkey⟩ := root_digest h hB hM
+  obtain ⟨hdig, -, hkey⟩ := root_digest h hR hM
   have hdl := digestWords_length (ρ := ρ) (M := M) (prevV := prevV)
   -- The circuit's digest is H of its message.
   have hres : wordsOf ρ (epochRoot M prevV).results = H (digestWords ρ M prevV) := by
     rw [wordsOf_eq results_length hdig, H, hdl]
   rw [hres] at hd
   have hlenK : (keyOfK M (fun i => (ts i).hash leafH nodeH) (fun i => (ts i).key leafH nodeH)).length = 8 := H_length _
-  obtain e := (H_eq (by rw [hdl]; exact hB) (by rw [List.length_append, hlenK]; exact hrest) hd).resolve_right col
+  obtain e := (H_eq (by rw [hdl]; cases prevV <;> norm_num) (by rw [List.length_append, hlenK]; exact hrest) hd).resolve_right col
   -- Split off the key.
   have hk8 : (parts M prevV).key.res.length = 8 := by show ((List.range 8).map _).length = 8; simp
   have hsplit : digestWords ρ M prevV = (parts M prevV).key.res.map (word ∘ ρ) ++ (digestWords ρ M prevV).drop 8 := by
@@ -918,7 +957,7 @@ Or Blake2s has a collision. -/
 theorem rootK_epoch {ok : (ℕ → F) → Prop} (T : TrustK Acc SatC VGates leafH nodeH (LeafOutP ok))
     (hl : ∀ L, (leafH L).length = 8) (hn : ∀ a v, (nodeH a v).length = 8)
     {M : ℕ} {prevV : Bool} (hM0 : 0 < M) (hM : 64 * M < 2 ^ 32)
-    (hB : 4 * (8 + 8 + (if prevV then 8 else 0) + (parts M prevV).dpubs.length) < 2 ^ 32)
+    (hR : 4 * (parts M prevV).dpubs.length < 2 ^ 32)
     (hS : 4 * (seedMsg M prevV).length < 2 ^ 32)
     (ts : ℕ → TreeK) (hok : ∀ i < M, (ts i).Ok) {ρ : ℕ → Q}
     (h : Holds ρ (epochRoot M prevV).ops) (hg : HookGates VGates ρ (epochRoot M prevV).ops) (rest : List Spec.Blake2s.Word)
@@ -938,7 +977,7 @@ theorem rootK_epoch {ok : (ℕ → F) → Prop} (T : TrustK Acc SatC VGates leaf
   intro v
   by_cases col : Collision
   · exact Or.inr col
-  obtain ⟨hkids, hrest'⟩ := (root_children T hl hn hM hB ts hok h hg rest hrest hd).resolve_right col
+  obtain ⟨hkids, hrest'⟩ := (root_children T hl hn hM hR ts hok h hg rest hrest hd).resolve_right col
   -- Each child's count and start are below 2^30 (a proven summary).
   have bnd : ∀ i < M, (v i 0).val < 2 ^ 30 ∧ (v i 1).val < 2 ^ 30 ∧ (v i 6).val < 2 ^ 30 := fun i hi => by
     obtain ⟨_, _, _, h0, h1, h6, _⟩ := hkids i hi

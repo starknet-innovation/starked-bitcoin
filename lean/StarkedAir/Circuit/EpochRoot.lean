@@ -15,10 +15,12 @@ hashes against the chain's `T`:
    words, its low 31 bits (the top bit split off: `hi = h + 2^15·t`, `t` boolean, `2h < 2^16`), which
    must not be `2^31 − 1` (a rejection makes the prover fail); they equal child 0's limbs 7–18.
 
-The output digest is Blake2s over the key (the children's circuit hashes and keys), the final and
-(`prev`) previous set digests, then `from`, `to`, the summed partial sum, the summed input count, the
-challenge `(γ, z, α)` (child 0's limbs 7–18, which the verifier needs for the balance against the sets)
-and each child's block-hash root limbs (19–34), each through `m31_to_u32`.
+The output digest has two levels, so a join circuit can open a fixed-size message: `rest` is Blake2s
+over the summed partial sum (4 limbs), the summed input count, the challenge `(γ, z, α)` (child 0's
+limbs 7–18, which the verifier needs for the balance against the sets) and each child's block-hash root
+limbs (19–34), each through `m31_to_u32`; the output is Blake2s over the key (the children's circuit
+hashes and keys), the final and (`prev`) previous set digests, `from`, `to` (through `m31_to_u32`) and
+`rest`'s 8 words.
 
 External values: per child its 51 summary limbs, key and preprocessed root (`EXT_B` each, as the
 node); then `from`, `to`, the final set's digest (8 words) and the previous one's (8 words, read only
@@ -143,7 +145,7 @@ structure Parts where
   vals : List (Out ℕ)
   key : Out (List ℕ)
   dg : Out (List ℕ)
-  /-- The register after the roots' packings, the seed message's registers, the digest's public
+  /-- The register after the roots' packings, the seed message's registers, the `rest` digest's public
   registers (exposed for the soundness proofs; the ops do not depend on them). -/
   rn : ℕ
   smsg : List ℕ
@@ -175,12 +177,21 @@ def seedOut (M rn : ℕ) (lo hi : ℕ) (start k : ℕ → ℕ) (msg : List ℕ) 
   let seed := blake2s (m2 + 2 + 2 * M) msg (4 * msg.length)
   ⟨msgOps ++ seed.ops, seed.res, seed.next⟩
 
-/-- The output digest from register `dn`: each public register through `m31_to_u32`, then Blake2s of
-the key, the final (and `prevV` previous) set digests and those words. -/
-def digestOut (key fin prev : List ℕ) (prevV : Bool) (pubs : List ℕ) (dn : ℕ) : Out (List ℕ) :=
-  let words := key ++ fin ++ (if prevV then prev else []) ++ (List.range pubs.length).map (dn + ·)
-  let h := blake2s (dn + pubs.length) words (4 * words.length)
-  ⟨(List.range pubs.length).map (fun j => .m2u (dn + j) (pubs.getD j 0)) ++ h.ops, h.res, h.next⟩
+/-- The output digest from register `dn`, in two levels (a join circuit opens the fixed-size outer one):
+`rest` = Blake2s of each of `rpubs` through `m31_to_u32` (the summed partial sum and input count, child
+0's challenge limbs, each child's block-hash root limbs); the output = Blake2s of the key, the final (and
+`prevV` previous) set digests, `from` and `to` through `m31_to_u32`, then `rest`'s 8 words. -/
+def restOut (rpubs : List ℕ) (dn : ℕ) : Out (List ℕ) :=
+  let msg := (List.range rpubs.length).map (dn + ·)
+  let r := blake2s (dn + rpubs.length) msg (4 * rpubs.length)
+  ⟨(List.range rpubs.length).map (fun j => .m2u (dn + j) (rpubs.getD j 0)) ++ r.ops, r.res, r.next⟩
+
+def digestOut (key fin prev : List ℕ) (prevV : Bool) (lo hi : ℕ) (rpubs : List ℕ) (dn : ℕ) : Out (List ℕ) :=
+  let r := restOut rpubs dn
+  let b := r.next
+  let words := key ++ fin ++ (if prevV then prev else []) ++ [b, b + 1] ++ r.res
+  let h := blake2s (b + 2) words (4 * words.length)
+  ⟨r.ops ++ [.m2u b lo, .m2u (b + 1) hi] ++ h.ops, h.res, h.next⟩
 
 def parts (M : ℕ) (prevV : Bool) : Parts :=
   let p : ℕ → ℕ → ℕ := fun i => (kid i).res.pubs
@@ -202,9 +213,9 @@ def parts (M : ℕ) (prevV : Bool) : Parts :=
   let vn := lastNext vals (ci + 1)
   let key := blake2s vn (keyMsg M) (64 * M)
   -- The output digest.
-  let pubs := [inp.res.lo, inp.res.hi] ++ sm.res ++ (List.range 12).map (fun j => p 0 (CH + j)) ++
+  let pubs := sm.res ++ (List.range 12).map (fun j => p 0 (CH + j)) ++
     (List.range M).flatMap (fun i => (List.range 16).map fun k => p i (HR + k))
-  let dg := digestOut key.res inp.res.fin inp.res.prev prevV pubs key.next
+  let dg := digestOut key.res inp.res.fin inp.res.prev prevV inp.res.lo inp.res.hi pubs key.next
   ⟨inp, lk, sm, logs, roots, seed', ctrs, s0, s1, ci, vals, key, dg, rn, msg, pubs⟩
 
 /-- **The epoch root program** over `M` children (`prevV`: the epoch starts from a previous set).
