@@ -170,4 +170,175 @@ theorem low31_sound {w ci n : ℕ} (h : Holds ρ (low31 w ci n).ops) (hci : ρ c
   · rw [h18, hword, hvx]; omega
   · rw [hword, hvx]; omega
 
+/-! ### `logOf`: a count is `2^k` -/
+
+theorem bs_getD {n j : ℕ} (hj : j < LOGS) : ((List.range LOGS).map fun i => n + i).getD j 0 = n + j := by
+  rw [List.getD_eq_getElem?_getD, List.getElem?_map, List.getElem?_range hj]; rfl
+
+theorem two_pow_lt_P {j : ℕ} (hj : j < LOGS) : 2 ^ j < P := by
+  have : 2 ^ j ≤ 2 ^ 30 := Nat.pow_le_pow_right (by norm_num) (by unfold LOGS at hj; omega)
+  unfold P; omega
+
+/-- One bit at most: `Σ b = 1` over bits forces exactly one `1`. -/
+theorem one_hot {m : ℕ} (b : ℕ → ℕ) (hb : ∀ i < m, b i ≤ 1) (hs : ∑ i ∈ Finset.range m, b i = 1) :
+    ∃ k < m, ∀ i < m, b i = if i = k then 1 else 0 := by
+  have : ∃ k ∈ Finset.range m, b k ≠ 0 := by
+    by_contra hc
+    push Not at hc
+    rw [Finset.sum_eq_zero (fun i hi => hc i hi)] at hs
+    exact absurd hs (by norm_num)
+  obtain ⟨k, hk, hk0⟩ := this
+  have hk1 : b k = 1 := by have := hb k (Finset.mem_range.mp hk); omega
+  refine ⟨k, Finset.mem_range.mp hk, fun i hi => ?_⟩
+  split_ifs with hik
+  · rw [hik]; exact hk1
+  · have hsplit := Finset.add_sum_erase (Finset.range m) b hk
+    rw [hs, hk1] at hsplit
+    have hz : ∑ x ∈ (Finset.range m).erase k, b x = 0 := by omega
+    exact (Finset.sum_eq_zero_iff.mp hz) i (Finset.mem_erase.mpr ⟨hik, Finset.mem_range.mpr hi⟩)
+
+/-- **`logOf` is sound.** The count is `2^k` (`k < 31`) and the result register holds `k`. -/
+theorem logOf_sound {cnt n : ℕ} (h : Holds ρ (logOf cnt n).ops) :
+    ∃ k < LOGS, (ρ cnt).a = ((2 ^ k : ℕ) : F) ∧ (ρ (logOf cnt n).res).a = (k : F) := by
+  -- The ops, by family.
+  have hB : ∀ j < LOGS, ∀ o ∈ [Op.guessM31 (n + j) (.isEq (.reg cnt) (2 ^ j)), ONE (n + LOGS + 3 * j),
+      .sub (n + LOGS + 3 * j + 1) (n + j) (n + LOGS + 3 * j), .mul (n + LOGS + 3 * j + 2) (n + j) (n + LOGS + 3 * j + 1)],
+      o.holds ρ := fun j hj o ho => h o (by
+    unfold logOf
+    apply List.mem_append_left; apply List.mem_append_left; apply List.mem_append_left; apply List.mem_append_left
+    apply List.mem_append_left
+    exact List.mem_flatMap.mpr ⟨j, List.mem_range.mpr hj, ho⟩)
+  have hZ : (Op.const (n + 4 * LOGS) 0 0 0 0).holds ρ := h _ (by
+    unfold logOf
+    apply List.mem_append_left; apply List.mem_append_left; apply List.mem_append_left; apply List.mem_append_left
+    exact List.mem_append_right _ (List.mem_singleton.mpr rfl))
+  have hE : ∀ j < LOGS, (Op.eq (n + LOGS + 3 * j + 2) (n + 4 * LOGS)).holds ρ := fun j hj => h _ (by
+    unfold logOf
+    apply List.mem_append_left; apply List.mem_append_left; apply List.mem_append_left
+    exact List.mem_append_right _ (List.mem_map.mpr ⟨j, List.mem_range.mpr hj, rfl⟩))
+  have hT : ∀ j < LOGS, ∀ o ∈ [Op.const (n + 4 * LOGS + 1 + 6 * j) (2 ^ j % 2147483647) 0 0 0,
+      .mul (n + 4 * LOGS + 1 + 6 * j + 1) (((List.range LOGS).map fun i => n + i).getD j 0) (n + 4 * LOGS + 1 + 6 * j),
+      Op.const (n + 4 * LOGS + 1 + 6 * j + 2) j 0 0 0,
+      .mul (n + 4 * LOGS + 1 + 6 * j + 3) (((List.range LOGS).map fun i => n + i).getD j 0) (n + 4 * LOGS + 1 + 6 * j + 2),
+      .add (n + 4 * LOGS + 1 + 6 * j + 4)
+        (if j = 0 then ((List.range LOGS).map fun i => n + i).getD 0 0 else n + 4 * LOGS + 1 + 6 * (j - 1) + 4)
+        (if j = 0 then n + 4 * LOGS else ((List.range LOGS).map fun i => n + i).getD j 0),
+      .add (n + 4 * LOGS + 1 + 6 * j + 5) (if j = 0 then n + 4 * LOGS + 1 + 6 * j + 1 else n + 4 * LOGS + 1 + 6 * (j - 1) + 5)
+        (if j = 0 then n + 4 * LOGS else n + 4 * LOGS + 1 + 6 * j + 1)], o.holds ρ := fun j hj o ho => h o (by
+    unfold logOf
+    apply List.mem_append_left; apply List.mem_append_left
+    exact List.mem_append_right _ (List.mem_flatMap.mpr ⟨j, List.mem_range.mpr hj, ho⟩))
+  have hK : ∀ j < LOGS, (Op.add (n + 4 * LOGS + 1 + 6 * LOGS + j) (if j = 0 then n + 4 * LOGS else n + 4 * LOGS + 1 + 6 * LOGS + j - 1)
+      (n + 4 * LOGS + 1 + 6 * j + 3)).holds ρ := fun j hj => h _ (by
+    unfold logOf
+    apply List.mem_append_left
+    exact List.mem_append_right _ (List.mem_map.mpr ⟨j, List.mem_range.mpr hj, rfl⟩))
+  have hL : ∀ o ∈ [ONE (n + 4 * LOGS + 1 + 6 * LOGS + LOGS), Op.eq (n + 4 * LOGS + 1 + 6 * (LOGS - 1) + 4) (n + 4 * LOGS + 1 + 6 * LOGS + LOGS),
+      Op.eq (n + 4 * LOGS + 1 + 6 * (LOGS - 1) + 5) cnt], o.holds ρ := fun o ho => h o (by
+    unfold logOf
+    exact List.mem_append_right _ ho)
+  -- Per-position facts.
+  set B : ℕ → F := fun j => (ρ (n + j)).a with hBdef
+  have z0 : ρ (n + 4 * LOGS) = lit 0 0 0 0 := by simpa [Op.holds] using hZ
+  have bit : ∀ j < LOGS, IsBase (ρ (n + j)) ∧ B j * (B j - 1) = 0 := by
+    intro j hj
+    have g := hB j hj
+    have tg := g _ (List.mem_cons_self)
+    have o1 := g _ (List.mem_cons_of_mem _ List.mem_cons_self)
+    have s2 := g _ (List.mem_cons_of_mem _ (List.mem_cons_of_mem _ List.mem_cons_self))
+    have m3 := g _ (List.mem_cons_of_mem _ (List.mem_cons_of_mem _ (List.mem_cons_of_mem _ List.mem_cons_self)))
+    have e := hE j hj
+    simp only [Op.holds, ONE] at tg o1 s2 m3 e
+    refine ⟨tg, ?_⟩
+    have b1 : IsBase (ρ (n + LOGS + 3 * j)) := by rw [o1]; exact isBase_lit 1
+    have b2 : IsBase (ρ (n + LOGS + 3 * j + 1)) := by rw [s2]; exact isBase_sub tg b1
+    have := congrArg Q.a (m3.symm.trans (e.trans z0))
+    rw [mul_a tg b2, s2, sub_a, o1] at this
+    simpa [lit, B] using this
+  have wt : ∀ j < LOGS, (ρ (n + 4 * LOGS + 1 + 6 * j + 1)).a = B j * ((2 ^ j : ℕ) : F) ∧
+      (ρ (n + 4 * LOGS + 1 + 6 * j + 3)).a = B j * (j : F) := by
+    intro j hj
+    have g := hT j hj
+    have c0 := g _ (List.mem_cons_self)
+    have m1 := g _ (List.mem_cons_of_mem _ List.mem_cons_self)
+    have c2 := g _ (List.mem_cons_of_mem _ (List.mem_cons_of_mem _ List.mem_cons_self))
+    have m3 := g _ (List.mem_cons_of_mem _ (List.mem_cons_of_mem _ (List.mem_cons_of_mem _ List.mem_cons_self)))
+    simp only [Op.holds, bs_getD hj] at c0 m1 c2 m3
+    have bb := (bit j hj).1
+    rw [Nat.mod_eq_of_lt (show 2 ^ j < 2147483647 from two_pow_lt_P hj)] at c0
+    refine ⟨?_, ?_⟩
+    · rw [m1, mul_a bb (by rw [c0]; exact isBase_lit _), c0]; rfl
+    · rw [m3, mul_a bb (by rw [c2]; exact isBase_lit _), c2]; rfl
+  -- The running sums.
+  have acc : ∀ j < LOGS, (ρ (n + 4 * LOGS + 1 + 6 * j + 4)).a = ∑ i ∈ Finset.range (j + 1), B i ∧
+      (ρ (n + 4 * LOGS + 1 + 6 * j + 5)).a = ∑ i ∈ Finset.range (j + 1), B i * ((2 ^ i : ℕ) : F) ∧
+      (ρ (n + 4 * LOGS + 1 + 6 * LOGS + j)).a = ∑ i ∈ Finset.range (j + 1), B i * (i : F) := by
+    intro j
+    induction j with
+    | zero =>
+      intro hj
+      have g := hT 0 hj
+      have a4 := g _ (List.mem_cons_of_mem _ (List.mem_cons_of_mem _ (List.mem_cons_of_mem _ (List.mem_cons_of_mem _ List.mem_cons_self))))
+      have a5 := g _ (List.mem_cons_of_mem _ (List.mem_cons_of_mem _ (List.mem_cons_of_mem _ (List.mem_cons_of_mem _ (List.mem_cons_of_mem _ List.mem_cons_self)))))
+      have k0 := hK 0 hj
+      simp only [Op.holds, if_true, bs_getD hj] at a4 a5 k0
+      have w0 := wt 0 hj
+      simp only [Nat.mul_zero, Nat.add_zero] at a4 a5 k0 w0 ⊢
+      refine ⟨?_, ?_, ?_⟩
+      · rw [a4, z0]; simp [lit, B]
+      · rw [a5, add_a, w0.1, z0]; simp [lit]
+      · rw [k0, add_a, w0.2, z0]; simp [lit]
+    | succ j ih =>
+      intro hj
+      have ih' := ih (by omega)
+      have g := hT (j + 1) hj
+      have a4 := g _ (List.mem_cons_of_mem _ (List.mem_cons_of_mem _ (List.mem_cons_of_mem _ (List.mem_cons_of_mem _ List.mem_cons_self))))
+      have a5 := g _ (List.mem_cons_of_mem _ (List.mem_cons_of_mem _ (List.mem_cons_of_mem _ (List.mem_cons_of_mem _ (List.mem_cons_of_mem _ List.mem_cons_self)))))
+      have k1 := hK (j + 1) hj
+      simp only [Op.holds, Nat.add_one_ne_zero, if_false, bs_getD hj, Nat.add_sub_cancel] at a4 a5 k1
+      have w1 := wt (j + 1) hj
+      rw [show n + 4 * LOGS + 1 + 6 * LOGS + (j + 1) - 1 = n + 4 * LOGS + 1 + 6 * LOGS + j by omega] at k1
+      refine ⟨?_, ?_, ?_⟩
+      · rw [a4, add_a, ih'.1, Finset.sum_range_succ _ (j + 1)]
+      · rw [a5, add_a, ih'.2.1, w1.1, Finset.sum_range_succ _ (j + 1)]
+      · rw [show n + 4 * LOGS + 1 + 6 * LOGS + (j + 1) = n + 4 * LOGS + 1 + 6 * LOGS + j + 1 by omega] at k1 ⊢
+        rw [k1, add_a, ih'.2.2, w1.2, Finset.sum_range_succ _ (j + 1)]
+  -- The end: Σ b = 1, Σ b 2^j = cnt.
+  have hl := hL
+  have o1 := hl _ (List.mem_cons_self)
+  have eS := hl _ (List.mem_cons_of_mem _ List.mem_cons_self)
+  have eC := hl _ (List.mem_cons_of_mem _ (List.mem_cons_of_mem _ List.mem_cons_self))
+  simp only [Op.holds, ONE] at o1 eS eC
+  have hLs : LOGS - 1 < LOGS := by unfold LOGS; omega
+  have fin := acc (LOGS - 1) hLs
+  have hsucc : LOGS - 1 + 1 = LOGS := by unfold LOGS; rfl
+  rw [hsucc] at fin
+  have sumB : ∑ i ∈ Finset.range LOGS, B i = 1 := by
+    rw [← fin.1, eS, o1]; simp [lit]
+  have sumC : (ρ cnt).a = ∑ i ∈ Finset.range LOGS, B i * ((2 ^ i : ℕ) : F) := by
+    rw [← fin.2.1, eC]
+  -- Bits as naturals.
+  have bv : ∀ i < LOGS, B i = (((B i).val : ℕ) : F) ∧ (B i).val ≤ 1 := fun i hi =>
+    ⟨(ZMod.natCast_zmod_val _).symm, val_le_one_of_bool (bit i hi).2⟩
+  have sumN : ∑ i ∈ Finset.range LOGS, (B i).val = 1 := by
+    have hc : ((∑ i ∈ Finset.range LOGS, (B i).val : ℕ) : F) = 1 := by
+      rw [Nat.cast_sum, ← sumB]
+      exact Finset.sum_congr rfl (fun i hi => ((bv i (Finset.mem_range.mp hi)).1).symm)
+    have hle : ∑ i ∈ Finset.range LOGS, (B i).val ≤ LOGS := by
+      calc ∑ i ∈ Finset.range LOGS, (B i).val ≤ ∑ _i ∈ Finset.range LOGS, 1 :=
+            Finset.sum_le_sum (fun i hi => (bv i (Finset.mem_range.mp hi)).2)
+        _ = LOGS := by simp
+    have hLP : LOGS < P := by unfold LOGS P; norm_num
+    exact natCast_inj_of_lt (by omega) (by unfold P; norm_num) (by rw [hc]; simp)
+  obtain ⟨k, hk, hone⟩ := one_hot (fun i => (B i).val) (fun i hi => (bv i hi).2) sumN
+  have hBk : ∀ i < LOGS, B i = if i = k then 1 else 0 := fun i hi => by
+    rw [(bv i hi).1, hone i hi]; split_ifs <;> simp
+  refine ⟨k, hk, ?_, ?_⟩
+  · rw [sumC, Finset.sum_congr rfl (fun i hi => by rw [hBk i (Finset.mem_range.mp hi)])]
+    simp [Finset.sum_ite_eq', Finset.mem_range.mpr hk]
+  · show (ρ (n + 4 * LOGS + 1 + 6 * LOGS + LOGS - 1)).a = (k : F)
+    rw [show n + 4 * LOGS + 1 + 6 * LOGS + LOGS - 1 = n + 4 * LOGS + 1 + 6 * LOGS + (LOGS - 1) by unfold LOGS; omega, fin.2.2,
+      Finset.sum_congr rfl (fun i hi => by rw [hBk i (Finset.mem_range.mp hi)])]
+    simp [Finset.sum_ite_eq', Finset.mem_range.mpr hk]
+
 end StarkedAir.Circuit.EpochRoot
