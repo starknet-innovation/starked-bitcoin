@@ -404,6 +404,39 @@ against `T`, and the balance against both coin sets natively. Next:
 1. a root circuit over an epoch's trees (different sizes), closing the seed and the challenge in-circuit;
 2. the segmented final-set pass (Sizing, above), so a verifier needs neither set file.
 
+## The epoch root: one proof per epoch (design, 2026-10-22)
+
+The forest's verifier checks an epoch's aligned roots (16 for each rehearsal epoch), the seed and the
+challenge natively. The epoch root moves that into one circuit, so an epoch is one proof plus the chain
+proof (and, until the set pass is proved, the two set files for the balance).
+
+- **Lift.** A forest root of one block (`k = 0`, at most one at each end of an epoch) is a leaf-shaped
+  proof. A one-child node (`blockNodeK 0`, already covered by `nodeK_sound`) lifts it to the node shape,
+  so every child of the root is node-shaped.
+- **The root circuit, `M` children** (`M` = the epoch's number of aligned subtrees; its identity is per
+  `M`, set up when an epoch needs it):
+  1. verify the `M` node-shaped proofs (hooks, as the wide node);
+  2. the ranges: child 0 starts at `from`, child `i + 1` at child `i`'s start plus its count, the last
+     ends at `to`; each count is `2^k` (`k` a hint, checked by a one-hot table);
+  3. one challenge: limbs 7–18 equal across children;
+  4. the sums: partial sums (QM31) and input counts (`lt30`, as the node);
+  5. **the seed** (`epoch.seedOfRoots`): Blake2s over the tag (7 words), `from`, `to`, the previous set's
+     digest (when the epoch starts from a set), the final set's, then per child `x`, `k` and its seed
+     root (limbs 35–50); all word-aligned;
+  6. **the challenge** (`epoch.challenge`): Blake2s(seed ‖ ctr) for ctr = 0, 1; the low 31 bits of each
+     word (the top bit split off and range-checked), each `≠ 2^31 − 1` (a rejection, probability
+     2^−31 per word, makes the prover fail, never accept); `(γ, z, α)` = the first 12 values, equal to
+     the children's limbs 7–18;
+  7. outputs: the digest of `from`, `to`, both set digests, the summed partial sum and input count, the
+     key over the children's circuit hashes and keys, and the children's block-hash roots (limbs 19–34).
+- **The verifier** checks the root proof against the VK's identity for `M`, each block-hash root against
+  the chain's `T` (inclusion paths, as now), and the balance against the two sets.
+- **Size.** 16 children of 2^24 are about 100 M variables, a 2^25 trace, ~90 GiB on the device: an
+  H200 (141 GB). Epochs of up to about 20 roots fit; more would need two levels.
+- **Lean.** `epochRoot M` Lean-first (as `blockNodeK`); soundness from `SumOkP` of the children
+  (`treeK_soundP`), the seed and the challenge equal to `seedOfRoots`/`challenge`'s spec, giving
+  `forestK_epochV`'s conclusion with the native seed check gone.
+
 ## Following the tip
 
 Three layers at three cadences:
