@@ -119,30 +119,45 @@ pub fn expected(hashes: []const [8]u32, keys: []const Key, sums: []const Summary
 /// (12 limbs, `(γ, z, α)`) and each child's block-hash root (16 limbs).
 pub const Public = struct { s: [4]M31, nin: M31, challenge: [12]M31, hash_roots: []const [16]M31 };
 
-/// The root's output digest (the Lean program's): Blake2s over the key, the final and previous set
-/// digests, then `from`, `to`, the partial sum, the input count, the challenge and the block-hash root
-/// limbs, one little-endian word each.
-pub fn digestOf(key: Key, ep: Epoch, pubs: *const Public) [8]u32 {
-    var h = std.crypto.hash.blake2.Blake2s256.init(.{});
+fn putWord(h: *std.crypto.hash.blake2.Blake2s256, w: u32) void {
     var b: [4]u8 = undefined;
-    const put = struct {
-        fn f(hh: *std.crypto.hash.blake2.Blake2s256, bb: *[4]u8, w: u32) void {
-            std.mem.writeInt(u32, bb, w, .little);
-            hh.update(bb);
-        }
-    }.f;
-    for (key) |w| put(&h, &b, w);
-    for (digestWords(ep.fin)) |w| put(&h, &b, w);
-    if (ep.prev) |p| for (digestWords(p)) |w| put(&h, &b, w);
-    put(&h, &b, ep.from);
-    put(&h, &b, ep.to);
-    for (pubs.s) |x| put(&h, &b, x.toU32());
-    put(&h, &b, pubs.nin.toU32());
-    for (pubs.challenge) |x| put(&h, &b, x.toU32());
-    for (pubs.hash_roots) |r| for (r) |x| put(&h, &b, x.toU32());
+    std.mem.writeInt(u32, &b, w, .little);
+    h.update(&b);
+}
+
+fn finalWords(h: *std.crypto.hash.blake2.Blake2s256) [8]u32 {
     var d: [32]u8 = undefined;
     h.final(&d);
     return digestWords(d);
+}
+
+/// The digest of the root's variable part (the Lean program's `rest`): Blake2s over the partial sum, the
+/// input count, the challenge and the block-hash root limbs, one little-endian word each.
+pub fn restOf(pubs: *const Public) [8]u32 {
+    var h = std.crypto.hash.blake2.Blake2s256.init(.{});
+    for (pubs.s) |x| putWord(&h, x.toU32());
+    putWord(&h, pubs.nin.toU32());
+    for (pubs.challenge) |x| putWord(&h, x.toU32());
+    for (pubs.hash_roots) |r| for (r) |x| putWord(&h, x.toU32());
+    return finalWords(&h);
+}
+
+/// The root's output digest from its fixed part and `rest` (what a join opens): Blake2s over the key,
+/// the final set's digest, the previous set's (the `prev` variant), `from`, `to`, then `rest`.
+pub fn outOf(key: Key, ep: Epoch, rest: [8]u32) [8]u32 {
+    var h = std.crypto.hash.blake2.Blake2s256.init(.{});
+    for (key) |w| putWord(&h, w);
+    for (digestWords(ep.fin)) |w| putWord(&h, w);
+    if (ep.prev) |p| for (digestWords(p)) |w| putWord(&h, w);
+    putWord(&h, ep.from);
+    putWord(&h, ep.to);
+    for (rest) |w| putWord(&h, w);
+    return finalWords(&h);
+}
+
+/// The root's output digest (the Lean program's): `outOf(key, ep, restOf(pubs))`.
+pub fn digestOf(key: Key, ep: Epoch, pubs: *const Public) [8]u32 {
+    return outOf(key, ep, restOf(pubs));
 }
 
 /// The challenge the root recomputes, from the children's seed roots: `epoch.challenge` of

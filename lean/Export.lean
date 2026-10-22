@@ -2,6 +2,7 @@ import StarkedAir.Export
 import StarkedAir.Circuit.CompositionLogUp
 import StarkedAir.Circuit.BlockNodeK
 import StarkedAir.Circuit.EpochRoot
+import StarkedAir.Circuit.EpochJoin
 import StarkedAir.Circuit.Balance
 import StarkedAir.Circuit.Statement
 import StarkedAir.Circuit.LeafHash
@@ -70,6 +71,9 @@ def main (args : List String) : IO Unit := do
   | ["block_node_glue"] => IO.println StarkedAir.Circuit.BlockNode.nodeJson
   | ["block_node_k", a] => IO.println (StarkedAir.Circuit.BlockNodeK.nodeKJson a.toNat!)
   | ["epoch_root", m] => IO.println (StarkedAir.Circuit.EpochRoot.epochRootJson m.toNat! false)
+  | ["epoch_join", "base_prev"] => IO.println (StarkedAir.Circuit.EpochJoin.epochJoinJson (.base true))
+  | ["epoch_join", "base_genesis"] => IO.println (StarkedAir.Circuit.EpochJoin.epochJoinJson (.base false))
+  | ["epoch_join", "step"] => IO.println (StarkedAir.Circuit.EpochJoin.epochJoinJson .step)
   | ["epoch_root", m, "prev"] => IO.println (StarkedAir.Circuit.EpochRoot.epochRootJson m.toNat! true)
   | ["block_leaf_out"] => IO.println StarkedAir.Circuit.BlockRec.leafOutJson
   | ["seed_leaf"] => IO.println StarkedAir.Circuit.BlockLeaf.seedLeafJson
