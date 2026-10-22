@@ -180,7 +180,8 @@ pub fn main() !void {
         return verifyEpoch(gpa, a, args[2], args[3], args[4], try std.fmt.parseInt(u32, args[5], 10), min_work, weak, from);
     }
     if ((std.mem.eql(u8, cmd, "prove-epoch-tree") or std.mem.eql(u8, cmd, "verify-epoch-tree") or
-        std.mem.eql(u8, cmd, "prove-epoch-wide") or std.mem.eql(u8, cmd, "verify-epoch-wide")) and args.len >= 6)
+        std.mem.eql(u8, cmd, "prove-epoch-wide") or std.mem.eql(u8, cmd, "verify-epoch-wide") or
+        std.mem.eql(u8, cmd, "prove-epoch-root")) and args.len >= 6)
     {
         var min_work: u256 = core_min_work;
         var from: EpochFrom = .{};
@@ -202,6 +203,8 @@ pub fn main() !void {
             return proveEpochTree(gpa, a, args[2], args[3], try std.fmt.parseInt(u32, args[4], 10), args[5], from);
         if (std.mem.eql(u8, cmd, "prove-epoch-wide"))
             return proveEpochWide(gpa, a, args[2], args[3], try std.fmt.parseInt(u32, args[4], 10), args[5], from);
+        if (std.mem.eql(u8, cmd, "prove-epoch-root"))
+            return proveEpochRoot(gpa, a, args[2], args[3], try std.fmt.parseInt(u32, args[4], 10), args[5], from);
         if (std.mem.eql(u8, cmd, "verify-epoch-wide"))
             return verifyEpochWide(gpa, a, args[2], args[3], args[4], try std.fmt.parseInt(u32, args[5], 10), min_work, from);
         return verifyEpochTree(gpa, a, args[2], args[3], args[4], try std.fmt.parseInt(u32, args[5], 10), min_work, from);
@@ -677,6 +680,7 @@ fn verifyEpochTree(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []cons
 }
 
 const BT = sb.recursion.block_tree;
+const br_mod = sb.recursion.block_rec;
 
 fn proveEpochWide(gpa: std.mem.Allocator, a: std.mem.Allocator, headers_path: []const u8, dir: []const u8, to: u32, chain_path: []const u8, from: EpochFrom) !void {
     var c = try S.Chain.decode(gpa, a, try S.readFile(a, chain_path));
@@ -705,6 +709,54 @@ fn proveEpochWide(gpa: std.mem.Allocator, a: std.mem.Allocator, headers_path: []
     const out = try std.fmt.allocPrint(a, "{s}/forestk-{d}.bin", .{ dir, to });
     try S.writeFileAtomic(out, try forest.encode(a));
     std.debug.print("epoch {d}..{d}: {d} blocks in {d} recursion trees (wide nodes), written to {s} ({d:.0}s)\n", .{ from.height, to, nb, forest.roots.len, out, secs(timer.read()) });
+}
+
+const ERoot = sb.recursion.epoch_root;
+
+/// The epoch root over `prove-epoch-wide`'s forest: one-block roots lifted (a one-child node), the root
+/// circuit checked against the native digest, then proved and verified on the CPU (Mac-sized epochs; a
+/// GPU driver for real ones). Needs both sets' digests: `<dir>/set-<to>.bin` and `--from`'s set.
+fn proveEpochRoot(gpa: std.mem.Allocator, a: std.mem.Allocator, headers_path: []const u8, dir: []const u8, to: u32, chain_path: []const u8, from: EpochFrom) !void {
+    _ = headers_path;
+    _ = chain_path;
+    var timer = try std.time.Timer.start();
+    const nb = to - from.height + 1;
+    const keys = try BT.epochKeys(a, .{ .dir = dir }, from.height, nb);
+    const airs = try BS.parseAirs(a);
+    const tables = try L.Tables.init(gpa);
+    defer tables.deinit(gpa);
+    const bfri = blockFri(from.weak);
+    var roots = PF.PreRoots{ .airs = &airs, .fri = bfri };
+    var shapes = try BT.Shapes.init(gpa, &tables.table, try BT.leafStart(gpa, a, &airs, keys.firsts, bfri, &roots), BT.circuitFri());
+    defer shapes.deinit(gpa);
+    const forest = try BT.Forest.decode(gpa, a, try S.readFile(a, try std.fmt.allocPrint(a, "{s}/forestk-{d}.bin", .{ dir, to })));
+    defer for (forest.roots) |*r| r.proved.proof.deinit();
+    if (forest.from != from.height or forest.to != to) return error.WrongEpoch;
+    const init = try ER.loadInit(gpa, .{ .height = from.height, .prev_set = from.prev_set });
+    const fin_info = try SF.scan(gpa, try std.fmt.allocPrint(a, "{s}/set-{d}.bin", .{ dir, to }), null);
+    const ep: ERoot.Epoch = .{ .from = from.height, .to = to, .prev = if (init.info) |x| x.digest else null, .fin = fin_info.digest };
+    std.debug.print("epoch {d}..{d}: {d} forest roots, sets scanned ({d:.1}s)\n", .{ from.height, to, forest.roots.len, secs(timer.lap()) });
+    // One-block roots are leaf-shaped: lift them to the node shape.
+    var lifted = std.ArrayList(br_mod.Proved).empty;
+    defer for (lifted.items) |*p| p.proof.deinit();
+    const children = try a.alloc(*const br_mod.Proved, forest.roots.len);
+    for (forest.roots, children) |*r, *c| {
+        if (r.k == 0) {
+            const view = shapes.nodeView(.over_leaves);
+            try lifted.append(a, try sb.recursion.block_node_k.prove(gpa, a, tables, 0, &view, &.{&r.proved}));
+            c.* = &lifted.items[lifted.items.len - 1];
+            std.debug.print("  root at {d} (one block) lifted ({d:.1}s)\n", .{ r.x, secs(timer.lap()) });
+        } else c.* = &r.proved;
+    }
+    const ch = try ERoot.challengeOf(blk: {
+        const sums = try a.alloc(br_mod.Summary, children.len);
+        for (sums, children) |*s, c| s.* = c.sum;
+        break :blk sums;
+    }, ep);
+    std.debug.print("  native challenge from the seed over the roots: gamma {any}\n", .{ch.gamma});
+    var r = try ERoot.proveRoot(gpa, a, tables, &shapes.node.shared, BT.circuitFri(), children, ep, true);
+    defer if (r.proof) |*p| p.deinit();
+    std.debug.print("epoch root: {d} children, {d} vars, satisfied, output digest = the native one; proved and verified ({d:.1}s), {d} bytes\n", .{ children.len, r.n_vars, secs(timer.lap()), r.proof.?.bytes.len });
 }
 
 fn verifyEpochWide(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8, chain_path: []const u8, dir: []const u8, to: u32, min_work: u256, from: EpochFrom) !void {

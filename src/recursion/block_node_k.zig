@@ -36,11 +36,13 @@ const Key = leaf.Key;
 const NS = br.NS;
 const Summary = br.Summary;
 
-/// The widest node (`2^MAX_A` children); `blockNodeK a` is exported for `a = 1 … MAX_A`.
+/// The widest node (`2^MAX_A` children); `blockNodeK a` is exported for `a = 0 … MAX_A` (`a = 0`: one
+/// child, which lifts a leaf to a node's shape for the epoch root).
 pub const MAX_A = 4;
 
 pub fn programJson(a: u32) ![]const u8 {
     return switch (a) {
+        0 => @embedFile("air:block_node_k0"),
         1 => @embedFile("air:block_node_k1"),
         2 => @embedFile("air:block_node_k2"),
         3 => @embedFile("air:block_node_k3"),
@@ -146,7 +148,7 @@ pub fn join(sums: []const Summary) Summary {
     return br.joinSummary(join(sums[0..h]), join(sums[h..]));
 }
 
-fn childInputs(a: std.mem.Allocator, children: []const *const br.Proved) ![]br.ChildInput(QM31) {
+pub fn childInputs(a: std.mem.Allocator, children: []const *const br.Proved) ![]br.ChildInput(QM31) {
     const inputs = try a.alloc(br.ChildInput(QM31), children.len);
     for (children, inputs) |child, *input| {
         const v = try a.create(stark_proof.Proof(QM31));
@@ -217,6 +219,14 @@ test "wide node programs parse, with one hook per child" {
             hooks += 1;
         };
         try std.testing.expectEqual(@as(usize, 1) << @intCast(a), hooks);
+        if (a == 1) {
+            const p0 = try glue.parse(arena.allocator(), try programJson(0));
+            var h0: usize = 0;
+            for (p0.ops) |op| if (op == .hook) {
+                h0 += 1;
+            };
+            try std.testing.expectEqual(@as(usize, 1), h0);
+        }
         try std.testing.expectEqual(@as(usize, 8), prog.results.len);
     }
 }
