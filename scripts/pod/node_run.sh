@@ -7,7 +7,8 @@
 # answering, when the run fails twice, and at <deadline> (Unix time) whatever the state: the cost cap.
 #   node_run.sh <pod-id> <ssh-host> <ssh-port> <commit> <name> <from> <to> <set-dir> <blocks-dir> \
 #               <chain> <local-dir> <check-set> <deadline> [cuda-epoch options]
-# SKIP: heights to pass as --skip (space-separated). The RunPod API key is read from ~/.runpod_key and
+# SKIP: heights to pass as --skip (space-separated); ONLY: heights to pass as --only (e.g. the blocks an
+# 80 GB run deferred, on an H200); UPLOAD=0: do not upload the proofs already in <local-dir> (an ONLY run). The RunPod API key is read from ~/.runpod_key and
 # never printed or put on a command line. Log: <local-dir>/logs/node_run.log. FOLLOW_ONLY=1 re-attaches to
 # a run already proving (e.g. after this node restarted): no setup, no launch, straight to following.
 set -uo pipefail
@@ -67,6 +68,7 @@ trap 'log "stopped (deadline or signal)"; exit 5' TERM INT
 log "pod $pod ($host:$port), epoch $from..$to, commit $commit, deadline $(date -u -d @"$deadline" +%FT%TZ)${FOLLOW_ONLY:+, re-attach}"
 opts=("$@")
 if [ -n "${SKIP:-}" ]; then opts+=(--skip /root/data/skip.txt); fi
+if [ -n "${ONLY:-}" ]; then opts+=(--only /root/data/only.txt); fi
 launch() { on_pod "cd /root/starked-bitcoin && (nohup scripts/pod/prove_epoch.sh $name $from $to ${opts[*]} > /dev/null 2>&1 &)"; log "launched prove_epoch.sh $name $from $to ${opts[*]}"; }
 if [ -z "${FOLLOW_ONLY:-}" ]; then
 for i in $(seq 1 40); do on_pod true 2> /dev/null && break; sleep 15; done
@@ -79,7 +81,9 @@ on_pod "rm -rf /root/starked-bitcoin; for i in 1 2 3; do git clone -q https://gi
 NODE_SSH="bash -c" POD_SSH="$POD_SSH" DATA=/root/data "$here/xfer_epoch.sh" "$from" "$to" "$setdir" "$bdir" "$chain" 2>&1 | tee -a "$logf"
 [ "${PIPESTATUS[0]}" = 0 ] || finish "transfer failed" 1
 on_pod "mkdir -p /workspace/$name/proofs"
-rsync -a --no-owner --no-group --exclude=".*" --timeout=300 -e "${pod_ssh[*]:0:${#pod_ssh[@]}-1}" "$dst/proofs/" "root@$host:/workspace/$name/proofs/" || finish "proof upload failed" 1
+if [ "${UPLOAD:-1}" != 0 ]; then
+  rsync -a --no-owner --no-group --exclude=".*" --timeout=300 -e "${pod_ssh[*]:0:${#pod_ssh[@]}-1}" "$dst/proofs/" "root@$host:/workspace/$name/proofs/" || finish "proof upload failed" 1
+fi
 log "proofs on the pod: $(on_pod "ls /workspace/$name/proofs | wc -l")"
 
 for i in $(seq 1 120); do
@@ -90,6 +94,7 @@ done
 case $st in 1*) log "bootstrap done" ;; *) finish "bootstrap not done after 60 min" 1 ;; esac
 
 [ -n "${SKIP:-}" ] && on_pod "printf '%s\n' $SKIP > /root/data/skip.txt"
+[ -n "${ONLY:-}" ] && on_pod "printf '%s\n' $ONLY > /root/data/only.txt"
 launch
 sleep 60
 fi
