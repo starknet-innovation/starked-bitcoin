@@ -158,6 +158,7 @@ import StarkedAir.Circuit.BlockNodeK
 import StarkedAir.Circuit.EpochRoot
 import StarkedAir.Circuit.EpochJoin
 import StarkedAir.Circuit.EpochRootSound
+import StarkedAir.Circuit.EpochJoinSound
 import StarkedAir.Circuit.RecCR
 import StarkedAir.Circuit.HeaderRec
 import StarkedAir.Circuit.BlockCtx
