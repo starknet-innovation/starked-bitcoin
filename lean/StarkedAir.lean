@@ -160,6 +160,7 @@ import StarkedAir.Circuit.EpochJoin
 import StarkedAir.Circuit.EpochRootSound
 import StarkedAir.Circuit.EpochJoinSound
 import StarkedAir.Circuit.EpochChainSound
+import StarkedAir.Circuit.EpochChainW
 import StarkedAir.Circuit.RecCR
 import StarkedAir.Circuit.HeaderRec
 import StarkedAir.Circuit.BlockCtx

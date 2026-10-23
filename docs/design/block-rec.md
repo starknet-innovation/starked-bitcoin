@@ -490,8 +490,12 @@ own chain proof. Rejected: a wrong previous set (`SetsDoNotLink`), the 0..8 proo
 epochs out of order, a changed input count or partial sum (`WrongDigest`), a changed block-hash root
 (`HashesNotTheChain`), a flipped proof byte (`CircuitProofRejected`). Lean: `join_sound`
 (`Circuit/EpochJoinSound.lean`, all three variants, standard axioms): each child's digest from its
-opening and its hook, the links, `acc`, the key and the output; composing with the children's trust
-records (the left child's `b < 2^30` and `a`'s range come from its own proof) is still to do.
+opening and its hook, the links, `acc`, the key and the output. Composed with the children's trust
+records in `Circuit/EpochChainSound.lean` (`chain_sound` by induction over step joins, `chain_cover`,
+`chain_verify`; `root_range` gives each root's `from ≤ to < 2^30`, which carries the left child's
+`b < 2^30` and `a`'s range) and, non-vacuously, in `Circuit/EpochChainW.lean` (`RecCR` witness style:
+`rootK_epochW`, `chain_soundW`, `chain_coverW`, `chain_verifyW`, each "the statement, or a collision
+among named Blake2s message pairs"); standard axioms.
 Epoch roots are exported for M = 1, 2, 3, 16 (with a previous set) and 1, 2, 3 (without); each is a
 few seconds of `lake env lean --run Export.lean epoch_root <M> [prev]` and ~50 KB per child embedded.
 

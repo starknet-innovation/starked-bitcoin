@@ -37,7 +37,7 @@ the expected key of a join is `Chain.key` (`H(hash‖key)` of both children, as 
 The join's caveats: the left child's `b < 2^30` (for `from = b + 1` over the naturals) and `a`'s range come
 from the left child's own proof: the epoch root's `root_range` (base) or, by induction, the chain so far
 (step). Like `rootK_epoch`, the conclusions are `… ∨ Collision`, which `RecCR.collision_true` makes
-vacuous; a per-instance restatement (`RecCR`'s `TrustKW` style) is not done here.
+vacuous; a per-instance restatement (`RecCR`'s `TrustKW` style) is `EpochChainW.lean` (`rootK_epochW`, `chain_soundW`, `chain_verifyW`).
 -/
 import StarkedAir.Circuit.EpochJoinSound
 
