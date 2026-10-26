@@ -21,6 +21,35 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-10-22 (session 20) — Epoch 945,001–972,500 proved to the tip; one proof per epoch; the two mainnet epochs joined into one proof
+Who: Claude (agent, Opus 5.5), with the owner (scope: prove the tip epoch from the node overnight, build the epoch root and the epoch join, run the real join; no push)
+Roadmap: BLOCK-REC epoch root built (one proof per epoch); epoch join built (one proof per chain of epochs); 935,001–972,500 proved as ONE proof and verified on the node
+Done:
+- bd7b0fd..1146363: the epoch root (Lean `epochRoot M prevV`, Zig program over M node-shaped roots, seed and challenge in-circuit, two-level output digest); `prove-epoch-root` / `verify-epoch-root`, `--set-digests` (a pod without the set files).
+- 2145d55..b7eeb97: Lean soundness of the epoch root (`low31_sound`, `logOf_sound`, `links_sound`, `sums_sound`, `root_seed`, `root_challenge`, `root_sound`, `root_digest`, `root_children`, `rootK_epoch`).
+- 43bc5f9..01e6a90: the epoch join (Lean `EpochJoin.lean`: base_prev, base_genesis, step); chain shapes (root shape R from both root variants at the largest child count, join shape J a fixpoint), chain VK `joinvk.bin`, chain file (every epoch's head and the last join's proof), `prove-chain` / `verify-chain`.
+- efdaef9: `prove-chain` reads size keys from the forest and one block proof per key; `scripts/pod/node_join.sh` (a join on a pod, CPU build, cost cap).
+- 5b9bd13, 83cda05, 0c23832: Lean `join_sound`, `EpochChainSound` (chain_sound, chain_cover, chain_verify) and the witness-style, non-vacuous `EpochChainW` (`chain_verifyW`).
+- 5b46f78: `airs/epoch_root_16.json` (the no-prev 16-child root, needed by the root shape).
+- 96a3763: `chainproof rebind-forest` (a forest's paths in a longer chain's header tree, each subtree's block-hash root checked against the new chain proof's root; no proof redone); `prove-chain` reuses a root file only when its head is this run's byte for byte.
+Evidence:
+- Tip epoch 945,001–972,500 (27,500 blocks) from the node: block proofs on an H100 (3 deferred blocks on an H200), final set equal to the pod's; tree and epoch root on an H100. `verify-epoch-wide` and `verify-epoch-root` on the node: VERIFIED, 164,539,066 coins, `hash_serialized 9f92d143…` (Core's).
+- Mac: a 3-epoch chain (blocks 0..15) proved and verified as one proof, roots and joins at 2^22, ~4 s per join, ~527 KB; the prefix chain-8 verifies alone; rejected: a wrong prev set (`SetsDoNotLink`), a short proof for a long range (`WrongEpochs`), out-of-order epochs (`RootNotSetUp`), resealed tampers of nin/sum (`WrongDigest`), a hash root (`HashesNotTheChain`), a proof byte (`CircuitProofRejected`). A minimal dir (forest, tree VK, one proof per size key, set digests) gives the same VK. After 96a3763: blocks 4..15 as one chain proof, both roots reused.
+- `zig build test -Doptimize=ReleaseFast`: 127/128 passed, 1 skipped (2,081 s).
+- The real join (H100 pod, CPU, 224 cores): shapes R = 2^25, J = 2^22 (237 s); both roots proved at R (97 s, 99 s); the join 9.4 s; chain file 575,868 bytes; 7.5 min, 69.6 GB peak. `verify-chain` on the node: "VERIFIED blocks 935001..972500 as one chain proof: the coin set after block 972500 is 164539066 coins, hash_serialized 9f92d143…", both epochs balanced (the 945,000 set 165,215,167 coins).
+- `#print axioms` on the new Lean theorems: standard axioms only.
+- RunPod billing: 2026-10-22 $57.10 (block run $54.05), 2026-10-23 $29.12 (block run tail $9.39, H200 $5.86, tree and root $13.04, first join try $0.83), 2026-10-26 $1.82 (two join tries).
+Problems / lessons:
+- First join try: `EpochRootNotExported`. The root shape folds both variants at the largest child count; only the 16-child prev variant was exported. The Mac test used 3 children, where both exist. A test with the production child count would have caught it.
+- Second try: `HashesNotTheChain`. The rehearsal epoch's forest held paths in the header tree of the chain file it was proved against. An epoch proved under an older chain file needs `rebind-forest` before a join under a newer one.
+- The tip's own epoch root was not reused (it was proved at its natural shape, not the chain's R); re-proving it took 99 s.
+- My watcher for the first try never ran ssh (zsh does not word-split `$N`); the failure sat unseen for three days. Watchers are now bash scripts.
+- `verify-chain` on the node (16 GB, aarch64) took 33 min, most of it opening the heads and the joins' native replay; worth profiling.
+- A Zig result-location alias (`x = .{ .f = g(&x) }`) gave `SetsDoNotLink`; compute into a const first.
+Next: push `rec/epoch-root` (owner's approval); profile `verify-chain`; the coin-set pass (the set fingerprint and hash_serialized in-circuit).
+
+---
+
 ## 2026-10-21 (session 19) — Rehearsal epoch verified flat, then aggregated on the GPU: 10,000 block proofs as 16 recursion trees
 Who: Claude (agent, Opus 5.5), with the owner (scope: run the rest of the rehearsal from the node, verify it, build the GPU aggregation tree, push)
 Roadmap: rehearsal 935,001–945,000 proved and verified (flat and through recursion); BLOCK-REC wide nodes and per-level shapes built, on the GPU
