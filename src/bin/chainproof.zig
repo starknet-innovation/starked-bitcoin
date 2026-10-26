@@ -57,6 +57,7 @@
 //!   chainproof verify-epoch-root <vk> <file.sbchain> <dir> <to> [--from <a> <prev-set.bin>] [--min-work <hex> | --min-work 0]
 //!       Verifies the chain proof, the epoch root proof and the balance against <dir>/set-<to>.bin.
 //!   chainproof rebind-block <in.sbblock> <headers.bin> <file.sbchain> <out.sbblock>
+//!   chainproof rebind-forest <vk> <in forestk-<to>.bin> <headers.bin> <file.sbchain> <out>
 //!       Rebuilds a block file's header window for another (longer) chain proof, without re-proving.
 //!
 //! `headers.bin`: raw 80-byte headers from height 0. CPU only. `--test-strength`: 3 queries, 10
@@ -83,6 +84,7 @@ fn usage() noreturn {
         \\  chainproof prove-block <block.bin> <undo.bin | -> <headers.bin> <height> <file.sbchain> <out.sbblock> [--test-strength]
         \\  chainproof verify-block <vk> <file.sbchain> <file.sbblock> [--min-work <hex> | --min-work 0] [--test-strength]
         \\  chainproof rebind-block <in.sbblock> <headers.bin> <file.sbchain> <out.sbblock>
+        \\  chainproof rebind-forest <vk> <in forestk-<to>.bin> <headers.bin> <file.sbchain> <out>
         \\  chainproof prove-epoch <headers.bin> <dir> <to> <file.sbchain> [--from <a> <prev-set.bin>] [--test-strength]
         \\  chainproof prove-chain <vk> <file.sbchain> <out-dir> [--max-m M] <dir>:<to>[:<from>:<prev-set.bin>][#<prev-hex|->,<fin-hex>]...
         \\  chainproof verify-chain <vk> <file.sbchain> <out-dir> [--min-work <hex> | --min-work 0] <dir>:<to>[:<from>:<prev-set.bin>]...
@@ -255,6 +257,7 @@ pub fn main() !void {
     if (std.mem.eql(u8, cmd, "join-demo") and args.len == 8)
         return joinDemo(gpa, a, args[2], try std.fmt.parseInt(u32, args[3], 10), args[4], try std.fmt.parseInt(u32, args[5], 10), try std.fmt.parseInt(u32, args[6], 10), args[7]);
     if (std.mem.eql(u8, cmd, "rebind-block") and args.len == 6) return rebindBlock(gpa, a, args[2], args[3], args[4], args[5]);
+    if (std.mem.eql(u8, cmd, "rebind-forest") and args.len == 7) return rebindForest(gpa, a, args[2], args[3], args[4], args[5], args[6]);
     if (std.mem.eql(u8, cmd, "inclusion") and args.len == 6) return inclusion(gpa, a, args[2], args[3], args[4], try std.fmt.parseInt(usize, args[5], 10));
     usage();
 }
@@ -917,6 +920,15 @@ fn rootHead(a: std.mem.Allocator, ri: *const RootInputs) !ERoot.Head {
     return head;
 }
 
+/// The two heads encode to the same bytes.
+fn sameHead(a: std.mem.Allocator, x: *const ERoot.Head, y: *const ERoot.Head) !bool {
+    var ex: S.Enc = .{ .a = a };
+    var ey: S.Enc = .{ .a = a };
+    try x.encode(&ex);
+    try y.encode(&ey);
+    return std.mem.eql(u8, ex.buf.items, ey.buf.items);
+}
+
 /// `prove-chain <vk> <file.sbchain> <out-dir> [--max-m M] <epoch>...` (epochs as `ChainSpec`, in chain
 /// order, each with `prove-epoch-wide`'s forest and tree VK in its dir): the chain's shapes (the root
 /// shape for up to `M` children, default the most any epoch has) and VK (`<out>/joinvk.bin`), each
@@ -978,15 +990,16 @@ fn proveChain(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8,
         const path = try std.fmt.allocPrint(a, "{s}/root-{d}.bin", .{ out, ri.ep.to });
         const head = try rootHead(a, ri);
         // A root file already there (this run's, or the epoch's own root when it is at the chain's
-        // root shape) is reused; any other is proved again.
+        // root shape) is reused when its public part is this run's (the paths in this chain file's
+        // header tree included); any other is proved again.
         const reused = if (S.readFile(a, path)) |bytes| blk: {
             var g = ERoot.File.decode(gpa, a, bytes) catch break :blk false;
-            if (std.mem.eql(u32, &g.proof.request.preprocessed_root, &entry.id.root) and std.mem.eql(u32, &g.proof.circuit_hash, &entry.id.hash) and g.head.from == ri.ep.from and g.head.to == ri.ep.to) {
+            if (std.mem.eql(u32, &g.proof.request.preprocessed_root, &entry.id.root) and std.mem.eql(u32, &g.proof.circuit_hash, &entry.id.hash) and try sameHead(a, &g.head, &head)) {
                 f.* = g;
                 break :blk true;
             }
             g.proof.deinit();
-            std.debug.print("  epoch {d}: {s} is not at the chain's root shape: proving again\n", .{ i, path });
+            std.debug.print("  epoch {d}: {s} is not at the chain's root shape or not over these inputs (paths: this chain file's): proving again\n", .{ i, path });
             break :blk false;
         } else |_| false;
         if (reused) {
@@ -1207,6 +1220,40 @@ fn rebindBlock(gpa: std.mem.Allocator, a: std.mem.Allocator, in_path: []const u8
     f.chain_len = @intCast(n);
     try S.writeFileAtomic(out, try PF.encode(a, &f));
     std.debug.print("rebound {s} to a chain of {d} headers: {s}\n", .{ in_path, n, out });
+}
+
+/// `rebind-forest <vk> <in forestk-*.bin> <headers.bin> <file.sbchain> <out>`: the forest's root paths
+/// recomputed in a longer chain's header tree. The paths are native data (the epoch root checks them
+/// against the chain's root, its circuits never see them), so an epoch proved against an older chain
+/// file joins under a newer one after this, with no proof redone. Each subtree's block-hash root is
+/// checked against the new chain proof's root.
+fn rebindForest(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8, in_path: []const u8, headers_path: []const u8, chain_path: []const u8, out: []const u8) !void {
+    const vk = try loadVk(a, vk_path);
+    const tables = try L.Tables.init(gpa);
+    defer tables.deinit(gpa);
+    var c = try S.Chain.decode(gpa, a, try S.readFile(a, chain_path));
+    defer c.deinit();
+    const s = try S.verifyChain(gpa, a, tables, &vk, &c);
+    const all = try loadHeaderFile(a, headers_path);
+    if (all.len < s.headers) return error.HeadersShorterThanChain;
+    const hashes = try a.alloc(HT.Words, s.headers);
+    for (hashes, all[0..s.headers]) |*h, *hd| h.* = HT.blockHash(hd);
+    var paths = try HT.Paths.init(a, hashes);
+    defer paths.deinit(a);
+    var f = try BT.Forest.decode(gpa, a, try S.readFile(a, in_path));
+    if (f.to >= s.headers) return error.BeyondChain;
+    const roots = try a.dupe(BT.Root, f.roots);
+    for (roots) |*r| {
+        const full = try paths.proof(a, r.x);
+        if (full.len < r.k) return error.BadPath;
+        var w: HT.Words = undefined;
+        for (&w, 0..) |*q, i| q.* = r.proved.sum[19 + 2 * i].toU32() | (r.proved.sum[19 + 2 * i + 1].toU32() << 16);
+        if (!HT.verifyInclusion(w, full[r.k..], s.t)) return error.HashesNotTheChain;
+        r.path = full[r.k..];
+    }
+    f.roots = roots;
+    try S.writeFileAtomic(out, try f.encode(a));
+    std.debug.print("rebound {s} ({d} roots, blocks {d}..{d}) to a chain of {d} headers: {s}\n", .{ in_path, roots.len, f.from, f.to, s.headers, out });
 }
 
 fn verifyBlock(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8, chain_path: []const u8, block_path: []const u8, min_work: u256, weak: bool) !void {
