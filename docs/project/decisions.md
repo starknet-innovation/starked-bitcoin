@@ -449,3 +449,16 @@ Decision: the production tools choose the profile by size (`block.system.sizesAu
   (`SizeOk`).
 - Open: tiered proofs rest on `StarkSoundV`, sent for review to stwo-zig
   (`~/Workshop/stwo-zig/LIFTING_SOUNDNESS_BRIEF.md`); the review gates freezing the block VK set.
+
+### D-047 — The epoch layers' VKs are pinned in the binary
+Date: 2026-10-26 · By: owner · Status: active
+Decision: The epoch verifiers (`verify-chain`, `verify-epoch-wide`, `verify-epoch-root`,
+`verify-epoch-tree`) accept only the tree, root and join VKs committed in `vk/epoch/` and embedded in
+`chainproof`, as the header chain's VK already is. `--unpinned` accepts others for tests and says so.
+`chainproof setup-vks` remakes the VKs from public inputs (the forests, one block proof per size key,
+the Lean-exported programs) so anyone can check a pinned VK is the honest circuits'. A new size class
+or chain shape adds a pinned VK in a reviewed commit.
+Why: the verifiers read these VKs from the prover's files, so a dishonest prover could name a circuit
+that outputs the expected digest and checks nothing. Recomputing them in every verifier was rejected:
+it needs the block proofs and minutes per verification.
+

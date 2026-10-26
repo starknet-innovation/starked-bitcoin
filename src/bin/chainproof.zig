@@ -41,7 +41,7 @@
 //!   chainproof prove-epoch-tree <headers.bin> <dir> <to> <file.sbchain> [--from <a> <prev-set.bin>] [--test-strength]
 //!       BLOCK-REC: the epoch's block proofs (<dir>/proofs) as a forest of recursion trees, one per
 //!       aligned subtree; writes the block VK <dir>/blockvk.bin (setup) and <dir>/forest-<to>.bin.
-//!   chainproof verify-epoch-tree <vk> <file.sbchain> <dir> <to> [--from <a> <prev-set.bin>] [--min-work <hex> | --min-work 0]
+//!   chainproof verify-epoch-tree <vk> <file.sbchain> <dir> <to> [--from <a> <prev-set.bin>] [--min-work <hex> | --min-work 0] [--unpinned]
 //!       Verifies the chain proof, the forest against the block VK (identities, keys, proofs, ranges,
 //!       the challenge from the seed over the roots, the block hashes against the chain's T) and the
 //!       balance against <dir>/set-<to>.bin. Each block proof binds its previous MTP (D-043 part 3).
@@ -49,16 +49,24 @@
 //!       BLOCK-REC with wide nodes and per-level shapes (src/recursion/block_tree.zig): writes the tree VK
 //!       <dir>/treevk.bin, each proof to <dir>/tree/<k>-<x>.sbproof (a stopped run resumes from them)
 //!       and the forest <dir>/forestk-<to>.bin.
-//!   chainproof verify-epoch-wide <vk> <file.sbchain> <dir> <to> [--from <a> <prev-set.bin>] [--min-work <hex> | --min-work 0]
+//!   chainproof verify-epoch-wide <vk> <file.sbchain> <dir> <to> [--from <a> <prev-set.bin>] [--min-work <hex> | --min-work 0] [--unpinned]
 //!       As verify-epoch-tree, for prove-epoch-wide's forest.
 //!   chainproof prove-epoch-root <headers.bin> <dir> <to> <file.sbchain> [--from <a> <prev-set.bin>] [--set-digests <prev|-> <fin>]
 //!       The epoch root over prove-epoch-wide's forest (src/recursion/epoch_root.zig): one proof for the
 //!       epoch; writes <dir>/rootvk.bin and <dir>/epochroot-<to>.bin (CPU: small epochs).
-//!   chainproof verify-epoch-root <vk> <file.sbchain> <dir> <to> [--from <a> <prev-set.bin>] [--min-work <hex> | --min-work 0]
+//!   chainproof verify-epoch-root <vk> <file.sbchain> <dir> <to> [--from <a> <prev-set.bin>] [--min-work <hex> | --min-work 0] [--unpinned]
 //!       Verifies the chain proof, the epoch root proof and the balance against <dir>/set-<to>.bin.
 //!   chainproof rebind-block <in.sbblock> <headers.bin> <file.sbchain> <out.sbblock>
-//!   chainproof rebind-forest <vk> <in forestk-<to>.bin> <headers.bin> <file.sbchain> <out>
 //!       Rebuilds a block file's header window for another (longer) chain proof, without re-proving.
+//!   chainproof rebind-forest <vk> <in forestk-<to>.bin> <headers.bin> <file.sbchain> <out>
+//!       The same for a forest's root paths (an epoch proved under an older chain file).
+//!   chainproof setup-vks <out-dir> [--max-m M] [--test-strength] <dir>:<to>[:<from>:<prev-set.bin>]...
+//!       Remakes the epoch layers' VKs (tree, root, join) from the forests and one block proof per
+//!       size key, proving nothing, and says which equal the pinned ones (vk/epoch/).
+//!
+//! The epoch verifiers (verify-epoch-tree, -wide, -root, verify-chain) accept only the pinned VKs in
+//! vk/epoch/, built into this binary: a VK read from the prover's files could name any circuit.
+//! `--unpinned` accepts any VK, for tests (small epochs, test strength); the output says so.
 //!
 //! `headers.bin`: raw 80-byte headers from height 0. CPU only. `--test-strength`: 3 queries, 10
 //! PoW bits (fast, not secure); without it block proofs use the chain proof's 70 queries, 26 bits.
@@ -85,10 +93,15 @@ fn usage() noreturn {
         \\  chainproof verify-block <vk> <file.sbchain> <file.sbblock> [--min-work <hex> | --min-work 0] [--test-strength]
         \\  chainproof rebind-block <in.sbblock> <headers.bin> <file.sbchain> <out.sbblock>
         \\  chainproof rebind-forest <vk> <in forestk-<to>.bin> <headers.bin> <file.sbchain> <out>
+        \\  chainproof set-pass-model <set.bin> [--per N]
+        \\  chainproof setup-vks <out-dir> [--max-m M] [--test-strength] <dir>:<to>[:<from>:<prev-set.bin>]...
         \\  chainproof prove-epoch <headers.bin> <dir> <to> <file.sbchain> [--from <a> <prev-set.bin>] [--test-strength]
         \\  chainproof prove-chain <vk> <file.sbchain> <out-dir> [--max-m M] <dir>:<to>[:<from>:<prev-set.bin>][#<prev-hex|->,<fin-hex>]...
-        \\  chainproof verify-chain <vk> <file.sbchain> <out-dir> [--min-work <hex> | --min-work 0] <dir>:<to>[:<from>:<prev-set.bin>]...
+        \\  chainproof verify-chain <vk> <file.sbchain> <out-dir> [--min-work <hex> | --min-work 0] [--unpinned] <dir>:<to>[:<from>:<prev-set.bin>]...
         \\  chainproof verify-epoch <vk> <file.sbchain> <dir> <to> [--from <a> <prev-set.bin>] [--min-work <hex> | --min-work 0] [--test-strength] [--jobs <n>]
+        \\  chainproof prove-epoch-wide|prove-epoch-tree <headers.bin> <dir> <to> <file.sbchain> [--from <a> <prev-set.bin>] [--test-strength]
+        \\  chainproof prove-epoch-root <headers.bin> <dir> <to> <file.sbchain> [--from <a> <prev-set.bin>] [--set-digests <prev|-> <fin>]
+        \\  chainproof verify-epoch-wide|verify-epoch-tree|verify-epoch-root <vk> <file.sbchain> <dir> <to> [--from <a> <prev-set.bin>] [--min-work <hex> | --min-work 0] [--unpinned]
         \\
     , .{});
     std.process.exit(2);
@@ -202,6 +215,9 @@ pub fn main() !void {
             } else if (std.mem.eql(u8, args[i], "--test-strength")) {
                 from.weak = true;
                 i += 1;
+            } else if (std.mem.eql(u8, args[i], "--unpinned") and std.mem.startsWith(u8, cmd, "verify-")) {
+                from.unpinned = true;
+                i += 1;
             } else if (std.mem.eql(u8, args[i], "--from") and i + 2 < args.len) {
                 from.height = try std.fmt.parseInt(u32, args[i + 1], 10);
                 from.prev_set = args[i + 2];
@@ -240,19 +256,45 @@ pub fn main() !void {
     }
     if (std.mem.eql(u8, cmd, "verify-chain") and args.len >= 7) {
         var min_work: u256 = core_min_work;
+        var unpinned = false;
         var specs: std.ArrayList(ChainSpec) = .empty;
         var i: usize = 5;
         while (i < args.len) {
             if (std.mem.eql(u8, args[i], "--min-work") and i + 1 < args.len) {
                 min_work = try std.fmt.parseInt(u256, args[i + 1], 16);
                 i += 2;
+            } else if (std.mem.eql(u8, args[i], "--unpinned")) {
+                unpinned = true;
+                i += 1;
             } else {
                 try specs.append(a, parseChainSpec(args[i]) catch usage());
                 i += 1;
             }
         }
         if (specs.items.len < 2) usage();
-        return verifyChainCmd(gpa, a, args[2], args[3], args[4], min_work, specs.items);
+        return verifyChainCmd(gpa, a, args[2], args[3], args[4], min_work, unpinned, specs.items);
+    }
+    if (std.mem.eql(u8, cmd, "set-pass-model") and (args.len == 3 or (args.len == 5 and std.mem.eql(u8, args[3], "--per"))))
+        return setPassModel(gpa, args[2], if (args.len == 5) try std.fmt.parseInt(u32, args[4], 10) else 23000);
+    if (std.mem.eql(u8, cmd, "setup-vks") and args.len >= 4) {
+        var max_m: ?usize = null;
+        var weak = false;
+        var specs: std.ArrayList(ChainSpec) = .empty;
+        var i: usize = 3;
+        while (i < args.len) {
+            if (std.mem.eql(u8, args[i], "--max-m") and i + 1 < args.len) {
+                max_m = try std.fmt.parseInt(usize, args[i + 1], 10);
+                i += 2;
+            } else if (std.mem.eql(u8, args[i], "--test-strength")) {
+                weak = true;
+                i += 1;
+            } else {
+                try specs.append(a, parseChainSpec(args[i]) catch usage());
+                i += 1;
+            }
+        }
+        if (specs.items.len == 0) usage();
+        return setupVks(gpa, a, args[2], max_m, weak, specs.items);
     }
     if (std.mem.eql(u8, cmd, "join-demo") and args.len == 8)
         return joinDemo(gpa, a, args[2], try std.fmt.parseInt(u32, args[3], 10), args[4], try std.fmt.parseInt(u32, args[5], 10), try std.fmt.parseInt(u32, args[6], 10), args[7]);
@@ -324,6 +366,58 @@ fn loadVk(a: std.mem.Allocator, path: []const u8) !S.Vk {
     for (&d) |w| std.debug.print("{x:0>8}", .{w});
     std.debug.print(" (queries {d}, pow {d}, segment logs 9..{d})\n", .{ vk.fri.n_queries, vk.fri.pow_bits, vk.max_log });
     return vk;
+}
+
+/// The epoch layers' pinned production VKs (`vk/epoch/`), by kind. A VK names the circuits a proof
+/// must be from; one read from the prover's files could name a circuit that checks nothing, so the
+/// epoch verifiers accept only these (or any, with `--unpinned`, for tests). Each is remade from
+/// public inputs (the forest, one block proof per size key, the circuit programs in this binary) by
+/// `chainproof setup-vks`, byte for byte.
+const PinnedVk = struct { name: []const u8, bytes: []const u8 };
+const VkKind = enum { block, tree, root, join };
+const pinned_vks = struct {
+    const block = [_]PinnedVk{};
+    const tree = [_]PinnedVk{
+        .{ .name = "vk/epoch/tree-935001-945000.vk", .bytes = @embedFile("vk:epoch/tree-935001-945000") },
+        .{ .name = "vk/epoch/tree-945001-972500.vk", .bytes = @embedFile("vk:epoch/tree-945001-972500") },
+    };
+    // Both mainnet epochs' standalone roots (16 children, a previous set, one node shape).
+    const root = [_]PinnedVk{
+        .{ .name = "vk/epoch/root-16-prev.vk", .bytes = @embedFile("vk:epoch/root-16-prev") },
+    };
+    const join = [_]PinnedVk{
+        .{ .name = "vk/epoch/join-935001-972500.vk", .bytes = @embedFile("vk:epoch/join-935001-972500") },
+    };
+};
+
+fn pinnedOf(kind: VkKind) []const PinnedVk {
+    return switch (kind) {
+        .block => &pinned_vks.block,
+        .tree => &pinned_vks.tree,
+        .root => &pinned_vks.root,
+        .join => &pinned_vks.join,
+    };
+}
+
+/// The pinned VK equal to `bytes`, if any.
+fn pinnedName(kind: VkKind, bytes: []const u8) ?[]const u8 {
+    for (pinnedOf(kind)) |p| if (std.mem.eql(u8, p.bytes, bytes)) return p.name;
+    return null;
+}
+
+/// Reads the `kind` VK at `path` and accepts it only when it is a pinned one (`unpinned`: any, said so).
+fn readPinnedVk(a: std.mem.Allocator, kind: VkKind, path: []const u8, unpinned: bool) ![]const u8 {
+    const bytes = try S.readFile(a, path);
+    if (pinnedName(kind, bytes)) |name| {
+        std.debug.print("{s} VK {s}: pinned ({s})\n", .{ @tagName(kind), path, name });
+        return bytes;
+    }
+    if (unpinned) {
+        std.debug.print("{s} VK {s}: NOT PINNED, accepted by --unpinned (tests only: it does not fix the circuits)\n", .{ @tagName(kind), path });
+        return bytes;
+    }
+    std.debug.print("REJECTED: {s} VK {s} is not a pinned production VK (vk/epoch/; --unpinned for tests)\n", .{ @tagName(kind), path });
+    return error.VkNotPinned;
 }
 
 fn fileExists(path: []const u8) bool {
@@ -503,6 +597,8 @@ const EpochFrom = struct {
     size: SizeChoice = .auto,
     /// prove-epoch-tree `--test-strength`: the block proofs were made at test strength.
     weak: bool = false,
+    /// verify-epoch-tree/-wide/-root `--unpinned`: accept VKs that are not pinned (tests).
+    unpinned: bool = false,
     /// verify-epoch `--jobs`: threads verifying block proofs (default: the CPU count).
     jobs: ?u32 = null,
     /// prove-epoch-root `--set-digests <prev> <fin>`: the sets' digests (hex; `-` for no previous set)
@@ -714,7 +810,7 @@ fn verifyEpochTree(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []cons
     const s = try S.verifyChain(gpa, a, tables, &vk, &c);
     if (min_work != 0 and s.work < min_work) return error.InsufficientWork;
     std.debug.print("chain proof verified: headers 0..{d} ({d:.1}s)\n", .{ s.headers - 1, secs(timer.lap()) });
-    const bvk = try BF.Vk.decode(try S.readFile(a, try std.fmt.allocPrint(a, "{s}/blockvk.bin", .{dir})));
+    const bvk = try BF.Vk.decode(try readPinnedVk(a, .block, try std.fmt.allocPrint(a, "{s}/blockvk.bin", .{dir}), from.unpinned));
     var forest = try BF.Forest.decode(gpa, a, try S.readFile(a, try std.fmt.allocPrint(a, "{s}/forest-{d}.bin", .{ dir, to })));
     defer for (forest.roots) |*r| r.proved.proof.deinit();
     if (forest.from != from.height or forest.to != to) return error.WrongEpoch;
@@ -937,6 +1033,7 @@ fn sameHead(a: std.mem.Allocator, x: *const ERoot.Head, y: *const ERoot.Head) !b
 fn proveChain(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8, chain_path: []const u8, out: []const u8, max_m_opt: ?usize, specs: []const ChainSpec) !void {
     var timer = try std.time.Timer.start();
     if (specs.len < 2) return error.NeedTwoEpochs;
+    try std.fs.cwd().makePath(out);
     const vk = try loadVk(a, vk_path);
     const tables = try L.Tables.init(gpa);
     defer tables.deinit(gpa);
@@ -1039,10 +1136,101 @@ fn proveChain(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8,
     }
 }
 
+/// `setup-vks <out-dir> [--max-m M] [--test-strength] <dir>:<to>[:<from>:<prev-set>]...`: the epoch
+/// layers' VKs remade from public inputs alone: each epoch's forest (its size keys) and one block
+/// proof per key from `<dir>/proofs` (as prove-chain reads them), and the circuit programs in this
+/// binary. No proof is made. Writes `<out>/tree-<to>.vk` and `<out>/root-<to>.vk` per epoch and, for
+/// two or more epochs, `<out>/join.vk` (the chain's shapes as prove-chain sets them), and says which
+/// equal a pinned VK (vk/epoch/): this is how a pinned VK is checked to be the honest circuits'.
+fn setupVks(gpa: std.mem.Allocator, a: std.mem.Allocator, out: []const u8, max_m_opt: ?usize, weak: bool, specs: []const ChainSpec) !void {
+    var timer = try std.time.Timer.start();
+    const tables = try L.Tables.init(gpa);
+    defer tables.deinit(gpa);
+    try std.fs.cwd().makePath(out);
+    const airs = try a.create([BS.N_COMP]sb.air.ir.Air);
+    airs.* = try BS.parseAirs(a);
+    const bfri = blockFri(weak);
+    const roots = try a.create(PF.PreRoots);
+    roots.* = .{ .airs = airs, .fri = bfri };
+    const n = specs.len;
+    const shapes = try a.alloc(BT.Shapes, n);
+    var n_shapes: usize = 0;
+    defer for (shapes[0..n_shapes]) |*sh| sh.deinit(gpa);
+    const tvks = try a.alloc(BT.Vk, n);
+    const setups = try a.alloc(EJ.EpochSetup, n);
+    var max_m: usize = 0;
+    var all_pinned = true;
+    for (specs, shapes, tvks, setups) |sp, *sh, *tvk, *st| {
+        const forest = try BT.Forest.decode(gpa, a, try S.readFile(a, try std.fmt.allocPrint(a, "{s}/forestk-{d}.bin", .{ sp.dir, sp.to })));
+        defer for (forest.roots) |*r| r.proved.proof.deinit();
+        if (forest.from != sp.from.height or forest.to != sp.to) return error.WrongEpoch;
+        const firsts = try BT.firstsOf(a, .{ .dir = sp.dir }, sp.from.height, forest.logs);
+        const su = try BT.setup(gpa, a, tables, airs, firsts, bfri, roots);
+        sh.* = su.shapes;
+        n_shapes += 1;
+        tvk.* = su.vk;
+        const m = forest.roots.len;
+        const prev = sp.from.height != 0;
+        st.* = .{ .tshapes = sh, .tvk = tvk, .m = m, .prev = prev };
+        max_m = @max(max_m, m);
+        all_pinned = try writeVk(a, .tree, try std.fmt.allocPrint(a, "{s}/tree-{d}.vk", .{ out, sp.to }), try tvk.encode(a)) and all_pinned;
+        const rvk = try ERoot.setupVk(gpa, tables, sh, m, prev);
+        all_pinned = try writeVk(a, .root, try std.fmt.allocPrint(a, "{s}/root-{d}.vk", .{ out, sp.to }), try rvk.encode(a)) and all_pinned;
+        std.debug.print("  epoch {d}..{d}: {d} size keys, {d} children ({d:.1}s)\n", .{ sp.from.height, sp.to, firsts.len, m, secs(timer.lap()) });
+    }
+    if (n >= 2) {
+        if (max_m_opt) |m| {
+            if (m < max_m) return error.MaxMTooSmall;
+            max_m = m;
+        }
+        // As prove-chain: the node configurations, each once; the root and join shapes; the VK.
+        var shareds: std.ArrayList(*const @TypeOf(shapes[0].node.shared)) = .empty;
+        var tags: std.ArrayList([8]u32) = .empty;
+        for (shapes, tvks) |*sh, *tvk| {
+            const tag = EJ.nodeTag(tvk);
+            if (for (tags.items) |t| {
+                if (std.mem.eql(u32, &t, &tag)) break true;
+            } else false) continue;
+            try tags.append(a, tag);
+            try shareds.append(a, &sh.node.shared);
+        }
+        var js = try EJ.Shapes.init(gpa, &tables.table, try EJ.rootTarget(gpa, &tables.table, max_m, shareds.items), BT.circuitFri());
+        defer js.deinit(gpa);
+        const jvk = try EJ.setupVk(gpa, a, tables, &js, setups);
+        all_pinned = try writeVk(a, .join, try std.fmt.allocPrint(a, "{s}/join.vk", .{out}), try jvk.encode(a)) and all_pinned;
+        std.debug.print("  chain: roots (up to {d} children) at 2^{d}, joins at 2^{d} ({d:.1}s)\n", .{ max_m, jvk.root_log, jvk.join_log, secs(timer.lap()) });
+    }
+    std.debug.print("{s}\n", .{if (all_pinned) "every VK remade equals a pinned one" else "some VKs remade are not pinned (see above)"});
+}
+
+/// Writes a remade VK and says whether it is a pinned one.
+fn writeVk(a: std.mem.Allocator, kind: VkKind, path: []const u8, bytes: []const u8) !bool {
+    _ = a;
+    try S.writeFileAtomic(path, bytes);
+    if (pinnedName(kind, bytes)) |name| {
+        std.debug.print("{s} VK {s}: equals the pinned {s}\n", .{ @tagName(kind), path, name });
+        return true;
+    }
+    std.debug.print("{s} VK {s}: not pinned\n", .{ @tagName(kind), path });
+    return false;
+}
+
+/// `set-pass-model <set.bin> [--per N]`: the coin-set pass's native model (`block.set_pass`) over a set
+/// file in segments of N records (default 23,000): its facts, which must equal `scan`'s, and its sizing.
+fn setPassModel(gpa: std.mem.Allocator, path: []const u8, per: u32) !void {
+    var timer = try std.time.Timer.start();
+    const SP = sb.block.set_pass;
+    const chs = [_]sb.block.coin.Challenge{sb.block.epoch.challenge(@splat(7))};
+    const f = try SP.runFile(gpa, path, &chs, per);
+    std.debug.print("{s}: {d} coins, amount {d} sat, highest coin at {d}\n", .{ path, f.count, f.amount, f.max_height });
+    std.debug.print("  hash_serialized {x}\n  digest          {x}\n", .{ f.hash, f.digest });
+    std.debug.print("  file {d} bytes ({d} Blake2s blocks), TxOutSer {d} bytes ({d} SHA-256 blocks); {d} segments of {d} records ({d:.1}s)\n", .{ f.file_bytes, f.b2_blocks, f.sha_bytes, f.sha_blocks, (f.count + per - 1) / per, per, secs(timer.lap()) });
+}
+
 /// `verify-chain <vk> <file.sbchain> <out-dir> <epoch>...`: the chain proof `<out>/chain-<to>.bin` (to:
 /// the last epoch's) under `<out>/joinvk.bin`, each epoch's tree VK from its dir, and each epoch's
 /// balance against its sets (the previous set given, the final `<dir>/set-<to>.bin`).
-fn verifyChainCmd(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8, chain_path: []const u8, out: []const u8, min_work: u256, specs: []const ChainSpec) !void {
+fn verifyChainCmd(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8, chain_path: []const u8, out: []const u8, min_work: u256, unpinned: bool, specs: []const ChainSpec) !void {
     var timer = try std.time.Timer.start();
     const vk = try loadVk(a, vk_path);
     const tables = try L.Tables.init(gpa);
@@ -1052,7 +1240,7 @@ fn verifyChainCmd(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const
     const s = try S.verifyChain(gpa, a, tables, &vk, &c);
     if (min_work != 0 and s.work < min_work) return error.InsufficientWork;
     std.debug.print("chain proof verified: headers 0..{d} ({d:.1}s)\n", .{ s.headers - 1, secs(timer.lap()) });
-    const jvk = try EJ.Vk.decode(a, try S.readFile(a, try std.fmt.allocPrint(a, "{s}/joinvk.bin", .{out})));
+    const jvk = try EJ.Vk.decode(a, try readPinnedVk(a, .join, try std.fmt.allocPrint(a, "{s}/joinvk.bin", .{out}), unpinned));
     var file = try EJ.ChainFile.decode(gpa, a, try S.readFile(a, try std.fmt.allocPrint(a, "{s}/chain-{d}.bin", .{ out, specs[specs.len - 1].to })));
     defer file.proof.deinit();
     const ins = try a.alloc(EJ.EpochIn, specs.len);
@@ -1060,7 +1248,7 @@ fn verifyChainCmd(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const
     const inits = try a.alloc(@TypeOf(try ER.loadInit(gpa, .{})), specs.len);
     const fins = try a.alloc(@TypeOf(try SF.scan(gpa, "", null)), specs.len);
     for (specs, ins, tvks, inits, fins) |sp, *in, *tvk, *init, *fin| {
-        tvk.* = try BT.Vk.decode(try S.readFile(a, try std.fmt.allocPrint(a, "{s}/treevk.bin", .{sp.dir})));
+        tvk.* = try BT.Vk.decode(try readPinnedVk(a, .tree, try std.fmt.allocPrint(a, "{s}/treevk.bin", .{sp.dir}), unpinned));
         init.* = try ER.loadInit(gpa, .{ .height = sp.from.height, .prev_set = sp.from.prev_set });
         fin.* = try SF.scan(gpa, try std.fmt.allocPrint(a, "{s}/set-{d}.bin", .{ sp.dir, sp.to }), null);
         in.* = .{ .tvk = tvk, .ep = .{ .from = sp.from.height, .to = sp.to, .prev = if (init.info) |x| x.digest else null, .fin = fin.digest } };
@@ -1144,8 +1332,8 @@ fn verifyEpochRoot(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []cons
     const s = try S.verifyChain(gpa, a, tables, &vk, &c);
     if (min_work != 0 and s.work < min_work) return error.InsufficientWork;
     std.debug.print("chain proof verified: headers 0..{d} ({d:.1}s)\n", .{ s.headers - 1, secs(timer.lap()) });
-    const tvk = try BT.Vk.decode(try S.readFile(a, try std.fmt.allocPrint(a, "{s}/treevk.bin", .{dir})));
-    const rvk = try ERoot.RootVk.decode(try S.readFile(a, try std.fmt.allocPrint(a, "{s}/rootvk.bin", .{dir})));
+    const tvk = try BT.Vk.decode(try readPinnedVk(a, .tree, try std.fmt.allocPrint(a, "{s}/treevk.bin", .{dir}), from.unpinned));
+    const rvk = try ERoot.RootVk.decode(try readPinnedVk(a, .root, try std.fmt.allocPrint(a, "{s}/rootvk.bin", .{dir}), from.unpinned));
     var file = try ERoot.File.decode(gpa, a, try S.readFile(a, try std.fmt.allocPrint(a, "{s}/epochroot-{d}.bin", .{ dir, to })));
     defer file.proof.deinit();
     const init = try ER.loadInit(gpa, .{ .height = from.height, .prev_set = from.prev_set });
@@ -1179,7 +1367,7 @@ fn verifyEpochWide(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []cons
     const s = try S.verifyChain(gpa, a, tables, &vk, &c);
     if (min_work != 0 and s.work < min_work) return error.InsufficientWork;
     std.debug.print("chain proof verified: headers 0..{d} ({d:.1}s)\n", .{ s.headers - 1, secs(timer.lap()) });
-    const tvk = try BT.Vk.decode(try S.readFile(a, try std.fmt.allocPrint(a, "{s}/treevk.bin", .{dir})));
+    const tvk = try BT.Vk.decode(try readPinnedVk(a, .tree, try std.fmt.allocPrint(a, "{s}/treevk.bin", .{dir}), from.unpinned));
     var forest = try BT.Forest.decode(gpa, a, try S.readFile(a, try std.fmt.allocPrint(a, "{s}/forestk-{d}.bin", .{ dir, to })));
     defer for (forest.roots) |*r| r.proved.proof.deinit();
     if (forest.from != from.height or forest.to != to) return error.WrongEpoch;
