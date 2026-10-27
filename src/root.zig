@@ -45,6 +45,7 @@ pub const recursion = struct {
     pub const block_node_k = @import("recursion/block_node_k.zig");
     pub const block_forest = @import("recursion/block_forest.zig");
     pub const block_tree = @import("recursion/block_tree.zig");
+    pub const set_tree = @import("recursion/set_tree.zig");
     pub const epoch_root = @import("recursion/epoch_root.zig");
     pub const epoch_join = @import("recursion/epoch_join.zig");
 };

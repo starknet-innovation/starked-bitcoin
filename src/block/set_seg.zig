@@ -220,11 +220,10 @@ fn setHash(pubs: *[N_PUB]M31, base: usize, s: HashSt) void {
     for (0..64) |j| pubs[base + 18 + j] = f(s.pend[j]);
 }
 
-fn setPubs(pubs: *[N_PUB]M31, len: usize, ch: coin.Challenge, in: State, out: State) void {
+/// The challenge and the incoming state `in` as public inputs (everything else zero).
+pub fn statePubsIn(pubs: *[N_PUB]M31, ch: coin.Challenge, in: State) void {
     @memset(pubs, M31.zero());
-    pubs[PUB_LEN] = f(len);
     pubs[PUB_I_IN] = f(in.i);
-    pubs[PUB_I_OUT] = f(out.i);
     if (in.last) |k| {
         pubs[PUB_HASLAST] = M31.one();
         for (0..36) |j| pubs[PUB_LAST_IN + j] = f(k[j]);
@@ -236,16 +235,20 @@ fn setPubs(pubs: *[N_PUB]M31, len: usize, ch: coin.Challenge, in: State, out: St
         pubs[PUB_ALPHA + 4 * i + j] = v;
     };
     for (in.sum.toM31Array(), 0..) |v, j| pubs[PUB_SUM_IN + j] = v;
+    for (0..12) |j| pubs[PUB_AMT_IN + j] = f(@as(u8, @truncate(in.amount >> @intCast(8 * j))));
+    setHash(pubs, B2_IN, in.b2);
+    setHash(pubs, SHA_IN, in.sha);
+}
+
+fn setPubs(pubs: *[N_PUB]M31, len: usize, ch: coin.Challenge, in: State, out: State) void {
+    statePubsIn(pubs, ch, in);
+    pubs[PUB_LEN] = f(len);
+    pubs[PUB_I_OUT] = f(out.i);
     for (out.sum.toM31Array(), 0..) |v, j| pubs[PUB_SUM_OUT + j] = v;
     pubs[PUB_MAXH_OUT] = f(out.max_h);
-    for (0..12) |j| {
-        pubs[PUB_AMT_IN + j] = f(@as(u8, @truncate(in.amount >> @intCast(8 * j))));
-        pubs[PUB_AMT_OUT + j] = f(@as(u8, @truncate(out.amount >> @intCast(8 * j))));
-    }
+    for (0..12) |j| pubs[PUB_AMT_OUT + j] = f(@as(u8, @truncate(out.amount >> @intCast(8 * j))));
     for (0..36) |j| pubs[PUB_LAST_OUT + j] = f(out.last.?[j]);
-    setHash(pubs, B2_IN, in.b2);
     setHash(pubs, B2_OUT, out.b2);
-    setHash(pubs, SHA_IN, in.sha);
     setHash(pubs, SHA_OUT, out.sha);
 }
 
@@ -254,6 +257,63 @@ const PendReads = [4][64]u32;
 
 /// The witnesses of one segment `seg` (whole records) from state `in`.
 pub fn build(a: std.mem.Allocator, ch: coin.Challenge, in: State, seg: []const u8) !Built {
+    return buildAt(a, ch, in, seg, null);
+}
+
+/// The component logs a segment needs (each at its floor or above), from its byte length, record
+/// count, `ser` bytes and the incoming pending lengths.
+pub fn minLogs(seg_len: usize, n_recs: usize, ser_len: usize, b2p: usize, shap: usize) [N_COMP]u32 {
+    const xs = b2p + seg_len;
+    const m_b2 = if (xs > 64) (xs + 63) / 64 - 1 else 0;
+    const ys = shap + 40 * n_recs + ser_len;
+    const m_sha = ys / 64;
+    return .{
+        logFor(seg_len, 6),
+        8,
+        6,
+        logFor(n_recs + 1, 6),
+        logFor(ser_len + 1, 6),
+        logFor(16 * (m_b2 + 1) + 1, 6),
+        logFor(b2.PERIOD * m_b2, 8),
+        logFor(ys + 1, 6),
+        logFor(shaw.PERIOD * m_sha, 8),
+    };
+}
+
+fn fitsIn(need: [N_COMP]u32, logs: [N_COMP]u32) bool {
+    for (need, logs) |n, l| if (n > l) return false;
+    return true;
+}
+
+/// Cuts a set file's records into segments that fit `logs` (with full pending buffers, so whatever the
+/// incoming state): greedy, each segment as long as fits. Returns each segment's end offset.
+pub fn cut(a: std.mem.Allocator, file: []const u8, logs: [N_COMP]u32) ![]usize {
+    var ends: std.ArrayList(usize) = .empty;
+    var at: usize = 4;
+    while (at < file.len) {
+        var end = at;
+        var n: usize = 0;
+        var ser: usize = 0;
+        while (end < file.len) {
+            if (file.len - end < HEAD) return error.Truncated;
+            const l = std.mem.readInt(u32, file[end + 45 ..][0..4], .little);
+            const next = end + HEAD + l;
+            if (next > file.len) return error.Truncated;
+            if (!fitsIn(minLogs(next - at, n + 1, ser + l, 64, 63), logs)) break;
+            end = next;
+            n += 1;
+            ser += l;
+        }
+        if (n == 0) return error.RecordTooLarge;
+        try ends.append(a, end);
+        at = end;
+    }
+    return ends.toOwnedSlice(a);
+}
+
+/// `build` at fixed component logs `fixed` (a pass's leaves share one shape), when given: the segment
+/// must fit them.
+pub fn buildAt(a: std.mem.Allocator, ch: coin.Challenge, in: State, seg: []const u8, fixed: ?[N_COMP]u32) !Built {
     const recs = try parse(a, seg);
     var out = in;
     var reads: std.ArrayList(u32) = .empty;
@@ -312,17 +372,11 @@ pub fn build(a: std.mem.Allocator, ch: coin.Challenge, in: State, seg: []const u
 
     var ser_len: usize = 0;
     for (recs) |r| ser_len += r.ser.len;
-    b.logs = .{
-        logFor(seg.len, 6),
-        8,
-        6,
-        logFor(recs.len + 1, 6),
-        logFor(ser_len + 1, 6),
-        logFor(16 * (m_b2 + 1) + 1, 6),
-        logFor(b2.PERIOD * m_b2, 8),
-        logFor(ys.len + 1, 6),
-        logFor(shaw.PERIOD * m_sha, 8),
-    };
+    b.logs = minLogs(seg.len, recs.len, ser_len, in.b2.plen, in.sha.plen);
+    if (fixed) |fx| {
+        if (!fitsIn(b.logs, fx)) return error.SegmentTooLarge;
+        b.logs = fx;
+    }
 
     b.mains[C.rec] = try recColumns(a, b.logs[C.rec], ch, in, recs, fracs, &reads, &ranges);
     var segs = try a.alloc(coin.Seg, recs.len);

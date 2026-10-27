@@ -131,6 +131,8 @@ pub fn build(b: *std.Build) void {
     lib.addAnonymousImport("air:set_b2c", .{ .root_source_file = b.path("airs/set_b2c.json") });
     lib.addAnonymousImport("air:set_tmsg", .{ .root_source_file = b.path("airs/set_tmsg.json") });
     lib.addAnonymousImport("air:set_shac", .{ .root_source_file = b.path("airs/set_shac.json") });
+    lib.addAnonymousImport("air:set_leaf_out", .{ .root_source_file = b.path("airs/set_leaf_out.json") });
+    lib.addAnonymousImport("air:set_node_glue", .{ .root_source_file = b.path("airs/set_node_glue.json") });
     lib.addAnonymousImport("air:block_reader", .{ .root_source_file = b.path("airs/block_reader.json") });
     lib.addAnonymousImport("air:block_sha", .{ .root_source_file = b.path("airs/block_sha.json") });
     lib.addAnonymousImport("air:block_msg", .{ .root_source_file = b.path("airs/block_msg.json") });
