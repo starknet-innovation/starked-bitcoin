@@ -106,6 +106,7 @@ fn usage() noreturn {
         \\  chainproof verify-chain <vk> <file.sbchain> <out-dir> [--min-work <hex> | --min-work 0] [--unpinned] [--set-proofs] <dir>:<to>[:<from>:<prev-set.bin>]...
         \\  chainproof prove-set <set.bin> <dir>:<to>[:<from>:<prev-set.bin>] <work-dir> [--test-strength] [--logs l0,...,l8]
         \\  chainproof verify-set <work-dir> <dir>:<to>[:<from>:<prev-set.bin>] [--unpinned]
+        \\  chainproof set-cut <set.bin> [--logs l0,...,l8]
         \\  chainproof verify-epoch <vk> <file.sbchain> <dir> <to> [--from <a> <prev-set.bin>] [--min-work <hex> | --min-work 0] [--test-strength] [--jobs <n>]
         \\  chainproof prove-epoch-wide|prove-epoch-tree <headers.bin> <dir> <to> <file.sbchain> [--from <a> <prev-set.bin>] [--test-strength]
         \\  chainproof prove-epoch-root <headers.bin> <dir> <to> <file.sbchain> [--from <a> <prev-set.bin>] [--set-digests <prev|-> <fin>]
@@ -306,6 +307,14 @@ pub fn main() !void {
             } else usage();
         }
         return proveSet(gpa, a, args[2], parseChainSpec(args[3]) catch usage(), args[4], weak, logs orelse default_set_logs);
+    }
+    if (std.mem.eql(u8, cmd, "set-cut") and (args.len == 3 or (args.len == 5 and std.mem.eql(u8, args[3], "--logs")))) {
+        var logs = default_set_logs;
+        if (args.len == 5) {
+            var it = std.mem.splitScalar(u8, args[4], ',');
+            for (&logs) |*l| l.* = try parseU32(it.next() orelse usage());
+        }
+        return setCut(gpa, args[2], logs);
     }
     if (std.mem.eql(u8, cmd, "verify-set") and (args.len == 4 or (args.len == 5 and std.mem.eql(u8, args[4], "--unpinned"))))
         return verifySet(gpa, a, args[2], parseChainSpec(args[3]) catch usage(), args.len == 5);
@@ -1554,8 +1563,10 @@ const ST = sb.recursion.set_tree;
 const SSG = sb.block.set_seg;
 
 /// Production component logs of a segment (bytes, tables, pending, records, fingerprints, Blake2s words,
-/// Blake2s, `TxOutSer`, SHA-256): ~70k records of ~85 bytes per segment.
-const default_set_logs: ST.Logs = .{ 23, 8, 6, 17, 22, 19, 23, 23, 23 };
+/// Blake2s, `TxOutSer`, SHA-256). Blake2s binds (88 rows per 64 bytes): 2^23 rows hold ~95k blocks,
+/// ~6.1 MB of file, ~71k records; the others then fit 2^23 (bytes, `TxOutSer`, SHA-256), 2^22
+/// (`ser` bytes), 2^21 (16 rows per block), 2^17 (records).
+const default_set_logs: ST.Logs = .{ 23, 8, 6, 17, 22, 21, 23, 23, 23 };
 
 /// Core's assumeUTXO `hash_serialized` anchors (`src/kernel/chainparams.cpp`, mainnet; line 211 at
 /// commit `c067aa71`, the copy in `data/core-src`): the set after each height, as printed by Core.
@@ -1699,4 +1710,40 @@ fn verifyChainSetProofs(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: [
     std.debug.print("VERIFIED blocks {d}..{d} as one chain proof, sets by set-pass proofs: the coin set after block {d} is {d} coins\n", .{ specs[0].from.height, specs[specs.len - 1].to, specs[specs.len - 1].to, last.count });
     std.debug.print("  total amount     {d} sat\n", .{last.amount});
     std.debug.print("  hash_serialized  {x}  (Core's HASH_SERIALIZED of this set)\n", .{last.hash});
+}
+
+/// `set-cut`: the segments a set file cuts into at `logs` (`set_seg.cut`, streamed coin by coin).
+fn setCut(gpa: std.mem.Allocator, path: []const u8, logs: ST.Logs) !void {
+    var timer = try std.time.Timer.start();
+    var rd: SF.Reader = undefined;
+    try rd.init(gpa, path);
+    defer rd.deinit();
+    var segs: u64 = 0;
+    var coins: u64 = 0;
+    var seg_len: usize = 0;
+    var n: usize = 0;
+    var ser: usize = 0;
+    var min_recs: usize = std.math.maxInt(usize);
+    while (try rd.next()) |c| {
+        const l = c.ser.len;
+        const need = SSG.minLogs(seg_len + SSG.HEAD + l, n + 1, ser + l, 64, 63);
+        var fits = true;
+        for (need, logs) |x, y| if (x > y) {
+            fits = false;
+        };
+        if (!fits) {
+            if (n == 0) return error.RecordTooLarge;
+            segs += 1;
+            min_recs = @min(min_recs, n);
+            seg_len = 0;
+            n = 0;
+            ser = 0;
+        }
+        seg_len += SSG.HEAD + l;
+        n += 1;
+        ser += l;
+        coins += 1;
+    }
+    if (n > 0) segs += 1;
+    std.debug.print("{s}: {d} coins in {d} segments at logs {any} (~{d} coins each, fewest {d}; {d:.1}s)\n", .{ path, coins, segs, logs, coins / @max(segs, 1), min_recs, secs(timer.lap()) });
 }
