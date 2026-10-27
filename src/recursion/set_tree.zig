@@ -549,6 +549,148 @@ pub fn outStateVec(ch: coin.Challenge, st: SS.State) Vec {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Set-pass proofs: a whole set file's pass under one challenge
+
+pub const PASS_MAGIC = "SBSETPAS";
+
+/// A set pass: the segment count, the file's count bytes, the final state, the tree's root.
+pub const Pass = struct {
+    k: u32,
+    count: [4]u8,
+    final: SS.State,
+    root: Proved,
+};
+
+fn encHash(e: *store.Enc, h: SS.HashSt) !void {
+    try e.words(&h.h);
+    try e.int(u32, h.nb);
+    try e.int(u8, h.plen);
+    try e.buf.appendSlice(e.a, &h.pend);
+}
+
+fn decHash(d: *store.Dec) !SS.HashSt {
+    var h: SS.HashSt = .{ .h = try d.words(8) };
+    h.nb = try d.int(u32);
+    h.plen = try d.int(u8);
+    if (h.plen > 64) return error.BadState;
+    @memcpy(&h.pend, try d.take(64));
+    return h;
+}
+
+fn encState(e: *store.Enc, st: SS.State) !void {
+    try e.int(u32, st.i);
+    try e.int(u8, @intFromBool(st.last != null));
+    try e.buf.appendSlice(e.a, &(st.last orelse @as([36]u8, @splat(0))));
+    try e.int(u32, st.max_h);
+    for (st.sum.toM31Array()) |x| try e.int(u32, x.toU32());
+    try e.int(u128, st.amount);
+    try encHash(e, st.b2);
+    try encHash(e, st.sha);
+}
+
+fn decState(d: *store.Dec) !SS.State {
+    var st: SS.State = .{ .b2 = undefined, .sha = undefined };
+    st.i = try d.int(u32);
+    const has = try d.int(u8);
+    const last = (try d.take(36))[0..36].*;
+    st.last = switch (has) {
+        0 => null,
+        1 => last,
+        else => return error.BadState,
+    };
+    st.max_h = try d.int(u32);
+    var v: [4]M31 = undefined;
+    for (&v) |*x| x.* = try m31(try d.int(u32));
+    st.sum = QM31.fromM31Array(v);
+    st.amount = try d.int(u128);
+    st.b2 = try decHash(d);
+    st.sha = try decHash(d);
+    return st;
+}
+
+pub fn encodePass(a: std.mem.Allocator, p: *const Pass) ![]u8 {
+    var e: store.Enc = .{ .a = a };
+    try e.buf.appendSlice(a, PASS_MAGIC);
+    try e.int(u32, store.VERSION);
+    try e.int(u32, p.k);
+    try e.buf.appendSlice(a, &p.count);
+    try encState(&e, p.final);
+    try store.encodeCircuit(&e, &p.root.proof, p.root.key, &p.root.sum);
+    return store.seal(&e);
+}
+
+pub fn decodePass(gpa: std.mem.Allocator, a: std.mem.Allocator, bytes: []const u8) !Pass {
+    var d: store.Dec = .{ .bytes = try store.unseal(bytes) };
+    try d.magic(PASS_MAGIC);
+    var p: Pass = undefined;
+    p.k = try d.int(u32);
+    p.count = (try d.take(4))[0..4].*;
+    p.final = try decState(&d);
+    var sum: Summary = undefined;
+    const c = try store.decodeCircuit(gpa, a, &d, &sum);
+    p.root = .{ .proof = c.proof, .key = c.key, .sum = sum };
+    if (d.pos != d.bytes.len) return error.TrailingBytes;
+    return p;
+}
+
+/// What a set pass proves about its file (Lean `SetFile.finish`): the count, amount, highest coin height,
+/// the fraction sum under the challenge, the Blake2s digest and Core's `hash_serialized`.
+pub const Facts = struct { count: u32, amount: u128, max_height: u32, sum: QM31, digest: [32]u8, hash: [32]u8 };
+
+/// The facts the pass's final state gives (`finish`; the root is not checked).
+pub fn factsOf(p: *const Pass) !Facts {
+    const n = std.mem.readInt(u32, &p.count, .little);
+    if (p.final.i != n) return error.CountMismatch;
+    const fin = SS.finish(p.final);
+    return .{ .count = n, .amount = p.final.amount, .max_height = p.final.max_h, .sum = p.final.sum, .digest = fin.digest, .hash = fin.hash };
+}
+
+/// **Verifies a set pass under `ch`**: the root binds the start state `begin(count)` and the final state
+/// (`verifyRoot`), the final count is the file's; returns the facts.
+pub fn verifyPass(gpa: std.mem.Allocator, tables: *const leaf.Tables, vk: *const Vk, p: *const Pass, ch: coin.Challenge) !Facts {
+    try verifyRoot(gpa, tables, vk, &p.root, p.k, ch, p.count, p.final);
+    return factsOf(p);
+}
+
+/// Proves a whole set file's pass under `ch`: segments cut at `logs`, each proved (kept as
+/// `<dir>/seg/<i>.sbseg` and reused when present), the VK from the first, then the tree.
+pub fn provePass(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const leaf.Tables, airs: *const [N_COMP]ir.Air, file: []const u8, ch: coin.Challenge, logs: Logs, sfri: FriConfigV2, cfri: FriConfigV2, dir: []const u8) !struct { pass: Pass, vk: Vk, shape: Shape } {
+    if (file.len < 4) return error.Truncated;
+    const ends = try SS.cut(a, file, logs);
+    try std.fs.cwd().makePath(try std.fmt.allocPrint(a, "{s}/seg", .{dir}));
+    const files = try a.alloc(SegFile, ends.len);
+    var st = SS.begin(file[0..4].*);
+    var at: usize = 4;
+    var timer = try std.time.Timer.start();
+    for (files, ends, 0..) |*f, end, i| {
+        var scratch = std.heap.ArenaAllocator.init(gpa);
+        defer scratch.deinit();
+        const b = try SS.buildAt(scratch.allocator(), ch, st, file[at..end], logs);
+        const path = try std.fmt.allocPrint(a, "{s}/seg/{d}.sbseg", .{ dir, i });
+        const bytes = store.readFile(a, path) catch |err| switch (err) {
+            error.FileNotFound => blk: {
+                const p = try proveSeg(scratch.allocator(), airs, &b, sfri);
+                const enc = try encodeSeg(a, &p);
+                try store.writeFileAtomic(path, enc);
+                break :blk enc;
+            },
+            else => return err,
+        };
+        f.* = try decodeSeg(a, bytes);
+        for (f.pubs, b.pubs) |x, y| if (!x.eql(y)) return error.StaleSegment;
+        if (!std.meta.eql(f.logs, logs)) return error.StaleSegment;
+        st = b.out;
+        at = end;
+    }
+    std.debug.print("{d} segments ({d} records) proved in {d:.1}s\n", .{ files.len, st.i, @as(f64, @floatFromInt(timer.lap())) / 1e9 });
+    var su = try setup(gpa, a, tables, airs, &files[0], sfri, cfri);
+    errdefer su.shape.deinit(gpa);
+    const root = try proveTree(gpa, a, tables, &su.shape, airs, files, sfri);
+    std.debug.print("tree over {d} segments proved in {d:.1}s\n", .{ files.len, @as(f64, @floatFromInt(timer.lap())) / 1e9 });
+    return .{ .pass = .{ .k = @intCast(files.len), .count = file[0..4].*, .final = st, .root = root }, .vk = su.vk, .shape = su.shape };
+}
+
+// ---------------------------------------------------------------------------------------------
 
 test "set tree: state vectors match the segment's public inputs; summaries link" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

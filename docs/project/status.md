@@ -4,7 +4,7 @@ Rewritten at the end of every session; see [README.md](README.md#ending-a-sessio
 If `HEAD at last update` doesn't match `git log -1`, this file is stale:
 follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work).
 
-- **Updated:** 2026-10-27 (session 23: coin-set pass step 3 done, the segment system's soundness)
+- **Updated:** 2026-10-27 (session 23: coin-set pass steps 3–5 done on small sets)
 - **HEAD at last update:** see `git log -1` (this file is committed with the work)
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
 - **Current item:** the coin-set pass (D-048, docs/design/set-pass.md), so `verify-chain` needs no
@@ -12,7 +12,9 @@ follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work)
   VKs only (D-047) and with the compact header file (D-049: 0.99 MB instead of 13.8 MB). The pass's
   native model (`set_pass.zig`), Lean spec (`Spec/SetFile.lean`, `pass_sound`) and the segment
   circuit (`lean/StarkedAir/SetPass/`, `src/block/set_seg.zig`; tested on small sets) are done, and
-  so is its soundness (`SetPass.set_seg_sound`, standard axioms). Next: the set tree (step 4). Branch
+  so is its soundness (`SetPass.set_seg_sound`), the set tree (`set_root_sound`) and `verify-chain
+  --set-proofs` (steps 4–5, tested on the small test chain). Next: step 6, the real sets on GPU
+  (needs the owner's approval of the spend). Branch
   `rec/epoch-root` pushed through 949cbe3; later commits not pushed. See log.md, sessions 22–23.
   (The paragraphs below date from 2026-10-12.)
 
@@ -132,11 +134,12 @@ open StarkedAir.HeaderChain StarkedAir.Spec.Bitcoin
 #print axioms StarkedAir.Block.commit_sound
 #print axioms StarkedAir.Block.hash_pub
 #print axioms StarkedAir.SetPass.set_seg_sound
+#print axioms StarkedAir.SetPass.set_root_sound
 EOS
 (cd lean && lake env lean /tmp/ax.lean)  # expect: propext, Classical.choice, Quot.sound
 
 # JSON drift: committed AIRs must equal the Lean export
-(cd lean && for n in add32_chain sha256_compress header_chain probe_oracle byte_table byte_user blake2s_compress blake2s_tree header_chain_v7 node_glue leaf_glue block_bytes block_reader block_fields block_msg block_sha block_merkle block_tables block_walk block_ctx block_wmerkle block_undo block_b2msg block_b2s extsum_test genesis_checks set_pend set_rec set_b2w set_b2c set_tmsg set_shac; do
+(cd lean && for n in add32_chain sha256_compress header_chain probe_oracle byte_table byte_user blake2s_compress blake2s_tree header_chain_v7 node_glue leaf_glue block_bytes block_reader block_fields block_msg block_sha block_merkle block_tables block_walk block_ctx block_wmerkle block_undo block_b2msg block_b2s extsum_test genesis_checks set_pend set_rec set_b2w set_b2c set_tmsg set_shac set_leaf_out set_node_glue; do
   lake env lean --run Export.lean $n | cmp -s - ../airs/$n.json && echo "$n ok" || echo "$n DRIFT"; done)
 
 python3 ~/.claude/skills/document/scripts/check_docs.py .   # expect: 0 errors

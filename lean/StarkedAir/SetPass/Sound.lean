@@ -31,7 +31,8 @@ open StarkedAir.Spec.QM31 (QM toQ emb)
 def EncB2 (pub : ℕ → F) (bs : ℕ) (s : Spec.SetFile.B2) : Prop :=
   (∀ w < 8, ∀ h ≤ 1, pub (H_LIMB bs (2 * w + h)) = ((half16 (s.h w) h : ℕ) : F)) ∧
   (pub (H_NB bs)).val < 2 ^ 30 ∧ s.t = 64 * (pub (H_NB bs)).val ∧
-  (pub (H_PLEN bs)).val = s.pend.length ∧ ∀ q < s.pend.length, (pub (H_PEND bs q)).val = (s.pend.getD q 0).toNat
+  (pub (H_PLEN bs)).val = s.pend.length ∧ s.pend.length ≤ 64 ∧
+  ∀ q < s.pend.length, (pub (H_PEND bs q)).val = (s.pend.getD q 0).toNat
 
 /-- A SHA-256 state at public block `bs`: the chaining value's limbs, the length as whole blocks and
 pending bytes. -/
@@ -185,7 +186,7 @@ theorem toNat_ofNat_lt {x : ℕ} (h : x < 256) : (UInt8.ofNat x).toNat = x := Re
 /-- The Blake2s stream byte `i`: the incoming pending bytes, then the segment's. -/
 theorem xb_eq {s : Spec.SetFile.B2} (hb : EncB2 pub B2_IN s) (i : ℕ) :
     B2w.xb pub (Sb inst pub) i = ((s.pend ++ segBytes inst pub).getD i 0).toNat := by
-  obtain ⟨-, -, -, hpl, hpb⟩ := hb
+  obtain ⟨-, -, -, hpl, -, hpb⟩ := hb
   unfold B2w.xb
   rw [hpl]
   split_ifs with h
@@ -214,7 +215,7 @@ theorem b2_side (hHL : pub PUB_HASLAST = 0 ∨ pub PUB_HASLAST = 1) {s : Spec.Se
     (fun r hr j hj hH => (b2w_reads hL hsat hHL hsz hr hj).2.2 hH)
   set X := s.pend ++ segBytes inst pub with hX
   have hxb := xb_eq hL hsat hsz hb
-  obtain ⟨hlimb, hnb, ht, hpl, -⟩ := hb
+  obtain ⟨hlimb, hnb, ht, hpl, -, -⟩ := hb
   have hXl : X.length = 64 * m + (pub (H_PLEN B2_OUT)).val := by
     rw [hX, List.length_append, ← hpl, segBytes, List.length_map, List.length_range]; omega
   have hXb : ∀ i, (X.getD i 0).toNat < 256 := fun i => (X.getD i 0).toNat_lt
@@ -274,9 +275,10 @@ theorem b2_side (hHL : pub PUB_HASLAST = 0 ∨ pub PUB_HASLAST = 1) {s : Spec.Se
     have e1 : pub (H_NB B2_OUT) = (((pub (H_NB B2_IN)).val + m : ℕ) : F) := by
       rw [Nat.cast_add, Rec.cast_val, ← hmF]; ring
     rw [e1, ZMod.val_natCast_of_lt (by have := Rec.P_big; omega)]
-  refine ⟨fun w hw h hh => ?_, by omega, by rw [ft, ht, hnbo]; ring, ?_, ?_⟩
+  refine ⟨fun w hw h hh => ?_, by omega, by rw [ft, ht, hnbo]; ring, ?_, ?_, ?_⟩
   · rw [hout w hw h hh, fh w hw, ← hX, ht,
       Spec.SetFile.chainS_congr (fun w hw => (hin w hw).symm) _ _ m w hw]
+  · rw [fp, List.length_drop, ← hX]; omega
   · rw [fp, List.length_drop, ← hX]; omega
   · intro q hq
     rw [fp, ← hX] at hq ⊢

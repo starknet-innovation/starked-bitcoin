@@ -1,6 +1,6 @@
 # The coin-set pass: a set file's facts proved, so a verifier needs no set
 
-Status: current · Updated: 2026-10-27 (accepted as D-048; steps 1–2 done; step 3's circuit done, its proofs open)
+Status: current · Updated: 2026-10-27 (accepted as D-048; steps 1–5 done on small sets; step 6, the real sets on GPU, next)
 
 Figures marked *est.* are rough; the native model (step 1) measures them.
 
@@ -156,8 +156,33 @@ sorted. Its parts: the byte table and `set_rec` parse the segment (`encSet`'s re
 
 ### The tree
 
-The header chain's `linkChecks`/`combine` (right's input = left's output) over the carried state;
-the challenge is equal across the tree.
+Built 2026-10-27 (`Circuit/SetTree.lean`, `src/recursion/set_tree.zig`). A segment's summary is 32
+limbs: the 16-bit halves of the Blake2s digests of its **incoming and outgoing state vectors** (331
+limbs each: the challenge `(γ, z, α)`, then `i`, `HASLAST`, the last key, the height, the sum, the
+amount, the Blake2s and SHA-256 states; the outgoing `HASLAST` is the constant 1). The challenge is in
+both vectors, so linked segments share it with no separate check, and a node checks only 16 limbs.
+
+- **Leaf** (`setLeafOut`): the plain verifier over the segment proof, then the two digests and
+  `pubsDigest(0, summary)`.
+- **Node** (`setNodeProgram`): two children verified at hooks; the right one's incoming digest is the
+  left one's outgoing digest; the output is (left's incoming, right's outgoing) under the key of the
+  children's circuit hashes and keys. Binary; the tree over `k` leaves splits at the largest power of
+  two below `k` (`set_tree.split`), so the key the verifier expects follows from `k` alone.
+- **One leaf identity per pass:** every segment of a pass is built at the same component logs
+  (`set_seg.buildAt`; the cutter `set_seg.cut` fills each segment to them, assuming full pending
+  buffers), so the VK is (circuit FRI, segment FRI, logs, leaf identity, node identity).
+- **The verifier** (`set_tree.verifyRoot`, `verifyPass`) rebuilds the start state `begin(n)` and takes
+  the final state from the pass file, compares the root's summary with their digests under the
+  epoch's challenge, then computes `finish` natively: digest, `hash_serialized`, count (`i = n`),
+  amount, highest height, sum.
+- **Lean:** `leafOut_sound`, the node's digests/key/link, `stree_sound` (a root with the expected hash
+  and key is a chain of proven, linked segments, or a Blake2s collision, under the same `Trust`
+  hypotheses as the block and header trees), and `SetPass.set_root_sound` (`PassChain.lean`): with
+  `set_seg_sound` per segment, the root gives a record list folding the pass from the start state to
+  the final state, the checks holding iff they held before (standard axioms).
+- **SHA-256 length:** the pass's SHA-256 block count is a field element, but it cannot wrap: the
+  Blake2s block count is checked below `2^30` in-circuit, so the file is under `2^36 + 64` bytes, and
+  the `TxOutSer` stream (`40 + len` per record against the file's `49 + len`) is shorter.
 
 ## Cost
 
@@ -210,9 +235,24 @@ sets of the current chain: ~$50–60. For scale, the chain's 37,500 block proofs
    incoming state's ranges (`nb_b2 < 2^30`, key and amount bytes, height `< 2^24`, `HASLAST` 0/1), which
    `EncOut` gives back; the SHA-256 block count is a field element, so the final length
    `64·nb + plen` is exact only below `64·P` bytes (~137 GB), which the verifier should check.
-4. **The set tree** (node circuit over segments, root VK pinned in `vk/`).
-5. **`verify-chain` without set files:** the set-pass roots in the chain file; the balance and
-   anchors compared on public values.
+4. **The set tree** (node circuit over segments, root VK pinned in `vk/`). **Built (2026-10-27):**
+   § The tree. `chainproof prove-set <set.bin> <epoch> <work-dir>` proves a whole pass under the
+   epoch's challenge (from its forest and its sets' digests, as the epoch root derives it):
+   `<work-dir>/seg/*.sbseg`, `setvk.bin`, `pass.bin` (segment count, the count bytes, the final state,
+   the root). `verify-set` checks one. Tested: three segments of `set-170` proved, folded and verified
+   (swapped children unsatisfiable; a wrong final state, segment count or non-root proof rejected),
+   and the test chain's five passes (one with five segments). The set VK is pinned after the real runs
+   (step 6; `chainproof` has the `set` kind, empty until then).
+5. **`verify-chain` without set files:** **Built (2026-10-27):** `verify-chain --set-proofs` reads each
+   epoch's passes (`<dir>/pass-<to>` for its final set, `<dir>/pass-<from−1>` for its start set, both
+   under its challenge) instead of set files: the digests the joins bind come from the passes' final
+   states, each pass is then verified under the epoch's derived challenge, the balance is checked on
+   the passes' sums, the start set's highest coin height is below the epoch's first block, consecutive
+   epochs' sets have equal digests, and the chain's start set matches Core's assumeUTXO
+   `hash_serialized` when one is pinned for it (935,000). On the test chain (blocks 0..15, three
+   epochs) it gives the set-file path's balances and final facts (15 coins, `hash_serialized
+   d6ab257d…`); the set after block 8 proved under epoch 9..15's challenge and given as epoch 4..8's is
+   rejected (`scripts/test_chain_set_pass.sh`; the test chain is `data/test-chain/build.sh`'s).
 6. **The real sets** on GPU pods (three sets, ~12 H100-hours *est.*).
 7. Later: the balance folded into the join, so one proof covers everything.
 

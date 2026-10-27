@@ -43,7 +43,24 @@ Problems / lessons:
 - `unfold P; omega` splits `ZMod.val` atoms; use `Rec.P_big` (`2^30 < P`) with omega instead.
 - The SHA-256 block count is carried as a field element: the verifier must check the final length is
   below 64·P bytes. The tree must check `EncIn`'s ranges on the first segment (the begin state meets them).
-Next: the set tree (step 4): node circuit over segments with `linkChecks`/`combine`, root VK pinned.
+- Steps 4–5 (same session, after the owner's "keep going until you have finished all steps"): the set
+  tree (aee0401 and this commit): Lean `Circuit/SetTree.lean` (leaf output, binary node; summaries are
+  digests of the incoming/outgoing state vectors with the challenge inside), `SetTreeSound.lean`
+  (`leafOut_sound`, `stree_sound`), `SetPass/PassIdx`/`PassSound`/`PassRoot`/`PassChain.lean`
+  (`set_root_sound`: a root gives a record list folding the pass from the start state to the final
+  state); Zig `set_tree.zig` (segment files, leaf/node circuits, tree, VK, pass files, `verifyPass`),
+  `set_seg.buildAt`/`cut` (fixed logs per pass); `chainproof prove-set`, `verify-set`,
+  `verify-chain --set-proofs` (Core anchor for 935,000 built in). The push of the six earlier commits
+  was blocked by the permission classifier: the owner pushes.
+Evidence (steps 4–5):
+- `zig build test -Dtest-filter="set tree"`: 2/2 pass (three set-170 segments proved, folded, root
+  verified; tampers rejected; ~7 min on the Mac at test strength).
+- `scripts/test_chain_set_pass.sh`: five passes proved (~30–65 s each), `verify-chain --set-proofs` VERIFIED
+  with the set-file path's facts (15 coins, `d6ab257d…`); a pass under another epoch's challenge
+  rejected (`WrongDigest`); a five-segment pass of set-15 also verifies (265 s).
+- `#print axioms` on `set_root_sound`, `pass_chain`, `stree_sound`, `leafOut_sound`: standard three.
+Next: step 6, the real sets on GPU: CUDA kernels for the six new AIRs and drivers for segments and the
+set tree, then four passes (~$65–80 *est.*): needs the owner's approval of the pod spend.
 
 ## 2026-10-27 (session 22) — Coin-set pass step 3: the segment circuit (AIRs, witness, tests)
 Who: Claude (agent, Opus 5.5), with the owner (push of 949cbe3 approved; "go ahead with the segment circuit"; the node's RunPod key kept)

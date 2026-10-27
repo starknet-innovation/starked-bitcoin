@@ -103,7 +103,9 @@ fn usage() noreturn {
         \\  chainproof setup-vks <out-dir> [--max-m M] [--test-strength] <dir>:<to>[:<from>:<prev-set.bin>]...
         \\  chainproof prove-epoch <headers.bin> <dir> <to> <file.sbchain> [--from <a> <prev-set.bin>] [--test-strength]
         \\  chainproof prove-chain <vk> <file.sbchain> <out-dir> [--max-m M] <dir>:<to>[:<from>:<prev-set.bin>][#<prev-hex|->,<fin-hex>]...
-        \\  chainproof verify-chain <vk> <file.sbchain> <out-dir> [--min-work <hex> | --min-work 0] [--unpinned] <dir>:<to>[:<from>:<prev-set.bin>]...
+        \\  chainproof verify-chain <vk> <file.sbchain> <out-dir> [--min-work <hex> | --min-work 0] [--unpinned] [--set-proofs] <dir>:<to>[:<from>:<prev-set.bin>]...
+        \\  chainproof prove-set <set.bin> <dir>:<to>[:<from>:<prev-set.bin>] <work-dir> [--test-strength] [--logs l0,...,l8]
+        \\  chainproof verify-set <work-dir> <dir>:<to>[:<from>:<prev-set.bin>] [--unpinned]
         \\  chainproof verify-epoch <vk> <file.sbchain> <dir> <to> [--from <a> <prev-set.bin>] [--min-work <hex> | --min-work 0] [--test-strength] [--jobs <n>]
         \\  chainproof prove-epoch-wide|prove-epoch-tree <headers.bin> <dir> <to> <file.sbchain> [--from <a> <prev-set.bin>] [--test-strength]
         \\  chainproof prove-epoch-root <headers.bin> <dir> <to> <file.sbchain> [--from <a> <prev-set.bin>] [--set-digests <prev|-> <fin>]
@@ -265,6 +267,7 @@ pub fn main() !void {
     if (std.mem.eql(u8, cmd, "verify-chain") and args.len >= 7) {
         var min_work: u256 = core_min_work;
         var unpinned = false;
+        var set_proofs = false;
         var specs: std.ArrayList(ChainSpec) = .empty;
         var i: usize = 5;
         while (i < args.len) {
@@ -274,14 +277,38 @@ pub fn main() !void {
             } else if (std.mem.eql(u8, args[i], "--unpinned")) {
                 unpinned = true;
                 i += 1;
+            } else if (std.mem.eql(u8, args[i], "--set-proofs")) {
+                set_proofs = true;
+                i += 1;
             } else {
                 try specs.append(a, parseChainSpec(args[i]) catch usage());
                 i += 1;
             }
         }
         if (specs.items.len < 2) usage();
-        return verifyChainCmd(gpa, a, args[2], args[3], args[4], min_work, unpinned, specs.items);
+        return verifyChainCmd(gpa, a, args[2], args[3], args[4], min_work, unpinned, set_proofs, specs.items);
     }
+    if (std.mem.eql(u8, cmd, "prove-set") and args.len >= 5) {
+        var weak = false;
+        var logs: ?ST.Logs = null;
+        var i: usize = 5;
+        while (i < args.len) {
+            if (std.mem.eql(u8, args[i], "--test-strength")) {
+                weak = true;
+                i += 1;
+            } else if (std.mem.eql(u8, args[i], "--logs") and i + 1 < args.len) {
+                var ls: ST.Logs = undefined;
+                var it = std.mem.splitScalar(u8, args[i + 1], ',');
+                for (&ls) |*l| l.* = try parseU32(it.next() orelse usage());
+                if (it.next() != null) usage();
+                logs = ls;
+                i += 2;
+            } else usage();
+        }
+        return proveSet(gpa, a, args[2], parseChainSpec(args[3]) catch usage(), args[4], weak, logs orelse default_set_logs);
+    }
+    if (std.mem.eql(u8, cmd, "verify-set") and (args.len == 4 or (args.len == 5 and std.mem.eql(u8, args[4], "--unpinned"))))
+        return verifySet(gpa, a, args[2], parseChainSpec(args[3]) catch usage(), args.len == 5);
     if (std.mem.eql(u8, cmd, "set-pass-model") and (args.len == 3 or (args.len == 5 and std.mem.eql(u8, args[3], "--per"))))
         return setPassModel(gpa, args[2], if (args.len == 5) try std.fmt.parseInt(u32, args[4], 10) else 23000);
     if (std.mem.eql(u8, cmd, "setup-vks") and args.len >= 4) {
@@ -382,7 +409,7 @@ fn loadVk(a: std.mem.Allocator, path: []const u8) !S.Vk {
 /// public inputs (the forest, one block proof per size key, the circuit programs in this binary) by
 /// `chainproof setup-vks`, byte for byte.
 const PinnedVk = struct { name: []const u8, bytes: []const u8 };
-const VkKind = enum { block, tree, root, join };
+const VkKind = enum { block, tree, root, join, set };
 const pinned_vks = struct {
     const block = [_]PinnedVk{};
     const tree = [_]PinnedVk{
@@ -396,6 +423,8 @@ const pinned_vks = struct {
     const join = [_]PinnedVk{
         .{ .name = "vk/epoch/join-935001-972500.vk", .bytes = @embedFile("vk:epoch/join-935001-972500") },
     };
+    // The coin-set pass (set-pass step 6 pins it after the real runs).
+    const set = [_]PinnedVk{};
 };
 
 fn pinnedOf(kind: VkKind) []const PinnedVk {
@@ -404,6 +433,7 @@ fn pinnedOf(kind: VkKind) []const PinnedVk {
         .tree => &pinned_vks.tree,
         .root => &pinned_vks.root,
         .join => &pinned_vks.join,
+        .set => &pinned_vks.set,
     };
 }
 
@@ -1257,7 +1287,8 @@ fn setPassModel(gpa: std.mem.Allocator, path: []const u8, per: u32) !void {
 /// `verify-chain <vk> <file.sbchain> <out-dir> <epoch>...`: the chain proof `<out>/chain-<to>.bin` (to:
 /// the last epoch's) under `<out>/joinvk.bin`, each epoch's tree VK from its dir, and each epoch's
 /// balance against its sets (the previous set given, the final `<dir>/set-<to>.bin`).
-fn verifyChainCmd(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8, chain_path: []const u8, out: []const u8, min_work: u256, unpinned: bool, specs: []const ChainSpec) !void {
+fn verifyChainCmd(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8, chain_path: []const u8, out: []const u8, min_work: u256, unpinned: bool, set_proofs: bool, specs: []const ChainSpec) !void {
+    if (set_proofs) return verifyChainSetProofs(gpa, a, vk_path, chain_path, out, min_work, unpinned, specs);
     var timer = try std.time.Timer.start();
     const vk = try loadVk(a, vk_path);
     const tables = try L.Tables.init(gpa);
@@ -1514,4 +1545,158 @@ fn info(gpa: std.mem.Allocator, a: std.mem.Allocator, path: []const u8) !void {
     std.debug.print("\n  peaks (headers each):", .{});
     for (c.peaks) |p| std.debug.print(" {d}", .{sb.recursion.node.headerCount(p.pubs)});
     std.debug.print("\n  provenance  {s}\n", .{c.provenance});
+}
+
+// ---------------------------------------------------------------------------------------------
+// The coin-set pass (docs/design/set-pass.md, steps 4–5)
+
+const ST = sb.recursion.set_tree;
+const SSG = sb.block.set_seg;
+
+/// Production component logs of a segment (bytes, tables, pending, records, fingerprints, Blake2s words,
+/// Blake2s, `TxOutSer`, SHA-256): ~70k records of ~85 bytes per segment.
+const default_set_logs: ST.Logs = .{ 23, 8, 6, 17, 22, 19, 23, 23, 23 };
+
+/// Core's assumeUTXO `hash_serialized` anchors (`src/kernel/chainparams.cpp`, mainnet; line 211 at
+/// commit `c067aa71`, the copy in `data/core-src`): the set after each height, as printed by Core.
+const set_anchors = [_]struct { height: u32, hash: []const u8 }{
+    .{ .height = 935000, .hash = "e4b90ef9eae834f56c4b64d2d50143cee10ad87994c614d7d04125e2a6025050" },
+};
+
+fn setFris(weak: bool) struct { seg: FriConfigV2, circuit: FriConfigV2 } {
+    if (weak) return .{ .seg = PF.testFri(), .circuit = FriConfigV2.init(10, 0, 1, 3, 1) catch unreachable };
+    return .{ .seg = PF.productionFri(), .circuit = BF.circuitFri() };
+}
+
+fn setDigestOf(gpa: std.mem.Allocator, path: []const u8) ![32]u8 {
+    return (try SF.scan(gpa, path, null)).digest;
+}
+
+/// An epoch's challenge, from its forest's roots and its sets' digests (as the epoch root derives it).
+fn epochChallenge(gpa: std.mem.Allocator, a: std.mem.Allocator, sp: ChainSpec) !sb.block.coin.Challenge {
+    const f = try BT.Forest.decode(gpa, a, try S.readFile(a, try std.fmt.allocPrint(a, "{s}/forestk-{d}.bin", .{ sp.dir, sp.to })));
+    defer for (f.roots) |*r| r.proved.proof.deinit();
+    const sums = try a.alloc(sb.recursion.block_rec.Summary, f.roots.len);
+    for (sums, f.roots) |*x, r| x.* = r.proved.sum;
+    const prev: ?[32]u8 = if (sp.from.prev_set) |ps| try setDigestOf(gpa, ps) else null;
+    const fin = try setDigestOf(gpa, try std.fmt.allocPrint(a, "{s}/set-{d}.bin", .{ sp.dir, sp.to }));
+    return ERoot.challengeOf(sums, .{ .from = sp.from.height, .to = sp.to, .prev = prev, .fin = fin });
+}
+
+/// `prove-set <set.bin> <epoch> <work-dir>`: the pass over `set.bin` under the epoch's challenge;
+/// writes `<work-dir>/pass.bin` and `<work-dir>/setvk.bin` (segments under `<work-dir>/seg`).
+fn proveSet(gpa: std.mem.Allocator, a: std.mem.Allocator, set_path: []const u8, sp: ChainSpec, work: []const u8, weak: bool, logs: ST.Logs) !void {
+    var timer = try std.time.Timer.start();
+    const ch = try epochChallenge(gpa, a, sp);
+    const file = try S.readFile(a, set_path);
+    const airs = try SSG.parseAirs(a);
+    const tables = try L.Tables.init(gpa);
+    defer tables.deinit(gpa);
+    const fr = setFris(weak);
+    var r = try ST.provePass(gpa, a, tables, &airs, file, ch, logs, fr.seg, fr.circuit, work);
+    defer r.shape.deinit(gpa);
+    defer r.pass.root.proof.deinit();
+    try S.writeFileAtomic(try std.fmt.allocPrint(a, "{s}/setvk.bin", .{work}), try r.vk.encode(a));
+    try S.writeFileAtomic(try std.fmt.allocPrint(a, "{s}/pass.bin", .{work}), try ST.encodePass(a, &r.pass));
+    const facts = try ST.verifyPass(gpa, tables, &r.vk, &r.pass, ch);
+    std.debug.print("set pass proved ({d:.1}s): {d} coins, digest {x}\n", .{ secs(timer.lap()), facts.count, facts.digest });
+}
+
+/// The set pass at `<work-dir>` under the epoch's challenge: verified, its facts.
+fn openPass(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const L.Tables, work: []const u8, ch: sb.block.coin.Challenge, unpinned: bool) !ST.Facts {
+    const vk = try ST.Vk.decode(try readPinnedVk(a, .set, try std.fmt.allocPrint(a, "{s}/setvk.bin", .{work}), unpinned));
+    var p = try ST.decodePass(gpa, a, try S.readFile(a, try std.fmt.allocPrint(a, "{s}/pass.bin", .{work})));
+    defer p.root.proof.deinit();
+    return ST.verifyPass(gpa, tables, &vk, &p, ch);
+}
+
+fn printFacts(f: ST.Facts) void {
+    std.debug.print("  coins {d}, amount {d} sat, highest coin height {d}\n  digest           {x}\n  hash_serialized  {x}\n", .{ f.count, f.amount, f.max_height, f.digest, f.hash });
+}
+
+fn verifySet(gpa: std.mem.Allocator, a: std.mem.Allocator, work: []const u8, sp: ChainSpec, unpinned: bool) !void {
+    const ch = try epochChallenge(gpa, a, sp);
+    const tables = try L.Tables.init(gpa);
+    defer tables.deinit(gpa);
+    const f = try openPass(gpa, a, tables, work, ch, unpinned);
+    std.debug.print("VERIFIED set pass {s}\n", .{work});
+    printFacts(f);
+}
+
+/// The final state's facts without the root (the digests the chain proof's challenge is built from).
+fn passFacts(gpa: std.mem.Allocator, a: std.mem.Allocator, work: []const u8) !ST.Facts {
+    var p = try ST.decodePass(gpa, a, try S.readFile(a, try std.fmt.allocPrint(a, "{s}/pass.bin", .{work})));
+    defer p.root.proof.deinit();
+    return ST.factsOf(&p);
+}
+
+/// `verify-chain --set-proofs`: as `verify-chain`, with each epoch's sets given by set-pass proofs instead
+/// of set files (`<dir>/pass-<to>` for the final set, `<dir>/pass-<from−1>` for the previous one), each
+/// under the epoch's challenge; the chain's start set against Core's assumeUTXO anchor when it has one.
+fn verifyChainSetProofs(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8, chain_path: []const u8, out: []const u8, min_work: u256, unpinned: bool, specs: []const ChainSpec) !void {
+    var timer = try std.time.Timer.start();
+    const vk = try loadVk(a, vk_path);
+    const tables = try L.Tables.init(gpa);
+    defer tables.deinit(gpa);
+    var c = try S.Chain.decode(gpa, a, try S.readFile(a, chain_path));
+    defer c.deinit();
+    const s = try S.verifyChain(gpa, a, tables, &vk, &c);
+    if (min_work != 0 and s.work < min_work) return error.InsufficientWork;
+    std.debug.print("chain proof verified: headers 0..{d} ({d:.1}s)\n", .{ s.headers - 1, secs(timer.lap()) });
+    const jvk = try EJ.Vk.decode(a, try readPinnedVk(a, .join, try std.fmt.allocPrint(a, "{s}/joinvk.bin", .{out}), unpinned));
+    var file = try EJ.ChainFile.decode(gpa, a, try S.readFile(a, try std.fmt.allocPrint(a, "{s}/chain-{d}.bin", .{ out, specs[specs.len - 1].to })));
+    defer file.proof.deinit();
+    const ins = try a.alloc(EJ.EpochIn, specs.len);
+    const tvks = try a.alloc(BT.Vk, specs.len);
+    const works = try a.alloc(struct { fin: []const u8, prev: ?[]const u8 }, specs.len);
+    for (specs, ins, tvks, works) |sp, *in, *tvk, *w| {
+        if (sp.from.height == 0 and sp.from.prev_set != null) return error.GenesisHasNoPrevSet;
+        if (sp.from.height != 0 and sp.from.prev_set == null) return error.PrevSetRequired;
+        tvk.* = try BT.Vk.decode(try readPinnedVk(a, .tree, try std.fmt.allocPrint(a, "{s}/treevk.bin", .{sp.dir}), unpinned));
+        w.* = .{
+            .fin = try std.fmt.allocPrint(a, "{s}/pass-{d}", .{ sp.dir, sp.to }),
+            .prev = if (sp.from.height != 0) try std.fmt.allocPrint(a, "{s}/pass-{d}", .{ sp.dir, sp.from.height - 1 }) else null,
+        };
+        // The digests the challenge binds, as the passes' final states give them (each pass is then
+        // verified under that challenge).
+        const fin = try passFacts(gpa, a, w.fin);
+        const prev: ?[32]u8 = if (w.prev) |p| (try passFacts(gpa, a, p)).digest else null;
+        in.* = .{ .tvk = tvk, .ep = .{ .from = sp.from.height, .to = sp.to, .prev = prev, .fin = fin.digest } };
+    }
+    const vs = try EJ.verifyChain(gpa, a, tables, &jvk, &file, ins, s.headers, s.t);
+    std.debug.print("chain of epochs verified: ONE proof for blocks {d}..{d} ({d} epochs joined), the block hashes the chain's ({d:.1}s)\n", .{ specs[0].from.height, specs[specs.len - 1].to, specs.len, secs(timer.lap()) });
+    var last: ST.Facts = undefined;
+    for (specs, vs, works, 0..) |sp, v, w, idx| {
+        const fin = try openPass(gpa, a, tables, w.fin, v.challenge, unpinned);
+        var sum = v.sum;
+        var init_count: u64 = 0;
+        if (w.prev) |p| {
+            const prev = try openPass(gpa, a, tables, p, v.challenge, unpinned);
+            if (prev.max_height >= sp.from.height) return error.PrevSetTooNew;
+            if (idx > 0) {
+                // The previous epoch's final set is this one's start set (same digest, bound by the joins).
+                if (!std.mem.eql(u8, &prev.digest, &(try passFacts(gpa, a, works[idx - 1].fin)).digest)) return error.SetsDoNotLink;
+            } else for (set_anchors) |an| if (an.height + 1 == sp.from.height) {
+                var want: [32]u8 = undefined;
+                _ = try std.fmt.hexToBytes(&want, an.hash);
+                if (!std.mem.eql(u8, &prev.hash, &want)) {
+                    std.debug.print("REJECTED: the set after block {d} is not Core's assumeUTXO set\n", .{an.height});
+                    return error.AnchorMismatch;
+                }
+                std.debug.print("  start set after block {d}: Core's assumeUTXO hash_serialized\n", .{an.height});
+            };
+            sum = sum.add(prev.sum);
+            init_count = prev.count;
+        }
+        if (v.nin + fin.count + init_count >= 1 << 30) return error.EpochTooLarge;
+        if (!sum.eql(fin.sum)) {
+            std.debug.print("REJECTED: epoch {d}..{d}: the blocks' coin events do not end at its coin set\n", .{ sp.from.height, sp.to });
+            return error.EpochUnbalanced;
+        }
+        std.debug.print("  epoch {d}..{d} balanced (set-pass proofs): {d} coins after block {d} ({d} inputs spent)\n", .{ sp.from.height, sp.to, fin.count, sp.to, v.nin });
+        last = fin;
+    }
+    std.debug.print("VERIFIED blocks {d}..{d} as one chain proof, sets by set-pass proofs: the coin set after block {d} is {d} coins\n", .{ specs[0].from.height, specs[specs.len - 1].to, specs[specs.len - 1].to, last.count });
+    std.debug.print("  total amount     {d} sat\n", .{last.amount});
+    std.debug.print("  hash_serialized  {x}  (Core's HASH_SERIALIZED of this set)\n", .{last.hash});
 }
