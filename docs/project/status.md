@@ -4,16 +4,16 @@ Rewritten at the end of every session; see [README.md](README.md#ending-a-sessio
 If `HEAD at last update` doesn't match `git log -1`, this file is stale:
 follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work).
 
-- **Updated:** 2026-10-27 (session 22: coin-set pass step 3, the segment circuit)
+- **Updated:** 2026-10-27 (session 23: coin-set pass step 3 done, the segment system's soundness)
 - **HEAD at last update:** see `git log -1` (this file is committed with the work)
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
 - **Current item:** the coin-set pass (D-048, docs/design/set-pass.md), so `verify-chain` needs no
   set file. Blocks 935,001–972,500 are proved as ONE chain proof and verify on the node with pinned
   VKs only (D-047) and with the compact header file (D-049: 0.99 MB instead of 13.8 MB). The pass's
   native model (`set_pass.zig`), Lean spec (`Spec/SetFile.lean`, `pass_sound`) and the segment
-  circuit (`lean/StarkedAir/SetPass/`, `src/block/set_seg.zig`; tested on small sets) are done.
-  Next: the segment system's Lean soundness (`set_seg_sound`), then the set tree. Branch
-  `rec/epoch-root` pushed through 949cbe3; later commits not pushed. See log.md, session 22.
+  circuit (`lean/StarkedAir/SetPass/`, `src/block/set_seg.zig`; tested on small sets) are done, and
+  so is its soundness (`SetPass.set_seg_sound`, standard axioms). Next: the set tree (step 4). Branch
+  `rec/epoch-root` pushed through 949cbe3; later commits not pushed. See log.md, sessions 22–23.
   (The paragraphs below date from 2026-10-12.)
 
 ## State in one paragraph
@@ -131,6 +131,7 @@ open StarkedAir.HeaderChain StarkedAir.Spec.Bitcoin
 #print axioms StarkedAir.Block.block_sound
 #print axioms StarkedAir.Block.commit_sound
 #print axioms StarkedAir.Block.hash_pub
+#print axioms StarkedAir.SetPass.set_seg_sound
 EOS
 (cd lean && lake env lean /tmp/ax.lean)  # expect: propext, Classical.choice, Quot.sound
 

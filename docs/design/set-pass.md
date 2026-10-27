@@ -199,11 +199,17 @@ sets of the current chain: ~$50–60. For scale, the chain's 37,500 block proofs
    `src/block/set_seg.zig` (witnesses, `begin`, `finish`). Every segment of the sets after blocks 170
    and 1000 satisfies and balances, the first proves and verifies, and the chained public states give
    the native model's digest, `hash_serialized`, count, amount, height and sum; 21 tampered public
-   values are each rejected. **Open:** the Lean soundness theorem (`set_seg_sound`, § Soundness).
-   In progress: the system link (`SetPass/Link.lean`, `LinkUse.lean`: uses and yields, `link`, byte,
-   range and pending reads), the cross-component facts (`Facts.lean`: fingerprints, the `TxOutSer`
-   stream's reads, compression words, end tokens), the hash sides (`B2wSound`/`B2cSound`/`B2Spec`,
-   `TMsgSound`/`ShaCSound`/`ShaSpec`).
+   values are each rejected. **Soundness done (2026-10-27):** `SetPass.set_seg_sound`
+   (`SetPass/Sound.lean`, standard axioms): a satisfied, balanced segment system below the size bound
+   (`SegSizeOk`) whose incoming public state encodes `s` (`EncIn`) proves records `seg` its bytes
+   encode (nonempty, `RecOk`), its outgoing state encodes `seg.foldl step s` (`EncOut`), and the checks
+   hold after it iff before (the records are sorted after `s`'s last). Parts: the system link
+   (`Link`, `LinkUse`, `Facts`), `RecSound`, `B2wSound`/`B2cSound`/`B2Spec`, `TMsgSound`/`ShaCSound`/
+   `ShaSpec`, `Fold` (`fold_step`). Review found one hole, fixed before the proof: the end tokens moved
+   to the period's last row (f7caac7). Two things the tree and verifier must carry: `EncIn` asks the
+   incoming state's ranges (`nb_b2 < 2^30`, key and amount bytes, height `< 2^24`, `HASLAST` 0/1), which
+   `EncOut` gives back; the SHA-256 block count is a field element, so the final length
+   `64·nb + plen` is exact only below `64·P` bytes (~137 GB), which the verifier should check.
 4. **The set tree** (node circuit over segments, root VK pinned in `vk/`).
 5. **`verify-chain` without set files:** the set-pass roots in the chain file; the balance and
    anchors compared on public values.

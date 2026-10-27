@@ -21,6 +21,30 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-10-27 (session 23) — Coin-set pass step 3 done: the segment system's soundness
+Who: Claude (agent, Opus 5.5), owner: "Go for it. Don't stop working until you need something from me."
+Roadmap: coin-set pass (D-048) step 3 done; step 4 (the set tree) next
+Done:
+- f7caac7: soundness fix found in review. The compression components yielded their end token at row 0
+  of the last block's period; the trace's last period can be cut short (2^L is not a multiple of 88 or
+  72) and a cut period has no output rows, so the outgoing chaining value was free. The tokens are now on
+  the period's last row (set_b2c P_FIN 3, set_shac row 71). JSON regenerated; segment tests pass.
+- d3a8b5a, 0b6f809 and this commit: `SetPass.set_seg_sound` (lean/StarkedAir/SetPass/Sound.lean) and its
+  parts: the system link (Link, LinkUse: uses −1/0, `link`, byte/range/pending reads), Facts (fingerprints,
+  stream reads, compression words, end tokens), RecSound, B2wSound/B2cSound/B2Spec,
+  TMsgSound/ShaCSound/ShaSpec, Fold. The component files were written by three parallel sub-agents
+  (no pods); the link and composition by the main agent.
+Evidence:
+- `#print axioms StarkedAir.SetPass.set_seg_sound`: propext, Classical.choice, Quot.sound.
+- `lake build` (full) passes; the AIR JSON drift check passes for all 32 AIRs (set_b2c and set_shac
+  were regenerated in f7caac7; the existing block AIRs are byte-identical).
+- `zig build test -Dtest-filter="set segments"` passes after f7caac7.
+Problems / lessons:
+- `unfold P; omega` splits `ZMod.val` atoms; use `Rec.P_big` (`2^30 < P`) with omega instead.
+- The SHA-256 block count is carried as a field element: the verifier must check the final length is
+  below 64·P bytes. The tree must check `EncIn`'s ranges on the first segment (the begin state meets them).
+Next: the set tree (step 4): node circuit over segments with `linkChecks`/`combine`, root VK pinned.
+
 ## 2026-10-27 (session 22) — Coin-set pass step 3: the segment circuit (AIRs, witness, tests)
 Who: Claude (agent, Opus 5.5), with the owner (push of 949cbe3 approved; "go ahead with the segment circuit"; the node's RunPod key kept)
 Roadmap: coin-set pass (D-048) step 3, circuit half; the soundness proofs are next
