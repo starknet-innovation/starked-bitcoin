@@ -253,7 +253,14 @@ sets of the current chain: ~$50–60. For scale, the chain's 37,500 block proofs
    epochs) it gives the set-file path's balances and final facts (15 coins, `hash_serialized
    d6ab257d…`); the set after block 8 proved under epoch 9..15's challenge and given as epoch 4..8's is
    rejected (`scripts/test_chain_set_pass.sh`; the test chain is `data/test-chain/build.sh`'s).
-6. **The real sets** on GPU pods (three sets, ~12 H100-hours *est.*).
+6. **The real sets** on GPU pods (three sets, four passes). Measured with `chainproof set-cut` on the
+   node at the production logs (Blake2s binds: ~6.1 MB, ~70.6k coins per segment): 2,326 segments for
+   the set after 935,000, 2,339 after 945,000 (two passes), 2,329 after 972,500: **9,333 segment proofs
+   at 2^23, 9,333 leaves and 9,329 nodes**. Needs, before any run: the CUDA kernels of the six new
+   AIRs in the AOT catalog (`gpu/cuda_aot`; the catalog's reorder and witness kernels are block-only,
+   so the set system proves with host witnesses, `prover.Input.witness = null`), a `cuda-set` driver
+   (segments) and a set-tree driver (leaves, nodes; as `cuda-epoch-tree`). *Est.* ~3–5 s per segment and
+   ~2 s per leaf+node on an H100: ~15 H100-hours for the four passes, plus GPU development and testing.
 7. Later: the balance folded into the join, so one proof covers everything.
 
 ## Decisions (D-048, owner, 2026-10-27)

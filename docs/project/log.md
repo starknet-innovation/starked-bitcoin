@@ -59,6 +59,8 @@ Evidence (steps 4–5):
   with the set-file path's facts (15 coins, `d6ab257d…`); a pass under another epoch's challenge
   rejected (`WrongDigest`); a five-segment pass of set-15 also verifies (265 s).
 - `#print axioms` on `set_root_sound`, `pass_chain`, `stree_sound`, `leafOut_sound`: standard three.
+- 2e744a1: `chainproof set-cut`; on the node the three real sets cut into 2,326 / 2,339 / 2,329 segments
+  (9,333 for the four passes).
 Next: step 6, the real sets on GPU: CUDA kernels for the six new AIRs and drivers for segments and the
 set tree, then four passes (~$65–80 *est.*): needs the owner's approval of the pod spend.
 
