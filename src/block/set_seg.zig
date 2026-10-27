@@ -18,9 +18,9 @@ const b2 = @import("../hash/blake2s_air.zig");
 const shaw = @import("../sha256/witness.zig");
 const shs = @import("../sha256/spec.zig");
 
-pub const N_COMP = 9;
-pub const jsons = [N_COMP][]const u8{ bytes.json, checks.tables_json, @embedFile("air:set_pend"), @embedFile("air:set_rec"), coin.fpwalk_json, @embedFile("air:set_b2w"), @embedFile("air:set_b2c"), @embedFile("air:set_tmsg"), @embedFile("air:set_shac") };
-pub const names = [N_COMP][]const u8{ "bytes", "tables", "pend", "rec", "fpwalk", "b2w", "b2c", "tmsg", "shac" };
+pub const N_COMP = 12;
+pub const jsons = [N_COMP][]const u8{ bytes.json, checks.tables_json, @embedFile("air:set_pend"), @embedFile("air:set_rec"), coin.fpwalk_json, @embedFile("air:set_b2w"), @embedFile("air:set_b2c"), @embedFile("air:set_tmsg"), @embedFile("air:set_shac"), @embedFile("air:set_lw"), @embedFile("air:set_lc"), @embedFile("air:set_mt") };
+pub const names = [N_COMP][]const u8{ "bytes", "tables", "pend", "rec", "fpwalk", "b2w", "b2c", "tmsg", "shac", "lw", "lc", "mt" };
 pub const C = struct {
     pub const bytes = 0;
     pub const tables = 1;
@@ -31,10 +31,13 @@ pub const C = struct {
     pub const b2c = 6;
     pub const tmsg = 7;
     pub const shac = 8;
+    pub const lw = 9;
+    pub const lc = 10;
+    pub const mt = 11;
 };
 
 /// Public inputs (Lean `SetPass/Layout.lean`).
-pub const N_PUB = 550;
+pub const N_PUB = 567;
 pub const PUB_LEN = 0;
 pub const PUB_I_IN = 1;
 pub const PUB_I_OUT = 2;
@@ -54,6 +57,9 @@ pub const B2_IN = 222;
 pub const B2_OUT = 304;
 pub const SHA_IN = 386;
 pub const SHA_OUT = 468;
+/// The segment's Merkle root (16 limbs) and the tree's half width (D-050).
+pub const PUB_ROOT = 550;
+pub const PUB_HALF = 566;
 
 const REL_PB2I = 26;
 const REL_PB2O = 27;
@@ -179,6 +185,8 @@ fn txOutSer(a: std.mem.Allocator, r: Rec) ![]u8 {
 
 pub const Built = struct {
     logs: [N_COMP]u32,
+    /// The segment's Merkle root (D-050).
+    root: [8]u32 = @splat(0),
     pubs: [N_PUB]M31,
     mains: [N_COMP][][]M31,
     out: State,
@@ -262,11 +270,12 @@ pub fn build(a: std.mem.Allocator, ch: coin.Challenge, in: State, seg: []const u
 
 /// The component logs a segment needs (each at its floor or above), from its byte length, record
 /// count, `ser` bytes and the incoming pending lengths.
-pub fn minLogs(seg_len: usize, n_recs: usize, ser_len: usize, b2p: usize, shap: usize) [N_COMP]u32 {
+pub fn minLogs(seg_len: usize, n_recs: usize, ser_len: usize, b2p: usize, shap: usize, leaf_blocks: usize) [N_COMP]u32 {
     const xs = b2p + seg_len;
     const m_b2 = if (xs > 64) (xs + 63) / 64 - 1 else 0;
     const ys = shap + 40 * n_recs + ser_len;
     const m_sha = ys / 64;
+    const rec_log = logFor(n_recs + 1, 6);
     return .{
         logFor(seg_len, 6),
         8,
@@ -277,7 +286,23 @@ pub fn minLogs(seg_len: usize, n_recs: usize, ser_len: usize, b2p: usize, shap: 
         logFor(b2.PERIOD * m_b2, 8),
         logFor(ys + 1, 6),
         logFor(shaw.PERIOD * m_sha, 8),
+        logFor(16 * leaf_blocks + 1, 6),
+        logFor(b2.PERIOD * leaf_blocks, 8),
+        treeLog(rec_log),
     };
+}
+
+/// A record's Merkle leaf message length (`key(r − 1) ‖ record`) and blocks.
+pub fn leafLen(ser_len: usize) usize {
+    return 36 + HEAD + ser_len;
+}
+pub fn leafBlocks(ser_len: usize) usize {
+    return (leafLen(ser_len) + 63) / 64;
+}
+
+/// The tree component's log for a segment whose records fit `2^rec_log` slots (`HALF = 2^(rec_log − 1)`).
+pub fn treeLog(rec_log: u32) u32 {
+    return logFor(b2.PERIOD * ((@as(usize, 1) << @intCast(rec_log)) - 1), 8);
 }
 
 fn fitsIn(need: [N_COMP]u32, logs: [N_COMP]u32) bool {
@@ -294,15 +319,17 @@ pub fn cut(a: std.mem.Allocator, file: []const u8, logs: [N_COMP]u32) ![]usize {
         var end = at;
         var n: usize = 0;
         var ser: usize = 0;
+        var lb: usize = 0;
         while (end < file.len) {
             if (file.len - end < HEAD) return error.Truncated;
             const l = std.mem.readInt(u32, file[end + 45 ..][0..4], .little);
             const next = end + HEAD + l;
             if (next > file.len) return error.Truncated;
-            if (!fitsIn(minLogs(next - at, n + 1, ser + l, 64, 63), logs)) break;
+            if (!fitsIn(minLogs(next - at, n + 1, ser + l, 64, 63, lb + leafBlocks(l)), logs)) break;
             end = next;
             n += 1;
             ser += l;
+            lb += leafBlocks(l);
         }
         if (n == 0) return error.RecordTooLarge;
         try ends.append(a, end);
@@ -372,9 +399,11 @@ pub fn buildAt(a: std.mem.Allocator, ch: coin.Challenge, in: State, seg: []const
 
     var ser_len: usize = 0;
     for (recs) |r| ser_len += r.ser.len;
-    b.logs = minLogs(seg.len, recs.len, ser_len, in.b2.plen, in.sha.plen);
+    var leaf_blocks: usize = 0;
+    for (recs) |r| leaf_blocks += leafBlocks(r.ser.len);
+    b.logs = minLogs(seg.len, recs.len, ser_len, in.b2.plen, in.sha.plen, leaf_blocks);
     if (fixed) |fx| {
-        if (!fitsIn(b.logs, fx)) return error.SegmentTooLarge;
+        if (!fitsIn(b.logs, fx) or fx[C.mt] < treeLog(fx[C.rec])) return error.SegmentTooLarge;
         b.logs = fx;
     }
 
@@ -387,6 +416,20 @@ pub fn buildAt(a: std.mem.Allocator, ch: coin.Challenge, in: State, seg: []const
     b.mains[C.b2c] = try b2cColumns(a, b.logs[C.b2c], in.b2, b2_blocks, b2_hs);
     b.mains[C.tmsg] = try tmsgColumns(a, b.logs[C.tmsg], in.sha, recs, ys, m_sha, &reads, &pend_reads);
     b.mains[C.shac] = try shacColumns(a, b.logs[C.shac], sha_comps);
+    // The Merkle root (D-050): leaves, the heap tree over `2·HALF` slots, its three components.
+    const half: usize = @as(usize, 1) << @intCast(b.logs[C.rec] - 1);
+    if (recs.len > 2 * half) return error.TooManyRecords;
+    const leaves = try leafHashes(a, in, recs);
+    const tree = try treeNodes(a, leaves, half);
+    for (0..8) |w| {
+        b.pubs[PUB_ROOT + 2 * w] = f(tree[1][w] & 0xffff);
+        b.pubs[PUB_ROOT + 2 * w + 1] = f(tree[1][w] >> 16);
+    }
+    b.pubs[PUB_HALF] = f(half);
+    b.root = tree[1];
+    b.mains[C.lw] = try lwColumns(a, b.logs[C.lw], recs, leaves, &reads);
+    b.mains[C.lc] = try lcColumns(a, b.logs[C.lc], leaves);
+    b.mains[C.mt] = try mtColumns(a, b.logs[C.mt], leaves, tree, half, &ranges);
     b.mains[C.pend] = try pendColumns(a, b.logs[C.pend], &pend_reads);
     b.mains[C.tables] = try checks.tables(a, b.logs[C.tables], ranges.items, &.{});
     b.mains[C.bytes] = try bytes.generate(a, b.logs[C.bytes], seg, reads.items);
@@ -861,7 +904,7 @@ test "set segments: a tampered outgoing value is rejected (each carried part)" {
         PUB_LAST_OUT + 3,  B2_OUT + 5,               B2_OUT + 16,              B2_OUT + 17,               B2_OUT + 18,
         SHA_OUT + 9,       SHA_OUT + 16,             SHA_OUT + 17,             SHA_OUT + 18,              PUB_LEN,
         B2_IN + 3,         SHA_IN + 12,              PUB_SUM_IN,               PUB_AMT_IN,                PUB_MAXH_IN,
-        PUB_I_IN,
+        PUB_I_IN,          PUB_ROOT + 3,             PUB_ROOT + 14,            PUB_HALF,
     };
     for (cases) |i| {
         var t = b;
@@ -870,4 +913,312 @@ test "set segments: a tampered outgoing value is rejected (each carried part)" {
         if (!bad) std.debug.print("public input {d} tampered: not rejected\n", .{i});
         try std.testing.expect(bad);
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// The Merkle root (D-050)
+
+/// A record's Merkle leaf: its message `key(r − 1) ‖ record`, the message blocks, the chaining value
+/// before each block, and the digest.
+pub const Leaf = struct {
+    msg: []const u8,
+    blocks: []const [16]u32,
+    ins: []const [8]u32,
+    digest: [8]u32,
+};
+
+fn leafT(msg_len: usize, b: usize, nb: usize) u64 {
+    return if (b + 1 == nb) msg_len else 64 * (@as(u64, b) + 1);
+}
+
+/// The segment's leaves, from the incoming state's last key (36 zero bytes before the set's first record).
+pub fn leafHashes(a: std.mem.Allocator, in: State, recs: []const Rec) ![]Leaf {
+    const out = try a.alloc(Leaf, recs.len);
+    var prev: [36]u8 = in.last orelse @splat(0);
+    for (recs, out) |r, *lf| {
+        const msg = try a.alloc(u8, leafLen(r.ser.len));
+        @memcpy(msg[0..36], &prev);
+        @memcpy(msg[36..][0..HEAD], r.head);
+        @memcpy(msg[36 + HEAD ..], r.ser);
+        const nb = leafBlocks(r.ser.len);
+        const blocks = try a.alloc([16]u32, nb);
+        const ins = try a.alloc([8]u32, nb);
+        var h = commit.H0;
+        for (blocks, ins, 0..) |*bw, *hin, bi| {
+            var buf: [64]u8 = @splat(0);
+            const lo = 64 * bi;
+            const hi = @min(msg.len, lo + 64);
+            @memcpy(buf[0 .. hi - lo], msg[lo..hi]);
+            for (bw, 0..) |*w, k| w.* = std.mem.readInt(u32, buf[4 * k ..][0..4], .little);
+            hin.* = h;
+            h = b2.compress(.{ .h = h, .m = bw.*, .t = leafT(msg.len, bi, nb), .f = bi + 1 == nb });
+        }
+        lf.* = .{ .msg = msg, .blocks = blocks, .ins = ins, .digest = h };
+        prev = r.key();
+    }
+    return out;
+}
+
+/// A node: Blake2s-256 of `left ‖ right` (one block).
+pub fn nodeHash(l: [8]u32, r: [8]u32) [8]u32 {
+    var m: [16]u32 = undefined;
+    @memcpy(m[0..8], &l);
+    @memcpy(m[8..16], &r);
+    return b2.compress(.{ .h = commit.H0, .m = m, .t = 64, .f = true });
+}
+
+fn slotDigest(leaves: []const Leaf, s: usize) [8]u32 {
+    return if (s < leaves.len) leaves[s].digest else @splat(0);
+}
+
+/// The heap tree's nodes `1 … 2·HALF − 1` (index 0 unused): node `j < HALF` hashes nodes `2j`, `2j + 1`,
+/// node `j ≥ HALF` slots `2(j − HALF)`, `2(j − HALF) + 1`.
+pub fn treeNodes(a: std.mem.Allocator, leaves: []const Leaf, half: usize) ![][8]u32 {
+    const nodes = try a.alloc([8]u32, 2 * half);
+    nodes[0] = @splat(0);
+    var j = 2 * half - 1;
+    while (j >= 1) : (j -= 1) {
+        nodes[j] = if (j >= half)
+            nodeHash(slotDigest(leaves, 2 * (j - half)), slotDigest(leaves, 2 * (j - half) + 1))
+        else
+            nodeHash(nodes[2 * j], nodes[2 * j + 1]);
+    }
+    return nodes;
+}
+
+fn lwColumns(a: std.mem.Allocator, log_size: u32, recs: []const Rec, leaves: []const Leaf, reads: *std.ArrayList(u32)) ![][]M31 {
+    const ON = 0;
+    const RI = 1;
+    const BLK = 2;
+    const B = 3;
+    const A = 7;
+    const CNT = 11;
+    const LASTF = 12;
+    const T = 13;
+    const SM = 14;
+    const ENDR = 15;
+    const NEWR = 16;
+    const START = 17;
+    const M = 18;
+    const F0 = 19;
+    const PKU = 20;
+    const n = @as(usize, 1) << @intCast(log_size);
+    const cols = try zeros(a, 21, n);
+    var row: usize = 0;
+    for (recs, leaves, 0..) |r, lf, ri| {
+        const nb = lf.blocks.len;
+        var cnt: usize = 0;
+        for (0..nb) |bi| for (0..16) |k| {
+            if (row + 1 >= n) return error.LeafWordsDoNotFit;
+            const last = bi + 1 == nb;
+            const newr = bi == 0 and k == 0;
+            const pku = bi == 0 and k < 9;
+            cols[ON][row] = M31.one();
+            cols[RI][row] = f(ri);
+            cols[BLK][row] = f(bi);
+            for (0..4) |j| {
+                const pos = 64 * bi + 4 * k + j;
+                if (pos < lf.msg.len) {
+                    cols[B + j][row] = f(lf.msg[pos]);
+                    cols[A + j][row] = M31.one();
+                    cnt += 1;
+                    if (!pku) try reads.append(a, @intCast(r.start + pos - 36));
+                }
+            }
+            cols[CNT][row] = f(cnt);
+            cols[LASTF][row] = if (last) M31.one() else M31.zero();
+            cols[T][row] = f(leafT(lf.msg.len, bi, nb));
+            cols[SM][row] = if (row > 0 and !newr) M31.one() else M31.zero();
+            cols[ENDR][row] = if (k == 15 and last) M31.one() else M31.zero();
+            cols[NEWR][row] = if (newr) M31.one() else M31.zero();
+            cols[START][row] = f(r.start);
+            cols[M][row] = f(lf.msg.len);
+            cols[F0][row] = if (bi == 0) M31.one() else M31.zero();
+            cols[PKU][row] = if (pku) M31.one() else M31.zero();
+            row += 1;
+        };
+    }
+    // Off rows: block 0, not last: the counter constraint gives 64.
+    while (row < n) : (row += 1) cols[T][row] = f(64);
+    return cols;
+}
+
+fn lcColumns(a: std.mem.Allocator, log_size: u32, leaves: []const Leaf) ![][]M31 {
+    const BLKI = 300;
+    const FST = 301;
+    const NIL = 302;
+    const LASTF = 303;
+    const T = 304;
+    const WLO = 305;
+    const WHI = 306;
+    const CHN = 307;
+    const USEW = 308;
+    const YD = 309;
+    const MU0 = 310;
+    const MU1 = 311;
+    const RI = 312;
+    const n = @as(usize, 1) << @intCast(log_size);
+    var total: usize = 0;
+    for (leaves) |lf| total += lf.blocks.len;
+    if (b2.PERIOD * total > n) return error.LeafBlocksDoNotFit;
+    const cols = try zeros(a, 313, n);
+    var p: usize = 0;
+    for (leaves, 0..) |lf, ri| for (lf.blocks, lf.ins, 0..) |bw, hin, bi| {
+        const nb = lf.blocks.len;
+        const last = bi + 1 == nb;
+        const input: b2.Input = .{ .h = hin, .m = bw, .t = leafT(lf.msg.len, bi, nb), .f = last };
+        const base = p * b2.PERIOD;
+        b2.fillPeriod(cols, base, n, input);
+        for (0..b2.PERIOD) |q| {
+            const row = base + q;
+            if (row >= n) break;
+            cols[BLKI][row] = f(bi);
+            cols[FST][row] = if (bi == 0) M31.one() else M31.zero();
+            cols[LASTF][row] = if (last) M31.one() else M31.zero();
+            cols[T][row] = f(input.t);
+            cols[CHN][row] = if (bi > 0) M31.one() else M31.zero();
+            cols[USEW][row] = M31.one();
+            cols[YD][row] = if (last) M31.one() else M31.zero();
+            cols[MU0][row] = if (q < 16) M31.one() else M31.zero();
+            cols[MU1][row] = if (q == 0) M31.one() else M31.zero();
+            cols[RI][row] = f(ri);
+            if (q < 16) {
+                cols[WLO][row] = f(bw[q] & 0xffff);
+                cols[WHI][row] = f(bw[q] >> 16);
+            }
+        }
+        p += 1;
+    };
+    while (p * b2.PERIOD < n) : (p += 1) {
+        const base = p * b2.PERIOD;
+        b2.fillPeriod(cols, base, n, .{ .h = commit.H0, .m = @splat(0), .t = 0, .f = false });
+        for (0..b2.PERIOD) |q| {
+            if (base + q >= n) break;
+            cols[NIL][base + q] = M31.one();
+        }
+    }
+    return cols;
+}
+
+fn bytes3(x: usize) [3]u32 {
+    return .{ @intCast(x & 0xff), @intCast((x >> 8) & 0xff), @intCast((x >> 16) & 0xff) };
+}
+
+fn mtColumns(a: std.mem.Allocator, log_size: u32, leaves: []const Leaf, tree: []const [8]u32, half: usize, ranges: *std.ArrayList(u32)) ![][]M31 {
+    const ID = 300;
+    const NIL = 301;
+    const USEW = 302;
+    const LEAFL = 303;
+    const USEL = 304;
+    const USER = 305;
+    const WLO = 306;
+    const WHI = 307;
+    const CK = 308;
+    const LU = 309;
+    const USEROW = 310;
+    const ZW = 311;
+    const MUN = 312;
+    const MUL = 313;
+    const DD = 314;
+    const UL = 317;
+    const UR = 320;
+    const EB = 323;
+    const n = @as(usize, 1) << @intCast(log_size);
+    const nodes = 2 * half - 1;
+    const cnt = leaves.len;
+    if (b2.PERIOD * nodes > n) return error.TreeDoesNotFit;
+    if (cnt > 2 * half or 2 * half - cnt >= 1 << 24) return error.TooManyRecords;
+    const cols = try zeros(a, 326, n);
+    var p: usize = 0;
+    while (p * b2.PERIOD < n) : (p += 1) {
+        const base = p * b2.PERIOD;
+        const used = p < nodes;
+        const j = p + 1;
+        const leafl = used and j >= half;
+        var m: [16]u32 = @splat(0);
+        if (used) {
+            const l = if (leafl) slotDigest(leaves, 2 * (j - half)) else tree[2 * j];
+            const r = if (leafl) slotDigest(leaves, 2 * (j - half) + 1) else tree[2 * j + 1];
+            @memcpy(m[0..8], &l);
+            @memcpy(m[8..16], &r);
+        }
+        b2.fillPeriod(cols, base, n, if (used) .{ .h = commit.H0, .m = m, .t = 64, .f = true } else .{ .h = commit.H0, .m = @splat(0), .t = 0, .f = false });
+        const slot_l = if (leafl) 2 * (j - half) else 0;
+        const use_l = leafl and slot_l < cnt;
+        const use_r = leafl and slot_l + 1 < cnt;
+        const dd = if (!used) 0 else if (leafl) j - half else half - 1 - j;
+        const ul: usize = if (!leafl) 0 else if (use_l) cnt - 1 - slot_l else slot_l - cnt;
+        const ur: usize = if (!leafl) 0 else if (use_r) cnt - 1 - (slot_l + 1) else slot_l + 1 - cnt;
+        if (dd >= 1 << 24 or ul >= 1 << 24 or ur >= 1 << 24) return error.TreeOutOfRange;
+        if (used) {
+            for (bytes3(dd)) |x| try ranges.append(a, x);
+            if (leafl) for ([_]usize{ ul, ur }) |v| for (bytes3(v)) |x| try ranges.append(a, x);
+        }
+        for (0..b2.PERIOD) |q| {
+            const row = base + q;
+            if (row >= n) break;
+            const lt8 = q < 8;
+            const lt16 = q < 16;
+            const userow = if (lt8) use_l else use_r;
+            if (!used) {
+                cols[NIL][row] = M31.one();
+            } else {
+                cols[ID][row] = f(j);
+                cols[USEW][row] = M31.one();
+            }
+            cols[LEAFL][row] = if (leafl) M31.one() else M31.zero();
+            cols[USEL][row] = if (use_l) M31.one() else M31.zero();
+            cols[USER][row] = if (use_r) M31.one() else M31.zero();
+            const ck = f(2 * (if (used) j else 0) + @intFromBool(!lt8)).sub(f(if (leafl) 2 * half else 0));
+            cols[CK][row] = ck;
+            cols[LU][row] = if (leafl) M31.one() else M31.zero();
+            cols[USEROW][row] = if (userow) M31.one() else M31.zero();
+            cols[ZW][row] = if (leafl and !userow) M31.one() else M31.zero();
+            cols[MUN][row] = if (used and lt16 and !leafl) M31.one() else M31.zero();
+            cols[MUL][row] = if (lt16 and leafl and userow) M31.one() else M31.zero();
+            for (bytes3(dd), 0..) |x, i| cols[DD + i][row] = f(x);
+            for (bytes3(ul), 0..) |x, i| cols[UL + i][row] = f(x);
+            for (bytes3(ur), 0..) |x, i| cols[UR + i][row] = f(x);
+            if (lt16) {
+                cols[WLO][row] = f(m[q] & 0xffff);
+                cols[WHI][row] = f(m[q] >> 16);
+            }
+        }
+    }
+    for (bytes3(2 * half - cnt), 0..) |x, i| {
+        cols[EB + i][0] = f(x);
+        try ranges.append(a, x);
+    }
+    return cols;
+}
+
+test "set segments: Merkle leaves are Blake2s-256 of key(r - 1) ‖ record; the root is the heap tree's" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const file = std.fs.cwd().readFileAlloc(a, "data/epoch/set-170.bin", 1 << 30) catch return error.SkipZigTest;
+    const recs = try parse(a, file[4..]);
+    const leaves = try leafHashes(a, begin(file[0..4].*), recs);
+    for (recs, leaves, 0..) |r, lf, i| {
+        var want: [32]u8 = undefined;
+        var msg: std.ArrayList(u8) = .empty;
+        const prev: [36]u8 = if (i == 0) @splat(0) else recs[i - 1].key();
+        try msg.appendSlice(a, &prev);
+        try msg.appendSlice(a, r.head);
+        try msg.appendSlice(a, r.ser);
+        std.crypto.hash.blake2.Blake2s256.hash(msg.items, &want, .{});
+        var got: [32]u8 = undefined;
+        for (lf.digest, 0..) |w, k| std.mem.writeInt(u32, got[4 * k ..][0..4], w, .little);
+        try std.testing.expectEqualSlices(u8, &want, &got);
+    }
+    // A node is Blake2s-256 of the two 32-byte children.
+    const tree = try treeNodes(a, leaves, 64);
+    var lr: [64]u8 = undefined;
+    for (tree[2], 0..) |w, k| std.mem.writeInt(u32, lr[4 * k ..][0..4], w, .little);
+    for (tree[3], 0..) |w, k| std.mem.writeInt(u32, lr[32 + 4 * k ..][0..4], w, .little);
+    var want: [32]u8 = undefined;
+    std.crypto.hash.blake2.Blake2s256.hash(&lr, &want, .{});
+    var got: [32]u8 = undefined;
+    for (tree[1], 0..) |w, k| std.mem.writeInt(u32, got[4 * k ..][0..4], w, .little);
+    try std.testing.expectEqualSlices(u8, &want, &got);
 }

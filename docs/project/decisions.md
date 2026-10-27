@@ -486,3 +486,18 @@ Why: the root's public inputs are attested by the root alone (its circuit and ke
 plan), so the peaks only serve extension. 13.8 MB → 0.99 MB. No circuit, VK or proof changes.
 Rejected for now: folding the header root into the join (a new circuit; planned with the set pass's
 final step) and a compression proof (only worth it after that).
+
+### D-050 — A per-coin commitment in the set pass
+Date: 2026-10-27 · By: owner ("Yes, I need it. I'm ok with it only at specific heights", "go ahead.
+You can also proceed with the GPU run") · Status: accepted
+Decision (docs/design/set-pass.md § Membership): the set pass also proves a Merkle root over the set's
+records, so anyone can check that a coin is (or is not) in a proven set with ~1 KB instead of the set
+file. Leaf `i` is Blake2s-256 of `key(i − 1) ‖ record i` (the previous record's outpoint key, 36 zero
+bytes for the first): one leaf proves membership, and one leaf whose previous key is below an outpoint
+and own key above it proves non-membership. Nodes are Blake2s-256 of `left ‖ right` (64 bytes; leaves
+are at least 93 bytes, so a node is never a leaf). Each segment hashes its records into a perfect
+tree of `2^D` slots (empty slots are 32 zero bytes); the set tree combines segment roots with the same
+node hash. Only at the proven heights (the epoch boundary sets); every height (a per-epoch tree of
+spends, or per-block updates) is left for later.
+Why: the pass's existing commitments (the file's Blake2s, `hash_serialized`, the fraction sums) are
+sequential or aggregate, so a single coin can only be checked against them with the whole file.

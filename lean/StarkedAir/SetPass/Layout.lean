@@ -37,12 +37,16 @@ def H_LIMB (base i : ℕ) : ℕ := base + i
 def H_NB (base : ℕ) : ℕ := base + 16
 def H_PLEN (base : ℕ) : ℕ := base + 17
 def H_PEND (base j : ℕ) : ℕ := base + 18 + j
-def N_PUB : ℕ := 550
+/-- The segment's Merkle root over its records (16 limbs, D-050) and the tree's half width `HALF`. -/
+def PUB_ROOT (i : ℕ) : ℕ := 550 + i
+def PUB_HALF : ℕ := 566
+def N_PUB : ℕ := 567
 
 #guard PUB_G = Block.FpWalk.PUB_G
 #guard PUB_Z = Block.Coin.PUB_Z
 #guard (List.range 26).all fun j => PUB_ALPHA j = Block.Coin.PUB_ALPHA j
-#guard H_PEND SHA_OUT 63 + 1 = N_PUB
+#guard H_PEND SHA_OUT 63 + 1 = PUB_ROOT 0
+#guard PUB_HALF + 1 = N_PUB
 
 /-- Relations (the reused ones keep theirs: byte 3, r8 9, seg 21, fp 22). -/
 def REL_PB2I : ℕ := 26
@@ -56,5 +60,12 @@ def REL_REC : ℕ := 32
 def REL_CODE : ℕ := 33
 def REL_SW : ℕ := 34
 def REL_SHEND : ℕ := 35
+/-- The Merkle root (D-050): a record's previous key as words; leaf-message words and blocks; leaf and
+node digests (as `(id, word, lo, hi)`). -/
+def REL_PKEY : ℕ := 36
+def REL_LW : ℕ := 37
+def REL_LB : ℕ := 38
+def REL_LEAF : ℕ := 39
+def REL_NODE : ℕ := 40
 
 end StarkedAir.SetPass

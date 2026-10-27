@@ -19,7 +19,7 @@ open StarkedAir.Spec.QM31 (QM)
 
 /-- A proven segment: a satisfied, balanced segment system below the size bound with public inputs `p`. -/
 def SegOk (p : ℕ → F) : Prop :=
-  ∃ (inst : ℕ → Inst) (Ls : ℕ → ℕ), (∀ i < 9, (inst i).logSize = Ls i) ∧ segSys.SatisfiedExt inst p [] ∧ SegSizeOk Ls
+  ∃ (inst : ℕ → Inst) (Ls : ℕ → ℕ), (∀ i < 12, (inst i).logSize = Ls i) ∧ segSys.SatisfiedExt inst p [] ∧ SegSizeOk Ls
 
 /-! ### Vector entries -/
 

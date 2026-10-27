@@ -144,7 +144,7 @@ pub fn decodeSeg(a: std.mem.Allocator, bytes: []const u8) !SegFile {
 // ---------------------------------------------------------------------------------------------
 // Summaries (Lean `SetTree.inIdx`, `outIdx`, `setLeafOut`)
 
-pub const NS = 32;
+pub const NS = 48;
 pub const Summary = [NS]M31;
 pub const NV = 331;
 pub const Vec = [NV]M31;
@@ -221,25 +221,38 @@ fn limbs16(d: [8]u32, out: []M31) void {
     }
 }
 
-/// The summary of two state digests.
-pub fn summaryOf(din: [8]u32, dout: [8]u32) Summary {
+/// The summary of two state digests and a Merkle root (D-050).
+pub fn summaryOf(din: [8]u32, dout: [8]u32, root: [8]u32) Summary {
     var s: Summary = undefined;
     limbs16(din, s[0..16]);
     limbs16(dout, s[16..32]);
+    limbs16(root, s[32..48]);
     return s;
+}
+
+fn wordsOf(s: []const M31) [8]u32 {
+    var w: [8]u32 = undefined;
+    for (&w, 0..) |*x, i| x.* = s[2 * i].toU32() | (s[2 * i + 1].toU32() << 16);
+    return w;
+}
+
+/// A summary's Merkle root.
+pub fn rootOf(s: *const Summary) [8]u32 {
+    return wordsOf(s[32..48]);
 }
 
 /// A segment's summary (what the leaf circuit outputs).
 pub fn leafSummary(pubs: *const [N_PUB]M31) Summary {
-    return summaryOf(vecDigest(&inVec(pubs)), vecDigest(&outVec(pubs)));
+    return summaryOf(vecDigest(&inVec(pubs)), vecDigest(&outVec(pubs)), wordsOf(pubs[SS.PUB_ROOT..][0..16]));
 }
 
-/// Two linked ranges' summary (what the node circuit outputs).
+/// Two linked ranges' summary (what the node circuit outputs): the roots folded with the tree's node.
 pub fn joinSummary(l: Summary, r: Summary) !Summary {
     for (0..16) |j| if (!l[16 + j].eql(r[j])) return error.NotLinked;
     var s: Summary = undefined;
     @memcpy(s[0..16], l[0..16]);
     @memcpy(s[16..32], r[16..32]);
+    limbs16(SS.nodeHash(rootOf(&l), rootOf(&r)), s[32..48]);
     return s;
 }
 
@@ -537,7 +550,7 @@ pub fn verifyRoot(gpa: std.mem.Allocator, tables: *const leaf.Tables, vk: *const
     if (!std.mem.eql(u32, &root.proof.circuit_hash, &want.hash)) return error.WrongCircuit;
     if (!std.meta.eql(root.proof.request.pcs_config, PcsConfigV2.fromFriAndTraceSize(vk.fri, vk.trace_log))) return error.ConfigNotPinned;
     const out = try leaf.verifyCircuit(gpa, tables, &root.proof);
-    const sum = summaryOf(vecDigest(&stateVec(ch, SS.begin(count))), vecDigest(&outStateVec(ch, final)));
+    const sum = summaryOf(vecDigest(&stateVec(ch, SS.begin(count))), vecDigest(&outStateVec(ch, final)), rootOf(&root.sum));
     if (!std.mem.eql(u32, &out, &leaf.pubsDigest(want.key, &sum))) return error.WrongDigest;
 }
 
@@ -635,14 +648,14 @@ pub fn decodePass(gpa: std.mem.Allocator, a: std.mem.Allocator, bytes: []const u
 
 /// What a set pass proves about its file (Lean `SetFile.finish`): the count, amount, highest coin height,
 /// the fraction sum under the challenge, the Blake2s digest and Core's `hash_serialized`.
-pub const Facts = struct { count: u32, amount: u128, max_height: u32, sum: QM31, digest: [32]u8, hash: [32]u8 };
+pub const Facts = struct { count: u32, amount: u128, max_height: u32, sum: QM31, digest: [32]u8, hash: [32]u8, root: [8]u32 = @splat(0), last: ?[36]u8 = null };
 
 /// The facts the pass's final state gives (`finish`; the root is not checked).
 pub fn factsOf(p: *const Pass) !Facts {
     const n = std.mem.readInt(u32, &p.count, .little);
     if (p.final.i != n) return error.CountMismatch;
     const fin = SS.finish(p.final);
-    return .{ .count = n, .amount = p.final.amount, .max_height = p.final.max_h, .sum = p.final.sum, .digest = fin.digest, .hash = fin.hash };
+    return .{ .count = n, .amount = p.final.amount, .max_height = p.final.max_h, .sum = p.final.sum, .digest = fin.digest, .hash = fin.hash, .root = rootOf(&p.root.sum), .last = p.final.last };
 }
 
 /// **Verifies a set pass under `ch`**: the root binds the start state `begin(count)` and the final state
@@ -720,7 +733,7 @@ test "set tree: state vectors match the segment's public inputs; summaries link"
         st = b.out;
         at = end;
     }
-    const want = summaryOf(vecDigest(&stateVec(ch, SS.begin(file[0..4].*))), vecDigest(&outStateVec(ch, st)));
+    const want = summaryOf(vecDigest(&stateVec(ch, SS.begin(file[0..4].*))), vecDigest(&outStateVec(ch, st)), rootOf(&prev.?));
     try std.testing.expectEqualSlices(M31, &want, &prev.?);
     std.debug.print("set-170: {d} segments, summaries chain to begin/final\n", .{k});
 }
@@ -739,7 +752,7 @@ test "set tree: three segments of set-170 proved, folded and verified; unlinked 
     defer tables.deinit(gpa);
     const sfri = PF.testFri();
     const cfri = try FriConfigV2.init(10, 0, 1, 3, 1);
-    const logs: Logs = .{ 10, 8, 6, 6, 10, 8, 11, 10, 11 };
+    const logs: Logs = .{ 10, 8, 6, 6, 10, 8, 11, 10, 11, 10, 12, 13 };
     const ends = try SS.cut(a, file, logs);
     var timer = try std.time.Timer.start();
     var files: [3]SegFile = undefined;
@@ -786,4 +799,210 @@ test "set tree: three segments of set-170 proved, folded and verified; unlinked 
     try std.testing.expectError(error.WrongDigest, verifyRoot(gpa, tables, &su.vk, &root, 3, ch, file[0..4].*, bad));
     try std.testing.expectError(error.WrongDigest, verifyRoot(gpa, tables, &su.vk, &root, 4, ch, file[0..4].*, st));
     try std.testing.expectError(error.WrongCircuit, verifyRoot(gpa, tables, &su.vk, &n01, 1, ch, file[0..4].*, st));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Membership proofs (D-050): a coin's leaf and its path to a pass's root
+
+pub const MEMBER_MAGIC = "SBMEMBER";
+
+/// One step up a path: the sibling digest and whether it is the left child.
+pub const Step = struct { sib: [8]u32, left: bool };
+
+/// A membership proof for outpoint key `key` against a pass's root. `present`: the leaf's record has
+/// `key`. Absent: the leaf's previous key is below `key` and its record's key above it, or (`after_last`)
+/// the leaf is the set's last record (the pass's final state names its key) and its key is below `key`.
+pub const Member = struct {
+    key: [36]u8,
+    present: bool,
+    after_last: bool,
+    prev: [36]u8,
+    record: []const u8,
+    path: []const Step,
+};
+
+/// The root of a list of segment roots in the set tree's shape (`split`).
+pub fn foldRoots(roots: []const [8]u32) [8]u32 {
+    if (roots.len == 1) return roots[0];
+    const s = split(roots.len);
+    return SS.nodeHash(foldRoots(roots[0..s]), foldRoots(roots[s..]));
+}
+
+fn treePath(a: std.mem.Allocator, roots: []const [8]u32, i: usize, out: *std.ArrayList(Step)) !void {
+    if (roots.len == 1) return;
+    const s = split(roots.len);
+    if (i < s) {
+        try treePath(a, roots[0..s], i, out);
+        try out.append(a, .{ .sib = foldRoots(roots[s..]), .left = false });
+    } else {
+        try treePath(a, roots[s..], i - s, out);
+        try out.append(a, .{ .sib = foldRoots(roots[0..s]), .left = true });
+    }
+}
+
+fn recKey(r: []const u8) [36]u8 {
+    var k: [36]u8 = undefined;
+    @memcpy(k[0..32], r[0..32]);
+    for (0..4) |i| k[32 + i] = r[35 - i];
+    return k;
+}
+
+/// A set's segments at `logs`, each with its records, leaves and root.
+pub fn passSegments(a: std.mem.Allocator, file: []const u8, logs: Logs) !struct { ends: []const usize, roots: [][8]u32 } {
+    const ends = try SS.cut(a, file, logs);
+    const roots = try a.alloc([8]u32, ends.len);
+    const half: usize = @as(usize, 1) << @intCast(logs[SS.C.rec] - 1);
+    var at: usize = 4;
+    var last: ?[36]u8 = null;
+    for (ends, roots) |end, *root| {
+        var scratch = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer scratch.deinit();
+        const sa = scratch.allocator();
+        const recs = try SS.parse(sa, file[at..end]);
+        var st: SS.State = .{ .b2 = undefined, .sha = undefined };
+        st.last = last;
+        const leaves = try SS.leafHashes(sa, st, recs);
+        root.* = (try SS.treeNodes(sa, leaves, half))[1];
+        last = recKey(recs[recs.len - 1].head);
+        at = end;
+    }
+    return .{ .ends = ends, .roots = roots };
+}
+
+/// The membership proof of `key` in the set `file` (proved at `logs`).
+pub fn proveMember(a: std.mem.Allocator, file: []const u8, logs: Logs, key: [36]u8) !Member {
+    const ps = try passSegments(a, file, logs);
+    const half: usize = @as(usize, 1) << @intCast(logs[SS.C.rec] - 1);
+    var at: usize = 4;
+    var last: ?[36]u8 = null;
+    for (ps.ends, 0..) |end, si| {
+        const recs = try SS.parse(a, file[at..end]);
+        const is_last_seg = si + 1 == ps.ends.len;
+        for (recs, 0..) |r, ri| {
+            const k = recKey(r.head);
+            const o = std.mem.order(u8, &k, &key);
+            const after = is_last_seg and ri + 1 == recs.len and o == .lt;
+            if (o == .lt and !after) continue;
+            // Record `ri` of segment `si`: present (`o == .eq`), the bracket above `key` (`.gt`), or the last.
+            var st: SS.State = .{ .b2 = undefined, .sha = undefined };
+            st.last = last;
+            const leaves = try SS.leafHashes(a, st, recs);
+            const nodes = try SS.treeNodes(a, leaves, half);
+            var path: std.ArrayList(Step) = .empty;
+            var s = ri;
+            const other = s ^ 1;
+            try path.append(a, .{ .sib = if (other < leaves.len) leaves[other].digest else @splat(0), .left = (s & 1) == 1 });
+            var j = half + s / 2;
+            while (j > 1) : (j /= 2) try path.append(a, .{ .sib = nodes[j ^ 1], .left = (j & 1) == 1 });
+            s = 0;
+            try treePath(a, ps.roots, si, &path);
+            return .{
+                .key = key,
+                .present = o == .eq,
+                .after_last = after,
+                .prev = leaves[ri].msg[0..36].*,
+                .record = file[at + r.start ..][0 .. SS.HEAD + r.ser.len],
+                .path = path.items,
+            };
+        }
+        last = recKey(recs[recs.len - 1].head);
+        at = end;
+    }
+    return error.EmptySet;
+}
+
+/// **Verifies a membership proof** against a pass's root (and, for `after_last`, the pass's last key).
+pub fn verifyMember(m: *const Member, root: [8]u32, last_key: ?[36]u8) !void {
+    if (m.record.len < SS.HEAD + 8 or m.record.len != SS.HEAD + std.mem.readInt(u32, m.record[45..49], .little))
+        return error.BadRecord;
+    const k = recKey(m.record);
+    if (m.present) {
+        if (!std.mem.eql(u8, &k, &m.key)) return error.WrongKey;
+    } else if (m.after_last) {
+        const lk = last_key orelse return error.NoLastKey;
+        if (!std.mem.eql(u8, &k, &lk) or std.mem.order(u8, &k, &m.key) != .lt) return error.NotBracketed;
+    } else if (std.mem.order(u8, &m.prev, &m.key) != .lt or std.mem.order(u8, &m.key, &k) != .lt) return error.NotBracketed;
+    var d: [32]u8 = undefined;
+    var h = std.crypto.hash.blake2.Blake2s256.init(.{});
+    h.update(&m.prev);
+    h.update(m.record);
+    h.final(&d);
+    var w: [8]u32 = undefined;
+    for (&w, 0..) |*x, i| x.* = std.mem.readInt(u32, d[4 * i ..][0..4], .little);
+    for (m.path) |st| w = if (st.left) SS.nodeHash(st.sib, w) else SS.nodeHash(w, st.sib);
+    if (!std.mem.eql(u32, &w, &root)) return error.NotInRoot;
+}
+
+pub fn encodeMember(a: std.mem.Allocator, m: *const Member) ![]u8 {
+    var e: store.Enc = .{ .a = a };
+    try e.buf.appendSlice(a, MEMBER_MAGIC);
+    try e.int(u32, store.VERSION);
+    try e.buf.appendSlice(a, &m.key);
+    try e.int(u8, @intFromBool(m.present));
+    try e.int(u8, @intFromBool(m.after_last));
+    try e.buf.appendSlice(a, &m.prev);
+    try e.blob(m.record);
+    try e.int(u32, @intCast(m.path.len));
+    for (m.path) |st| {
+        try e.words(&st.sib);
+        try e.int(u8, @intFromBool(st.left));
+    }
+    return store.seal(&e);
+}
+
+pub fn decodeMember(a: std.mem.Allocator, bytes: []const u8) !Member {
+    var d: store.Dec = .{ .bytes = try store.unseal(bytes) };
+    try d.magic(MEMBER_MAGIC);
+    var m: Member = undefined;
+    m.key = (try d.take(36))[0..36].*;
+    m.present = (try d.int(u8)) == 1;
+    m.after_last = (try d.int(u8)) == 1;
+    m.prev = (try d.take(36))[0..36].*;
+    m.record = try d.blob();
+    const np = try d.int(u32);
+    if (np > 64) return error.PathTooLong;
+    const path = try a.alloc(Step, np);
+    for (path) |*st| {
+        st.sib = try d.words(8);
+        st.left = (try d.int(u8)) == 1;
+    }
+    m.path = path;
+    if (d.pos != d.bytes.len) return error.TrailingBytes;
+    return m;
+}
+
+test "set tree: membership proofs verify against the pass root (present, absent between, after the last)" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const file = std.fs.cwd().readFileAlloc(a, "data/epoch/set-1000.bin", 1 << 30) catch return error.SkipZigTest;
+    const logs: Logs = .{ 10, 8, 6, 6, 10, 9, 11, 10, 11, 10, 12, 13 };
+    const ps = try passSegments(a, file, logs);
+    const root = foldRoots(ps.roots);
+    std.debug.print("set-1000: {d} segments\n", .{ps.ends.len});
+    const recs = try SS.parse(a, file[4..]);
+    const last = recKey(recs[recs.len - 1].head);
+    for ([_]usize{ 0, 1, 37, recs.len / 2, recs.len - 1 }) |i| {
+        const k = recKey(recs[i].head);
+        const m = try decodeMember(a, try encodeMember(a, &try proveMember(a, file, logs, k)));
+        try std.testing.expect(m.present);
+        try verifyMember(&m, root, last);
+        // A changed byte of the record, a flipped side, another root: rejected.
+        var bad = m;
+        const br = try a.dupe(u8, m.record);
+        br[60] ^= 1;
+        bad.record = br;
+        try std.testing.expectError(error.NotInRoot, verifyMember(&bad, root, last));
+        var r2 = root;
+        r2[0] ^= 1;
+        try std.testing.expectError(error.NotInRoot, verifyMember(&m, r2, last));
+        // An absent key just above it.
+        var x = k;
+        x[35] +%= 1;
+        if (i + 1 < recs.len and std.mem.eql(u8, &x, &recKey(recs[i + 1].head))) continue;
+        const ab = try proveMember(a, file, logs, x);
+        try std.testing.expect(!ab.present);
+        try verifyMember(&ab, root, last);
+        try std.testing.expectEqual(i + 1 == recs.len, ab.after_last);
+    }
 }

@@ -14,8 +14,10 @@ position `START` (`Spec/SetFile.encRec`):
 * the amount (12 bytes with carries), the highest height, the record count, from the public incoming
   values; the last row's are the outgoing ones, and its key the outgoing last key.
 
-It yields `rec(r, START, len)` and the code bytes `code(r, i, byte)` for the `TxOutSer` stream, and the
-`ser` segment `(0, r, START + 49, len)`, whose fingerprint it reads back.
+It yields `rec(r, START, len)` (twice: the `TxOutSer` stream and the Merkle leaf walker each read it) and
+the code bytes `code(r, i, byte)` for the `TxOutSer` stream, the `ser` segment `(0, r, START + 49, len)`,
+whose fingerprint it reads back, and the previous key as nine words `pkey(r, w, lo, hi)` for the
+record's Merkle leaf (D-050).
 -/
 import StarkedAir.SetPass.Layout
 
@@ -158,7 +160,7 @@ def r8 (e : Expr) (m : Expr) : Lookup := ⟨Block.Tables.REL_R8, .neg m, [e]⟩
 def lookups : List Lookup :=
   (List.range 49).map (fun j => ⟨Block.REL_BYTE, .neg (k ON), [.add (k START) (cst j), hb j]⟩) ++
   (List.range 8).map (fun j => ⟨Block.REL_BYTE, .neg (k ON), [.add (k START) (cst (49 + j)), k (AB j)]⟩) ++
-  [ ⟨REL_REC, k ON, [k IDX, k START, k LENC]⟩ ] ++
+  [ ⟨REL_REC, .mul (cst 2) (k ON), [k IDX, k START, k LENC]⟩ ] ++
   (List.range 4).map (fun i => ⟨REL_CODE, k ON, [k IDX, cst i, k (C i)]⟩) ++
   [ ⟨Block.FpWalk.REL_SEG, k ON, [cst 0, k IDX, .add (k START) (cst 49), k LENC]⟩,
     ⟨Block.FpWalk.REL_FP, .neg (k ON), [cst 0, k IDX, k LENC, k FH, k (FH + 1), k (FH + 2), k (FH + 3)]⟩ ] ++
@@ -167,7 +169,10 @@ def lookups : List Lookup :=
   (List.range 3).map (fun i => r8 (k (SB i)) (k ON)) ++
   (List.range 3).map (fun i => r8 (k (MD i)) (k ON)) ++
   (List.range 12).map (fun j => r8 (k (AM j)) one) ++
-  [r8 (k DELTA) cmp]
+  [r8 (k DELTA) cmp] ++
+  -- the previous key as little-endian words, for the record's Merkle leaf (D-050)
+  (List.range 9).map (fun w => ⟨REL_PKEY, k ON, [k IDX, cst w, pair (k (PREV (4 * w))) (k (PREV (4 * w + 1))),
+    pair (k (PREV (4 * w + 2))) (k (PREV (4 * w + 3)))]⟩)
 
 def rec : Comp where
   air := { name := "set_rec", nMain := N_MAIN, pre := preCols, constraints := constraints }

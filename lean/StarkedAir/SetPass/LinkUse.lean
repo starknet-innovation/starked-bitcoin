@@ -14,7 +14,7 @@ open StarkedAir.Block (neg01 mul01 air_bool)
 section System
 
 variable {inst : ℕ → Inst} {pub : ℕ → F} {Ls : ℕ → ℕ}
-  (hL : ∀ i < 9, (inst i).logSize = Ls i) (hsat : segSys.SatisfiedExt inst pub [])
+  (hL : ∀ i < 12, (inst i).logSize = Ls i) (hsat : segSys.SatisfiedExt inst pub [])
 include hL hsat
 
 omit hL hsat in
@@ -32,7 +32,7 @@ theorem pre01 {n : ℕ} {pc : List PreCol} {M : ℕ → ℕ → F} {i r : ℕ} {
 
 omit hsat in
 /-- The site multiplicity of component `i`'s lookup `k`, as its expression's value. -/
-theorem site_mult_eq {i r k : ℕ} (hi : i < 9) :
+theorem site_mult_eq {i r k : ℕ} (hi : i < 12) :
     siteMult segSys inst pub (i, r, k) =
       ((segSys.comp i).lookups.getD k ⟨0, .const 0, []⟩).mult.eval (2 ^ Ls i) (segSys.comp i).air.pre pub (inst i).main r := by
   simp only [siteMult, siteEval, siteLookup, hL i hi]
@@ -68,8 +68,8 @@ theorem use_mult (hHL : pub PUB_HASLAST = 0 ∨ pub PUB_HASLAST = 1) : ∀ s ∈
   · simp [isUse] at hu
   · -- records: `−ON`, `−1`, `−cmp`
     have rs := rec_sat hL hsat
-    have hk89 : k < 89 := by have h := lookups_len 3 (by decide); rw [h] at hk; simpa using hk
-    have hm := rec_mult_cases k hk89 hu
+    have hk98 : k < 98 := by have h := lookups_len 3 (by decide); rw [h] at hk; simpa using hk
+    have hm := rec_mult_cases k hk98 hu
     have e : ((segSys.comp 3).lookups.getD k ⟨0, .const 0, []⟩) = Rec.lookups.getD k ⟨0, .const 0, []⟩ := rfl
     have ep : (segSys.comp 3).air.pre = Rec.preCols := rfl
     rw [e, ep]
@@ -208,6 +208,75 @@ theorem use_mult (hHL : pub PUB_HASLAST = 0 ∨ pub PUB_HASLAST = 1) : ∀ s ∈
       wrap_zero hr, Nat.cast_one, sub_eq_zero] at dUSEW
     simp only [ShaC.lookups, List.getD_cons_zero, Expr.eval, ShaC.k, StarkedAir.Sha256.eval_col, wrap_zero hr, dUSEW]
     exact neg01 (mul01 bMR (om01 bNIL))
+  · -- leaf words: `−PKU`, `−NEWR`, `−A j·(1 − PKU)`
+    have ws := lw_sat hL hsat
+    have hk6 : k < 6 := by simpa [isUse] using hu
+    have e : ∀ kk, ((segSys.comp 9).lookups.getD kk ⟨0, .const 0, []⟩) = LW.lookups.getD kk ⟨0, .const 0, []⟩ :=
+      fun _ => rfl
+    have ep : (segSys.comp 9).air.pre = LW.preCols := rfl
+    rw [e, ep]
+    have bc : ∀ c ∈ LW.boolCols, (inst 9).main c r = 0 ∨ (inst 9).main c r = 1 := fun c hc =>
+      air_bool (air := LW.lw.air) ws (c := c) (by
+        simp only [LW.lw, LW.constraints, List.mem_append, List.mem_map]
+        exact Or.inl (Or.inl (Or.inl (Or.inl ⟨c, hc, rfl⟩)))) hr
+    interval_cases k <;>
+      simp only [LW.lookups, List.range_succ, List.range_zero, List.map_cons, List.map_nil, List.nil_append,
+        List.cons_append, List.getD_cons_zero, List.getD_cons_succ, Expr.eval, LW.k, LW.om, LW.one,
+        StarkedAir.Sha256.eval_col, StarkedAir.Sha256.eval_cst, wrap_zero hr, Nat.cast_one] <;>
+      first
+        | exact neg01 (bc LW.PKU (by simp [LW.boolCols])) | exact neg01 (bc LW.NEWR (by simp [LW.boolCols]))
+        | exact neg01 (mul01 (bc (LW.A 0) (by simp [LW.boolCols])) (om01 (bc LW.PKU (by simp [LW.boolCols]))))
+        | exact neg01 (mul01 (bc (LW.A 1) (by simp [LW.boolCols])) (om01 (bc LW.PKU (by simp [LW.boolCols]))))
+        | exact neg01 (mul01 (bc (LW.A 2) (by simp [LW.boolCols])) (om01 (bc LW.PKU (by simp [LW.boolCols]))))
+        | exact neg01 (mul01 (bc (LW.A 3) (by simp [LW.boolCols])) (om01 (bc LW.PKU (by simp [LW.boolCols]))))
+  · -- leaf compressions: `−MU0`, `−MU1`
+    have cs := lc_sat hL hsat
+    have hk2 : k < 2 := by simpa [isUse] using hu
+    have e : ∀ kk, ((segSys.comp 10).lookups.getD kk ⟨0, .const 0, []⟩) = LC.lookups.getD kk ⟨0, .const 0, []⟩ :=
+      fun _ => rfl
+    have ep : (segSys.comp 10).air.pre = LC.preCols := rfl
+    rw [e, ep]
+    have hb : ∀ c ∈ [LC.FST, LC.NIL, LC.LASTF, LC.MU0, LC.MU1], (inst 10).main c r = 0 ∨ (inst 10).main c r = 1 :=
+      fun c hc => air_bool (air := LC.lc.air) cs (c := c)
+        (List.mem_append_left _ (List.mem_append_left _ (List.mem_append_left _ (List.mem_append_left _
+          (List.mem_append_right _ (by
+            simp only [LC.flagC, List.mem_append, List.mem_map]; exact Or.inl (Or.inl ⟨c, hc, rfl⟩))))))) hr
+    interval_cases k <;>
+      simp only [LC.lookups, List.cons_append, List.getD_cons_zero, List.getD_cons_succ, Expr.eval, LC.k,
+        StarkedAir.Sha256.eval_col, wrap_zero hr] <;>
+      first | exact neg01 (hb LC.MU0 (by simp)) | exact neg01 (hb LC.MU1 (by simp))
+  · -- tree nodes: `−MUN`, `−MUL`, `−first` (the root), range reads `−USEW·R0`, `−LU·R0`, `−first`
+    have cs := mt_sat hL hsat
+    have e : ∀ kk, ((segSys.comp 11).lookups.getD kk ⟨0, .const 0, []⟩) = MT.lookups.getD kk ⟨0, .const 0, []⟩ :=
+      fun _ => rfl
+    have ep : (segSys.comp 11).air.pre = MT.preCols := rfl
+    rw [e, ep]
+    have hk30 : k < 30 := by simpa [segSys, comps, MT.mt, MT.lookups] using hk
+    have hb : ∀ c ∈ [MT.NIL, MT.LEAFL, MT.USEL, MT.USER, MT.USEW, MT.LU, MT.MUN, MT.MUL],
+        (inst 11).main c r = 0 ∨ (inst 11).main c r = 1 :=
+      fun c hc => air_bool (air := MT.mt.air) cs (c := c)
+        (List.mem_append_left _ (List.mem_append_left _ (List.mem_append_left _
+          (List.mem_append_right _ (by
+            simp only [MT.flagC, List.mem_append, List.mem_map]; exact Or.inl (Or.inl ⟨c, hc, rfl⟩)))))) hr
+    have bR0 := pre01 (pub := pub) (pc := MT.preCols) (M := (inst 11).main) (i := MT.P_R0)
+      (vs := (List.range 88).map fun r => if r = 0 then 1 else 0)
+      (by simp [MT.preCols, MT.P_R0, Blake2s.preCols, Block.B2s.per88, Blake2s.PERIOD])
+      (fun v hv => by simp only [List.mem_map, List.mem_range] at hv; obtain ⟨q, -, rfl⟩ := hv; split_ifs <;> omega) hr
+    have bF : (pre MT.P_FIRST).eval (2 ^ Ls 11) MT.preCols pub (inst 11).main r = 0 ∨
+        (pre MT.P_FIRST).eval (2 ^ Ls 11) MT.preCols pub (inst 11).main r = 1 := by
+      have hg : MT.preCols.getD MT.P_FIRST (.periodic [0]) = .isFirst := by
+        simp [MT.preCols, MT.P_FIRST, Blake2s.preCols, List.getD_eq_getElem?_getD]
+      simp only [pre, Expr.eval, hg, PreCol.eval, wrap_zero hr]
+      split_ifs <;> simp
+    interval_cases k
+    all_goals first
+      | (simp [isUse] at hu; done)
+      | (simp only [MT.lookups, MT.r8, List.range_succ, List.range_zero, List.map_cons, List.map_nil,
+          List.flatMap_cons, List.flatMap_nil, List.nil_append, List.cons_append, List.append_nil,
+          List.getD_cons_zero, List.getD_cons_succ, Expr.eval, MT.k, MT.p, StarkedAir.Sha256.eval_col, wrap_zero hr]
+         first
+          | exact neg01 (hb MT.MUN (by simp)) | exact neg01 (hb MT.MUL (by simp)) | exact neg01 bF
+          | exact neg01 (mul01 (hb MT.USEW (by simp)) bR0) | exact neg01 (mul01 (hb MT.LU (by simp)) bR0))
 
 /-- **A use is matched by a yield.** -/
 theorem linked (hHL : pub PUB_HASLAST = 0 ∨ pub PUB_HASLAST = 1) (hsz : SegSizeOk Ls) {s0 : Site}
@@ -231,14 +300,23 @@ theorem yield_of {i r k : ℕ} (hs : ((i, r, k) : Site) ∈ sites segSys inst) (
   obtain ⟨hi, -, hk⟩ := (mem_sites hL).mp hs
   exact yield_table i hi k hk hnu
 
+/-- The yield sites, as a test. -/
+def YT (i k R : ℕ) : Bool :=
+    (i == 0 && k == 0 && R == 3) || (i == 1 && k == 0 && R == 9) || (i == 1 && k == 1 && R == 10) || (i == 2 && k == 0 && R == 26) ||
+    (i == 2 && k == 1 && R == 27) || (i == 2 && k == 2 && R == 28) || (i == 2 && k == 3 && R == 29) || (i == 3 && k == 57 && R == 32) ||
+    (i == 3 && k == 58 && R == 33) || (i == 3 && k == 59 && R == 33) || (i == 3 && k == 60 && R == 33) || (i == 3 && k == 61 && R == 33) ||
+    (i == 3 && k == 62 && R == 21) || (i == 4 && k == 3 && R == 22) || (i == 5 && k == 12 && R == 30) || (i == 6 && k == 1 && R == 31) ||
+    (i == 7 && k == 6 && R == 34) || (i == 8 && k == 1 && R == 35) || (i == 3 && decide (89 ≤ k) && decide (k < 98) && R == 36) ||
+    (i == 9 && k == 6 && R == 37) || (i == 9 && k == 7 && R == 38) || (i == 10 && decide (2 ≤ k) && decide (k < 10) && R == 39) ||
+    (i == 11 && decide (2 ≤ k) && decide (k < 10) && R == 40)
+
 omit hL hsat in
-theorem yt (i k R : ℕ) : (i, k, R) ∈ yieldTable ↔
-    (i = 0 ∧ k = 0 ∧ R = 3) ∨ (i = 1 ∧ k = 0 ∧ R = 9) ∨ (i = 1 ∧ k = 1 ∧ R = 10) ∨ (i = 2 ∧ k = 0 ∧ R = 26) ∨
-    (i = 2 ∧ k = 1 ∧ R = 27) ∨ (i = 2 ∧ k = 2 ∧ R = 28) ∨ (i = 2 ∧ k = 3 ∧ R = 29) ∨ (i = 3 ∧ k = 57 ∧ R = 32) ∨
-    (i = 3 ∧ k = 58 ∧ R = 33) ∨ (i = 3 ∧ k = 59 ∧ R = 33) ∨ (i = 3 ∧ k = 60 ∧ R = 33) ∨ (i = 3 ∧ k = 61 ∧ R = 33) ∨
-    (i = 3 ∧ k = 62 ∧ R = 21) ∨ (i = 4 ∧ k = 3 ∧ R = 22) ∨ (i = 5 ∧ k = 12 ∧ R = 30) ∨ (i = 6 ∧ k = 1 ∧ R = 31) ∨
-    (i = 7 ∧ k = 6 ∧ R = 34) ∨ (i = 8 ∧ k = 1 ∧ R = 35) := by
-  simp only [yieldTable, List.mem_cons, Prod.mk.injEq, List.not_mem_nil, or_false]
+set_option maxRecDepth 20000 in
+theorem yt_all : yieldTable.all (fun t => YT t.1 t.2.1 t.2.2) = true := by decide
+
+omit hL hsat in
+theorem yt {i k R : ℕ} (h : (i, k, R) ∈ yieldTable) : YT i k R = true :=
+  (List.all_eq_true.mp yt_all) (i, k, R) h
 
 /-- **Linking a use to its yield, by relation.** -/
 theorem link (hHL : pub PUB_HASLAST = 0 ∨ pub PUB_HASLAST = 1) (hsz : SegSizeOk Ls) {i0 r0 k0 : ℕ}
@@ -252,11 +330,11 @@ theorem link (hHL : pub PUB_HASLAST = 0 ∨ pub PUB_HASLAST = 1) (hsz : SegSizeO
   rw [← hsr]; exact yield_of hL hs hnu
 
 omit hsat in
-theorem site_mem {i r k : ℕ} (hi : i < 9) (hr : r < 2 ^ Ls i) (hk : k < (segSys.comp i).lookups.length) :
+theorem site_mem {i r k : ℕ} (hi : i < 12) (hr : r < 2 ^ Ls i) (hk : k < (segSys.comp i).lookups.length) :
     ((i, r, k) : Site) ∈ sites segSys inst := (mem_sites hL).mpr ⟨hi, hr, hk⟩
 
 omit hsat in
-theorem rows_lt_P (hsz : SegSizeOk Ls) {i : ℕ} (hi : i < 9) : 2 ^ Ls i < P := by
+theorem rows_lt_P (hsz : SegSizeOk Ls) {i : ℕ} (hi : i < 12) : 2 ^ Ls i < P := by
   have := Nat.pow_le_pow_right (by norm_num : 0 < 2) (hsz.1 i hi)
   unfold P; omega
 
@@ -268,7 +346,8 @@ theorem byte_read (hHL : pub PUB_HASLAST = 0 ∨ pub PUB_HASLAST = 1) (hsz : Seg
     (hv : siteVals segSys inst pub (i, r, k) = [p, b]) :
     ∃ q, q < (pub PUB_LEN).val ∧ p = (q : F) ∧ b = (inst 0).main Block.BYTE q := by
   obtain ⟨i', r', k', hr', hy, hsm, hsv⟩ := link hL hsat hHL hsz hs0 hu hm
-  rw [hrel, show Block.REL_BYTE = 3 from rfl, yt] at hy
+  rw [hrel, show Block.REL_BYTE = 3 from rfl] at hy
+  replace hy := yt hy; simp only [YT, Bool.or_eq_true, Bool.and_eq_true, beq_iff_eq, decide_eq_true_eq] at hy
   obtain ⟨rfl, rfl⟩ : i' = 0 ∧ k' = 0 := by omega
   have hb0 := bytes_sat hL hsat
   have hP : 2 ^ Ls 0 < P := rows_lt_P hL hsz (by decide)
@@ -288,7 +367,8 @@ theorem r8_read (hHL : pub PUB_HASLAST = 0 ∨ pub PUB_HASLAST = 1) (hsz : SegSi
     (hrel : siteRel segSys (i, r, k) = Block.Tables.REL_R8) (hm : siteMult segSys inst pub (i, r, k) = -1) {v : F}
     (hv : siteVals segSys inst pub (i, r, k) = [v]) : v.val < 256 := by
   obtain ⟨i', r', k', hr', hy, -, hsv⟩ := link hL hsat hHL hsz hs0 hu hm
-  rw [hrel, show Block.Tables.REL_R8 = 9 from rfl, yt] at hy
+  rw [hrel, show Block.Tables.REL_R8 = 9 from rfl] at hy
+  replace hy := yt hy; simp only [YT, Bool.or_eq_true, Bool.and_eq_true, beq_iff_eq, decide_eq_true_eq] at hy
   obtain ⟨rfl, rfl⟩ : i' = 1 ∧ k' = 0 := by omega
   have e : siteVals segSys inst pub (1, r', 0) = [((r' % 256 : ℕ) : F)] := by
     simp [siteVals, siteEval, siteLookup, segSys, comps, hL 1 (by decide), Block.Tables.tables, Expr.eval,
@@ -336,7 +416,8 @@ theorem pend_read (hHL : pub PUB_HASLAST = 0 ∨ pub PUB_HASLAST = 1) (hsz : Seg
     (hv : siteVals segSys inst pub (i, r, k) = [p, b]) :
     ∃ q : ℕ, q < 64 ∧ p = (q : F) ∧ b = pub (H_PEND ([B2_IN, B2_OUT, SHA_IN, SHA_OUT].getD j 0) q) := by
   obtain ⟨i', r', k', hr', hy, -, hsv⟩ := link hL hsat hHL hsz hs0 hu hm
-  rw [hrel, yt] at hy
+  rw [hrel] at hy
+  replace hy := yt hy; simp only [YT, Bool.or_eq_true, Bool.and_eq_true, beq_iff_eq, decide_eq_true_eq] at hy
   obtain ⟨rfl, rfl⟩ : i' = 2 ∧ j = k' := by omega
   have e : siteVals segSys inst pub (2, r', j) =
       [((r' % 64 : ℕ) : F), pub (H_PEND ([B2_IN, B2_OUT, SHA_IN, SHA_OUT].getD j 0) (r' % 64))] := by

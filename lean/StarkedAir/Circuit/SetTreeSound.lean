@@ -2,20 +2,24 @@
 **The set tree's glue is sound (set-pass step 4).**
 
 - `leafOut_sound`: if the set leaf's output program holds and hook 0 returned the public inputs `p`,
-  the output is `pubsDigest(0, summ p)`: the halves of `H` of the incoming and outgoing state vectors.
-- `node_sound` and the node program's digests, key and link (`SetNode`): the right child's incoming
-  digest limbs are the left's outgoing ones, and the output digest is over (left's incoming, right's
-  outgoing).
+  the output is `pubsDigest(0, summ p)`: the halves of `H` of the incoming and outgoing state vectors,
+  then the segment's Merkle root limbs (D-050).
+- The node program's digests, key, link and root (`snode_*`): the right child's incoming digest limbs
+  are the left's outgoing ones, and the output digest is over (left's incoming, right's outgoing,
+  `hnode` of the children's roots).
 - `stree_sound`: under the recursion `Trust` (as the block and header trees), a satisfied tree circuit
-  with the expected hash and key outputs the digest of a chain of proven segments (`Chain`), or Blake2s
-  has a collision.
+  with the expected hash and key of shape `t` outputs the digest of a chain of proven segments over a
+  segment tree of shape `t` whose root is the summary's root (`Chain`), or Blake2s has a collision.
 -/
 import StarkedAir.Circuit.SetTree
 import StarkedAir.Circuit.HeaderRec
+import StarkedAir.Circuit.NodeSound
 
 namespace StarkedAir.Circuit.SetTree
 
 open StarkedAir StarkedAir.Circuit StarkedAir.Circuit.BlockRec Q Spec.Blake2s
+open StarkedAir.HeaderTree (pubT limbsOf)
+open StarkedAir.Spec.HeaderTree (hnode)
 
 /-- A state vector's words. -/
 def vecW (p : ℕ → F) (idx : List ℕ) : List Word := idx.map fun k => BitVec.ofNat 32 (p k).val
@@ -26,14 +30,27 @@ def withOne (p : ℕ → F) (k : ℕ) : F := if k = NP then 1 else p k
 /-- Limb `j` (16 bits) of digest words `ws`. -/
 def half (ws : List Word) (j : ℕ) : F := ((Sha256.half16 (ws.getD (j / 2) 0) (j % 2) : ℕ) : F)
 
-/-- A segment's summary: the limbs of `H` of its incoming vector, then of its outgoing one. -/
+/-- A segment's summary: the limbs of `H` of its incoming vector, then of its outgoing one, then its
+Merkle root's limbs (public inputs `ROOT0 …`). -/
 def summ (p : ℕ → F) (j : ℕ) : F :=
-  if j < 16 then half (H (vecW p inIdx)) j else half (H (vecW (withOne p) outIdx)) (j - 16)
+  if j < 16 then half (H (vecW p inIdx)) j
+  else if j < 32 then half (H (vecW (withOne p) outIdx)) (j - 16) else p (ROOT0 + (j - 32))
 
-/-- A summary's 32 limbs as words. -/
+/-- A summary's root limbs. -/
+def rootL (v : ℕ → F) : List F := (List.range 16).map fun j => v (32 + j)
+
+/-- A segment's root limbs. -/
+def segRootL (p : ℕ → F) : List F := (List.range 16).map fun j => p (ROOT0 + j)
+
+theorem rootL_summ (p : ℕ → F) : rootL (summ p) = segRootL p := by
+  simp only [rootL, segRootL, summ]
+  exact List.map_congr_left fun j hj => by
+    rw [if_neg (by omega), if_neg (by omega), show 32 + j - 32 = j by omega]
+
+/-- A summary's 48 limbs as words. -/
 def vals32 (v : ℕ → F) : List Word := (List.range NS).map fun i => BitVec.ofNat 32 (v i).val
 
-/-- `pubsDigest(key, v)` over a 32-limb summary. -/
+/-- `pubsDigest(key, v)` over a 48-limb summary. -/
 def sd (key : List Word) (v : ℕ → F) : List Word := H (key ++ vals32 v)
 
 set_option maxRecDepth 100000 in
@@ -102,6 +119,7 @@ theorem leafOut_sound {ρ : ℕ → Q} (h : Holds ρ leafOutOps) {p : ℕ → F}
     wordsOf ρ setLeafOut.results = sd zeroKey (summ p) := by
   simp only [leafOutOps, holds_append] at h
   obtain ⟨⟨⟨⟨⟨⟨h0, hi⟩, ho⟩, hsi⟩, hso⟩, hk⟩, hd⟩ := h
+  have hR := fun j (hj : j < 16) => hp (ROOT0 + j) (by unfold ROOT0 NP; omega)
   have hone : (ρ NP).a = 1 := by
     have := h0 _ (List.mem_cons_of_mem _ List.mem_cons_self)
     simp only [Op.holds] at this
@@ -125,23 +143,34 @@ theorem leafOut_sound {ρ : ℕ → Q} (h : Holds ρ leafOutOps) {p : ℕ → F}
     simp only [wordsOf, leafKey, List.getElem_map, List.getElem_range, Function.comp, const_word this (by norm_num),
       zeroKey, List.getElem_replicate]
     rfl
-  have hres : (sIn.res ++ sOut.res).length = NS := by
-    rw [List.length_append, (show sIn.res.length = 16 from split16_len _ _), (show sOut.res.length = 16 from split16_len _ _)]; rfl
-  have e2 : (sIn.res ++ sOut.res).map (fun r => BitVec.ofNat 32 (ρ r).a.val) = vals32 (summ p) := by
+  have li : sIn.res.length = 16 := split16_len _ _
+  have lo : sOut.res.length = 16 := split16_len _ _
+  have hres : (sIn.res ++ sOut.res ++ (List.range 16).map (ROOT0 + ·)).length = NS := by
+    rw [List.length_append, List.length_append, li, lo]; simp [NS]
+  have e2 : (sIn.res ++ sOut.res ++ (List.range 16).map (ROOT0 + ·)).map (fun r => BitVec.ofNat 32 (ρ r).a.val) =
+      vals32 (summ p) := by
     apply List.ext_getElem (by rw [List.length_map, hres, vals32_length])
     intro j h1 h2
     have hj : j < NS := by simpa [vals32] using h2
+    have hj48 : j < 48 := hj
     simp only [List.getElem_map, vals32, List.getElem_range]
     congr 2
     by_cases hlt : j < 16
-    · rw [List.getElem_append_left (by rw [(show sIn.res.length = 16 from split16_len _ _)]; omega), summ, if_pos hlt, half,
+    · rw [List.getElem_append_left (by rw [List.length_append, li, lo]; omega),
+        List.getElem_append_left (by rw [li]; omega), summ, if_pos hlt, half,
         ← List.getD_eq_getElem _ 0, sin j hlt, din _ (by omega)]
-    · rw [List.getElem_append_right (by rw [(show sIn.res.length = 16 from split16_len _ _)]; omega), summ, if_neg hlt, half,
-        ← List.getD_eq_getElem _ 0]
-      rw [(show sIn.res.length = 16 from split16_len _ _)]
-      rw [sout (j - 16) (by have : NS = 32 := rfl; omega), dout _ (by have : NS = 32 := rfl; omega)]
+    · by_cases h32 : j < 32
+      · rw [List.getElem_append_left (by rw [List.length_append, li, lo]; omega),
+          List.getElem_append_right (by rw [li]; omega), summ, if_neg hlt, if_pos h32, half,
+          ← List.getD_eq_getElem _ 0]
+        rw [li, sout (j - 16) (by omega), dout _ (by omega)]
+      · rw [List.getElem_append_right (by rw [List.length_append, li, lo]; omega), summ, if_neg hlt, if_neg h32]
+        simp only [List.getElem_map, List.getElem_range, List.length_append, li, lo]
+        rw [show j - (16 + 16) = j - 32 by omega]
+        exact hR _ (by omega)
   have hz' : leafKey.map (word ∘ ρ) = zeroKey := hz
-  have hlen : 4 * (leafKey.length + (sIn.res ++ sOut.res).length) = 4 * (zeroKey ++ vals32 (summ p)).length := by
+  have hlen : 4 * (leafKey.length + (sIn.res ++ sOut.res ++ (List.range 16).map (ROOT0 + ·)).length) =
+      4 * (zeroKey ++ vals32 (summ p)).length := by
     rw [hres]; simp [leafKey, zeroKey, vals32, NS]
   show wordsOf ρ leafDg.res = _
   rw [leafDg, wordsOf_eq (pubsDigest_length _ _ _) (pubsDigest_sound hd (by rw [hlen]; simp [zeroKey, vals32, NS])),
@@ -192,10 +221,11 @@ theorem schild_hook (n i : ℕ) : ∃ root : List ℕ, root.length = 8 ∧
   simp [schild]
 
 theorem snode_parts {ρ : ℕ → Q} (h : Holds ρ setNodeProgram.ops) :
-    Holds ρ sC0.ops ∧ Holds ρ sC1.ops ∧ Holds ρ sLink ∧ Holds ρ sKey.ops ∧ Holds ρ sDigest.ops := by
+    Holds ρ sC0.ops ∧ Holds ρ sC1.ops ∧ Holds ρ sLink ∧ Holds ρ sKey.ops ∧ Holds ρ sDigest.ops ∧
+      Holds ρ sRoot.ops := by
   simp only [setNodeProgram, holds_append] at h
-  obtain ⟨⟨⟨⟨h0, h1⟩, hl⟩, hk⟩, hd⟩ := h
-  exact ⟨h0, h1, hl, hk, hd⟩
+  obtain ⟨⟨⟨⟨⟨h0, h1⟩, hl⟩, hk⟩, hr⟩, hd⟩ := h
+  exact ⟨h0, h1, hl, hk, hd, hr⟩
 
 theorem snode_key {ρ : ℕ → Q} (h : Holds ρ setNodeProgram.ops) :
     wordsOf ρ sKey.res = keyOf (wordsOf ρ sC0.res.chash) (wordsOf ρ sC0.res.key) (wordsOf ρ sC1.res.chash)
@@ -206,25 +236,34 @@ theorem snode_key {ρ : ℕ → Q} (h : Holds ρ setNodeProgram.ops) :
     schild_chash_length, schild_key_length, sC0, sC1]
 
 /-- The node's output limb registers. -/
-def outR (i : ℕ) : ℕ := if i < 16 then sC0.res.pubs i else sC1.res.pubs i
+def outR (i : ℕ) : ℕ :=
+  if i < 16 then sC0.res.pubs i else if i < 32 then sC1.res.pubs i else sRoot.res.getD (i - 32) 0
+
+theorem sRoot_len : sRoot.res.length = 16 := by simp [sRoot, treeNode]
 
 theorem sOuts_eq : sOuts = (List.range NS).map outR := by
-  apply List.ext_getElem (by simp [sOuts, NS])
+  apply List.ext_getElem (by simp [sOuts, NS, sRoot_len])
   intro i h1 h2
-  have hi : i < 32 := by simpa [NS] using h2
+  have hi : i < 48 := by simpa [NS] using h2
   simp only [List.getElem_map, List.getElem_range, outR]
   by_cases hlt : i < 16
-  · simp only [if_pos hlt, sOuts]; rw [List.getElem_append_left (by simp; omega)]; simp
-  · simp only [if_neg hlt, sOuts]; rw [List.getElem_append_right (by simp; omega)]
-    simp only [List.getElem_map, List.getElem_range, List.length_map, List.length_range]
-    congr 1; omega
+  · simp only [if_pos hlt, sOuts]
+    rw [List.getElem_append_left (by simp; omega), List.getElem_append_left (by simp; omega)]; simp
+  · by_cases h32 : i < 32
+    · simp only [if_neg hlt, if_pos h32, sOuts]
+      rw [List.getElem_append_left (by simp; omega), List.getElem_append_right (by simp; omega)]
+      simp only [List.getElem_map, List.getElem_range, List.length_map, List.length_range]
+      congr 1; omega
+    · simp only [if_neg hlt, if_neg h32, sOuts]
+      rw [List.getElem_append_right (by simp; omega), List.getD_eq_getElem _ _ (by rw [sRoot_len]; omega)]
+      simp only [List.length_append, List.length_map, List.length_range]
 
 /-- The node's output summary. -/
 def outSum (ρ : ℕ → Q) : ℕ → F := fun i => (ρ (outR i)).a
 
 theorem snode_digest {ρ : ℕ → Q} (h : Holds ρ setNodeProgram.ops) :
     wordsOf ρ setNodeProgram.results = sd (wordsOf ρ sKey.res) (outSum ρ) := by
-  have hd := (snode_parts h).2.2.2.2
+  have hd := (snode_parts h).2.2.2.2.1
   show wordsOf ρ sDigest.res = _
   rw [sDigest, sOuts_eq] at hd ⊢
   exact pubsDigest_sd (blake2s_length _ _ _) hd
@@ -238,71 +277,127 @@ theorem snode_link {ρ : ℕ → Q} (h : Holds ρ setNodeProgram.ops) :
   simp only [Op.holds] at this
   simp only [childSum, this]
 
+/-- **The root**: the node's root limbs are `hnode` of its children's. -/
+theorem snode_root {ρ : ℕ → Q} (h : Holds ρ setNodeProgram.ops) {a b : Spec.Sha256.State}
+    (ha : rootL (childSum ρ sC0) = limbsOf a) (hb : rootL (childSum ρ sC1) = limbsOf b) :
+    rootL (outSum ρ) = limbsOf (hnode a b) := by
+  have hr := (snode_parts h).2.2.2.2.2
+  have t := treeNode_sound (n := sKey.next) (pl := fun k => sC0.res.pubs (32 + (k - TB)))
+    (pr := fun k => sC1.res.pubs (32 + (k - TB))) hr (a := a) (b := b)
+    (by rw [← ha]; simp only [pubT, rootL, childSum, TB]
+        exact List.map_congr_left fun i _ => by rw [show 108 + i - 108 = i by omega])
+    (by rw [← hb]; simp only [pubT, rootL, childSum, TB]
+        exact List.map_congr_left fun i _ => by rw [show 108 + i - 108 = i by omega])
+  apply List.ext_getElem (by simp [rootL, limbsOf])
+  intro j h1 _
+  have hj : j < 16 := by simpa [rootL] using h1
+  simp only [rootL, List.getElem_map, List.getElem_range, outSum, outR, if_neg (show ¬ 32 + j < 16 by omega),
+    if_neg (show ¬ 32 + j < 32 by omega), show 32 + j - 32 = j by omega]
+  rw [show sRoot = treeNode sKey.next (fun k => sC0.res.pubs (32 + (k - TB))) (fun k => sC1.res.pubs (32 + (k - TB)))
+    from rfl, t j hj, List.getD_eq_getElem _ _ (by simpa [limbsOf] using hj)]
+
 theorem shook_mem0 : ∃ root : List ℕ, root.length = 8 ∧
     Op.hook 0 (root ++ sC0.res.digest) sC0.res.chash ∈ setNodeProgram.ops := by
   obtain ⟨r, hr, hm⟩ := schild_hook 0 0
-  exact ⟨r, hr, by simp only [setNodeProgram, List.mem_append]; exact Or.inl (Or.inl (Or.inl (Or.inl hm)))⟩
+  exact ⟨r, hr, by simp only [setNodeProgram, List.mem_append]; exact Or.inl (Or.inl (Or.inl (Or.inl (Or.inl hm))))⟩
 
 theorem shook_mem1 : ∃ root : List ℕ, root.length = 8 ∧
     Op.hook 1 (root ++ sC1.res.digest) sC1.res.chash ∈ setNodeProgram.ops := by
   obtain ⟨r, hr, hm⟩ := schild_hook sC0.next 1
-  exact ⟨r, hr, by simp only [setNodeProgram, List.mem_append]; exact Or.inl (Or.inl (Or.inl (Or.inr hm)))⟩
+  exact ⟨r, hr, by simp only [setNodeProgram, List.mem_append]; exact Or.inl (Or.inl (Or.inl (Or.inl (Or.inr hm))))⟩
 
 /-! ### The tree -/
 
 /-- Consecutive segments link: the next one's incoming digest is the previous one's outgoing digest. -/
 def Links (p q : ℕ → F) : Prop := ∀ j < 16, summ p (16 + j) = summ q j
 
-/-- **A chain of proven segments** with summary `v`: nonempty, each `SegOk`, linked, `v` the first's
-incoming limbs and the last's outgoing ones. -/
-def Chain (SegOk : (ℕ → F) → Prop) (v : ℕ → F) : Prop :=
-  ∃ ps : List (ℕ → F), ∃ p0 pk : ℕ → F, ps.head? = some p0 ∧ ps.getLast? = some pk ∧ (∀ p ∈ ps, SegOk p) ∧
-    ps.IsChain Links ∧ (∀ j < 16, v j = summ p0 j) ∧ (∀ j < 16, v (16 + j) = summ pk (16 + j))
+/-- A tree of segments, each leaf with its Merkle root (a state). -/
+inductive SegTree where
+  | leaf (p : ℕ → F) (st : Spec.Sha256.State)
+  | node (l r : SegTree)
+
+/-- The segments, in order. -/
+def SegTree.segs : SegTree → List (ℕ → F)
+  | .leaf p _ => [p]
+  | .node l r => l.segs ++ r.segs
+
+/-- The root: the segments' roots folded with `hnode`. -/
+def SegTree.root : SegTree → Spec.Sha256.State
+  | .leaf _ st => st
+  | .node l r => hnode l.root r.root
+
+/-- Each leaf's state is its segment's public root. -/
+def SegTree.Ok : SegTree → Prop
+  | .leaf p st => segRootL p = limbsOf st
+  | .node l r => l.Ok ∧ r.Ok
+
+/-- The segment tree has the verifier's shape. -/
+def SegTree.Fits : SegTree → BlockRec.Tree → Prop
+  | .leaf _ _, .leaf _ => True
+  | .node l r, .node a b => l.Fits a ∧ r.Fits b
+  | _, _ => False
+
+/-- **A chain of proven segments** over segment tree `τ` with summary `v`: each `SegOk`, linked, `v` the
+first's incoming limbs, the last's outgoing ones and `τ`'s root. -/
+def ChainT (SegOk : (ℕ → F) → Prop) (τ : SegTree) (v : ℕ → F) : Prop :=
+  τ.Ok ∧ (∀ p ∈ τ.segs, SegOk p) ∧ τ.segs.IsChain Links ∧ rootL v = limbsOf τ.root ∧
+    ∃ p0 pk : ℕ → F, τ.segs.head? = some p0 ∧ τ.segs.getLast? = some pk ∧ (∀ j < 16, v j = summ p0 j) ∧
+      (∀ j < 16, v (16 + j) = summ pk (16 + j))
+
+/-- A chain over a segment tree of shape `t`. -/
+def Chain (SegOk : (ℕ → F) → Prop) (t : BlockRec.Tree) (v : ℕ → F) : Prop :=
+  ∃ τ : SegTree, τ.Fits t ∧ ChainT SegOk τ v
 
 /-- A set leaf's guarantee: its output is the digest of a proven segment's summary. -/
 def LeafOkS (SegOk : (ℕ → F) → Prop) (d : List Word) : Prop := ∃ p, SegOk p ∧ d = sd zeroKey (summ p)
 
-theorem chain_congr {SegOk : (ℕ → F) → Prop} {v w : ℕ → F} (h : ∀ i < NS, v i = w i) (hv : Chain SegOk v) :
-    Chain SegOk w := by
-  obtain ⟨ps, p0, pk, h0, hk, hok, hc, hi, ho⟩ := hv
-  exact ⟨ps, p0, pk, h0, hk, hok, hc, fun j hj => by rw [← h j (by unfold NS; omega)]; exact hi j hj,
-    fun j hj => by rw [← h (16 + j) (by unfold NS; omega)]; exact ho j hj⟩
+theorem rootL_congr {v w : ℕ → F} (h : ∀ i < NS, v i = w i) : rootL v = rootL w :=
+  List.map_congr_left fun j hj => h _ (by simp at hj; unfold NS; omega)
 
-theorem chain_join {SegOk : (ℕ → F) → Prop} {u v w : ℕ → F} (hu : Chain SegOk u) (hv : Chain SegOk v)
-    (hl : ∀ j < 16, v j = u (16 + j)) (hw : ∀ i < NS, w i = if i < 16 then u i else v i) : Chain SegOk w := by
-  obtain ⟨as, a0, ak, ha0, hak, haok, hac, hai, hao⟩ := hu
-  obtain ⟨bs, b0, bk, hb0, hbk, hbok, hbc, hbi, hbo⟩ := hv
-  refine ⟨as ++ bs, a0, bk, ?_, ?_, ?_, ?_, ?_, ?_⟩
-  · rw [List.head?_append, ha0]; rfl
-  · rw [List.getLast?_append, hbk]; rfl
+theorem chainT_join {SegOk : (ℕ → F) → Prop} {τl τr : SegTree} {u v w : ℕ → F} (hu : ChainT SegOk τl u)
+    (hv : ChainT SegOk τr v) (hl : ∀ j < 16, v j = u (16 + j))
+    (hw : ∀ i < 32, w i = if i < 16 then u i else v i) (hr : rootL w = limbsOf (hnode τl.root τr.root)) :
+    ChainT SegOk (.node τl τr) w := by
+  obtain ⟨hal, haok, hac, -, a0, ak, ha0, hak, hai, hao⟩ := hu
+  obtain ⟨hbl, hbok, hbc, -, b0, bk, hb0, hbk, hbi, hbo⟩ := hv
+  refine ⟨⟨hal, hbl⟩, ?_, ?_, hr, a0, bk, ?_, ?_, ?_, ?_⟩
   · intro p hp
     rcases List.mem_append.mp hp with h | h
     · exact haok p h
     · exact hbok p h
-  · rw [List.isChain_append]
+  · show (τl.segs ++ τr.segs).IsChain Links
+    rw [List.isChain_append]
     refine ⟨hac, hbc, fun x hx y hy => ?_⟩
     rw [hak] at hx; rw [hb0] at hy
     cases hx; cases hy
     intro j hj
     rw [← hao j hj, ← hl j hj, hbi j hj]
-  · intro j hj; rw [hw j (by unfold NS; omega), if_pos hj]; exact hai j hj
-  · intro j hj; rw [hw (16 + j) (by unfold NS; omega), if_neg (by omega)]; exact hbo j hj
+  · show (τl.segs ++ τr.segs).head? = _
+    rw [List.head?_append, ha0]; rfl
+  · show (τl.segs ++ τr.segs).getLast? = _
+    rw [List.getLast?_append, hbk]; rfl
+  · intro j hj; rw [hw j (by omega), if_pos hj]; exact hai j hj
+  · intro j hj; rw [hw (16 + j) (by omega), if_neg (by omega)]; exact hbo j hj
 
 section
 variable {Acc SatC : List Word → List Word → Prop} {VGates : (ℕ → Q) → ℕ → List ℕ → List ℕ → Prop}
   {leafH : ℕ → List Word} {nodeH : List Word} {SegOk : (ℕ → F) → Prop}
 
 /-- **A set tree is sound.** A satisfied circuit with the hash and key of tree shape `t`, outputting
-`pubsDigest(key, v)`, has `v` the summary of a chain of proven, linked segments (or Blake2s has a
-collision). -/
+`pubsDigest(key, v)`, has `v` the summary of a chain of proven, linked segments over a segment tree of
+shape `t` with root `v`'s (or Blake2s has a collision). `hroot`: a proven segment's root limbs are a
+state's. -/
 theorem stree_sound (T : Trust Acc SatC VGates leafH nodeH setNodeProgram (LeafOkS SegOk))
-    (hl : ∀ L, (leafH L).length = 8) (hn : nodeH.length = 8) :
-    ∀ (t : BlockRec.Tree) (v : ℕ → F), SatC (t.hash leafH nodeH) (sd (t.key leafH nodeH) v) → Chain SegOk v ∨ Collision
+    (hl : ∀ L, (leafH L).length = 8) (hn : nodeH.length = 8)
+    (hroot : ∀ p, SegOk p → ∃ st, segRootL p = limbsOf st) :
+    ∀ (t : BlockRec.Tree) (v : ℕ → F), SatC (t.hash leafH nodeH) (sd (t.key leafH nodeH) v) → Chain SegOk t v ∨ Collision
   | .leaf L, v, hs => by
     obtain ⟨p, hp, hd⟩ := T.leafSound L _ hs
     rcases sd_eq (Tree.key_length leafH nodeH (.leaf L)) (by simp [zeroKey]) hd with ⟨-, e⟩ | c
-    · refine Or.inl ⟨[p], p, p, rfl, rfl, by simpa using hp, List.isChain_singleton _, fun j hj => e j (by unfold NS; omega),
-        fun j hj => e (16 + j) (by unfold NS; omega)⟩
+    · obtain ⟨st, hst⟩ := hroot p hp
+      refine Or.inl ⟨.leaf p st, trivial, hst, by simpa [SegTree.segs] using hp, List.isChain_singleton _,
+        ?_, p, p, rfl, rfl, fun j hj => e j (by unfold NS; omega), fun j hj => e (16 + j) (by unfold NS; omega)⟩
+      rw [rootL_congr e, rootL_summ, hst]; rfl
     · exact Or.inr c
   | .node l r, v, hs => by
     obtain ⟨ρ, hρ, hres, hg⟩ := T.nodeCircuit _ hs
@@ -312,7 +407,7 @@ theorem stree_sound (T : Trust Acc SatC VGates leafH nodeH setNodeProgram (LeafO
     have s1 := T.recVerifies ρ _ _ _ (hg _ _ _ hm1)
     rw [List.drop_left' hr0] at s0
     rw [List.drop_left' hr1] at s1
-    obtain ⟨h0, h1, -, -, -⟩ := snode_parts hρ
+    obtain ⟨h0, h1, -, -, -, -⟩ := snode_parts hρ
     have d0 : wordsOf ρ sC0.res.digest = sd (wordsOf ρ sC0.res.key) (childSum ρ sC0) := schild_digest h0
     have d1 : wordsOf ρ sC1.res.digest = sd (wordsOf ρ sC1.res.key) (childSum ρ sC1) := schild_digest h1
     rw [d0] at s0
@@ -335,14 +430,15 @@ theorem stree_sound (T : Trust Acc SatC VGates leafH nodeH setNodeProgram (LeafO
       rw [← e1', ← e2']; exact s0
     have s1' : SatC (r.hash leafH nodeH) (sd (r.key leafH nodeH) (childSum ρ sC1)) := by
       rw [← e3', ← e4']; exact s1
-    rcases stree_sound T hl hn l _ s0' with cl | c
+    rcases stree_sound T hl hn hroot l _ s0' with ⟨τl, fl, cl⟩ | c
     swap; · exact Or.inr c
-    rcases stree_sound T hl hn r _ s1' with cr | c
+    rcases stree_sound T hl hn hroot r _ s1' with ⟨τr, fr, cr⟩ | c
     swap; · exact Or.inr c
-    refine Or.inl (chain_join cl cr (snode_link hρ) fun i hi => ?_)
-    rw [← ev i hi]
-    simp only [outSum, outR, childSum]
-    split_ifs <;> rfl
+    refine Or.inl ⟨.node τl τr, ⟨fl, fr⟩, chainT_join cl cr (snode_link hρ) (fun i hi => ?_) ?_⟩
+    · rw [← ev i (by unfold NS; omega)]
+      simp only [outSum, outR, childSum]
+      split_ifs <;> rfl
+    · rw [← rootL_congr ev]; exact snode_root hρ cl.2.2.2.1 cr.2.2.2.1
 
 end
 

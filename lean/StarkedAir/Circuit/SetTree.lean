@@ -2,14 +2,17 @@
 **The set tree's glue (set-pass step 4), Lean-first.** Segment proofs (`SetPass.segSys`, 550 public
 inputs) are folded into one proof by a binary tree, as the header chain's and the block forest's.
 
-A segment's summary is 32 limbs: the 16-bit halves of two Blake2s digests, of its incoming and its
+A segment's summary is 48 limbs: the 16-bit halves of two Blake2s digests, of its incoming and its
 outgoing state vector (`inIdx`, `outIdx`: the challenge `(γ, z, α)`, then the carried state; the
 outgoing `HASLAST` is the constant 1, since a segment ends on a record). The challenge is in both
 vectors, so equal states mean equal challenges.
 
+then its Merkle root's limbs (D-050).
+
 - `setLeafOut`: hook 0 returns the segment's public inputs; the output is `pubsDigest(0, summary)`.
 - `setNodeProgram`: two verified children whose summaries link (the left's outgoing digest is the
-  right's incoming one); the output is `pubsDigest(key, (left's incoming, right's outgoing))`.
+  right's incoming one); the output is `pubsDigest(key, (left's incoming, right's outgoing,
+  node(left's root, right's root)))`, the roots folded with the header tree's node gadget (`treeNode`).
 
 The verifier rebuilds the pass's start and end states natively (`begin`, the final state it reads) and
 compares their digests with the root's summary.
@@ -21,7 +24,7 @@ namespace StarkedAir.Circuit.SetTree
 open StarkedAir StarkedAir.Circuit Q
 
 /-- The segment system's public inputs (`SetPass.N_PUB`). -/
-def NP : ℕ := 550
+def NP : ℕ := 567
 
 /-- The challenge: `γ` (41–44), `z` (45–48), `α` (49–152). -/
 def chal : List ℕ := (List.range 112).map (41 + ·)
@@ -59,10 +62,11 @@ def sIn : Out (List ℕ) := split16 hOut.next hIn.res
 def sOut : Out (List ℕ) := split16 sIn.next hOut.res
 def leafKey : List ℕ := (List.range 8).map (sOut.next + ·)
 
-/-- The summary: the incoming digest's limbs, then the outgoing one's. -/
-def NS : ℕ := 32
+/-- The summary: the incoming digest's limbs, the outgoing one's, the root's (public inputs 550–565). -/
+def NS : ℕ := 48
+def ROOT0 : ℕ := 550
 
-def leafDg : Out (List ℕ) := pubsDigest (sOut.next + 8) leafKey (sIn.res ++ sOut.res)
+def leafDg : Out (List ℕ) := pubsDigest (sOut.next + 8) leafKey (sIn.res ++ sOut.res ++ (List.range 16).map (ROOT0 + ·))
 
 def leafOutOps : List Op :=
   [.hook 0 [] (List.range NP), .const NP 1 0 0 0] ++ hIn.ops ++ hOut.ops ++ sIn.ops ++ sOut.ops ++
@@ -95,13 +99,17 @@ def sC1 : Out ChildRegs := schild sC0.next 1
 def sLink : List Op := (List.range 16).map (fun j => Op.eq (sC1.res.pubs j) (sC0.res.pubs (16 + j)))
 def sKey : Out (List ℕ) :=
   blake2s sC1.next (sC0.res.chash ++ sC0.res.key ++ sC1.res.chash ++ sC1.res.key) 128
-/-- The node's summary: the left's incoming digest, the right's outgoing one. -/
-def sOuts : List ℕ := (List.range 16).map sC0.res.pubs ++ (List.range 16).map (fun j => sC1.res.pubs (16 + j))
-def sDigest : Out (List ℕ) := pubsDigest sKey.next sKey.res sOuts
+/-- The children's roots folded (`treeNode` reads root limbs at `TB …`). -/
+def sRoot : Out (List ℕ) :=
+  treeNode sKey.next (fun k => sC0.res.pubs (32 + (k - TB))) (fun k => sC1.res.pubs (32 + (k - TB)))
+/-- The node's summary: the left's incoming digest, the right's outgoing one, the folded root. -/
+def sOuts : List ℕ :=
+  (List.range 16).map sC0.res.pubs ++ (List.range 16).map (fun j => sC1.res.pubs (16 + j)) ++ sRoot.res
+def sDigest : Out (List ℕ) := pubsDigest sRoot.next sKey.res sOuts
 
 /-- **The set node program.** Results: the output digest's 8 words. -/
 def setNodeProgram : Program :=
-  ⟨"set_node_glue", sC0.ops ++ sC1.ops ++ sLink ++ sKey.ops ++ sDigest.ops, sDigest.res⟩
+  ⟨"set_node_glue", sC0.ops ++ sC1.ops ++ sLink ++ sKey.ops ++ sRoot.ops ++ sDigest.ops, sDigest.res⟩
 
 def nodeJson : String := setNodeProgram.toJson
 

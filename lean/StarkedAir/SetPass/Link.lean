@@ -1,5 +1,5 @@
 /-
-**The segment system's lookups (set-pass step 3, soundness).** The nine components as a `System`, which
+**The segment system's lookups (set-pass step 3, soundness).** The twelve components as a `System`, which
 lookups are uses (multiplicity `−1` or `0` at every row) and which yield, and `link`: in a satisfied,
 balanced system below the size bound, a use with multiplicity `−1` is matched by a yield with nonzero
 multiplicity, the same relation and the same tuple (`used_in_table_ext`). Then the reads every component
@@ -18,16 +18,19 @@ open StarkedAir
 open StarkedAir.Sha256 (col pre cst)
 
 /-- The segment system, in proof order. -/
-def segSys : System := ⟨9, fun i => comps.getD i Block.bytes⟩
+def segSys : System := ⟨12, fun i => comps.getD i Block.bytes⟩
 
 /-- Use sites `(component, lookup)`; all others yield. -/
 def isUse : ℕ → ℕ → Bool
-  | 3, k => decide (k < 57) || k == 63 || decide (64 ≤ k)
+  | 3, k => decide (k < 57) || k == 63 || (decide (64 ≤ k) && decide (k < 89))
   | 4, k => decide (k < 3)
   | 5, k => k != 12
   | 6, k => k == 0
   | 7, k => k != 6
   | 8, k => k == 0
+  | 9, k => decide (k < 6)
+  | 10, k => decide (k < 2)
+  | 11, k => decide (k < 2) || decide (10 ≤ k)
   | _, _ => false
 
 def relAt (i k : ℕ) : ℕ := ((segSys.comp i).lookups.getD k ⟨0, .const 0, []⟩).rel
@@ -35,19 +38,21 @@ def relAt (i k : ℕ) : ℕ := ((segSys.comp i).lookups.getD k ⟨0, .const 0, [
 /-- The yield sites and their relations. -/
 def yieldTable : List (ℕ × ℕ × ℕ) :=
   [(0, 0, 3), (1, 0, 9), (1, 1, 10), (2, 0, 26), (2, 1, 27), (2, 2, 28), (2, 3, 29), (3, 57, 32), (3, 58, 33),
-   (3, 59, 33), (3, 60, 33), (3, 61, 33), (3, 62, 21), (4, 3, 22), (5, 12, 30), (6, 1, 31), (7, 6, 34), (8, 1, 35)]
+   (3, 59, 33), (3, 60, 33), (3, 61, 33), (3, 62, 21), (4, 3, 22), (5, 12, 30), (6, 1, 31), (7, 6, 34), (8, 1, 35)] ++
+  (List.range 9).map (fun w => (3, 89 + w, 36)) ++ [(9, 6, 37), (9, 7, 38)] ++
+  (List.range 8).map (fun j => (10, 2 + j, 39)) ++ (List.range 8).map (fun j => (11, 2 + j, 40))
 
-theorem lookups_len : ∀ i < 9, (segSys.comp i).lookups.length = [1, 2, 4, 89, 4, 14, 2, 8, 2].getD i 0 := by
+theorem lookups_len : ∀ i < 12, (segSys.comp i).lookups.length = [1, 2, 4, 98, 4, 14, 2, 8, 2, 8, 10, 30].getD i 0 := by
   decide
 
 def yieldOK : Bool :=
-  (List.range 9).all fun i => (List.range (segSys.comp i).lookups.length).all fun k =>
+  (List.range 12).all fun i => (List.range (segSys.comp i).lookups.length).all fun k =>
     isUse i k || yieldTable.contains (i, k, relAt i k)
 
 set_option maxRecDepth 20000 in
 theorem yieldOK_true : yieldOK = true := by decide
 
-theorem yield_table : ∀ i < 9, ∀ k < (segSys.comp i).lookups.length, isUse i k = false →
+theorem yield_table : ∀ i < 12, ∀ k < (segSys.comp i).lookups.length, isUse i k = false →
     (i, k, relAt i k) ∈ yieldTable := by
   intro i hi k hk hu
   have h := yieldOK_true
@@ -56,26 +61,27 @@ theorem yield_table : ∀ i < 9, ∀ k < (segSys.comp i).lookups.length, isUse i
   simp only [hu, Bool.false_or, List.contains_iff_mem] at this
   exact this
 
-/-- Lookup sites over all rows: `Σᵢ kᵢ · 2^(Ls i)` (bytes 1, tables 2, pending 4, records 89,
-fingerprints 4, Blake2s words 14, Blake2s 2, `TxOutSer` 8, SHA-256 2). -/
+/-- Lookup sites over all rows: `Σᵢ kᵢ · 2^(Ls i)` (bytes 1, tables 2, pending 4, records 98,
+fingerprints 4, Blake2s words 14, Blake2s 2, `TxOutSer` 8, SHA-256 2, leaf words 8, leaf compressions 10,
+tree nodes 30). -/
 def segRows (Ls : ℕ → ℕ) : ℕ :=
-  2 ^ Ls 0 + 2 * 2 ^ Ls 1 + 4 * 2 ^ Ls 2 + 89 * 2 ^ Ls 3 + 4 * 2 ^ Ls 4 + 14 * 2 ^ Ls 5 + 2 * 2 ^ Ls 6 +
-    8 * 2 ^ Ls 7 + 2 * 2 ^ Ls 8
+  2 ^ Ls 0 + 2 * 2 ^ Ls 1 + 4 * 2 ^ Ls 2 + 98 * 2 ^ Ls 3 + 4 * 2 ^ Ls 4 + 14 * 2 ^ Ls 5 + 2 * 2 ^ Ls 6 +
+    8 * 2 ^ Ls 7 + 2 * 2 ^ Ls 8 + 8 * 2 ^ Ls 9 + 10 * 2 ^ Ls 10 + 30 * 2 ^ Ls 11
 
 /-- **The size condition**: every component has at most `2^24` rows and the site count is below `P`. -/
-def SegSizeOk (Ls : ℕ → ℕ) : Prop := (∀ i < 9, Ls i ≤ 24) ∧ segRows Ls < P
+def SegSizeOk (Ls : ℕ → ℕ) : Prop := (∀ i < 12, Ls i ≤ 24) ∧ segRows Ls < P
 
 /-- `set_rec`'s use multiplicities. -/
 def recUseMults : List Expr := [.neg (Rec.k Rec.ON), .neg Rec.one, .neg Rec.cmp]
 
 set_option maxRecDepth 20000 in
-theorem rec_mult_cases : ∀ k < 89, isUse 3 k = true → (Rec.lookups.getD k ⟨0, .const 0, []⟩).mult ∈ recUseMults := by
+theorem rec_mult_cases : ∀ k < 98, isUse 3 k = true → (Rec.lookups.getD k ⟨0, .const 0, []⟩).mult ∈ recUseMults := by
   decide
 
 section System
 
 variable {inst : ℕ → Inst} {pub : ℕ → F} {Ls : ℕ → ℕ}
-  (hL : ∀ i < 9, (inst i).logSize = Ls i) (hsat : segSys.SatisfiedExt inst pub [])
+  (hL : ∀ i < 12, (inst i).logSize = Ls i) (hsat : segSys.SatisfiedExt inst pub [])
 include hL hsat
 
 theorem bytes_sat : Block.bytes.air.Satisfied (Ls 0) pub (inst 0).main := by
@@ -106,9 +112,18 @@ theorem tmsg_sat : ∀ r < 2 ^ Ls 7, ∀ c ∈ TMsg.constraints, c.eval (2 ^ Ls 
 theorem shac_sat : ∀ r < 2 ^ Ls 8, ∀ c ∈ ShaC.constraints, c.eval (2 ^ Ls 8) ShaC.preCols pub (inst 8).main r = 0 := by
   have := hsat.1 8 (by decide); rw [hL 8 (by decide)] at this; exact this
 
+theorem lw_sat : ∀ r < 2 ^ Ls 9, ∀ c ∈ LW.constraints, c.eval (2 ^ Ls 9) LW.preCols pub (inst 9).main r = 0 := by
+  have := hsat.1 9 (by decide); rw [hL 9 (by decide)] at this; exact this
+
+theorem lc_sat : ∀ r < 2 ^ Ls 10, ∀ c ∈ LC.constraints, c.eval (2 ^ Ls 10) LC.preCols pub (inst 10).main r = 0 := by
+  have := hsat.1 10 (by decide); rw [hL 10 (by decide)] at this; exact this
+
+theorem mt_sat : ∀ r < 2 ^ Ls 11, ∀ c ∈ MT.constraints, c.eval (2 ^ Ls 11) MT.preCols pub (inst 11).main r = 0 := by
+  have := hsat.1 11 (by decide); rw [hL 11 (by decide)] at this; exact this
+
 omit hsat in
 theorem mem_sites {i r k : ℕ} : ((i, r, k) : Site) ∈ sites segSys inst ↔
-    i < 9 ∧ r < 2 ^ Ls i ∧ k < (segSys.comp i).lookups.length := by
+    i < 12 ∧ r < 2 ^ Ls i ∧ k < (segSys.comp i).lookups.length := by
   simp only [sites, List.mem_flatMap, List.mem_range, List.mem_map, Prod.mk.injEq]
   constructor
   · rintro ⟨i', hi, r', hr', k', hk', rfl, rfl, rfl⟩
@@ -118,14 +133,16 @@ theorem mem_sites {i r k : ℕ} : ((i, r, k) : Site) ∈ sites segSys inst ↔
 
 omit hsat in
 theorem sites_len : (sites segSys inst).length = segRows Ls := by
-  have hl : ∀ i < 9, (segSys.comp i).lookups.length = [1, 2, 4, 89, 4, 14, 2, 8, 2].getD i 0 := lookups_len
-  have hm : segSys.m = 9 := rfl
+  have hl : ∀ i < 12, (segSys.comp i).lookups.length = [1, 2, 4, 98, 4, 14, 2, 8, 2, 8, 10, 30].getD i 0 :=
+    lookups_len
+  have hm : segSys.m = 12 := rfl
   simp only [sites, List.length_flatMap, List.length_map, List.length_range, hm]
   simp only [List.sum_range_succ, List.range_zero, List.map_nil, List.sum_nil, zero_add]
   simp only [List.map_const', List.sum_replicate, smul_eq_mul]
   rw [hl 0 (by decide), hl 1 (by decide), hl 2 (by decide), hl 3 (by decide), hl 4 (by decide), hl 5 (by decide),
-    hl 6 (by decide), hl 7 (by decide), hl 8 (by decide), hL 0 (by decide), hL 1 (by decide), hL 2 (by decide),
-    hL 3 (by decide), hL 4 (by decide), hL 5 (by decide), hL 6 (by decide), hL 7 (by decide), hL 8 (by decide)]
+    hl 6 (by decide), hl 7 (by decide), hl 8 (by decide), hl 9 (by decide), hl 10 (by decide), hl 11 (by decide),
+    hL 0 (by decide), hL 1 (by decide), hL 2 (by decide), hL 3 (by decide), hL 4 (by decide), hL 5 (by decide),
+    hL 6 (by decide), hL 7 (by decide), hL 8 (by decide), hL 9 (by decide), hL 10 (by decide), hL 11 (by decide)]
   simp only [segRows, List.getD_cons_zero, List.getD_cons_succ, List.length_range]
   ring
 

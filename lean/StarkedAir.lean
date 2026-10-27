@@ -130,6 +130,7 @@ import StarkedAir.Spec.UtxoMap
 import StarkedAir.Spec.CoinDecode
 import StarkedAir.Spec.CoinEpoch
 import StarkedAir.Spec.SetFile
+import StarkedAir.Spec.SetMerkle
 import StarkedAir.SetPass.System
 import StarkedAir.SetPass.Sound
 import StarkedAir.Circuit.SetTree

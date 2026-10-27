@@ -104,9 +104,11 @@ fn usage() noreturn {
         \\  chainproof prove-epoch <headers.bin> <dir> <to> <file.sbchain> [--from <a> <prev-set.bin>] [--test-strength]
         \\  chainproof prove-chain <vk> <file.sbchain> <out-dir> [--max-m M] <dir>:<to>[:<from>:<prev-set.bin>][#<prev-hex|->,<fin-hex>]...
         \\  chainproof verify-chain <vk> <file.sbchain> <out-dir> [--min-work <hex> | --min-work 0] [--unpinned] [--set-proofs] <dir>:<to>[:<from>:<prev-set.bin>]...
-        \\  chainproof prove-set <set.bin> <dir>:<to>[:<from>:<prev-set.bin>] <work-dir> [--test-strength] [--logs l0,...,l8]
+        \\  chainproof prove-set <set.bin> <dir>:<to>[:<from>:<prev-set.bin>] <work-dir> [--test-strength] [--logs l0,...,l11]
         \\  chainproof verify-set <work-dir> <dir>:<to>[:<from>:<prev-set.bin>] [--unpinned]
-        \\  chainproof set-cut <set.bin> [--logs l0,...,l8]
+        \\  chainproof set-cut <set.bin> [--logs l0,...,l11]
+        \\  chainproof set-member <set.bin> <work-dir> <txid>:<vout> <out.sbmember>
+        \\  chainproof verify-member <work-dir> <dir>:<to>[:<from>:<prev-set.bin>] <file.sbmember> [--unpinned]
         \\  chainproof verify-epoch <vk> <file.sbchain> <dir> <to> [--from <a> <prev-set.bin>] [--min-work <hex> | --min-work 0] [--test-strength] [--jobs <n>]
         \\  chainproof prove-epoch-wide|prove-epoch-tree <headers.bin> <dir> <to> <file.sbchain> [--from <a> <prev-set.bin>] [--test-strength]
         \\  chainproof prove-epoch-root <headers.bin> <dir> <to> <file.sbchain> [--from <a> <prev-set.bin>] [--set-digests <prev|-> <fin>]
@@ -316,6 +318,10 @@ pub fn main() !void {
         }
         return setCut(gpa, args[2], logs);
     }
+    if (std.mem.eql(u8, cmd, "set-member") and args.len == 6)
+        return setMember(gpa, a, args[2], args[3], args[4], args[5]);
+    if (std.mem.eql(u8, cmd, "verify-member") and (args.len == 5 or (args.len == 6 and std.mem.eql(u8, args[5], "--unpinned"))))
+        return verifyMemberCmd(gpa, a, args[2], parseChainSpec(args[3]) catch usage(), args[4], args.len == 6);
     if (std.mem.eql(u8, cmd, "verify-set") and (args.len == 4 or (args.len == 5 and std.mem.eql(u8, args[4], "--unpinned"))))
         return verifySet(gpa, a, args[2], parseChainSpec(args[3]) catch usage(), args.len == 5);
     if (std.mem.eql(u8, cmd, "set-pass-model") and (args.len == 3 or (args.len == 5 and std.mem.eql(u8, args[3], "--per"))))
@@ -1563,10 +1569,10 @@ const ST = sb.recursion.set_tree;
 const SSG = sb.block.set_seg;
 
 /// Production component logs of a segment (bytes, tables, pending, records, fingerprints, Blake2s words,
-/// Blake2s, `TxOutSer`, SHA-256). Blake2s binds (88 rows per 64 bytes): 2^23 rows hold ~95k blocks,
-/// ~6.1 MB of file, ~71k records; the others then fit 2^23 (bytes, `TxOutSer`, SHA-256), 2^22
-/// (`ser` bytes), 2^21 (16 rows per block), 2^17 (records).
-const default_set_logs: ST.Logs = .{ 23, 8, 6, 17, 22, 21, 23, 23, 23 };
+/// Blake2s, `TxOutSer`, SHA-256, leaf words, leaf Blake2s, tree). The Merkle leaves' Blake2s binds (88 rows
+/// per 64-byte block, ~2 blocks per coin): 2^23 rows hold ~47k coins; records then fit 2^16 (the tree's
+/// 2^15 bottom nodes, 88 rows each, fit 2^23).
+const default_set_logs: ST.Logs = .{ 23, 8, 6, 16, 22, 21, 23, 23, 23, 22, 23, 23 };
 
 /// Core's assumeUTXO `hash_serialized` anchors (`src/kernel/chainparams.cpp`, mainnet; line 211 at
 /// commit `c067aa71`, the copy in `data/core-src`): the set after each height, as printed by Core.
@@ -1712,6 +1718,63 @@ fn verifyChainSetProofs(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: [
     std.debug.print("  hash_serialized  {x}  (Core's HASH_SERIALIZED of this set)\n", .{last.hash});
 }
 
+/// An outpoint `<txid>:<vout>` (txid in display order, as Core prints it) as a set key: the txid's
+/// internal bytes, then `vout` big-endian.
+fn parseOutpoint(s: []const u8) ![36]u8 {
+    const c = std.mem.indexOfScalar(u8, s, ':') orelse return error.BadOutpoint;
+    if (c != 64) return error.BadOutpoint;
+    var k: [36]u8 = undefined;
+    _ = try std.fmt.hexToBytes(k[0..32], s[0..64]);
+    std.mem.reverse(u8, k[0..32]);
+    std.mem.writeInt(u32, k[32..36], try std.fmt.parseInt(u32, s[c + 1 ..], 10), .big);
+    return k;
+}
+
+fn printOutpoint(k: [36]u8) void {
+    var t = k[0..32].*;
+    std.mem.reverse(u8, &t);
+    std.debug.print("{x}:{d}", .{ t, std.mem.readInt(u32, k[32..36], .big) });
+}
+
+/// `set-member <set.bin> <work-dir> <txid>:<vout> <out>`: the membership (or non-membership) proof of an
+/// outpoint in the set the pass at `<work-dir>` proves (its segments' logs), checked against the pass's root.
+fn setMember(gpa: std.mem.Allocator, a: std.mem.Allocator, set_path: []const u8, work: []const u8, op: []const u8, out: []const u8) !void {
+    const key = try parseOutpoint(op);
+    const seg0 = try ST.decodeSeg(a, try S.readFile(a, try std.fmt.allocPrint(a, "{s}/seg/0.sbseg", .{work})));
+    const file = try S.readFile(a, set_path);
+    const m = try ST.proveMember(a, file, seg0.logs, key);
+    var p = try ST.decodePass(gpa, a, try S.readFile(a, try std.fmt.allocPrint(a, "{s}/pass.bin", .{work})));
+    defer p.root.proof.deinit();
+    const f = try ST.factsOf(&p);
+    try ST.verifyMember(&m, f.root, f.last);
+    const bytes = try ST.encodeMember(a, &m);
+    try S.writeFileAtomic(out, bytes);
+    std.debug.print("{s} proof for ", .{if (m.present) "membership" else "non-membership"});
+    printOutpoint(key);
+    std.debug.print(": {d} bytes, path {d}\n", .{ bytes.len, m.path.len });
+}
+
+/// `verify-member <work-dir> <epoch> <file>`: verifies the set pass at `<work-dir>` under the epoch's
+/// challenge, then the membership proof against its root (and last key).
+fn verifyMemberCmd(gpa: std.mem.Allocator, a: std.mem.Allocator, work: []const u8, sp: ChainSpec, path: []const u8, unpinned: bool) !void {
+    const ch = try epochChallenge(gpa, a, sp);
+    const tables = try L.Tables.init(gpa);
+    defer tables.deinit(gpa);
+    const f = try openPass(gpa, a, tables, work, ch, unpinned);
+    const m = try ST.decodeMember(a, try S.readFile(a, path));
+    ST.verifyMember(&m, f.root, f.last) catch |e| {
+        std.debug.print("REJECTED: {s}\n", .{@errorName(e)});
+        return e;
+    };
+    std.debug.print("VERIFIED against the set after block {d} ({d} coins): ", .{ sp.to, f.count });
+    printOutpoint(m.key);
+    if (m.present) {
+        const h = std.mem.readInt(u32, m.record[36..40], .little);
+        const amt = std.mem.readInt(u64, m.record[49..57], .little);
+        std.debug.print(" is unspent: {d} sat, created at height {d}{s}\n", .{ amt, h, if (m.record[40] == 1) " (coinbase)" else "" });
+    } else std.debug.print(" is not in the set\n", .{});
+}
+
 /// `set-cut`: the segments a set file cuts into at `logs` (`set_seg.cut`, streamed coin by coin).
 fn setCut(gpa: std.mem.Allocator, path: []const u8, logs: ST.Logs) !void {
     var timer = try std.time.Timer.start();
@@ -1723,10 +1786,11 @@ fn setCut(gpa: std.mem.Allocator, path: []const u8, logs: ST.Logs) !void {
     var seg_len: usize = 0;
     var n: usize = 0;
     var ser: usize = 0;
+    var lb: usize = 0;
     var min_recs: usize = std.math.maxInt(usize);
     while (try rd.next()) |c| {
         const l = c.ser.len;
-        const need = SSG.minLogs(seg_len + SSG.HEAD + l, n + 1, ser + l, 64, 63);
+        const need = SSG.minLogs(seg_len + SSG.HEAD + l, n + 1, ser + l, 64, 63, lb + SSG.leafBlocks(l));
         var fits = true;
         for (need, logs) |x, y| if (x > y) {
             fits = false;
@@ -1738,10 +1802,12 @@ fn setCut(gpa: std.mem.Allocator, path: []const u8, logs: ST.Logs) !void {
             seg_len = 0;
             n = 0;
             ser = 0;
+            lb = 0;
         }
         seg_len += SSG.HEAD + l;
         n += 1;
         ser += l;
+        lb += SSG.leafBlocks(l);
         coins += 1;
     }
     if (n > 0) segs += 1;

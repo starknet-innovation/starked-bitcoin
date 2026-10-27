@@ -16,7 +16,7 @@ open StarkedAir.Spec.QM31 (QM toQ emb)
 section System
 
 variable {inst : ℕ → Inst} {pub : ℕ → F} {Ls : ℕ → ℕ}
-  (hL : ∀ i < 9, (inst i).logSize = Ls i) (hsat : segSys.SatisfiedExt inst pub [])
+  (hL : ∀ i < 12, (inst i).logSize = Ls i) (hsat : segSys.SatisfiedExt inst pub [])
   (hHL : pub PUB_HASLAST = 0 ∨ pub PUB_HASLAST = 1) (hsz : SegSizeOk Ls)
 include hL hsat hHL hsz
 
@@ -37,7 +37,7 @@ theorem rec_ab_lookup : ∀ j < 8, Rec.lookups.getD (49 + j) ⟨0, .const 0, []�
   intro j hj; interval_cases j <;> rfl
 
 omit hL hsat hHL hsz in
-theorem rec_len : Rec.lookups.length = 89 := by decide
+theorem rec_len : Rec.lookups.length = 98 := by decide
 
 /-- A record row's byte read at lookup `k`, column `c`, offset `o`. -/
 theorem rec_byte_at {r k c o : ℕ} (hr : r < 2 ^ Ls 3) (hon : (inst 3).main Rec.ON r = 1) (hk : k < 57)
@@ -133,7 +133,7 @@ theorem rec_fp (hidx : ∀ r < 2 ^ Ls 3, (inst 3).main Rec.ON r = 1 → (inst 3)
   have rs := rec_sat hL hsat
   have hP3 := rows_lt_P hL hsz (i := 3) (by decide)
   have hP4 := rows_lt_P hL hsz (i := 4) (by decide)
-  have h24 : ∀ i < 9, 2 ^ Ls i ≤ 2 ^ 24 := fun i hi => Nat.pow_le_pow_right (by norm_num) (hsz.1 i hi)
+  have h24 : ∀ i < 12, 2 ^ Ls i ≤ 2 ^ 24 := fun i hi => Nat.pow_le_pow_right (by norm_num) (hsz.1 i hi)
   have hpre3 : (segSys.comp 3).air.pre = Rec.preCols := rfl
   have hpre4 : (segSys.comp 4).air.pre = Block.FpWalk.preCols := rfl
   -- the record's fingerprint use
@@ -145,7 +145,8 @@ theorem rec_fp (hidx : ∀ r < 2 ^ Ls 3, (inst 3).main Rec.ON r = 1 → (inst 3)
     simp [siteMult, hl63, siteEval, hpre3, hL 3 (by decide), Expr.eval, Rec.k, StarkedAir.Sha256.eval_col,
       wrap_zero hr, hon]
   obtain ⟨i', e, k', he, hy, hsm, hsv⟩ := link hL hsat hHL hsz hsite (by simp [isUse]) hm
-  rw [show siteRel segSys ((3, r, 63) : Site) = 22 from rfl, yt] at hy
+  rw [show siteRel segSys ((3, r, 63) : Site) = 22 from rfl] at hy
+  replace hy := yt hy; simp only [YT, Bool.or_eq_true, Bool.and_eq_true, beq_iff_eq, decide_eq_true_eq] at hy
   obtain ⟨rfl, rfl⟩ : i' = 4 ∧ k' = 3 := by omega
   have hlst : (inst 4).main Block.FpWalk.LST e = 1 := by
     have hm' : (inst 4).main Block.FpWalk.LST e ≠ 0 := by
@@ -176,7 +177,8 @@ theorem rec_fp (hidx : ∀ r < 2 ^ Ls 3, (inst 3).main Rec.ON r = 1 → (inst 3)
     simp [siteMult, siteEval, siteLookup, segSys, comps, hL 4 (by decide), Block.FpWalk.fpwalk, Block.FpWalk.lookups,
       Expr.eval, Block.FpWalk.k, StarkedAir.Sha256.eval_col, wrap_zero hs0, hfs]
   obtain ⟨i2, ρ, k2, hρ, hy2, hsm2, hsv2⟩ := link hL hsat hHL hsz hsite2 (by simp [isUse]) hm2
-  rw [show siteRel segSys ((4, s0, 2) : Site) = 21 from rfl, yt] at hy2
+  rw [show siteRel segSys ((4, s0, 2) : Site) = 21 from rfl] at hy2
+  replace hy2 := yt hy2; simp only [YT, Bool.or_eq_true, Bool.and_eq_true, beq_iff_eq, decide_eq_true_eq] at hy2
   obtain ⟨rfl, rfl⟩ : i2 = 3 ∧ k2 = 62 := by omega
   have hl62 : siteLookup segSys ((3, ρ, 62) : Site) = ⟨Block.FpWalk.REL_SEG, Rec.k Rec.ON,
       [cst 0, Rec.k Rec.IDX, .add (Rec.k Rec.START) (cst 49), Rec.k Rec.LENC]⟩ := rfl
@@ -277,16 +279,19 @@ theorem tmsg_rec {y : ℕ} (hy : y < 2 ^ Ls 7) (hn : (inst 7).main TMsg.NEW y = 
       (inst 7).main TMsg.RST y = (inst 3).main Rec.START ρ ∧ (inst 7).main TMsg.RLEN y = (inst 3).main Rec.LENC ρ := by
   obtain ⟨i, ρ, k', hρ, hyt, hsm, hsv⟩ := tmsg_use hL hsat hHL hsz hy (k := 4) (c := TMsg.NEW) (by norm_num)
     (by norm_num) rfl hn
-  rw [show (TMsg.lookups.getD 4 ⟨0, .const 0, []⟩).rel = 32 from rfl, yt] at hyt
+  rw [show (TMsg.lookups.getD 4 ⟨0, .const 0, []⟩).rel = 32 from rfl] at hyt
+  replace hyt := yt hyt; simp only [YT, Bool.or_eq_true, Bool.and_eq_true, beq_iff_eq, decide_eq_true_eq] at hyt
   obtain ⟨rfl, rfl⟩ : i = 3 ∧ k' = 57 := by omega
   have rs := rec_sat hL hsat
   have hpre3 : (segSys.comp 3).air.pre = Rec.preCols := rfl
-  have hl57 : siteLookup segSys ((3, ρ, 57) : Site) = ⟨REL_REC, Rec.k Rec.ON, [Rec.k Rec.IDX, Rec.k Rec.START,
-      Rec.k Rec.LENC]⟩ := rfl
+  have hl57 : siteLookup segSys ((3, ρ, 57) : Site) = ⟨REL_REC, .mul (cst 2) (Rec.k Rec.ON), [Rec.k Rec.IDX,
+      Rec.k Rec.START, Rec.k Rec.LENC]⟩ := rfl
   have hon : (inst 3).main Rec.ON ρ = 1 := by
     have hm' : (inst 3).main Rec.ON ρ ≠ 0 := by
-      simpa [siteMult, hl57, siteEval, hpre3, hL 3 (by decide), Expr.eval, Rec.k, StarkedAir.Sha256.eval_col,
-        wrap_zero hρ] using hsm
+      have h2 : (2 : F) * (inst 3).main Rec.ON ρ ≠ 0 := by
+        simpa [siteMult, hl57, siteEval, hpre3, hL 3 (by decide), Expr.eval, Rec.k, StarkedAir.Sha256.eval_col,
+          StarkedAir.Sha256.eval_cst, wrap_zero hρ] using hsm
+      exact right_ne_zero_of_mul h2
     exact (Block.air_bool (air := Rec.rec.air) rs (c := Rec.ON) (by simp [Rec.rec, Rec.constraints, Rec.localC, Rec.k])
       hρ).resolve_left hm'
   have e1 : siteVals segSys inst pub (3, ρ, 57) = [(inst 3).main Rec.IDX ρ, (inst 3).main Rec.START ρ,
@@ -303,7 +308,8 @@ theorem tmsg_code {y : ℕ} (hy : y < 2 ^ Ls 7) (hc : (inst 7).main TMsg.PC y = 
       (inst 7).main TMsg.O y - 36 = (i : F) ∧ (inst 7).main TMsg.B y = (inst 3).main (Rec.C i) ρ := by
   obtain ⟨i', ρ, k', hρ, hyt, hsm, hsv⟩ := tmsg_use hL hsat hHL hsz hy (k := 2) (c := TMsg.PC) (by norm_num)
     (by norm_num) rfl hc
-  rw [show (TMsg.lookups.getD 2 ⟨0, .const 0, []⟩).rel = 33 from rfl, yt] at hyt
+  rw [show (TMsg.lookups.getD 2 ⟨0, .const 0, []⟩).rel = 33 from rfl] at hyt
+  replace hyt := yt hyt; simp only [YT, Bool.or_eq_true, Bool.and_eq_true, beq_iff_eq, decide_eq_true_eq] at hyt
   obtain ⟨rfl, hk1, hk2⟩ : i' = 3 ∧ 58 ≤ k' ∧ k' ≤ 61 := by omega
   obtain ⟨i, hi, rfl⟩ : ∃ i, i < 4 ∧ k' = 58 + i := ⟨k' - 58, by omega, by omega⟩
   have rs := rec_sat hL hsat
@@ -448,7 +454,8 @@ theorem b2c_word {x : ℕ} (hx : x < 2 ^ Ls 6) (hmu : (inst 6).main B2c.MU x = 1
     simp [B2c.k, StarkedAir.Sha256.eval_col, wrap_zero hx]
   obtain ⟨i', y, k', hy, hyt, hsm, hsv⟩ := link hL hsat hHL hsz hsite (by simp [isUse])
     (by simp only [siteMult, hsl, siteEval, hpre6, hL 6 (by decide), Expr.eval, ev6, hmu])
-  rw [show siteRel segSys ((6, x, 0) : Site) = 30 from rfl, yt] at hyt
+  rw [show siteRel segSys ((6, x, 0) : Site) = 30 from rfl] at hyt
+  replace hyt := yt hyt; simp only [YT, Bool.or_eq_true, Bool.and_eq_true, beq_iff_eq, decide_eq_true_eq] at hyt
   obtain ⟨rfl, rfl⟩ : i' = 5 ∧ k' = 12 := by omega
   have hsl5 : siteLookup segSys ((5, y, 12) : Site) = ⟨REL_SB2W, B2w.k B2w.UW,
       [B2w.k B2w.BLK, B2w.p B2w.P_K, B2w.lo, B2w.hi]⟩ := rfl
@@ -477,7 +484,8 @@ theorem b2_end : ∃ x < 2 ^ Ls 6, x % 88 = 87 ∧ (inst 6).main B2c.LASTU x = 1
   obtain ⟨i', x, k', hx, hyt, hsm, hsv⟩ := link hL hsat hHL hsz hsite (by simp [isUse])
     (by simp [siteMult, hsl, siteEval, hpre5, hL 5 (by decide), Expr.eval, B2w.first, B2w.p, B2w.preCols,
       B2w.P_FIRST, PreCol.eval, wrap_zero h0, pre])
-  rw [show siteRel segSys ((5, 0, 13) : Site) = 31 from rfl, yt] at hyt
+  rw [show siteRel segSys ((5, 0, 13) : Site) = 31 from rfl] at hyt
+  replace hyt := yt hyt; simp only [YT, Bool.or_eq_true, Bool.and_eq_true, beq_iff_eq, decide_eq_true_eq] at hyt
   obtain ⟨rfl, rfl⟩ : i' = 6 ∧ k' = 1 := by omega
   have hsl6 : siteLookup segSys ((6, x, 1) : Site) = ⟨REL_B2END, .mul (B2c.k B2c.LASTU) (B2c.p (Blake2s.P_FIN 3)),
       [B2c.k B2c.BLKI]⟩ := rfl
@@ -524,7 +532,8 @@ theorem shac_word {x : ℕ} (hx : x < 2 ^ Ls 8)
   obtain ⟨i', y, k', hy, hyt, hsm, hsv⟩ := link hL hsat hHL hsz hsite (by simp [isUse])
     (by simp only [siteMult, hsl, siteEval, hpre8, hL 8 (by decide), ShaC.lookups, List.getD_cons_zero, Expr.eval]
         simp only [Expr.eval] at hm; rw [hm])
-  rw [show siteRel segSys ((8, x, 0) : Site) = 34 from rfl, yt] at hyt
+  rw [show siteRel segSys ((8, x, 0) : Site) = 34 from rfl] at hyt
+  replace hyt := yt hyt; simp only [YT, Bool.or_eq_true, Bool.and_eq_true, beq_iff_eq, decide_eq_true_eq] at hyt
   obtain ⟨rfl, rfl⟩ : i' = 7 ∧ k' = 6 := by omega
   have hsl7 : siteLookup segSys ((7, y, 6) : Site) = TMsg.lookups.getD 6 ⟨0, .const 0, []⟩ := rfl
   refine ⟨y, hy, ?_, ?_⟩
@@ -548,7 +557,8 @@ theorem sha_end : ∃ x < 2 ^ Ls 8, x % 72 = 71 ∧ (inst 8).main ShaC.LASTS x =
   obtain ⟨i', x, k', hx, hyt, hsm, hsv⟩ := link hL hsat hHL hsz hsite (by simp [isUse])
     (by simp [siteMult, hsl, siteEval, hpre7, hL 7 (by decide), Expr.eval, TMsg.first, TMsg.p, TMsg.preCols,
       TMsg.P_FIRST, PreCol.eval, wrap_zero h0, pre])
-  rw [show siteRel segSys ((7, 0, 7) : Site) = 35 from rfl, yt] at hyt
+  rw [show siteRel segSys ((7, 0, 7) : Site) = 35 from rfl] at hyt
+  replace hyt := yt hyt; simp only [YT, Bool.or_eq_true, Bool.and_eq_true, beq_iff_eq, decide_eq_true_eq] at hyt
   obtain ⟨rfl, rfl⟩ : i' = 8 ∧ k' = 1 := by omega
   have hsl8 : siteLookup segSys ((8, x, 1) : Site) = ⟨REL_SHEND, .mul (ShaC.k ShaC.LASTS) (pre ShaC.FIN3),
       [ShaC.k ShaC.BLKI]⟩ := rfl

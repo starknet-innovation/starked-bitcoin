@@ -86,7 +86,7 @@ theorem segBytes_eq (inst : ℕ → Inst) (pub : ℕ → F) :
 section System
 
 variable {inst : ℕ → Inst} {pub : ℕ → F} {Ls : ℕ → ℕ}
-  (hL : ∀ i < 9, (inst i).logSize = Ls i) (hsat : segSys.SatisfiedExt inst pub []) (hsz : SegSizeOk Ls)
+  (hL : ∀ i < 12, (inst i).logSize = Ls i) (hsat : segSys.SatisfiedExt inst pub []) (hsz : SegSizeOk Ls)
 include hL hsat hsz
 
 theorem len_le : (pub PUB_LEN).val ≤ 2 ^ Ls 0 :=

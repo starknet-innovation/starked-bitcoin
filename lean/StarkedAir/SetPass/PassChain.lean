@@ -5,10 +5,11 @@
   the pass from `s` to a state the last one's outgoing inputs encode (one challenge throughout), or
   Blake2s has a collision.
 - `set_root_sound`: the native verifier accepts a set tree root (shape `t`) whose summary is the digests
-  of `pb`'s incoming vector (the start state `s0` the verifier builds) and `pf`'s outgoing vector (the
-  final state it is given); then some record list folds the pass from `s0` to a state `pf` encodes, the
-  checks holding iff they held in `s0` (or a collision). With `SetFile.pass_sound` the final state's
-  `finish` is the file's facts.
+  of `pb`'s incoming vector (the start state `s0` the verifier builds), `pf`'s outgoing vector (the
+  final state it is given) and root limbs `R`; then some record list folds the pass from `s0` to a state
+  `pf` encodes, the checks holding iff they held in `s0`, and `R` is the root of a segment tree of shape
+  `t` over the proven segments, each leaf its segment's public root (or a collision). With
+  `SetFile.pass_sound` the final state's `finish` is the file's facts.
 -/
 import StarkedAir.SetPass.PassRoot
 
@@ -17,13 +18,15 @@ namespace StarkedAir.SetPass
 open StarkedAir StarkedAir.Circuit StarkedAir.Circuit.BlockRec StarkedAir.Circuit.SetTree
 open StarkedAir.Spec.QM31 (QM)
 open StarkedAir.Spec.CoinEpoch (CEv)
+open StarkedAir.HeaderTree (limbsOf)
 
 /-- The link of two segments as equal vectors (or a collision). -/
 theorem link_vec {p q : ℕ → F} (h : Links p q) :
     (∀ t < NV, q (fIn t) = withOne p (fOut t)) ∨ Collision := by
   rcases vec_of_half (p := withOne p) (q := q) outIdx_length inIdx_length (fun j hj => by
     have := h j hj
-    simp only [summ, if_neg (show ¬ 16 + j < 16 by omega), if_pos hj, show 16 + j - 16 = j by omega] at this
+    simp only [summ, if_neg (show ¬ 16 + j < 16 by omega), if_pos (show 16 + j < 32 by omega), if_pos hj,
+      show 16 + j - 16 = j by omega] at this
     exact this) with hv | c
   · exact Or.inl fun t ht => by rw [← inIdx_get t ht, ← outIdx_get t ht]; exact (hv t ht).symm
   · exact Or.inr c
@@ -59,8 +62,9 @@ theorem pass_chain : ∀ (ps : List (ℕ → F)) (p0 : ℕ → F) (s : Spec.SetF
     · rw [List.foldl_append, hn', hn]
     · rw [List.foldl_append, hk', hk]
 
-/-- The summary the verifier expects: the incoming digest of `pb`, the outgoing digest of `pf`. -/
-def summ2 (pb pf : ℕ → F) (j : ℕ) : F := if j < 16 then summ pb j else summ pf j
+/-- The summary the verifier expects: the incoming digest of `pb`, the outgoing digest of `pf`, the root
+limbs `R`. -/
+def summ2 (pb pf R : ℕ → F) (j : ℕ) : F := if j < 16 then summ pb j else if j < 32 then summ pf j else R (j - 32)
 
 section
 variable {Acc SatC : List Spec.Blake2s.Word → List Spec.Blake2s.Word → Prop}
@@ -69,15 +73,17 @@ variable {Acc SatC : List Spec.Blake2s.Word → List Spec.Blake2s.Word → Prop}
 
 /-- **The coin-set pass is sound, from its root proof.** -/
 theorem set_root_sound (T : Trust Acc SatC VGates leafH nodeH setNodeProgram (LeafOkS SegOk))
-    (hl : ∀ L, (leafH L).length = 8) (hn : nodeH.length = 8) (t : BlockRec.Tree) (pb pf : ℕ → F)
+    (hl : ∀ L, (leafH L).length = 8) (hn : nodeH.length = 8)
+    (hroot : ∀ p, SegOk p → ∃ st, segRootL p = limbsOf st) (t : BlockRec.Tree) (pb pf R : ℕ → F)
     (s0 : Spec.SetFile.St QM) (hb : EncIn pb s0)
-    (hacc : Acc (t.hash leafH nodeH) (sd (t.key leafH nodeH) (summ2 pb pf))) :
+    (hacc : Acc (t.hash leafH nodeH) (sd (t.key leafH nodeH) (summ2 pb pf R))) :
     (∃ es : List CEv, EncOut pf (es.foldl (Spec.SetFile.step [Rec.frac pb]) s0) ∧
       (es.foldl (Spec.SetFile.step [Rec.frac pb]) s0).n = s0.n ∧
-      (es.foldl (Spec.SetFile.step [Rec.frac pb]) s0).ok = s0.ok) ∨ Collision := by
-  rcases stree_sound T hl hn t _ (T.stwoSound _ _ hacc) with ch | c
+      (es.foldl (Spec.SetFile.step [Rec.frac pb]) s0).ok = s0.ok) ∧
+    (∃ τ : SegTree, τ.Fits t ∧ τ.Ok ∧ (∀ p ∈ τ.segs, SegOk p) ∧
+      (List.range 16).map R = limbsOf τ.root) ∨ Collision := by
+  rcases stree_sound T hl hn hroot t _ (T.stwoSound _ _ hacc) with ⟨τ, hfit, hτok, hok, hc, hR, p0, pk, h0, hk, hi, ho⟩ | c
   swap; · exact Or.inr c
-  obtain ⟨ps, p0, pk, h0, hk, hok, hc, hi, ho⟩ := ch
   -- the start: `p0`'s incoming vector is `pb`'s
   rcases vec_of_half (p := p0) (q := pb) inIdx_length inIdx_length (fun j hj => by
     have := hi j hj
@@ -92,19 +98,26 @@ theorem set_root_sound (T : Trust Acc SatC VGates leafH nodeH setNodeProgram (Le
   -- the end: `pk`'s outgoing vector is `pf`'s
   rcases vec_of_half (p := withOne pf) (q := withOne pk) outIdx_length outIdx_length (fun j hj => by
     have := ho j hj
-    simp only [summ2, if_neg (show ¬ 16 + j < 16 by omega), summ, show 16 + j - 16 = j by omega] at this
+    simp only [summ2, if_neg (show ¬ 16 + j < 16 by omega), if_pos (show 16 + j < 32 by omega), summ,
+      show 16 + j - 16 = j by omega] at this
     exact this) with hvk | c
   swap; · exact Or.inr c
-  obtain ⟨rest, rfl⟩ : ∃ rest, ps = p0 :: rest := by
-    cases ps with
-    | nil => simp at h0
-    | cons a r => simp at h0; exact ⟨r, by rw [h0]⟩
+  obtain ⟨rest, hrest⟩ : ∃ rest, τ.segs = p0 :: rest := by
+    cases e : τ.segs with
+    | nil => rw [e] at h0; simp at h0
+    | cons a r => rw [e] at h0; simp at h0; exact ⟨r, by rw [h0]⟩
+  rw [hrest] at hok hc hk
   rcases pass_chain rest p0 s0 hok hc hin0 with ⟨es, pk', hpk', hout, hn', hk'⟩ | c
   swap; · exact Or.inr c
   rw [hk] at hpk'
   cases hpk'
   rw [hfr] at hout hn' hk'
-  exact Or.inl ⟨es, encOut_congr (fun t ht => by rw [← outIdx_get t ht]; exact hvk t ht) hout, hn', hk'⟩
+  refine Or.inl ⟨⟨es, encOut_congr (fun t ht => by rw [← outIdx_get t ht]; exact hvk t ht) hout, hn', hk'⟩,
+    τ, hfit, hτok, by rw [hrest]; exact hok, ?_⟩
+  rw [← hR]
+  simp only [rootL, summ2]
+  exact List.map_congr_left fun j _ => by
+    rw [if_neg (by omega), if_neg (by omega), show 32 + j - 32 = j by omega]
 
 end
 

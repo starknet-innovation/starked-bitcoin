@@ -184,6 +184,10 @@ both vectors, so linked segments share it with no separate check, and a node che
   Blake2s block count is checked below `2^30` in-circuit, so the file is under `2^36 + 64` bytes, and
   the `TxOutSer` stream (`40 + len` per record against the file's `49 + len`) is shorter.
 
+## Membership (D-050)
+
+The pass also proves a Merkle root over the set's records: [set-membership.md](set-membership.md).
+
 ## Cost
 
 Measured by the native model (`chainproof set-pass-model`) on the set after block 972,500 (164,539,066

@@ -99,7 +99,9 @@ scheduled as `UTXO-TREE`, the aggregator as `BLOCK-REC` — design in
 
 ## In flight
 
-- Nothing.
+- **Membership (D-050):** the segment circuit, set tree root, membership proofs and CLI are in and
+  tested; the Lean soundness of the root's content (`set_lw`, `set_lc`, `set_mt` against
+  `Spec/SetMerkle.lean`) is in progress; then the CUDA set prover and the production run.
 
 ## Needs owner
 
@@ -139,7 +141,7 @@ EOS
 (cd lean && lake env lean /tmp/ax.lean)  # expect: propext, Classical.choice, Quot.sound
 
 # JSON drift: committed AIRs must equal the Lean export
-(cd lean && for n in add32_chain sha256_compress header_chain probe_oracle byte_table byte_user blake2s_compress blake2s_tree header_chain_v7 node_glue leaf_glue block_bytes block_reader block_fields block_msg block_sha block_merkle block_tables block_walk block_ctx block_wmerkle block_undo block_b2msg block_b2s extsum_test genesis_checks set_pend set_rec set_b2w set_b2c set_tmsg set_shac set_leaf_out set_node_glue; do
+(cd lean && for n in add32_chain sha256_compress header_chain probe_oracle byte_table byte_user blake2s_compress blake2s_tree header_chain_v7 node_glue leaf_glue block_bytes block_reader block_fields block_msg block_sha block_merkle block_tables block_walk block_ctx block_wmerkle block_undo block_b2msg block_b2s extsum_test genesis_checks set_pend set_rec set_b2w set_b2c set_tmsg set_shac set_lw set_lc set_mt set_leaf_out set_node_glue; do
   lake env lean --run Export.lean $n | cmp -s - ../airs/$n.json && echo "$n ok" || echo "$n DRIFT"; done)
 
 python3 ~/.claude/skills/document/scripts/check_docs.py .   # expect: 0 errors
