@@ -1,4 +1,5 @@
 import StarkedAir.Export
+import StarkedAir.SetPass.System
 import StarkedAir.Circuit.CompositionLogUp
 import StarkedAir.Circuit.BlockNodeK
 import StarkedAir.Circuit.EpochRoot
@@ -112,6 +113,12 @@ def main (args : List String) : IO Unit := do
   | ["block_anc"] => IO.println StarkedAir.Block.Anc.anc.air.toJson
   | ["block_b2msg"] => IO.println StarkedAir.Block.B2Msg.b2msg.toJson
   | ["block_b2s"] => IO.println StarkedAir.Block.B2s.b2s.toJson
+  | ["set_pend"] => IO.println StarkedAir.SetPass.Pend.pend.toJson
+  | ["set_rec"] => IO.println StarkedAir.SetPass.Rec.rec.toJson
+  | ["set_b2w"] => IO.println StarkedAir.SetPass.B2w.b2w.toJson
+  | ["set_b2c"] => IO.println StarkedAir.SetPass.B2c.b2c.toJson
+  | ["set_tmsg"] => IO.println StarkedAir.SetPass.TMsg.tmsg.toJson
+  | ["set_shac"] => IO.println StarkedAir.SetPass.ShaC.shac.toJson
   | ["block_reader"] => IO.println StarkedAir.BlockReader.reader.toJson
   | ["genesis_checks"] => IO.println StarkedAir.HeaderTree.genesisChecksJson
   | ["probe_oracle"] => IO.println (StarkedAir.Probe.oracleJson 4 2024)

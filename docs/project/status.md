@@ -4,16 +4,16 @@ Rewritten at the end of every session; see [README.md](README.md#ending-a-sessio
 If `HEAD at last update` doesn't match `git log -1`, this file is stale:
 follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work).
 
-- **Updated:** 2026-10-27 (session 21: epoch VKs pinned, compact header file, coin-set pass steps 1–2)
+- **Updated:** 2026-10-27 (session 22: coin-set pass step 3, the segment circuit)
 - **HEAD at last update:** see `git log -1` (this file is committed with the work)
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
 - **Current item:** the coin-set pass (D-048, docs/design/set-pass.md), so `verify-chain` needs no
   set file. Blocks 935,001–972,500 are proved as ONE chain proof and verify on the node with pinned
   VKs only (D-047) and with the compact header file (D-049: 0.99 MB instead of 13.8 MB). The pass's
-  native model (`set_pass.zig`) and Lean spec (`Spec/SetFile.lean`, `pass_sound`) are done. Next:
-  step 3, the segment system (Zig witness, Lean export, soundness against `step`), small sets on the
-  Mac. Branch `rec/epoch-root` pushed through 287b9a3; later commits not pushed. See log.md,
-  session 21.
+  native model (`set_pass.zig`), Lean spec (`Spec/SetFile.lean`, `pass_sound`) and the segment
+  circuit (`lean/StarkedAir/SetPass/`, `src/block/set_seg.zig`; tested on small sets) are done.
+  Next: the segment system's Lean soundness (`set_seg_sound`), then the set tree. Branch
+  `rec/epoch-root` pushed through 949cbe3; later commits not pushed. See log.md, session 22.
   (The paragraphs below date from 2026-10-12.)
 
 ## State in one paragraph
@@ -135,7 +135,7 @@ EOS
 (cd lean && lake env lean /tmp/ax.lean)  # expect: propext, Classical.choice, Quot.sound
 
 # JSON drift: committed AIRs must equal the Lean export
-(cd lean && for n in add32_chain sha256_compress header_chain probe_oracle byte_table byte_user blake2s_compress blake2s_tree header_chain_v7 node_glue leaf_glue block_bytes block_reader block_fields block_msg block_sha block_merkle block_tables block_walk block_ctx block_wmerkle block_undo block_b2msg block_b2s extsum_test genesis_checks; do
+(cd lean && for n in add32_chain sha256_compress header_chain probe_oracle byte_table byte_user blake2s_compress blake2s_tree header_chain_v7 node_glue leaf_glue block_bytes block_reader block_fields block_msg block_sha block_merkle block_tables block_walk block_ctx block_wmerkle block_undo block_b2msg block_b2s extsum_test genesis_checks set_pend set_rec set_b2w set_b2c set_tmsg set_shac; do
   lake env lean --run Export.lean $n | cmp -s - ../airs/$n.json && echo "$n ok" || echo "$n DRIFT"; done)
 
 python3 ~/.claude/skills/document/scripts/check_docs.py .   # expect: 0 errors

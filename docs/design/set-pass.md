@@ -1,6 +1,6 @@
 # The coin-set pass: a set file's facts proved, so a verifier needs no set
 
-Status: current · Updated: 2026-10-27 (accepted as D-048; steps 1–2 done)
+Status: current · Updated: 2026-10-27 (accepted as D-048; steps 1–2 done; step 3's circuit done, its proofs open)
 
 Figures marked *est.* are rough; the native model (step 1) measures them.
 
@@ -57,8 +57,8 @@ The verifier then checks natively, per epoch i under its challenge `chᵢ`:
 
 The pass is one long sequential computation, so it splits like the header chain:
 
-- **Segment:** a run of whole records, ~2²³ rows (~23k coins, *est.*), plus the file's 4-byte count
-  in the first segment and the hash finalizations in the last.
+- **Segment:** a run of whole records, ~2²³ rows (~70k coins, *est.*). The file's 4-byte count and
+  the hash finalizations are the verifier's (§ What the circuit leaves to the verifier).
 - **Carried (public in, public out):** the Blake2s state (8 words, the byte counter, the up-to-64
   bytes not yet compressed); the SHA-256 state (8 words, the length, the pending bytes); the k
   fraction sums; the amount and count; the last outpoint (sortedness across the boundary); the
@@ -69,24 +69,90 @@ The pass is one long sequential computation, so it splits like the header chain:
 
 ## Components
 
-Surveyed against the block system (2026-10-27). No block component can start from a carried state:
-`b2s` fixes the chaining value to `h0` on its first period and its counter below 2^25, `sha` loads
-the IV from preprocessed constants and outputs only SHA256d, and `coin`'s accumulator starts at 0 under
-one challenge. The compression gadgets and their row proofs (`period_compress`, `compress_sound_air`)
-hold for any init rows, so the changes are at the edges.
+Surveyed against the block system (2026-10-27): no block component starts from a carried state
+(`b2s` fixes `h0` and a counter below 2^25, `sha` loads the IV and outputs only SHA256d, `coin`
+accumulates from 0). The compression gadgets hold for any init rows, so the segment system copies the
+block components' edges and keeps the gadgets.
 
-- **As is:** the byte table (`block_bytes`, positions local to the segment), `fpwalk` (Horner over
-  `ser`), `tables`/`R8`, the ExtSum builders (`phi`, `fracC`, `accC`), the System/LogUp framework.
-- **Modified:** Blake2s (start `(h, t)` from public inputs, a two-limb counter up to ~2^34, no final
-  block except in the last segment, the outgoing state public; the message side takes the counter
-  offset and the pending bytes); SHA-256 (chaining value from public inputs, no `DBL`/length check
-  inside a segment, the outgoing state public; padding and the second hash in the last segment).
-- **New:** the record parser (49-byte head, `cb ≤ 1`, `h < 2^31`, `8 ≤ len < 2^31 − 1`); the
-  `TxOutSer` message stream (file bytes plus the code bytes); a coin-fraction component with two
-  accumulators (two `(z, α)`), seeded from the incoming sums; amount, count and maximum height; the
-  36-byte outpoint comparison against the incoming `last`; the first segment's count bytes.
-- **Tree:** the header chain's `linkChecks`/`combine` (right's input = left's output) for the hash
-  states, `last`, `i`, `n`, `ok`; the block node's challenge equality and range checks for the sums.
+### What the circuit leaves to the verifier
+
+The pass's two ends are pure functions of public values, so they are computed natively:
+
+- **The start:** `begin(n)` (Lean `SetFile.begin`): the count's 4 bytes are Blake2s pending bytes,
+  everything else zero. The verifier builds it and compares the first segment's incoming state.
+- **The end:** `finish`: one Blake2s compression of the pending bytes (counter `64·nb + plen`, last
+  flag), SHA-256's padding and the second hash, and `i = n`.
+
+A segment then proves only `s' = seg.foldl step s` for its records. Counters are block counts: the
+pass only ever compresses whole 64-byte blocks, so Blake2s's `t = 64·nb` and SHA-256's
+`len = 64·nb + plen`, and `nb < 2^28` fits a field element.
+
+### One challenge per pass
+
+A pass carries one fraction sum. The set after block 945,000, which needs two challenges (D-048),
+is proved twice, once per challenge: four passes instead of three (~+$15–20 *est.*), but the
+fingerprint walker (`block_fpwalk`, `γ` at public input 41) and the accumulator are reused as they
+are, with their proofs.
+
+### The segment system
+
+Nine components. Reused unchanged (same AIR, same JSON, same proofs): `block_bytes` (the segment's
+file bytes, `pub 0` = length), `block_fpwalk` (Horner over each `ser`), `block_tables` (`r8`). New:
+
+| Component | Rows | Role |
+|---|---|---|
+| `set_pend` | 64 | yields the four pending-byte tables from public inputs: Blake2s in/out, SHA-256 in/out |
+| `set_rec` | one per record | reads the 49-byte head and the 8 amount bytes; checks `cb ≤ 1`, `h < 2^24`, `8 ≤ len < 2^24`, sortedness against the previous record (the first against the public `last`); the code bytes `2h + cb`; the fraction `1/(z − φ)` (the coin tuple) accumulated from the public incoming sum; the amount (12 bytes, carries), the maximum height, the count; yields `rec(r, start, len)` and `code(r, i, byte)`, the `ser` segment; uses its fingerprint |
+| `set_b2w` | one per word of `P_in ‖ S` | Blake2s message words over the incoming pending bytes then the segment's bytes; the last block is held back (its bytes are the outgoing pending bytes); yields words and `(block, nb_in + block + 1, last)` |
+| `set_b2c` | 88 per block | the Blake2s gadget: period 0 chains from the public `h_in`, the rest from the previous period; counter `64·G`, never final; the last used period's output is the public `h_out` |
+| `set_tmsg` | one per byte of `Q_in ‖ TxOutSer` | SHA-256's message, byte per row like `block_msg`: the pending bytes, then per record the outpoint (file bytes), the 4 code bytes, the `ser` (file bytes); yields big-endian words for whole blocks; the bytes after the last whole block are the outgoing pending bytes |
+| `set_shac` | 72 per block | the SHA-256 gadget: period 0 from the public `H_in`, the rest chained; the last used period's output is the public `H_out` |
+
+The lookups bind them: every record's head and amount bytes, outpoint and `ser` are read from the
+byte table by position; `rec` and `code` are yielded once per record and consumed once each by
+`set_tmsg`, so its records are `set_rec`'s; words and block tuples are yielded once and consumed once,
+so each compression component compresses exactly the walker's blocks.
+
+### Public inputs
+
+550, laid out so the reused components find theirs (`pub 0` length, `γ` at 41, the coin
+challenge's `z` at 45 and `α` at 49–152 as in `block_coin`):
+
+| Index | Value |
+|---|---|
+| 0 | segment length (file bytes) |
+| 1, 2 | records before and after the segment (`i`) |
+| 3, 4–39 | has-last flag, incoming last key (txid bytes, then `vout` big-endian) |
+| 40 | incoming maximum height |
+| 41–44, 45–48, 49–152 | `γ`, `z`, `α₀…α₂₅` |
+| 153–156, 157–160 | incoming and outgoing sums |
+| 161 | outgoing maximum height |
+| 162–173, 174–185 | incoming and outgoing amount (12 bytes, little-endian) |
+| 186–221 | outgoing last key |
+| 222–303, 304–385 | Blake2s in, out: `h` (16 limbs), `nb`, pending length, 64 pending bytes |
+| 386–467, 468–549 | SHA-256 in, out: the same layout |
+
+### Sizes
+
+Per record (86 file bytes, 77 `TxOutSer` bytes on average over the set after block 972,500):
+`set_b2c` ~119 rows, `set_shac` ~87, `bytes` 86, `set_tmsg` 77, `fpwalk` ~37, `set_b2w` ~22,
+`set_rec` 1. One profile: `set_b2c`, `set_shac`, `bytes`, `set_tmsg` at L; `fpwalk` at L − 1;
+`set_b2w` at L − 2; `set_rec` at L − 6; `set_pend` at 6; `tables` at 8. At L = 23, about 70,000
+records per segment and ~2,400 segments per set *est.*
+
+### Soundness (the obligation)
+
+`set_seg_sound`: a satisfied, balanced segment system whose incoming public state encodes a
+reachable `St` (limbs and bytes in range, `t = 64·nb`) has outgoing public values encoding
+`seg.foldl step s` for the records `seg` its bytes parse to, with every record well formed and
+sorted. Its parts: the byte table and `set_rec` parse the segment (`encSet`'s records);
+`set_b2w`/`set_b2c` give `b2Feed`, `set_tmsg`/`set_shac` give `shaFeed` (both streamed:
+`b2Feed_append`, `shaFeed_append`); `set_rec` gives the rest.
+
+### The tree
+
+The header chain's `linkChecks`/`combine` (right's input = left's output) over the carried state;
+the challenge is equal across the tree.
 
 ## Cost
 
@@ -124,6 +190,11 @@ sets of the current chain: ~$50–60. For scale, the chain's 37,500 block proofs
    Step 3's obligation: a segment proof with public states `(s, s')` implies `s' = seg.foldl step s`
    for some records `seg` (as field encodings of `St`).
 3. **The segment system** (Zig witness, Lean export, soundness), small sets on the Mac.
+   **Circuit done (2026-10-27):** `lean/StarkedAir/SetPass/` (six new components, `airs/set_*.json`),
+   `src/block/set_seg.zig` (witnesses, `begin`, `finish`). Every segment of the sets after blocks 170
+   and 1000 satisfies and balances, the first proves and verifies, and the chained public states give
+   the native model's digest, `hash_serialized`, count, amount, height and sum; 21 tampered public
+   values are each rejected. **Open:** the Lean soundness theorem (`set_seg_sound`, § Soundness).
 4. **The set tree** (node circuit over segments, root VK pinned in `vk/`).
 5. **`verify-chain` without set files:** the set-pass roots in the chain file; the balance and
    anchors compared on public values.

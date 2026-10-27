@@ -21,6 +21,23 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-10-27 (session 22) — Coin-set pass step 3: the segment circuit (AIRs, witness, tests)
+Who: Claude (agent, Opus 5.5), with the owner (push of 949cbe3 approved; "go ahead with the segment circuit"; the node's RunPod key kept)
+Roadmap: coin-set pass (D-048) step 3, circuit half; the soundness proofs are next
+Done:
+- 949cbe3 pushed with approval.
+- The segment system designed in docs/design/set-pass.md (§ The segment system): nine components, three reused unchanged (`block_bytes`, `block_tables`, `block_fpwalk`), six new in `lean/StarkedAir/SetPass/` (`set_pend`, `set_rec`, `set_b2w`, `set_b2c`, `set_tmsg`, `set_shac`), 550 public inputs. The pass's start (the count bytes) and end (the hash finalizations, `i = n`) are left to the verifier: both are pure functions of public values.
+- One challenge per pass: the set after block 945,000 gets two passes (~+$15–20 *est.*), so `block_fpwalk` and the accumulator are reused with their proofs.
+- `src/block/set_seg.zig`: the witnesses, `begin`/`finish`, the native state after a segment.
+Evidence:
+- `zig build test -Dtest-filter="set segments"`: every segment of the sets after blocks 170 (3 records each) and 1000 (40 each) satisfies every constraint and balances; the first segment of each proves and verifies; the chained states give `set_pass.run`'s digest, `hash_serialized`, count, amount, highest height and sum. Tampering any of 21 public values (each carried part, in and out) is rejected.
+- Lean: `lake build` passes (the components' degree `#guard`s); the existing AIRs' JSON is unchanged.
+Problems / lessons:
+- Limits the circuit adds over the reader: `height < 2^24`, `len < 2^24` (a record must fit a segment), the amount below `2^96`, segments over 64 bytes. Real sets are far inside them; a file outside cannot be proved (completeness only).
+Next: the Lean soundness theorem `set_seg_sound` (per component, then the system), then step 4 (the set tree).
+
+---
+
 ## 2026-10-26 (session 21) — Epoch VKs pinned; verify-only header file; coin-set pass steps 1–2
 Who: Claude (agent, Opus 5.5), with the owner (pin the circuits; shrink the header proof, option 1; the coin-set pass, D-048 "Ok on all 3"; pushes approved one by one)
 Roadmap: BLOCK-REC epoch VKs pinned (D-047); PROOF-STORE compact file (D-049); coin-set pass designed and accepted (D-048), native model and Lean spec done

@@ -125,6 +125,12 @@ pub fn build(b: *std.Build) void {
     lib.addAnonymousImport("air:genesis_checks", .{ .root_source_file = b.path("airs/genesis_checks.json") });
     lib.addAnonymousImport("air:leaf_glue", .{ .root_source_file = b.path("airs/leaf_glue.json") });
     lib.addAnonymousImport("air:block_bytes", .{ .root_source_file = b.path("airs/block_bytes.json") });
+    lib.addAnonymousImport("air:set_pend", .{ .root_source_file = b.path("airs/set_pend.json") });
+    lib.addAnonymousImport("air:set_rec", .{ .root_source_file = b.path("airs/set_rec.json") });
+    lib.addAnonymousImport("air:set_b2w", .{ .root_source_file = b.path("airs/set_b2w.json") });
+    lib.addAnonymousImport("air:set_b2c", .{ .root_source_file = b.path("airs/set_b2c.json") });
+    lib.addAnonymousImport("air:set_tmsg", .{ .root_source_file = b.path("airs/set_tmsg.json") });
+    lib.addAnonymousImport("air:set_shac", .{ .root_source_file = b.path("airs/set_shac.json") });
     lib.addAnonymousImport("air:block_reader", .{ .root_source_file = b.path("airs/block_reader.json") });
     lib.addAnonymousImport("air:block_sha", .{ .root_source_file = b.path("airs/block_sha.json") });
     lib.addAnonymousImport("air:block_msg", .{ .root_source_file = b.path("airs/block_msg.json") });
