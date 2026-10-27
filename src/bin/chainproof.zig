@@ -15,6 +15,11 @@
 //!       mainnet `nMinimumChainWork`; `--min-work 0` disables the check (e.g. for a short test chain).
 //!   chainproof info <file.sbchain>
 //!       What a file holds (plan, peaks, provenance), without verifying it.
+//!   chainproof compact <vk> <in.sbchain> <out.sbchain> [--min-work <hex> | --min-work 0]
+//!       Verifies <in.sbchain>, then writes its verify-only form: the root proof without the peak
+//!       proofs (~1/16 of the size for 15 peaks), and verifies it as read back. Every verifier
+//!       accepts it and reaches the same tip, work and `T`; `prove --from` cannot extend it (keep
+//!       the full file for that).
 //!   chainproof inclusion <vk> <file.sbchain> <headers.bin> <height>
 //!       Prints and checks the MMR inclusion path of a block hash in the (verified) file's `T`.
 //!
@@ -89,6 +94,7 @@ fn usage() noreturn {
         \\  chainproof verify <vk> <file.sbchain> [--min-work <hex> | --min-work 0]
         \\  chainproof inclusion <vk> <file.sbchain> <headers.bin> <height>
         \\  chainproof info <file.sbchain>
+        \\  chainproof compact <vk> <in.sbchain> <out.sbchain> [--min-work <hex> | --min-work 0]
         \\  chainproof prove-block <block.bin> <undo.bin | -> <headers.bin> <height> <file.sbchain> <out.sbblock> [--test-strength]
         \\  chainproof verify-block <vk> <file.sbchain> <file.sbblock> [--min-work <hex> | --min-work 0] [--test-strength]
         \\  chainproof rebind-block <in.sbblock> <headers.bin> <file.sbchain> <out.sbblock>
@@ -139,6 +145,8 @@ pub fn main() !void {
     if (std.mem.eql(u8, cmd, "verify") and (args.len == 4 or (args.len == 6 and std.mem.eql(u8, args[4], "--min-work"))))
         return verify(gpa, a, args[2], args[3], if (args.len == 6) try std.fmt.parseInt(u256, args[5], 16) else core_min_work);
     if (std.mem.eql(u8, cmd, "info") and args.len == 3) return info(gpa, a, args[2]);
+    if (std.mem.eql(u8, cmd, "compact") and (args.len == 5 or (args.len == 7 and std.mem.eql(u8, args[5], "--min-work"))))
+        return compact(gpa, a, args[2], args[3], args[4], if (args.len == 7) try std.fmt.parseInt(u256, args[6], 16) else core_min_work);
     if (std.mem.eql(u8, cmd, "prove-block") and (args.len == 8 or (args.len == 9 and std.mem.eql(u8, args[8], "--test-strength"))))
         return proveBlock(gpa, a, args[2], args[3], args[4], try std.fmt.parseInt(u32, args[5], 10), args[6], args[7], args.len == 9);
     if (std.mem.eql(u8, cmd, "verify-block") and args.len >= 5) {
@@ -495,7 +503,7 @@ fn verify(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8, pat
     defer c.deinit();
     const s = try S.verifyChain(gpa, a, tables, &vk, &c);
     std.debug.print("VERIFIED {s} ({d} bytes) in {d:.2}s\n", .{ path, bytes.len, secs(timer.read()) });
-    std.debug.print("  headers 0..{d} from Bitcoin's genesis block; {d} segments, {d} peaks\n", .{ s.headers - 1, c.logs.len, c.peaks.len });
+    std.debug.print("  headers 0..{d} from Bitcoin's genesis block; {d} segments, {d} peaks; root {s}\n", .{ s.headers - 1, c.logs.len, c.peaks.len, @tagName(c.root_kind) });
     std.debug.print("  tip height {d}\n", .{s.tip_height});
     printHash("  tip hash   ", s.tip);
     std.debug.print("  chainwork  0x{x}\n", .{s.work});
@@ -508,6 +516,25 @@ fn verify(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8, pat
         }
         std.debug.print("  chainwork >= required minimum 0x{x}{s}\n", .{ w, if (w == core_min_work) " (Bitcoin Core's nMinimumChainWork)" else "" });
     } else std.debug.print("  NOTE: compare the chainwork with a trusted minimum (--min-work); a valid proof alone does not show this is the real chain\n", .{});
+}
+
+fn compact(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8, in: []const u8, out: []const u8, min_work: u256) !void {
+    const vk = try loadVk(a, vk_path);
+    const tables = try L.Tables.init(gpa);
+    defer tables.deinit(gpa);
+    const bytes = try S.readFile(a, in);
+    var c = try S.Chain.decode(gpa, a, bytes);
+    defer c.deinit();
+    _ = try S.verifyChain(gpa, a, tables, &vk, &c);
+    const k = try c.compact();
+    if (k.root_kind == c.root_kind) {
+        std.debug.print("{s} is already one proof (root {s}): nothing to drop\n", .{ in, @tagName(c.root_kind) });
+        return;
+    }
+    const small = try k.encode(a);
+    try S.writeFileAtomic(out, small);
+    std.debug.print("wrote {s}: {d} bytes, from {d} ({d} peak proofs dropped)\n", .{ out, small.len, bytes.len, c.peaks.len });
+    try verify(gpa, a, vk_path, out, min_work);
 }
 
 fn inclusion(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8, path: []const u8, headers_path: []const u8, height: usize) !void {

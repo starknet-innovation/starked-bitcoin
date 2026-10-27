@@ -4,15 +4,16 @@ Rewritten at the end of every session; see [README.md](README.md#ending-a-sessio
 If `HEAD at last update` doesn't match `git log -1`, this file is stale:
 follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work).
 
-- **Updated:** 2026-10-26 (session 20: the tip epoch proved; one proof per epoch; two epochs joined into one proof)
+- **Updated:** 2026-10-27 (session 21: epoch VKs pinned, compact header file, coin-set pass steps 1–2)
 - **HEAD at last update:** see `git log -1` (this file is committed with the work)
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
-- **Current item:** BLOCK-REC. Blocks 935,001–972,500 (two epochs, 37,500 blocks) are proved as ONE
-  chain proof (`chainproof prove-chain`, 575,868 bytes) and verified on the node (`verify-chain`):
-  164,539,066 coins after block 972,500, `hash_serialized 9f92d143…` (Core's). Each epoch has one root
-  proof (`prove-epoch-root`); the epoch join chains them (Lean `EpochJoin`, `EpochChainW`). Branch
-  `rec/epoch-root`, not pushed. Next: push (owner's approval), profile `verify-chain` (33 min on the
-  node), then the coin-set pass. See log.md, session 20, and block-rec.md § The epoch join.
+- **Current item:** the coin-set pass (D-048, docs/design/set-pass.md), so `verify-chain` needs no
+  set file. Blocks 935,001–972,500 are proved as ONE chain proof and verify on the node with pinned
+  VKs only (D-047) and with the compact header file (D-049: 0.99 MB instead of 13.8 MB). The pass's
+  native model (`set_pass.zig`) and Lean spec (`Spec/SetFile.lean`, `pass_sound`) are done. Next:
+  step 3, the segment system (Zig witness, Lean export, soundness against `step`), small sets on the
+  Mac. Branch `rec/epoch-root` pushed through 287b9a3; later commits not pushed. See log.md,
+  session 21.
   (The paragraphs below date from 2026-10-12.)
 
 ## State in one paragraph

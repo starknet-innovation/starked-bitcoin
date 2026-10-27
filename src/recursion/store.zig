@@ -320,7 +320,9 @@ fn decodeProved(gpa: std.mem.Allocator, a: std.mem.Allocator, d: *Dec) !Proved {
 // ---------------------------------------------------------------------------------------------
 // The chain file.
 
-pub const RootKind = enum(u8) { none = 0, own = 1, peak = 2 };
+/// `compact`: a verify-only file, the bagged root's proof without the peaks (`Chain.compact`). The
+/// root alone attests the chain; the peaks are needed only to extend it.
+pub const RootKind = enum(u8) { none = 0, own = 1, peak = 2, compact = 3 };
 
 pub const Chain = struct {
     fri: FriConfigV2,
@@ -329,8 +331,8 @@ pub const Chain = struct {
     /// Segment log sizes, in chain order from height 0.
     logs: []const u32,
     peaks: []Proved,
-    /// The bagged root: its own proof, the single peak (one peak covers everything), or none
-    /// (a checkpoint).
+    /// The bagged root: its own proof, the single peak (one peak covers everything), none (a
+    /// checkpoint), or its own proof without the peaks (`compact`: `peaks` is empty).
     root_kind: RootKind,
     root: ?Proved,
     /// Inclusion path of leaf 0 (the genesis hash) in `T`.
@@ -346,9 +348,25 @@ pub const Chain = struct {
     pub fn rootProved(self: *const Chain) ?*const Proved {
         return switch (self.root_kind) {
             .none => null,
-            .own => if (self.root) |*r| r else null,
+            .own, .compact => if (self.root) |*r| r else null,
             .peak => if (self.peaks.len == 1) &self.peaks[0] else null,
         };
+    }
+
+    /// The verify-only form of a rooted chain (borrowing its root): what `verifyChain` needs to
+    /// accept the same chain, without the peak proofs. A chain whose single peak is the root is
+    /// already that.
+    pub fn compact(self: *const Chain) !Chain {
+        var c = self.*;
+        switch (self.root_kind) {
+            .none => return error.NoRoot,
+            .peak, .compact => return c,
+            .own => {
+                c.peaks = &.{};
+                c.root_kind = .compact;
+                return c;
+            },
+        }
     }
 
     /// Frees the decoded proofs' in-circuit views (a decoded chain owns them).
@@ -366,10 +384,11 @@ pub const Chain = struct {
         try e.words(&self.vk_digest);
         try e.int(u32, @intCast(self.logs.len));
         for (self.logs) |l| try e.int(u32, l);
+        if (self.root_kind == .compact and self.peaks.len != 0) return error.CompactWithPeaks;
         try e.int(u32, @intCast(self.peaks.len));
         for (self.peaks) |*p| try encodeProved(&e, p);
         try e.int(u8, @intFromEnum(self.root_kind));
-        if (self.root_kind == .own) try encodeProved(&e, &(self.root orelse return error.NoRoot));
+        if (self.root_kind == .own or self.root_kind == .compact) try encodeProved(&e, &(self.root orelse return error.NoRoot));
         try e.int(u32, @intCast(self.genesis.len));
         for (self.genesis) |s| {
             try e.words(&s.sibling);
@@ -398,7 +417,8 @@ pub const Chain = struct {
         for (0..n_peaks) |_| try peaks.append(a, try decodeProved(gpa, a, &d));
         c.peaks = peaks.items;
         c.root_kind = std.meta.intToEnum(RootKind, try d.int(u8)) catch return error.BadRootKind;
-        c.root = if (c.root_kind == .own) try decodeProved(gpa, a, &d) else null;
+        if ((c.root_kind == .compact) != (n_peaks == 0)) return error.BadPeakCount;
+        c.root = if (c.root_kind == .own or c.root_kind == .compact) try decodeProved(gpa, a, &d) else null;
         errdefer if (c.root) |*r| r.proof.deinit();
         const steps = try a.alloc(HT.Step, try d.int(u32));
         for (steps) |*s| {
@@ -465,11 +485,17 @@ fn checkProved(gpa: std.mem.Allocator, tables: *const leaf.Tables, vk: *const Vk
     if (!std.mem.eql(u32, &out, &p.digest())) return error.WrongDigest;
 }
 
-/// Steps 1–3 of `verifyChain`: the VK, the plan and every peak (all a checkpoint has).
-pub fn checkPeaks(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const leaf.Tables, vk: *const Vk, chain: *const Chain) !void {
+/// Steps 1–2 of `verifyChain`: the file names this VK and its parameters; the plan is aligned.
+fn checkPlan(a: std.mem.Allocator, vk: *const Vk, chain: *const Chain) !void {
     if (!std.mem.eql(u32, &chain.vk_digest, &try vk.digest(a))) return error.VkMismatch;
     if (!std.meta.eql(chain.fri, vk.fri) or chain.max_log != vk.max_log) return error.VkMismatch;
     if (!HT.validPlan(chain.logs, vk.max_log)) return error.BadSegmentPlan;
+}
+
+/// Steps 1–3 of `verifyChain`: the VK, the plan and every peak (all a checkpoint has).
+pub fn checkPeaks(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const leaf.Tables, vk: *const Vk, chain: *const Chain) !void {
+    if (chain.root_kind == .compact) return error.CompactHasNoPeaks;
+    try checkPlan(a, vk, chain);
     const want = try expectedPeaks(a, vk, chain.logs);
     if (want.len != chain.peaks.len) return error.PeakCountMismatch;
     for (chain.peaks, want) |*p, w| try checkProved(gpa, tables, vk, p, w.e);
@@ -482,19 +508,26 @@ pub fn checkPeaks(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const l
 /// 4. the root's public inputs are the peaks' combined ones, and the outer verifier
 ///    (`node.verifyRoot`: pinned request, identity, key, digest, genesis input state) accepts it;
 /// 5. leaf 0 of `T` is Bitcoin's genesis hash (leftmost path of the implied depth).
+/// A compact file (no peaks) skips step 3 and the peaks half of step 4: the root's circuit and key
+/// follow from the plan alone (`node.verifyRoot`), so its public inputs are attested without them.
 /// The caller must still compare `Summary.work` with a trusted minimum.
 pub fn verifyChain(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const leaf.Tables, vk: *const Vk, chain: *const Chain) !Summary {
-    try checkPeaks(gpa, a, tables, vk, chain);
+    if (chain.root_kind == .compact) {
+        if (chain.peaks.len != 0) return error.CompactWithPeaks;
+        try checkPlan(a, vk, chain);
+    } else try checkPeaks(gpa, a, tables, vk, chain);
     const n = chain.headers();
 
     const root = chain.rootProved() orelse return error.NoRoot;
-    var pubs = chain.peaks[chain.peaks.len - 1].pubs;
-    var i = chain.peaks.len - 1;
-    while (i > 0) {
-        i -= 1;
-        pubs = node.combine(chain.peaks[i].pubs, pubs);
+    if (chain.root_kind != .compact) {
+        var pubs = chain.peaks[chain.peaks.len - 1].pubs;
+        var i = chain.peaks.len - 1;
+        while (i > 0) {
+            i -= 1;
+            pubs = node.combine(chain.peaks[i].pubs, pubs);
+        }
+        for (pubs, root.pubs) |x, y| if (x.toU32() != y.toU32()) return error.RootNotFromPeaks;
     }
-    for (pubs, root.pubs) |x, y| if (x.toU32() != y.toU32()) return error.RootNotFromPeaks;
 
     const leaf_hashes = try a.alloc([8]u32, chain.logs.len);
     const sizes = try a.alloc(usize, chain.logs.len);
@@ -542,6 +575,7 @@ pub const Prover = struct {
         if (!std.mem.eql(u32, &stored.vk_digest, &self.vk_digest)) return error.VkMismatch;
         const n = stored.headers();
         if (all.len < n) return error.NotEnoughHeaders;
+        if (stored.root_kind == .compact) return error.CompactCannotExtend;
         if (stored.peaks.len == 0) return error.NoPeaks;
         // The peaks' combined `T` must be the MMR root over `all`'s first `n` block hashes.
         var pubs = stored.peaks[stored.peaks.len - 1].pubs;
@@ -739,6 +773,39 @@ test "proof store: prove, save, reload, verify, extend; tampered files are rejec
         // A reloaded proof re-serializes to the same bytes.
         const again = try circuit_cpu.verifier_proof.VerifierProof.serialize(&c.peaks[0].proof.prepared, a);
         try std.testing.expectEqualSlices(u8, c.peaks[0].proof.bytes, again);
+    }
+
+    // The compact form: the root alone verifies to the same summary, is smaller, cannot be
+    // extended, and an edit of its root or plan is rejected.
+    {
+        var c = try Chain.decode(gpa, a, try readFile(a, p10));
+        defer c.deinit();
+        const full = try verifyChain(gpa, a, tables, &vk, &c);
+        const bytes = try (try c.compact()).encode(a);
+        try std.testing.expect(bytes.len < (try c.encode(a)).len);
+        var k = try Chain.decode(gpa, a, bytes);
+        defer k.deinit();
+        try std.testing.expectEqual(RootKind.compact, k.root_kind);
+        try std.testing.expectEqual(@as(usize, 0), k.peaks.len);
+        try std.testing.expectEqualDeep(full, try verifyChain(gpa, a, tables, &vk, &k));
+        try std.testing.expectError(error.CompactHasNoPeaks, checkPeaks(gpa, a, tables, &vk, &k));
+        var pr = try Prover.init(gpa, a, tables, &shape, &vk);
+        defer pr.deinit();
+        try std.testing.expectError(error.CompactCannotExtend, pr.continueFrom(&k, all));
+
+        const pubs = k.root.?.pubs;
+        k.root.?.pubs[38] = M31.fromCanonical(pubs[38].toU32() + 1);
+        try std.testing.expectError(error.WrongRootDigest, verifyChain(gpa, a, tables, &vk, &k));
+        k.root.?.pubs = pubs;
+        const logs = k.logs;
+        k.logs = &.{ 10, 9, 9, 9 }; // aligned, 10 headers, another root key
+        try std.testing.expectError(error.WrongRootDigest, verifyChain(gpa, a, tables, &vk, &k));
+        k.logs = logs;
+        _ = try verifyChain(gpa, a, tables, &vk, &k);
+        // A compact file carrying peaks is malformed.
+        k.peaks = c.peaks;
+        try std.testing.expectError(error.CompactWithPeaks, k.encode(a));
+        k.peaks = &.{}; // borrowed: `c` frees them
     }
 
     // Extend to 16 from the file (segments 2 at height 10, 4 at 12): one peak, which is the root.

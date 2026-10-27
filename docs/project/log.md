@@ -21,6 +21,29 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-10-26 (session 21) — Epoch VKs pinned; verify-only header file; coin-set pass steps 1–2
+Who: Claude (agent, Opus 5.5), with the owner (pin the circuits; shrink the header proof, option 1; the coin-set pass, D-048 "Ok on all 3"; pushes approved one by one)
+Roadmap: BLOCK-REC epoch VKs pinned (D-047); PROOF-STORE compact file (D-049); coin-set pass designed and accepted (D-048), native model and Lean spec done
+Done:
+- b9d6504 pushed (session 20's work), then ec354e7 and 287b9a3 pushed on the owner's approval.
+- ec354e7: tree, root and join VKs pinned in `vk/epoch/` and embedded in `chainproof`; the epoch verifiers accept only them (`--unpinned` for tests); `setup-vks` remakes them from public inputs (D-047).
+- 287b9a3: the coin-set pass proposal (docs/design/set-pass.md) and its native model (`src/block/set_pass.zig`, `chainproof set-pass-model`).
+- This commit: `.sbchain` root kind `compact` (the root proof without the peaks; `chainproof compact`; extension refuses it) (D-049); Lean `Spec/SetFile.lean` (the set file's parse, facts, the streamed pass, `pass_sound`, `pass_segments`, `encSet_inj`); D-048 recorded; the step-3 component survey in set-pass.md.
+Evidence:
+- `verify-chain` on the node with pinned VKs only: VERIFIED blocks 935,001–972,500, `hash_serialized 9f92d143…`. The stale tip root from 2026-10-23 (`tree972/epochroot-972500.bin`, made before 43bc5f9) is now rejected (`VkNotPinned`); the epoch stays proved by the chain proof, whose roots use the current circuit.
+- `setup-vks` on the real forests (Mac, 80 s, 14.8 GB): every remade tree and join VK equals the pinned one; the remade root VK equals `root-16-prev.vk` (written while pinning).
+- `chainproof compact` on `mainnet-to-972502.sbchain`: 13,768,372 → 986,168 bytes; `verify` 2.02 s → 0.13 s (Mac); the same tip, chainwork and `T` on the Mac and the node. `verify-chain` on the node with the compact file: VERIFIED, the same coin set; the header check 0.8 s.
+- `set-pass-model` on the node's set after block 972,500 (7,154 segments): Core's `hash_serialized` and the epoch root's digest `77a0de28…`, 15 min, 3.8 MB.
+- Lean: `lake build` passes; `#print axioms` on `pass_sound`, `pass_segments`, `encSet_inj`, `encSet_of_parseSet`, `parseSet_encSet`: standard only; `#guard`s against Python `hashlib` and `set-pass-model` on a two-coin file (a mutated guard fails the build).
+- `zig build test -Doptimize=ReleaseFast`: 129/130 passed, 1 skipped (2,047 s).
+Problems / lessons:
+- Correction to session 20: `verify-chain`'s time is the set files, not the heads. Its "chain of epochs verified (2,009 s)" span reads each 14 GB set twice before the join proof is checked (`ER.loadInit`, `SF.scan`), and the balance after it reads them again; the whole run took 53 min on the node, the proofs a few seconds. The set pass removes those reads.
+- The first pinned root VK was a stale file (pre-43bc5f9); `setup-vks` caught it. Remake a VK before pinning it.
+- A test that borrows one decoded chain's peaks into another must not free them twice (segfault in the first run).
+Next: coin-set pass step 3, the segment system (modified Blake2s and SHA-256 with carried state, the record parser, two-challenge fractions), small sets on the Mac.
+
+---
+
 ## 2026-10-22 (session 20) — Epoch 945,001–972,500 proved to the tip; one proof per epoch; the two mainnet epochs joined into one proof
 Who: Claude (agent, Opus 5.5), with the owner (scope: prove the tip epoch from the node overnight, build the epoch root and the epoch join, run the real join; no push)
 Roadmap: BLOCK-REC epoch root built (one proof per epoch); epoch join built (one proof per chain of epochs); 935,001–972,500 proved as ONE proof and verified on the node

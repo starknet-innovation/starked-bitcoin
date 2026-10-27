@@ -129,6 +129,7 @@ import StarkedAir.Spec.UtxoBalance
 import StarkedAir.Spec.UtxoMap
 import StarkedAir.Spec.CoinDecode
 import StarkedAir.Spec.CoinEpoch
+import StarkedAir.Spec.SetFile
 import StarkedAir.Block.ExtSum
 import StarkedAir.Block.FpWalk
 import StarkedAir.Block.URec

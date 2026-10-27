@@ -1,6 +1,6 @@
 # Proof store (PROOF-STORE): a saved, verifiable, extendable chain proof — design
 
-Status: current (implemented) · Updated: 2026-10-10 · Decision: D-036
+Status: current (implemented) · Updated: 2026-10-27 · Decisions: D-036, D-049
 
 ## Goal
 
@@ -58,6 +58,18 @@ The stored peaks are also checked: each is verified natively against the VK, and
 give the stored root's public inputs. So a file whose peaks do not match its root is rejected, and an
 extension never builds on unchecked data.
 
+### The compact form (verify-only, D-049)
+
+The root alone attests the chain: `node.verifyRoot` derives the root's circuit and key from the
+segment plan, so its public inputs (header count, tip, chainwork, `T`) are proven without the peaks.
+The peaks are needed only to extend the chain. `chainproof compact <vk> <in> <out>` verifies a file and
+writes it without the peak proofs (root kind `compact`, zero peaks); every verifier accepts it and
+reaches the same summary, skipping step 3 and the peaks half of step 4. `prove --from` refuses it
+(`CompactCannotExtend`): keep the full file to extend.
+
+Measured on `mainnet-to-972502.sbchain` (972,502 headers, 13 peaks): 13,768,372 → 986,168 bytes;
+`verify` 2.02 s → 0.13 s on the Mac; the same tip, chainwork and `T`.
+
 ## File format (`.sbchain`, version 1)
 
 Little-endian, length-prefixed, sections in this order:
@@ -68,8 +80,8 @@ Little-endian, length-prefixed, sections in this order:
 | params | FRI config (`log_blowup`, `n_queries`, `pow_bits`, `log_last_layer`, fold step), min/max segment log size |
 | vk digest | Blake2s of the VK it was proven under (the verifier compares it with the pinned VK) |
 | segments | count, then `(h0, log_size)` per segment |
-| peaks | count, then per peak: `Proved` (below) and its header count |
-| root | `Proved` |
+| peaks | count, then per peak: `Proved` (below) and its header count; zero exactly when compact |
+| root | kind `u8` (0 none: a checkpoint; 1 own; 2 the single peak; 3 compact), then `Proved` for own and compact |
 | genesis | the inclusion steps of leaf 0 in `T` |
 | provenance | text: repo commit (and dirty flag), stwo-zig commit, SHA-256 of the proven headers, timestamps |
 | trailer | SHA-256 of everything before (corruption check only; soundness comes from verification) |

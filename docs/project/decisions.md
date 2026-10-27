@@ -462,3 +462,27 @@ Why: the verifiers read these VKs from the prover's files, so a dishonest prover
 that outputs the expected digest and checks nothing. Recomputing them in every verifier was rejected:
 it needs the block proofs and minutes per verification.
 
+
+### D-048 — The coin-set pass: scope, balance, anchor
+Date: 2026-10-27 · By: owner ("Ok on all 3") · Status: accepted
+Decision (docs/design/set-pass.md):
+- **Scope:** prove all three boundary sets of the current chain (after blocks 935,000, 945,000 and
+  972,500). The 945,000 set closes one epoch and opens the next, so its pass computes its fractions
+  under both challenges.
+- **Balance:** first checked natively by `verify-chain` on the set-pass roots' public values (no set
+  files); folding it into the join, so one proof covers everything, comes later.
+- **Anchor:** the start set's `hash_serialized` is compared with Bitcoin Core's pinned assumeUTXO value
+  at height 935,000, built into the binary with the `chainparams.cpp` line cited, as
+  `nMinimumChainWork` is.
+Why: a verifier then needs no set file (today three 14.2 GB files and ~33 minutes); the pass computes
+exactly the digest and fraction the block proofs bind, so nothing proven is redone.
+
+### D-049 — A verify-only header chain file
+Date: 2026-10-27 · By: owner ("Do option 1 to shrink the header proof") · Status: accepted
+Decision: `.sbchain` gains a root kind `compact`: the root proof without the peak proofs.
+`chainproof compact` writes it from a verified full file; every verifier accepts it; extension refuses
+it. The full file stays the prover's, for extending at the tip.
+Why: the root's public inputs are attested by the root alone (its circuit and key follow from the
+plan), so the peaks only serve extension. 13.8 MB → 0.99 MB. No circuit, VK or proof changes.
+Rejected for now: folding the header root into the join (a new circuit; planned with the set pass's
+final step) and a compression proof (only worth it after that).

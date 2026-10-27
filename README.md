@@ -85,6 +85,7 @@ docs/              Documentation (see below)
 | Understand the header commitment tree (MMR over block hashes, HC-HASHTREE) | [docs/design/header-tree.md](docs/design/header-tree.md) |
 | Understand the M3a block-data proof: spec, tests, proposed AIR structure | [docs/design/block-data.md](docs/design/block-data.md) |
 | Understand the block-proof aggregator and tip following (BLOCK-REC, UTXO-TREE) | [docs/design/block-rec.md](docs/design/block-rec.md) |
+| Understand the coin-set pass (a set file's digest, `hash_serialized` and sums proved, D-048) | [docs/design/set-pass.md](docs/design/set-pass.md) |
 | Resume the parked plan to prove our circuits (plain verifier, node) in Lean | [docs/design/verifier-formalization.md](docs/design/verifier-formalization.md) |
 | Port the resident CUDA prover to the block system (GPU step 3) | [docs/design/gpu-cuda.md](docs/design/gpu-cuda.md) |
 | Know exactly what is proven and what is trusted | [docs/reference/verification.md](docs/reference/verification.md) |

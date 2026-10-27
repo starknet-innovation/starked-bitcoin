@@ -1,6 +1,8 @@
 # The coin-set pass: a set file's facts proved, so a verifier needs no set
 
-Status: proposal (2026-10-26). Figures marked *est.* are rough; the native model (step 1) measures them.
+Status: current · Updated: 2026-10-27 (accepted as D-048; steps 1–2 done)
+
+Figures marked *est.* are rough; the native model (step 1) measures them.
 
 ## Why
 
@@ -67,10 +69,24 @@ The pass is one long sequential computation, so it splits like the header chain:
 
 ## Components
 
-Reused from the block system (proven gadgets, Lean models exist): the byte stream, SHA-256
-compression, Blake2s message words and compression, the coin fraction (Horner over `ser`, the
-26-term fingerprint, the inverse). New: the set-record parser (the field layout above, the range
-checks), the 36-byte outpoint comparison, the carried-state boundary rows.
+Surveyed against the block system (2026-10-27). No block component can start from a carried state:
+`b2s` fixes the chaining value to `h0` on its first period and its counter below 2^25, `sha` loads
+the IV from preprocessed constants and outputs only SHA256d, and `coin`'s accumulator starts at 0 under
+one challenge. The compression gadgets and their row proofs (`period_compress`, `compress_sound_air`)
+hold for any init rows, so the changes are at the edges.
+
+- **As is:** the byte table (`block_bytes`, positions local to the segment), `fpwalk` (Horner over
+  `ser`), `tables`/`R8`, the ExtSum builders (`phi`, `fracC`, `accC`), the System/LogUp framework.
+- **Modified:** Blake2s (start `(h, t)` from public inputs, a two-limb counter up to ~2^34, no final
+  block except in the last segment, the outgoing state public; the message side takes the counter
+  offset and the pending bytes); SHA-256 (chaining value from public inputs, no `DBL`/length check
+  inside a segment, the outgoing state public; padding and the second hash in the last segment).
+- **New:** the record parser (49-byte head, `cb ≤ 1`, `h < 2^31`, `8 ≤ len < 2^31 − 1`); the
+  `TxOutSer` message stream (file bytes plus the code bytes); a coin-fraction component with two
+  accumulators (two `(z, α)`), seeded from the incoming sums; amount, count and maximum height; the
+  36-byte outpoint comparison against the incoming `last`; the first segment's count bytes.
+- **Tree:** the header chain's `linkChecks`/`combine` (right's input = left's output) for the hash
+  states, `last`, `i`, `n`, `ok`; the block node's challenge equality and range checks for the sums.
 
 ## Cost
 
@@ -95,8 +111,18 @@ sets of the current chain: ~$50–60. For scale, the chain's 37,500 block proofs
    (two challenges); over the real set after block 972,500 in 7,154 segments of 23,000 records it
    gives the epoch root's digest `77a0de28…` and Core's `hash_serialized` `9f92d143…` (15 min on the
    node, 3.8 MB).
-2. **Lean spec and statement:** the set file's parse, `digest`, `hash`, `sum` as Lean functions
-   over bytes; the segment relation; composition by induction over segments.
+2. **Lean spec and statement.** **Done (2026-10-27):** `lean/StarkedAir/Spec/SetFile.lean`.
+   - `parseSet` is the reader; it accepts exactly the encodings of well-formed record lists
+     (`parseSet_encSet`, `encSet_of_parseSet`), so the bytes fix the records (`encSet_inj`).
+   - `facts`: count, amount, highest height, Blake2s digest, `hash_serialized`, one sum per challenge.
+   - The pass is a per-record `step` on a carried state; Blake2s and SHA-256 are streamed (chaining
+     value plus pending bytes: `b2Feed_rep`, `shaFeed_rep`), so a segment may end anywhere.
+   - `pass_sound`: `finish` accepts the fold exactly when the records are well formed, strictly sorted
+     and as many as declared, and then returns `facts`. `pass_segments`: any segmentation folds to
+     the same state. Standard axioms only.
+   - `#guard`s check a two-coin file against Python's `hashlib` and `chainproof set-pass-model`.
+   Step 3's obligation: a segment proof with public states `(s, s')` implies `s' = seg.foldl step s`
+   for some records `seg` (as field encodings of `St`).
 3. **The segment system** (Zig witness, Lean export, soundness), small sets on the Mac.
 4. **The set tree** (node circuit over segments, root VK pinned in `vk/`).
 5. **`verify-chain` without set files:** the set-pass roots in the chain file; the balance and
@@ -104,10 +130,12 @@ sets of the current chain: ~$50–60. For scale, the chain's 37,500 block proofs
 6. **The real sets** on GPU pods (three sets, ~12 H100-hours *est.*).
 7. Later: the balance folded into the join, so one proof covers everything.
 
-## Questions for the owner
+## Decisions (D-048, owner, 2026-10-27)
 
-1. **Scope:** prove all three boundary sets now (the 945,000 one under two challenges), as above?
-2. **Balance:** first natively on the set-pass roots' public values (step 5), the join folding it in
-   later (step 7)?
-3. **Anchor:** the start set's `hash_serialized` checked against Core's pinned 935,000 value built
-   into the binary (as `nMinimumChainWork` is), with the source line cited?
+1. **Scope:** all three boundary sets now, the 945,000 one under two challenges.
+2. **Balance:** natively on the set-pass roots' public values first (step 5); folded into the join
+   later (step 7).
+3. **Anchor:** the start set's `hash_serialized` checked against Core's pinned 935,000 assumeUTXO value,
+   built into the binary with the source line cited: `e4b90ef9eae834f56c4b64d2d50143cee10ad87994c614d7d04125e2a6025050`
+   for block `0000000000000000000147034958af1652b2b91bba607beacc5e72a56f0fb5ee`
+   (`src/kernel/chainparams.cpp:211` at Core commit `c067aa71`, the copy in `data/core-src`).
