@@ -200,6 +200,10 @@ sets of the current chain: ~$50–60. For scale, the chain's 37,500 block proofs
    and 1000 satisfies and balances, the first proves and verifies, and the chained public states give
    the native model's digest, `hash_serialized`, count, amount, height and sum; 21 tampered public
    values are each rejected. **Open:** the Lean soundness theorem (`set_seg_sound`, § Soundness).
+   In progress: the system link (`SetPass/Link.lean`, `LinkUse.lean`: uses and yields, `link`, byte,
+   range and pending reads), the cross-component facts (`Facts.lean`: fingerprints, the `TxOutSer`
+   stream's reads, compression words, end tokens), the hash sides (`B2wSound`/`B2cSound`/`B2Spec`,
+   `TMsgSound`/`ShaCSound`/`ShaSpec`).
 4. **The set tree** (node circuit over segments, root VK pinned in `vk/`).
 5. **`verify-chain` without set files:** the set-pass roots in the chain file; the balance and
    anchors compared on public values.
