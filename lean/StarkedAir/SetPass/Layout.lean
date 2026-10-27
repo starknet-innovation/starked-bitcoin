@@ -50,8 +50,11 @@ def REL_PB2O : ℕ := 27
 def REL_PSHI : ℕ := 28
 def REL_PSHO : ℕ := 29
 def REL_SB2W : ℕ := 30
+/-- The hashes' end tokens: the compression component yields one at its last block, the walker consumes it. -/
+def REL_B2END : ℕ := 31
 def REL_REC : ℕ := 32
 def REL_CODE : ℕ := 33
 def REL_SW : ℕ := 34
+def REL_SHEND : ℕ := 35
 
 end StarkedAir.SetPass

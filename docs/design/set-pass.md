@@ -111,7 +111,10 @@ file bytes, `pub 0` = length), `block_fpwalk` (Horner over each `ser`), `block_t
 The lookups bind them: every record's head and amount bytes, outpoint and `ser` are read from the
 byte table by position; `rec` and `code` are yielded once per record and consumed once each by
 `set_tmsg`, so its records are `set_rec`'s; words and block tuples are yielded once and consumed once,
-so each compression component compresses exactly the walker's blocks.
+so each compression component compresses exactly the walker's blocks. Membership alone would let a
+compression component stop early and leave the outgoing chaining value free, so each yields an end
+token at its last block (`m − 1`) that its walker consumes once; and `set_tmsg`'s last record is
+`i_out − i_in − 1`, so it walks every record.
 
 ### Public inputs
 

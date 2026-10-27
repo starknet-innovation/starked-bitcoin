@@ -7,7 +7,8 @@ period: block index `BLKI`, `NIL` (unused) and `LASTS` (the segment's last block
 * used periods are a prefix from period 0; period 0 is block 0 and starts from the public `H_in`; every
   other used period is the next block, chained from the previous period's output;
 * message words are the stream's `w(64·BLKI + 4t, lo, hi)`;
-* `LASTS` marks block `m − 1`; its output (rows 68–71) is the public `H_out`.
+* `LASTS` marks block `m − 1`; its output (rows 68–71) is the public `H_out`, and its row 0 yields
+  the end token `(m − 1)` that the stream consumes once, so the last block is reached.
 
 `block_sha` differs at the edges: the IV on a message's first block, the second hash, Merkle nodes.
 -/
@@ -96,7 +97,8 @@ def constraints : List Expr := Sha256.constraints ++ flagC ++ chainC ++ initC ++
 
 def lookups : List Lookup :=
   [ ⟨REL_SW, .neg (.mul (pre MSGROW) (k USEW)),
-      [.add (.mul (cst 64) (k BLKI)) (.sub (.mul (cst 4) (pre ROWIDX)) (cst 16)), limb Sha256.W 0, limb Sha256.W 1]⟩ ]
+      [.add (.mul (cst 64) (k BLKI)) (.sub (.mul (cst 4) (pre ROWIDX)) (cst 16)), limb Sha256.W 0, limb Sha256.W 1]⟩,
+    ⟨REL_SHEND, .mul (k LASTS) (pre ROW0), [k BLKI]⟩ ]
 
 def shac : Comp where
   air := { name := "set_shac", nMain := N_MAIN, pre := preCols, constraints := constraints }

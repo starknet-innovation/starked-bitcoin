@@ -8,7 +8,8 @@ period: block index `BLKI`, `NIL` (unused) and `LASTU` (the segment's last block
   other used period is the next block, chained from the previous period's output;
 * the counter is `64 · (nb_in + BLKI + 1)` (`t_lo`, `t_hi` bits; below `2^36`), the final flag 0;
 * message words are the walker's `w(BLKI, k, lo, hi)`;
-* `LASTU` marks block `m − 1`; its output is the public `h_out`.
+* `LASTU` marks block `m − 1`; its output is the public `h_out`, and its row 0 yields the end token
+  `(m − 1)` that the walker consumes once, so the last block is reached.
 
 `block_b2s` differs at the edges only: `h0` and a counter below `2^25` on a stream's first block, a
 final flag, the digest by lookup.
@@ -117,7 +118,8 @@ def outC : List Expr :=
 def constraints : List Expr := Blake2s.constraints ++ flagC ++ chainC ++ initC ++ tfC ++ wordC ++ outC
 
 def lookups : List Lookup :=
-  [ ⟨REL_SB2W, .neg (k MU), [k BLKI, p P_KR, k WLO, k WHI]⟩ ]
+  [ ⟨REL_SB2W, .neg (k MU), [k BLKI, p P_KR, k WLO, k WHI]⟩,
+    ⟨REL_B2END, .mul (k LASTU) (p P_R0), [k BLKI]⟩ ]
 
 def b2c : Comp where
   air := { name := "set_b2c", nMain := N_MAIN, pre := preCols, constraints := constraints }

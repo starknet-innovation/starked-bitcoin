@@ -8,7 +8,8 @@ the segment's bytes (the byte table), as little-endian words, one row per word, 
   and there are `plen_out ≥ 1` of them;
 * byte `x` of the stream is active iff `x < plen_in + len` (`64·m + plen_out = plen_in + len`): it is
   pending byte `x` when `x < plen_in` (block 0 only, `plen_in` of them), else segment byte
-  `x − plen_in`; inactive bytes are zero.
+  `x − plen_in`; inactive bytes are zero;
+* row 0 consumes the end token `(m − 1)`: the compressions reach block `m − 1`.
 -/
 import StarkedAir.SetPass.Layout
 
@@ -113,7 +114,8 @@ def lookups : List Lookup :=
   (List.range 4).map (fun j => ⟨REL_PB2I, .neg (k (N j)), [.add (k POS) (cst j), k (B j)]⟩) ++
   (List.range 4).map (fun j => ⟨Block.REL_BYTE, .neg (.sub (k (A j)) (k (N j))), [.sub (.add (k POS) (cst j)) plenIn, k (B j)]⟩) ++
   (List.range 4).map (fun j => ⟨REL_PB2O, .neg (.mul (k HELD) (k (A j))), [.add (.mul (cst 4) (p P_K)) (cst j), k (B j)]⟩) ++
-  [ ⟨REL_SB2W, k UW, [k BLK, p P_K, lo, hi]⟩ ]
+  [ ⟨REL_SB2W, k UW, [k BLK, p P_K, lo, hi]⟩,
+    ⟨REL_B2END, .neg first, [.sub m one]⟩ ]
 
 def b2w : Comp where
   air := { name := "set_b2w", nMain := N_MAIN, pre := preCols, constraints := constraints }

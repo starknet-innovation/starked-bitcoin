@@ -8,7 +8,8 @@ are its parts in order (`P0`: 36 rows, `PC`: 4, `PS`: `len`), counted by `O`, an
 
 The whole blocks (`m = nb_out − nb_in ≥ 1` of them) yield big-endian words `w(y − 3, lo, hi)` at rows
 `y ≡ 3 (mod 4)`; the rest (`TAIL`, fewer than 64 rows from a multiple of 64) are the outgoing pending
-bytes (the `psho` table).
+bytes (the `psho` table). The last record walked is the segment's last (`i_out − i_in − 1`), and row 0
+consumes `set_shac`'s end token.
 -/
 import StarkedAir.SetPass.Layout
 
@@ -106,7 +107,9 @@ def constraints : List Expr :=
     .mul first (k SB), .mul notFirst (.sub (.sub (k SB) (kp SB)) (p P_B0)),
     -- the outgoing state: pending length and block count
     .mul (k ENDS) (.sub (.pub (H_PLEN SHA_OUT)) (.mul (k TAIL) (.add (p P_K64) one))),
-    .mul (k ENDS) (.sub (.sub (.pub (H_NB SHA_OUT)) (.pub (H_NB SHA_IN))) (.sub (.add (k SB) one) (k TAIL))) ]
+    .mul (k ENDS) (.sub (.sub (.pub (H_NB SHA_OUT)) (.pub (H_NB SHA_IN))) (.sub (.add (k SB) one) (k TAIL))),
+    -- every record: the last one walked is the segment's last
+    .mul (k ENDS) (.sub (.add (k R) one) (.sub (.pub PUB_I_OUT) (.pub PUB_I_IN))) ]
 
 /-- The big-endian word ending at the row: bytes at offsets `−3 … 0`. -/
 def hiW : Expr := .add (.mul (cst 256) (col B (-3))) (col B (-2))
@@ -119,7 +122,8 @@ def lookups : List Lookup :=
     ⟨Block.REL_BYTE, .neg (k PS), [.add (.add (k RST) (k O)) (cst 9), k B]⟩,
     ⟨REL_REC, .neg (k NEW), [k R, k RST, k RLEN]⟩,
     ⟨REL_PSHO, .neg (k TAIL), [p P_K64, k B]⟩,
-    ⟨REL_SW, .mul (k NT) (p P_IS3), [.sub (k Y) (cst 3), loW, hiW]⟩ ]
+    ⟨REL_SW, .mul (k NT) (p P_IS3), [.sub (k Y) (cst 3), loW, hiW]⟩,
+    ⟨REL_SHEND, .neg first, [.sub (.sub (.pub (H_NB SHA_OUT)) (.pub (H_NB SHA_IN))) one]⟩ ]
 
 def tmsg : Comp where
   air := { name := "set_tmsg", nMain := N_MAIN, pre := preCols, constraints := constraints }
