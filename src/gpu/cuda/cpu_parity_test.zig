@@ -31,6 +31,18 @@ const Proved = struct {
     cfg: rec.Config,
     proof: system.Proof,
     capture: core.verifier.ProofCapture(rec.Hasher),
+
+    fn view(self: *const Proved) View {
+        return .{ .parts = &self.parts, .cfg = self.cfg, .proof = &self.proof, .capture = &self.capture };
+    }
+};
+
+/// A CPU proof of any system and the verifier's capture of it (`set_test.zig` checks the set system).
+pub const View = struct {
+    parts: []const system.Part,
+    cfg: rec.Config,
+    proof: *const system.Proof,
+    capture: *const core.verifier.ProofCapture(rec.Hasher),
 };
 
 fn proveSample(a: std.mem.Allocator, airs: *const [bs.N_COMP]sb.air.ir.Air, c: Case) !Proved {
@@ -67,8 +79,8 @@ fn perComponentSums(a: std.mem.Allocator, parts: []const system.Part, sums: []co
     return out;
 }
 
-fn checkPlans(a: std.mem.Allocator, cat: *const catalog_mod.Catalog, p: *const Proved) !void {
-    var plans = try plan_mod.Plans.init(a, &p.parts, cat, p.cfg);
+pub fn checkPlans(a: std.mem.Allocator, cat: *const catalog_mod.Catalog, p: View) !void {
+    var plans = try plan_mod.Plans.init(a, p.parts, cat, p.cfg);
     defer plans.deinit();
     const geo = &plans.geometry;
     const blowup = p.cfg.fri_config.log_blowup_factor;
@@ -98,7 +110,7 @@ fn checkPlans(a: std.mem.Allocator, cat: *const catalog_mod.Catalog, p: *const P
     var constraints: u64 = 0;
     for (plans.bundle.components) |c| constraints += c.n_constraints;
     try std.testing.expectEqual(constraints, plans.composition.topology.summary.constraint_count);
-    try std.testing.expectEqual(@as(usize, bs.N_COMP), plans.composition.placements.len);
+    try std.testing.expectEqual(p.parts.len, plans.composition.placements.len);
     std.debug.print("  resident plans match the CPU proof: trees {d}/{d}/{d}/{d} columns (lifted to {d}/{d}/{d}/{d}), {d} OODS samples, {d} FRI layers, {d} constraints, {d} composition constants\n", .{
         geo.trees[0].column_logs.len, geo.trees[1].column_logs.len, geo.trees[2].column_logs.len, geo.trees[3].column_logs.len,
         geo.trees[0].lifted_log,      geo.trees[1].lifted_log,      geo.trees[2].lifted_log,      geo.trees[3].lifted_log,
@@ -106,10 +118,10 @@ fn checkPlans(a: std.mem.Allocator, cat: *const catalog_mod.Catalog, p: *const P
     });
 }
 
-fn checkHostTranscript(a: std.mem.Allocator, p: *const Proved) !void {
+pub fn checkHostTranscript(a: std.mem.Allocator, p: View) !void {
     const stark = &p.proof.stark.commitment_scheme_proof;
     const roots = stark.commitments.items;
-    var statement = try transcript.Statement.init(a, &p.parts);
+    var statement = try transcript.Statement.init(a, p.parts);
     defer statement.deinit(a);
     var sink = transcript.HostSink{};
     var prefix = transcript.Prefix(transcript.HostSink){ .sink = &sink };
@@ -144,7 +156,7 @@ fn checkHostTranscript(a: std.mem.Allocator, p: *const Proved) !void {
 /// The device sink's whole call sequence on the host model, fed the proof's roots and values as
 /// device words: every challenge it writes is the verifier's, the grind finds the proof's nonce
 /// and the drawn queries are the proof's.
-fn checkDeviceSinkModel(a: std.mem.Allocator, p: *const Proved) !void {
+pub fn checkDeviceSinkModel(a: std.mem.Allocator, p: View) !void {
     const stark = &p.proof.stark.commitment_scheme_proof;
     const roots = stark.commitments.items;
     var model = transcript.HostModel{ .allocator = a };
@@ -163,7 +175,7 @@ fn checkDeviceSinkModel(a: std.mem.Allocator, p: *const Proved) !void {
     var sink = try transcript.ModelSink.init(&session, bindings, [_]u8{1} ** 32);
     // Ingress: everything the host knows before proving.
     try sink.prime(p.cfg);
-    var statement = try transcript.Statement.init(a, &p.parts);
+    var statement = try transcript.Statement.init(a, p.parts);
     defer statement.deinit(a);
     const statement_view = try model.alloc(u32, statement.words.len);
     try session.context.uploadSlice(u32, statement_view, statement.words);
@@ -235,9 +247,9 @@ test "cuda resident: plans and transcript reproduce CPU block proofs (uniform an
     defer cat.deinit();
     for ([_]Case{ .{ .profile = .uniform, .min_log = 0 }, .{ .profile = .tiered, .min_log = bs.TIERED_MIN_L } }) |c| {
         const p = try proveSample(a, airs, c);
-        try checkPlans(a, &cat, &p);
-        try checkHostTranscript(a, &p);
-        try checkDeviceSinkModel(a, &p);
+        try checkPlans(a, &cat, p.view());
+        try checkHostTranscript(a, p.view());
+        try checkDeviceSinkModel(a, p.view());
         _ = try perComponentSums(a, &p.parts, p.proof.claimed_sums);
     }
 }

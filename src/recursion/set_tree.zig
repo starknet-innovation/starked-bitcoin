@@ -704,6 +704,179 @@ pub fn provePass(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const le
 }
 
 // ---------------------------------------------------------------------------------------------
+// Split runs (GPU drivers, docs/design/gpu-cuda.md § Set pass): the segments proved by `cuda-set`,
+// the tree by `cuda-set-tree`, from files only. Both write what `provePass` writes, byte for byte.
+
+/// `<dir>/seg/<i>.sbseg`, as `provePass` names it.
+pub fn segPath(a: std.mem.Allocator, dir: []const u8, i: usize) ![]u8 {
+    return std.fmt.allocPrint(a, "{s}/seg/{d}.sbseg", .{ dir, i });
+}
+
+fn hashOf(pubs: *const [N_PUB]M31, base: usize) !SS.HashSt {
+    var h: SS.HashSt = .{ .h = undefined };
+    for (&h.h, 0..) |*w, k| {
+        const lo = pubs[base + 2 * k].toU32();
+        const hi = pubs[base + 2 * k + 1].toU32();
+        if (lo > 0xffff or hi > 0xffff) return error.BadState;
+        w.* = lo | (hi << 16);
+    }
+    h.nb = pubs[base + 16].toU32();
+    const plen = pubs[base + 17].toU32();
+    if (plen > 64) return error.BadState;
+    h.plen = @intCast(plen);
+    for (&h.pend, 0..) |*x, j| x.* = try byteOf(pubs[base + 18 + j]);
+    return h;
+}
+
+fn byteOf(x: M31) !u8 {
+    const v = x.toU32();
+    if (v > 0xff) return error.BadState;
+    return @intCast(v);
+}
+
+fn stateOf(pubs: *const [N_PUB]M31, comptime out: bool) !SS.State {
+    var st: SS.State = .{ .b2 = undefined, .sha = undefined };
+    st.i = pubs[if (out) SS.PUB_I_OUT else SS.PUB_I_IN].toU32();
+    const has = if (out) 1 else pubs[SS.PUB_HASLAST].toU32();
+    if (has > 1) return error.BadState;
+    if (has == 1) {
+        var k: [36]u8 = undefined;
+        for (&k, 0..) |*x, j| x.* = try byteOf(pubs[(if (out) SS.PUB_LAST_OUT else SS.PUB_LAST_IN) + j]);
+        st.last = k;
+    }
+    st.max_h = pubs[if (out) SS.PUB_MAXH_OUT else SS.PUB_MAXH_IN].toU32();
+    const sum_at = if (out) SS.PUB_SUM_OUT else SS.PUB_SUM_IN;
+    st.sum = QM31.fromM31Array(pubs[sum_at..][0..4].*);
+    const amt_at = if (out) SS.PUB_AMT_OUT else SS.PUB_AMT_IN;
+    st.amount = 0;
+    for (0..12) |j| st.amount |= @as(u128, try byteOf(pubs[amt_at + j])) << @intCast(8 * j);
+    st.b2 = try hashOf(pubs, if (out) SS.B2_OUT else SS.B2_IN);
+    st.sha = try hashOf(pubs, if (out) SS.SHA_OUT else SS.SHA_IN);
+    return st;
+}
+
+/// The carried state a segment's public inputs end at (the inverse of its outgoing encoding): the next
+/// segment's incoming state, and the pass's final state for the last one.
+pub fn outState(pubs: *const [N_PUB]M31) !SS.State {
+    return stateOf(pubs, true);
+}
+
+/// The carried state a segment's public inputs start from.
+pub fn inState(pubs: *const [N_PUB]M31) !SS.State {
+    return stateOf(pubs, false);
+}
+
+pub const CHALLENGE_MAGIC = "SBSETCHL";
+
+/// A challenge as a file (`chainproof set-challenge`): what `cuda-set` proves the segments under.
+pub fn encodeChallenge(a: std.mem.Allocator, ch: coin.Challenge) ![]u8 {
+    var e: store.Enc = .{ .a = a };
+    try e.buf.appendSlice(a, CHALLENGE_MAGIC);
+    try e.int(u32, store.VERSION);
+    for (ch.gamma.toM31Array()) |x| try e.int(u32, x.toU32());
+    for (ch.z.toM31Array()) |x| try e.int(u32, x.toU32());
+    for (ch.alpha) |al| for (al.toM31Array()) |x| try e.int(u32, x.toU32());
+    return store.seal(&e);
+}
+
+pub fn decodeChallenge(bytes: []const u8) !coin.Challenge {
+    var d: store.Dec = .{ .bytes = try store.unseal(bytes) };
+    try d.magic(CHALLENGE_MAGIC);
+    const q = struct {
+        fn f(dd: *store.Dec) !QM31 {
+            var v: [4]M31 = undefined;
+            for (&v) |*x| x.* = try m31(try dd.int(u32));
+            return QM31.fromM31Array(v);
+        }
+    }.f;
+    var ch: coin.Challenge = .{ .gamma = try q(&d), .z = try q(&d), .alpha = undefined };
+    for (&ch.alpha) |*al| al.* = try q(&d);
+    if (d.pos != d.bytes.len) return error.TrailingBytes;
+    return ch;
+}
+
+/// One proof of the tree over `k` segments: the range `[lo, lo + n)`, at height `h` (0: a leaf).
+pub const Task = struct { lo: u32, n: u32, h: u32 };
+
+fn collect(a: std.mem.Allocator, out: *std.ArrayList(Task), lo: u32, n: u32) !u32 {
+    if (n == 1) {
+        try out.append(a, .{ .lo = lo, .n = 1, .h = 0 });
+        return 0;
+    }
+    const s: u32 = @intCast(split(n));
+    const hl = try collect(a, out, lo, s);
+    const hr = try collect(a, out, lo + s, n - s);
+    const h = @max(hl, hr) + 1;
+    try out.append(a, .{ .lo = lo, .n = n, .h = h });
+    return h;
+}
+
+/// Every proof of `proveTree`'s tree over `k` segments, by height then position: each proof's children
+/// come before it, so a level can be proved in parallel once the levels below are done.
+pub fn tasks(a: std.mem.Allocator, k: u32) ![]Task {
+    if (k == 0) return error.NoSegments;
+    var out: std.ArrayList(Task) = .empty;
+    _ = try collect(a, &out, 0, k);
+    std.mem.sort(Task, out.items, {}, struct {
+        fn lt(_: void, l: Task, r: Task) bool {
+            return if (l.h != r.h) l.h < r.h else l.lo < r.lo;
+        }
+    }.lt);
+    return out.toOwnedSlice(a);
+}
+
+/// The two children of a node task.
+pub fn childTasks(t: Task) [2]Task {
+    const s: u32 = @intCast(split(t.n));
+    return .{ .{ .lo = t.lo, .n = s, .h = 0 }, .{ .lo = t.lo + s, .n = t.n - s, .h = 0 } };
+}
+
+/// `<dir>/stree/<lo>-<n>.sbproof`: one proof of the tree (`cuda-set-tree`).
+pub fn proofPath(a: std.mem.Allocator, dir: []const u8, lo: u32, n: u32) ![]u8 {
+    return std.fmt.allocPrint(a, "{s}/stree/{d}-{d}.sbproof", .{ dir, lo, n });
+}
+
+pub const PROVED_MAGIC = "SBSETPRF";
+
+pub fn encodeProved(a: std.mem.Allocator, p: *const Proved) ![]u8 {
+    var e: store.Enc = .{ .a = a };
+    try e.buf.appendSlice(a, PROVED_MAGIC);
+    try e.int(u32, store.VERSION);
+    try store.encodeCircuit(&e, &p.proof, p.key, &p.sum);
+    return store.seal(&e);
+}
+
+pub fn decodeProved(gpa: std.mem.Allocator, a: std.mem.Allocator, bytes: []const u8) !Proved {
+    var d: store.Dec = .{ .bytes = try store.unseal(bytes) };
+    try d.magic(PROVED_MAGIC);
+    var sum: Summary = undefined;
+    const c = try store.decodeCircuit(gpa, a, &d, &sum);
+    if (d.pos != d.bytes.len) return error.TrailingBytes;
+    return .{ .proof = c.proof, .key = c.key, .sum = sum };
+}
+
+/// What a tree proof must be: its circuit (the VK's leaf or node identity), key and summary. `kids`:
+/// a node's children (proved), null for a leaf over segment `seg`.
+pub fn expectedProof(vk: *const Vk, t: Task, seg: ?*const SegFile, kids: ?[2]*const Proved) !struct { id: BF.Id, key: Key, sum: Summary } {
+    if (t.n == 1) return .{ .id = vk.leaf, .key = leaf.zero_key, .sum = leafSummary(&seg.?.pubs) };
+    const k = kids.?;
+    return .{
+        .id = vk.node,
+        .key = node_mod.nodeKey(k[0].proof.circuit_hash, k[0].key, k[1].proof.circuit_hash, k[1].key),
+        .sum = try joinSummary(k[0].sum, k[1].sum),
+    };
+}
+
+/// The pass of `k` segments whose last segment's public inputs are `last` and whose tree root is
+/// `root`: the final state is the last segment's outgoing state, the count bytes its record count.
+pub fn passOf(k: u32, last: *const [N_PUB]M31, root: Proved) !Pass {
+    const fin = try outState(last);
+    var count: [4]u8 = undefined;
+    std.mem.writeInt(u32, &count, fin.i, .little);
+    return .{ .k = k, .count = count, .final = fin, .root = root };
+}
+
+// ---------------------------------------------------------------------------------------------
 
 test "set tree: state vectors match the segment's public inputs; summaries link" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -736,6 +909,39 @@ test "set tree: state vectors match the segment's public inputs; summaries link"
     const want = summaryOf(vecDigest(&stateVec(ch, SS.begin(file[0..4].*))), vecDigest(&outStateVec(ch, st)), rootOf(&prev.?));
     try std.testing.expectEqualSlices(M31, &want, &prev.?);
     std.debug.print("set-170: {d} segments, summaries chain to begin/final\n", .{k});
+}
+
+test "set tree: carried states decode from public inputs; challenge files round-trip; tasks follow proveTree" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const EP = @import("../block/epoch.zig");
+    const ch = EP.challenge(@splat(7));
+    try std.testing.expectEqualDeep(ch, try decodeChallenge(try encodeChallenge(a, ch)));
+    // Tasks: every range once, children first, the root last; the shape is `split`'s.
+    for ([_]u32{ 1, 2, 3, 5, 8, 13, 2326 }) |k| {
+        const ts = try tasks(a, k);
+        try std.testing.expectEqual(@as(usize, 2 * k - 1), ts.len);
+        const root = ts[ts.len - 1];
+        try std.testing.expect(root.lo == 0 and root.n == k);
+        for (ts, 0..) |t, i| if (t.n > 1) for (childTasks(t)) |c| {
+            var found = false;
+            for (ts[0..i]) |u| found = found or (u.lo == c.lo and u.n == c.n and u.h < t.h);
+            try std.testing.expect(found);
+        };
+    }
+    const file = std.fs.cwd().readFileAlloc(a, "data/epoch/set-170.bin", 1 << 30) catch return error.SkipZigTest;
+    const logs: Logs = .{ 10, 8, 6, 6, 10, 8, 11, 10, 11, 10, 12, 13 };
+    const ends = try SS.cut(a, file, logs);
+    var st = SS.begin(file[0..4].*);
+    var at: usize = 4;
+    for (ends) |end| {
+        const b = try SS.buildAt(a, ch, st, file[at..end], logs);
+        try std.testing.expect(std.meta.eql(st, try inState(&b.pubs)));
+        try std.testing.expect(std.meta.eql(b.out, try outState(&b.pubs)));
+        st = b.out;
+        at = end;
+    }
 }
 
 test "set tree: three segments of set-170 proved, folded and verified; unlinked children and a wrong final state are rejected" {

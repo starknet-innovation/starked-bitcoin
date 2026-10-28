@@ -265,6 +265,11 @@ sets of the current chain: ~$50–60. For scale, the chain's 37,500 block proofs
    so the set system proves with host witnesses, `prover.Input.witness = null`), a `cuda-set` driver
    (segments) and a set-tree driver (leaves, nodes; as `cuda-epoch-tree`). *Est.* ~3–5 s per segment and
    ~2 s per leaf+node on an H100: ~15 H100-hours for the four passes, plus GPU development and testing.
+   **Built, host-checked (2026-10-28, branch `gpu-set`):** the kernels, `cuda-set`, `cuda-set-tree`,
+   `chainproof set-challenge` and the pod runbook ([gpu-cuda.md § Set pass](gpu-cuda.md#set-pass-cuda-set-cuda-set-tree-2026-10-28-branch-gpu-set-not-yet-run-on-a-gpu)).
+   Two findings: the production logs' arena is 151.8 GiB (no H100/H200), so the runs use halved logs
+   (75.9 GiB, ~4,650 segments per set) or quartered (37.9 GiB); and the single-threaded host witness, not
+   the device, bounds the time until the set's Blake2s/SHA-256 columns get device generators.
 7. Later: the balance folded into the join, so one proof covers everything.
 
 ## Decisions (D-048, owner, 2026-10-27)

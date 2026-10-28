@@ -106,6 +106,69 @@
   },
   {
     "kind": "constraint",
+    "label": "starked_eval_47b5335e1365a69d",
+    "abi_schema": "cairo_eval_part_v1",
+    "kernel_name": "stwo_cairo_cuda_eval_v6_47b5335e1365a69d",
+    "cache_key": "417be526fa84964a",
+    "semantic_hash": "47b5335e1365a69d",
+    "program_identity": "79011e887e9483424977f9c8ae0bf2332aa11d49d9fea0b40a97ba9ecace8601",
+    "file": "constraint_starked_eval_47b5335e1365a69d_417be526fa84964a.cu",
+    "module_globals": "none",
+    "catalog_identity": "550200479d03f3cc5df12d3795cfe4645824bd96368f3cd6e70c0df8669c62ec",
+    "codegen_version": 6,
+    "identity_scheme": "sha256-cairo-eval-parametric-source-v6",
+    "occurrences": [
+      {
+        "component_index": 23,
+        "part_index": 0
+      }
+    ],
+    "source_sha256": "459e5288fc8c5e16a6aca4fc93e25f41ae4ddb564027c69fd8bdfeb7a8dfa6af"
+  },
+  {
+    "kind": "constraint",
+    "label": "starked_eval_53f476653d7165fd",
+    "abi_schema": "cairo_eval_part_v1",
+    "kernel_name": "stwo_cairo_cuda_eval_v6_53f476653d7165fd",
+    "cache_key": "9ff8d63a4150910a",
+    "semantic_hash": "53f476653d7165fd",
+    "program_identity": "8f0c452245351cce5d3293a4d7b9b6008a773da25c955cf27e8a7c880c4e87ea",
+    "file": "constraint_starked_eval_53f476653d7165fd_9ff8d63a4150910a.cu",
+    "module_globals": "none",
+    "catalog_identity": "550200479d03f3cc5df12d3795cfe4645824bd96368f3cd6e70c0df8669c62ec",
+    "codegen_version": 6,
+    "identity_scheme": "sha256-cairo-eval-parametric-source-v6",
+    "occurrences": [
+      {
+        "component_index": 24,
+        "part_index": 0
+      }
+    ],
+    "source_sha256": "fb30f526496c99f4130c2d520d3709518bbdd03b141cb7cf41fc981f501bc130"
+  },
+  {
+    "kind": "constraint",
+    "label": "starked_eval_57224b0970d78d9c",
+    "abi_schema": "cairo_eval_part_v1",
+    "kernel_name": "stwo_cairo_cuda_eval_v6_57224b0970d78d9c",
+    "cache_key": "6188909841b30698",
+    "semantic_hash": "57224b0970d78d9c",
+    "program_identity": "8485e31f7867062f5ed83132f5fb4a4bca07a575ec2087489b1a5ae62b3ac7bd",
+    "file": "constraint_starked_eval_57224b0970d78d9c_6188909841b30698.cu",
+    "module_globals": "none",
+    "catalog_identity": "550200479d03f3cc5df12d3795cfe4645824bd96368f3cd6e70c0df8669c62ec",
+    "codegen_version": 6,
+    "identity_scheme": "sha256-cairo-eval-parametric-source-v6",
+    "occurrences": [
+      {
+        "component_index": 26,
+        "part_index": 0
+      }
+    ],
+    "source_sha256": "2244e4a3b577f640873d620fc65c2d80029a0e0ec20a954bf2cafba65244870b"
+  },
+  {
+    "kind": "constraint",
     "label": "starked_eval_66f7ad92d02d7570",
     "abi_schema": "cairo_eval_part_v1",
     "kernel_name": "stwo_cairo_cuda_eval_v6_66f7ad92d02d7570",
@@ -142,6 +205,10 @@
       {
         "component_index": 12,
         "part_index": 0
+      },
+      {
+        "component_index": 20,
+        "part_index": 0
       }
     ],
     "source_sha256": "c62a8a01e4a1257089aed5718766b69ed34a46ef7a89a671bec0335b9db8c683"
@@ -169,6 +236,27 @@
   },
   {
     "kind": "constraint",
+    "label": "starked_eval_8778253bc647df9d",
+    "abi_schema": "cairo_eval_part_v1",
+    "kernel_name": "stwo_cairo_cuda_eval_v6_8778253bc647df9d",
+    "cache_key": "cdb375947560aef2",
+    "semantic_hash": "8778253bc647df9d",
+    "program_identity": "bf88d6a318562c4cfd363c9caa2dff780b66f369f16d6c233f6f30d4353264b7",
+    "file": "constraint_starked_eval_8778253bc647df9d_cdb375947560aef2.cu",
+    "module_globals": "none",
+    "catalog_identity": "550200479d03f3cc5df12d3795cfe4645824bd96368f3cd6e70c0df8669c62ec",
+    "codegen_version": 6,
+    "identity_scheme": "sha256-cairo-eval-parametric-source-v6",
+    "occurrences": [
+      {
+        "component_index": 18,
+        "part_index": 0
+      }
+    ],
+    "source_sha256": "974be4ca7ed7c4d6a79a1f6c6eed1c68b0a5cd9417f3fc85dd10a334e7ea03db"
+  },
+  {
+    "kind": "constraint",
     "label": "starked_eval_8f2a210bfd12daa6",
     "abi_schema": "cairo_eval_part_v1",
     "kernel_name": "stwo_cairo_cuda_eval_v6_8f2a210bfd12daa6",
@@ -184,9 +272,34 @@
       {
         "component_index": 5,
         "part_index": 0
+      },
+      {
+        "component_index": 17,
+        "part_index": 0
       }
     ],
     "source_sha256": "08e06571f3a0d2dd6d6b0e003adc92323a0590eafe45bc1aa2b5b86bf0e2e353"
+  },
+  {
+    "kind": "constraint",
+    "label": "starked_eval_8f3b825275be5dbd",
+    "abi_schema": "cairo_eval_part_v1",
+    "kernel_name": "stwo_cairo_cuda_eval_v6_8f3b825275be5dbd",
+    "cache_key": "8d21de8ef908f643",
+    "semantic_hash": "8f3b825275be5dbd",
+    "program_identity": "6c9793935e91b5ff952e0f14ecd8b4cb42391e12ab5d7e66bab589fb6b5bef35",
+    "file": "constraint_starked_eval_8f3b825275be5dbd_8d21de8ef908f643.cu",
+    "module_globals": "none",
+    "catalog_identity": "550200479d03f3cc5df12d3795cfe4645824bd96368f3cd6e70c0df8669c62ec",
+    "codegen_version": 6,
+    "identity_scheme": "sha256-cairo-eval-parametric-source-v6",
+    "occurrences": [
+      {
+        "component_index": 27,
+        "part_index": 0
+      }
+    ],
+    "source_sha256": "0db77239e9840061e08e5fd8c4fbc2c8f655517b658131f73aba2bdb5593cbb8"
   },
   {
     "kind": "constraint",
@@ -253,6 +366,27 @@
   },
   {
     "kind": "constraint",
+    "label": "starked_eval_a7ac3dae165578d8",
+    "abi_schema": "cairo_eval_part_v1",
+    "kernel_name": "stwo_cairo_cuda_eval_v6_a7ac3dae165578d8",
+    "cache_key": "fc408acf9fde9826",
+    "semantic_hash": "a7ac3dae165578d8",
+    "program_identity": "e00bc0769326ae849fe406c369d79e914ee6f5e6510f8014caa0a84ddc859429",
+    "file": "constraint_starked_eval_a7ac3dae165578d8_fc408acf9fde9826.cu",
+    "module_globals": "none",
+    "catalog_identity": "550200479d03f3cc5df12d3795cfe4645824bd96368f3cd6e70c0df8669c62ec",
+    "codegen_version": 6,
+    "identity_scheme": "sha256-cairo-eval-parametric-source-v6",
+    "occurrences": [
+      {
+        "component_index": 19,
+        "part_index": 0
+      }
+    ],
+    "source_sha256": "ba5956bcefc743a54c4d3add48a41fbab4f1e6e3a25f7fd23e21ce88edbb3f8e"
+  },
+  {
+    "kind": "constraint",
     "label": "starked_eval_acda39832f031c2f",
     "abi_schema": "cairo_eval_part_v1",
     "kernel_name": "stwo_cairo_cuda_eval_v6_acda39832f031c2f",
@@ -267,6 +401,10 @@
     "occurrences": [
       {
         "component_index": 0,
+        "part_index": 0
+      },
+      {
+        "component_index": 16,
         "part_index": 0
       }
     ],
@@ -316,6 +454,48 @@
   },
   {
     "kind": "constraint",
+    "label": "starked_eval_e62b4326b27d5f08",
+    "abi_schema": "cairo_eval_part_v1",
+    "kernel_name": "stwo_cairo_cuda_eval_v6_e62b4326b27d5f08",
+    "cache_key": "115ee20a348f8170",
+    "semantic_hash": "e62b4326b27d5f08",
+    "program_identity": "fc5f8629217bafbb4a14f1a45016dda3bfb62e9d036b711d16f1ba86875b2add",
+    "file": "constraint_starked_eval_e62b4326b27d5f08_115ee20a348f8170.cu",
+    "module_globals": "none",
+    "catalog_identity": "550200479d03f3cc5df12d3795cfe4645824bd96368f3cd6e70c0df8669c62ec",
+    "codegen_version": 6,
+    "identity_scheme": "sha256-cairo-eval-parametric-source-v6",
+    "occurrences": [
+      {
+        "component_index": 25,
+        "part_index": 0
+      }
+    ],
+    "source_sha256": "34843f594a8a40c4783a8c953a96e7c39b15c3bfc54521bc9d75ee01139ab4f3"
+  },
+  {
+    "kind": "constraint",
+    "label": "starked_eval_ee5278456b6a0ec0",
+    "abi_schema": "cairo_eval_part_v1",
+    "kernel_name": "stwo_cairo_cuda_eval_v6_ee5278456b6a0ec0",
+    "cache_key": "41813b1e6a164bd8",
+    "semantic_hash": "ee5278456b6a0ec0",
+    "program_identity": "b6c9ed1030ffacc1a0c270b0b0389b04bf06e48a9d7f21163e8a702c8f952a36",
+    "file": "constraint_starked_eval_ee5278456b6a0ec0_41813b1e6a164bd8.cu",
+    "module_globals": "none",
+    "catalog_identity": "550200479d03f3cc5df12d3795cfe4645824bd96368f3cd6e70c0df8669c62ec",
+    "codegen_version": 6,
+    "identity_scheme": "sha256-cairo-eval-parametric-source-v6",
+    "occurrences": [
+      {
+        "component_index": 21,
+        "part_index": 0
+      }
+    ],
+    "source_sha256": "38ad9b1d37f368caf943b702fed253b21cb7cdf2e6adacd386d96067b534d1ae"
+  },
+  {
+    "kind": "constraint",
     "label": "starked_eval_fe7e9855cdfa1ccf",
     "abi_schema": "cairo_eval_part_v1",
     "kernel_name": "stwo_cairo_cuda_eval_v6_fe7e9855cdfa1ccf",
@@ -334,6 +514,27 @@
       }
     ],
     "source_sha256": "a71f686afdd8e7fc72e816a05c64d0945867e2631cfd5d72f4431c71898ac574"
+  },
+  {
+    "kind": "constraint",
+    "label": "starked_eval_fe8f344c48d37c9a",
+    "abi_schema": "cairo_eval_part_v1",
+    "kernel_name": "stwo_cairo_cuda_eval_v6_fe8f344c48d37c9a",
+    "cache_key": "418f9cb170dc541b",
+    "semantic_hash": "fe8f344c48d37c9a",
+    "program_identity": "9cdafb3ffdb52103acc907f039f1a7e79cfafaedc56caefb0cacf7944add42bd",
+    "file": "constraint_starked_eval_fe8f344c48d37c9a_418f9cb170dc541b.cu",
+    "module_globals": "none",
+    "catalog_identity": "550200479d03f3cc5df12d3795cfe4645824bd96368f3cd6e70c0df8669c62ec",
+    "codegen_version": 6,
+    "identity_scheme": "sha256-cairo-eval-parametric-source-v6",
+    "occurrences": [
+      {
+        "component_index": 22,
+        "part_index": 0
+      }
+    ],
+    "source_sha256": "86f673ff63da731f38f50030580c07581326debe2d66c3a45cd4baf8510652b9"
   },
   {
     "kind": "witness",
@@ -376,6 +577,32 @@
   },
   {
     "kind": "witness",
+    "label": "starked_logup_460ea37cb1dee2f6",
+    "abi_schema": "native_blake_exact_interaction_v1",
+    "kernel_name": "starked_logup_v1_460ea37cb1dee2f6",
+    "cache_key": "6866d642a8b00ad5",
+    "semantic_hash": "460ea37cb1dee2f6",
+    "program_identity": "9145c4bbaaf6c10beb994d1576d0cc7f660ed7b1171386d66ffd6c03eaef8866",
+    "file": "witness_starked_logup_460ea37cb1dee2f6_6866d642a8b00ad5.cu",
+    "module_globals": "none",
+    "identity_scheme": "sha256-source-and-contract-v1",
+    "semantic_contract": "starked-bitcoin/logup-fractions/v1;air=set_lc;digest=184d5f52940e5c80c0693d4cd0581999af3e2c294a9b86094a28e1c7a2dc0bca;args=sources,outputs,pubs,powers,z,denominators,error,log_size;rows=storage;threads=256"
+  },
+  {
+    "kind": "witness",
+    "label": "starked_logup_5f62e1c6bb972f09",
+    "abi_schema": "native_blake_exact_interaction_v1",
+    "kernel_name": "starked_logup_v1_5f62e1c6bb972f09",
+    "cache_key": "9f2da27d33dc987e",
+    "semantic_hash": "5f62e1c6bb972f09",
+    "program_identity": "04e2676eb52e51ee2b7b82e7a0b21a3a82f8957bd449836d56b1a4574c948079",
+    "file": "witness_starked_logup_5f62e1c6bb972f09_9f2da27d33dc987e.cu",
+    "module_globals": "none",
+    "identity_scheme": "sha256-source-and-contract-v1",
+    "semantic_contract": "starked-bitcoin/logup-fractions/v1;air=set_shac;digest=8e6a1c1f6fbc11e815b0b6e305afe30beac19af24ee51347e34feeaf53535a67;args=sources,outputs,pubs,powers,z,denominators,error,log_size;rows=storage;threads=256"
+  },
+  {
+    "kind": "witness",
     "label": "starked_logup_63b83218a991e341",
     "abi_schema": "native_blake_exact_interaction_v1",
     "kernel_name": "starked_logup_v1_63b83218a991e341",
@@ -386,6 +613,58 @@
     "module_globals": "none",
     "identity_scheme": "sha256-source-and-contract-v1",
     "semantic_contract": "starked-bitcoin/logup-fractions/v1;air=block_fields;digest=f824c28a2b1caac7a3b63d663ab143fa98475a1ae21150b2c585534f7917930f;args=sources,outputs,pubs,powers,z,denominators,error,log_size;rows=storage;threads=256"
+  },
+  {
+    "kind": "witness",
+    "label": "starked_logup_64ffad17cac5f610",
+    "abi_schema": "native_blake_exact_interaction_v1",
+    "kernel_name": "starked_logup_v1_64ffad17cac5f610",
+    "cache_key": "6637b488388af638",
+    "semantic_hash": "64ffad17cac5f610",
+    "program_identity": "e299dfa89874d6300226901dd8799c6e677f44bd51b049f823a4176a594d626b",
+    "file": "witness_starked_logup_64ffad17cac5f610_6637b488388af638.cu",
+    "module_globals": "none",
+    "identity_scheme": "sha256-source-and-contract-v1",
+    "semantic_contract": "starked-bitcoin/logup-fractions/v1;air=set_pend;digest=332231fb239f72063731ba7a0273459f722c13da38cc02f9661096221f10cd1b;args=sources,outputs,pubs,powers,z,denominators,error,log_size;rows=storage;threads=256"
+  },
+  {
+    "kind": "witness",
+    "label": "starked_logup_6528d65b4de79501",
+    "abi_schema": "native_blake_exact_interaction_v1",
+    "kernel_name": "starked_logup_v1_6528d65b4de79501",
+    "cache_key": "595e4f99f38f044e",
+    "semantic_hash": "6528d65b4de79501",
+    "program_identity": "0e2f6f15056ead849e5434c7d1327cee8650e3ec414c2fe08ad5e237a3fb1077",
+    "file": "witness_starked_logup_6528d65b4de79501_595e4f99f38f044e.cu",
+    "module_globals": "none",
+    "identity_scheme": "sha256-source-and-contract-v1",
+    "semantic_contract": "starked-bitcoin/logup-fractions/v1;air=set_mt;digest=6ba4ebeb4840deedfab807aa97d38404004dcce861ff131f2b9dcaabd52c984e;args=sources,outputs,pubs,powers,z,denominators,error,log_size;rows=storage;threads=256"
+  },
+  {
+    "kind": "witness",
+    "label": "starked_logup_6ce5361c1ab293e7",
+    "abi_schema": "native_blake_exact_interaction_v1",
+    "kernel_name": "starked_logup_v1_6ce5361c1ab293e7",
+    "cache_key": "1cb4382b64b81a90",
+    "semantic_hash": "6ce5361c1ab293e7",
+    "program_identity": "f8f7a84e5e91d41782527aa7de81cd10132a4da8fd5ee7fba43db71f74b9227c",
+    "file": "witness_starked_logup_6ce5361c1ab293e7_1cb4382b64b81a90.cu",
+    "module_globals": "none",
+    "identity_scheme": "sha256-source-and-contract-v1",
+    "semantic_contract": "starked-bitcoin/logup-fractions/v1;air=set_rec;digest=0a4f4753a445adeea838db289c4841c008e4b3c087f44a7198f4b06d70f49a55;args=sources,outputs,pubs,powers,z,denominators,error,log_size;rows=storage;threads=256"
+  },
+  {
+    "kind": "witness",
+    "label": "starked_logup_7babb6a867ad510b",
+    "abi_schema": "native_blake_exact_interaction_v1",
+    "kernel_name": "starked_logup_v1_7babb6a867ad510b",
+    "cache_key": "78f812a1d07f0edf",
+    "semantic_hash": "7babb6a867ad510b",
+    "program_identity": "772d02522d4f0f15f44d7418c9aad1222f0490a4f25477a9e577cfe653e817ef",
+    "file": "witness_starked_logup_7babb6a867ad510b_78f812a1d07f0edf.cu",
+    "module_globals": "none",
+    "identity_scheme": "sha256-source-and-contract-v1",
+    "semantic_contract": "starked-bitcoin/logup-fractions/v1;air=set_b2c;digest=e38af0e5ec36439582abe5641e804d4ef2225d09d168b1f3e0bb7cb786825a74;args=sources,outputs,pubs,powers,z,denominators,error,log_size;rows=storage;threads=256"
   },
   {
     "kind": "witness",
@@ -441,6 +720,19 @@
   },
   {
     "kind": "witness",
+    "label": "starked_logup_ae0c8ba59a984c40",
+    "abi_schema": "native_blake_exact_interaction_v1",
+    "kernel_name": "starked_logup_v1_ae0c8ba59a984c40",
+    "cache_key": "faa126b9738776d5",
+    "semantic_hash": "ae0c8ba59a984c40",
+    "program_identity": "3738821656646a6b27ff00538c204ede7b4df46483e9b322ffb65af70c04a3e4",
+    "file": "witness_starked_logup_ae0c8ba59a984c40_faa126b9738776d5.cu",
+    "module_globals": "none",
+    "identity_scheme": "sha256-source-and-contract-v1",
+    "semantic_contract": "starked-bitcoin/logup-fractions/v1;air=set_tmsg;digest=037f8922078d48ced14ab12dbbc470084a5cfef06c1d44afe05722ae94561d1d;args=sources,outputs,pubs,powers,z,denominators,error,log_size;rows=storage;threads=256"
+  },
+  {
+    "kind": "witness",
     "label": "starked_logup_af5ed86f148a3aa8",
     "abi_schema": "native_blake_exact_interaction_v1",
     "kernel_name": "starked_logup_v1_af5ed86f148a3aa8",
@@ -480,6 +772,19 @@
   },
   {
     "kind": "witness",
+    "label": "starked_logup_b510828ab6c80d1b",
+    "abi_schema": "native_blake_exact_interaction_v1",
+    "kernel_name": "starked_logup_v1_b510828ab6c80d1b",
+    "cache_key": "b9414c36e8a5ed04",
+    "semantic_hash": "b510828ab6c80d1b",
+    "program_identity": "8f3799d1a2aa190a657d0df2395675e075f64a80075043f4d14dddc54a366b96",
+    "file": "witness_starked_logup_b510828ab6c80d1b_b9414c36e8a5ed04.cu",
+    "module_globals": "none",
+    "identity_scheme": "sha256-source-and-contract-v1",
+    "semantic_contract": "starked-bitcoin/logup-fractions/v1;air=set_b2w;digest=4f62318d703256eb46579091b96ca5a8e91e287c8a9202ec88935f8e3c3b4107;args=sources,outputs,pubs,powers,z,denominators,error,log_size;rows=storage;threads=256"
+  },
+  {
+    "kind": "witness",
     "label": "starked_logup_b89dad52afc65356",
     "abi_schema": "native_blake_exact_interaction_v1",
     "kernel_name": "starked_logup_v1_b89dad52afc65356",
@@ -516,6 +821,19 @@
     "module_globals": "none",
     "identity_scheme": "sha256-source-and-contract-v1",
     "semantic_contract": "starked-bitcoin/logup-fractions/v1;air=block_coin;digest=83b833e5f49fc09d3fbde5829d4bd7f36d7cdeeab1837b7c9467c123e74c4994;args=sources,outputs,pubs,powers,z,denominators,error,log_size;rows=storage;threads=256"
+  },
+  {
+    "kind": "witness",
+    "label": "starked_logup_f9897a332ca72b5b",
+    "abi_schema": "native_blake_exact_interaction_v1",
+    "kernel_name": "starked_logup_v1_f9897a332ca72b5b",
+    "cache_key": "585dab51e4e46a25",
+    "semantic_hash": "f9897a332ca72b5b",
+    "program_identity": "b0d1484213569b57c1588ced798788d27eda6c521d2ffeeb942889165021b662",
+    "file": "witness_starked_logup_f9897a332ca72b5b_585dab51e4e46a25.cu",
+    "module_globals": "none",
+    "identity_scheme": "sha256-source-and-contract-v1",
+    "semantic_contract": "starked-bitcoin/logup-fractions/v1;air=set_lw;digest=2bb94628a1ca6ed077d33d76852dfae15cedbb3b78b1ddf115747f420c32f1df;args=sources,outputs,pubs,powers,z,denominators,error,log_size;rows=storage;threads=256"
   },
   {
     "kind": "witness",

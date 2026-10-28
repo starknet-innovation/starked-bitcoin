@@ -1,4 +1,5 @@
-//! The AOT kernel catalog of the block system: one CUDA constraint kernel per AIR.
+//! The AOT kernel catalog: one CUDA constraint kernel per AIR, for the block system and the coin-set
+//! pass's segment system (`block/set_seg.zig`).
 //!
 //! Each AIR is lowered with its public inputs as dedicated base constants
 //! (`stwzeva.PubMode.slots`), normalised by stwo-zig's parametric CUDA path
@@ -11,12 +12,13 @@
 //! Each AIR with lookups also has a LogUp fraction kernel (`logup.zig`), a `witness` entry under
 //! stwo-zig's native-authenticated identity, the system one natural → storage reorder kernel
 //! (`reorder.zig`) and the seven device witness generators (`witness.zig`, the last `witness`
-//! entries).
+//! entries; block system only).
 //!
-//! `gpu/cuda_aot/` holds the generated sources, an `aot_manifest.json` that stwo-zig's CUDA build
-//! admits (the `circuit_eval` set of our local AOT root, see build.zig `cuda-archive`) and
-//! `catalog.json` (kernels → AIR). The drift test regenerates them and compares byte for byte;
-//! `STARKED_CUDA_AOT_WRITE=1` rewrites them.
+//! `gpu/cuda_aot/` holds the generated sources of both systems (`Product`; an AIR both use has one
+//! kernel), one `aot_manifest.json` that stwo-zig's CUDA build admits (the `circuit_eval` set of our
+//! local AOT root, see build.zig `cuda-archive`) and `catalog.json` (kernels → system and AIR). The
+//! drift test regenerates them and compares byte for byte; `STARKED_CUDA_AOT_WRITE=1` rewrites them
+//! (after any change to `airs/*.json`).
 
 const std = @import("std");
 const sb = @import("starked_bitcoin");
@@ -182,164 +184,9 @@ pub const Catalog = struct {
         return b;
     }
 
-    /// `aot_manifest.json` in stwo-zig's AOT product-set format (`backends/cuda/aot/native/*`): the
-    /// exact field set and (kind, label, cache key) order its build validates.
+    /// `aot_manifest.json` of this system alone (`productManifest` with one system).
     pub fn manifest(self: *const Catalog, allocator: std.mem.Allocator) ![]u8 {
-        const order = try allocator.alloc(usize, self.bodies.len);
-        defer allocator.free(order);
-        for (order, 0..) |*o, i| o.* = i;
-        std.mem.sort(usize, order, self, struct {
-            fn lt(c: *const Catalog, l: usize, r: usize) bool {
-                return c.bodies[l].semantic_hash < c.bodies[r].semantic_hash;
-            }
-        }.lt);
-        var out: std.Io.Writer.Allocating = .init(allocator);
-        errdefer out.deinit();
-        const w = &out.writer;
-        try w.writeAll("[\n");
-        for (order, 0..) |i, n| {
-            const b = self.bodies[i];
-            const file = try b.fileName(allocator);
-            defer allocator.free(file);
-            var source_sha: [32]u8 = undefined;
-            std.crypto.hash.sha2.Sha256.hash(b.source, &source_sha, .{});
-            try w.print(
-                \\  {{
-                \\    "kind": "constraint",
-                \\    "label": "starked_eval_{x:0>16}",
-                \\    "abi_schema": "cairo_eval_part_v1",
-                \\    "kernel_name": "{s}",
-                \\    "cache_key": "{x:0>16}",
-                \\    "semantic_hash": "{x:0>16}",
-                \\    "program_identity": "{x}",
-                \\    "file": "{s}",
-                \\    "module_globals": "none",
-                \\    "catalog_identity": "{s}",
-                \\    "codegen_version": {d},
-                \\    "identity_scheme": "{s}",
-                \\    "occurrences": [
-                \\      {{
-                \\        "component_index": {d},
-                \\        "part_index": 0
-                \\      }}
-                \\    ],
-                \\    "source_sha256": "{x}"
-                \\  }}{s}
-                \\
-            , .{
-                b.semantic_hash,
-                b.kernel_name,
-                b.cache_key,
-                b.semantic_hash,
-                &b.normalized_program_identity,
-                file,
-                parametric.authority_hex,
-                codegen.parametric_version,
-                identity_scheme,
-                i,
-                &source_sha,
-                if (n + 1 == self.bodies.len and self.logupCount() == 0 and self.reorder == null and self.witness == null) "" else ",",
-            });
-        }
-        // LogUp fraction kernels (`kind: witness` sorts after every constraint): stwo-zig's
-        // native-authenticated identity (`aot_identity.validate_native_aot_identity`).
-        const lorder = try allocator.alloc(usize, self.logupCount());
-        defer allocator.free(lorder);
-        {
-            var k: usize = 0;
-            for (self.logup, 0..) |x, i| if (x != null) {
-                lorder[k] = i;
-                k += 1;
-            };
-        }
-        std.mem.sort(usize, lorder, self, struct {
-            fn lt(c: *const Catalog, l: usize, r: usize) bool {
-                return c.logup[l].?.semantic_hash < c.logup[r].?.semantic_hash;
-            }
-        }.lt);
-        for (lorder, 0..) |i, n| {
-            const k = self.logup[i].?;
-            const file = try k.fileName(allocator);
-            defer allocator.free(file);
-            const label = try k.label(allocator);
-            defer allocator.free(label);
-            try w.print(
-                \\  {{
-                \\    "kind": "witness",
-                \\    "label": "{s}",
-                \\    "abi_schema": "{s}",
-                \\    "kernel_name": "{s}",
-                \\    "cache_key": "{x:0>16}",
-                \\    "semantic_hash": "{x:0>16}",
-                \\    "program_identity": "{x}",
-                \\    "file": "{s}",
-                \\    "module_globals": "none",
-                \\    "identity_scheme": "{s}",
-                \\    "semantic_contract": "{s}"
-                \\  }}{s}
-                \\
-            , .{
-                label,
-                logup.abi_schema_name,
-                k.kernel_name,
-                k.cache_key,
-                k.semantic_hash,
-                &k.program_identity,
-                file,
-                logup.identity_scheme,
-                k.semantic_contract,
-                if (n + 1 == lorder.len and self.reorder == null and self.witness == null) "" else ",",
-            });
-        }
-        // The reorder kernel: label `starked_reorder_*` sorts after every `starked_logup_*`.
-        if (self.reorder) |r| {
-            const file = try r.fileName(allocator);
-            defer allocator.free(file);
-            const label = try r.label(allocator);
-            defer allocator.free(label);
-            try w.print(
-                \\  {{
-                \\    "kind": "witness",
-                \\    "label": "{s}",
-                \\    "abi_schema": "{s}",
-                \\    "kernel_name": "{s}",
-                \\    "cache_key": "{x:0>16}",
-                \\    "semantic_hash": "{x:0>16}",
-                \\    "program_identity": "{x}",
-                \\    "file": "{s}",
-                \\    "module_globals": "none",
-                \\    "identity_scheme": "{s}",
-                \\    "semantic_contract": "{s}"
-                \\  }}{s}
-                \\
-            , .{ label, reorder.abi_schema_name, r.kernel_name, r.cache_key, r.semantic_hash, &r.program_identity, file, reorder.identity_scheme, reorder.semantic_contract, if (self.witness == null) "" else "," });
-        }
-        // The device witness generators: labels `starked_witness_{b2s,bytes,msg,pre,sha_columns,sha_words,walk}_*`
-        // sort after `starked_reorder_*`, in this order.
-        if (self.witness) |*ws| for (ws.all(), 0..) |g, n| {
-            const file = try g.fileName(allocator);
-            defer allocator.free(file);
-            const label = try g.label(allocator);
-            defer allocator.free(label);
-            try w.print(
-                \\  {{
-                \\    "kind": "witness",
-                \\    "label": "{s}",
-                \\    "abi_schema": "{s}",
-                \\    "kernel_name": "{s}",
-                \\    "cache_key": "{x:0>16}",
-                \\    "semantic_hash": "{x:0>16}",
-                \\    "program_identity": "{x}",
-                \\    "file": "{s}",
-                \\    "module_globals": "none",
-                \\    "identity_scheme": "{s}",
-                \\    "semantic_contract": "{s}"
-                \\  }}{s}
-                \\
-            , .{ label, witness.abi_schema_name, g.kernel_name, g.cache_key, g.semantic_hash, &g.program_identity, file, witness.identity_scheme, g.semantic_contract, if (n + 1 == ws.all().len) "" else "," });
-        };
-        try w.writeAll("]\n");
-        return out.toOwnedSlice();
+        return productManifest(allocator, &.{.{ .name = "block", .catalog = self }});
     }
 
     pub fn logupCount(self: *const Catalog) usize {
@@ -348,23 +195,303 @@ pub const Catalog = struct {
         return n;
     }
 
-    /// `catalog.json`: which AIR (name, digest, component index) each kernel is, in component order.
+    /// `catalog.json` of this system alone (`productSidecar` with one system).
     pub fn sidecar(self: *const Catalog, allocator: std.mem.Allocator) ![]u8 {
-        var out: std.Io.Writer.Allocating = .init(allocator);
-        errdefer out.deinit();
-        const w = &out.writer;
-        try w.writeAll("[\n");
+        return productSidecar(allocator, &.{.{ .name = "block", .catalog = self }});
+    }
+};
+
+/// One proof system whose kernels the AOT product holds.
+pub const System = struct {
+    name: []const u8,
+    catalog: *const Catalog,
+};
+
+/// The systems in `gpu/cuda_aot/` (one archive, one manifest): the block system (component indices
+/// 0..15 in the manifest) and the coin-set pass's segment system (`block/set_seg.zig`, 16..27). An AIR
+/// both use (`block_bytes`, `block_tables`, `block_fpwalk`) has one kernel, listed once with both
+/// placements: stwo-zig's build rejects a repeated cache key. The reorder and witness kernels are the
+/// block system's (the set system proves with host witnesses).
+pub const Product = struct {
+    block_airs: *[sb.block.system.N_COMP]ir.Air,
+    set_airs: *[sb.block.set_seg.N_COMP]ir.Air,
+    block: Catalog,
+    set: Catalog,
+
+    pub fn init(allocator: std.mem.Allocator) !Product {
+        const block_airs = try allocator.create([sb.block.system.N_COMP]ir.Air);
+        block_airs.* = try sb.block.system.parseAirs(allocator);
+        const set_airs = try allocator.create([sb.block.set_seg.N_COMP]ir.Air);
+        set_airs.* = try sb.block.set_seg.parseAirs(allocator);
+        var blk = try Catalog.init(allocator, block_airs);
+        errdefer blk.deinit();
+        const set = try Catalog.init(allocator, set_airs);
+        return .{ .block_airs = block_airs, .set_airs = set_airs, .block = blk, .set = set };
+    }
+
+    pub fn deinit(self: *Product) void {
+        self.block.deinit();
+        self.set.deinit();
+    }
+
+    pub fn systems(self: *const Product) [2]System {
+        return .{ .{ .name = "block", .catalog = &self.block }, .{ .name = "set", .catalog = &self.set } };
+    }
+};
+
+/// A kernel and the global component indices it serves (system-major).
+fn Unique(comptime K: type) type {
+    return struct {
+        kernel: *const K,
+        components: std.ArrayList(usize) = .empty,
+    };
+}
+
+fn uniqueBodies(allocator: std.mem.Allocator, systems: []const System) ![]Unique(Body) {
+    var out = std.ArrayList(Unique(Body)).empty;
+    var base: usize = 0;
+    for (systems) |s| {
+        outer: for (s.catalog.bodies, 0..) |*b, i| {
+            for (out.items) |*u| if (u.kernel.cache_key == b.cache_key) {
+                if (!std.mem.eql(u8, u.kernel.source, b.source)) return error.CudaCatalogCollision;
+                try u.components.append(allocator, base + i);
+                continue :outer;
+            };
+            try out.append(allocator, .{ .kernel = b });
+            try out.items[out.items.len - 1].components.append(allocator, base + i);
+        }
+        base += s.catalog.bodies.len;
+    }
+    // Distinct kernels have distinct names and keys, also across kinds.
+    for (out.items, 0..) |u, i| for (out.items[i + 1 ..]) |v| {
+        if (std.mem.eql(u8, u.kernel.kernel_name, v.kernel.kernel_name)) return error.CudaCatalogCollision;
+    };
+    std.mem.sort(Unique(Body), out.items, {}, struct {
+        fn lt(_: void, l: Unique(Body), r: Unique(Body)) bool {
+            return l.kernel.semantic_hash < r.kernel.semantic_hash;
+        }
+    }.lt);
+    return out.toOwnedSlice(allocator);
+}
+
+fn uniqueLogup(allocator: std.mem.Allocator, systems: []const System) ![]Unique(logup.Kernel) {
+    var out = std.ArrayList(Unique(logup.Kernel)).empty;
+    var base: usize = 0;
+    for (systems) |s| {
+        outer: for (s.catalog.logup, 0..) |*maybe, i| if (maybe.*) |*k| {
+            for (out.items) |*u| if (u.kernel.cache_key == k.cache_key) {
+                if (!std.mem.eql(u8, u.kernel.source, k.source)) return error.CudaCatalogCollision;
+                try u.components.append(allocator, base + i);
+                continue :outer;
+            };
+            try out.append(allocator, .{ .kernel = k });
+            try out.items[out.items.len - 1].components.append(allocator, base + i);
+        };
+        base += s.catalog.bodies.len;
+    }
+    for (out.items, 0..) |u, i| for (out.items[i + 1 ..]) |v| {
+        if (std.mem.eql(u8, u.kernel.kernel_name, v.kernel.kernel_name)) return error.CudaCatalogCollision;
+    };
+    std.mem.sort(Unique(logup.Kernel), out.items, {}, struct {
+        fn lt(_: void, l: Unique(logup.Kernel), r: Unique(logup.Kernel)) bool {
+            return l.kernel.semantic_hash < r.kernel.semantic_hash;
+        }
+    }.lt);
+    return out.toOwnedSlice(allocator);
+}
+
+/// `aot_manifest.json` in stwo-zig's AOT product-set format (`backends/cuda/aot/native/*`): the
+/// exact field set and (kind, label, cache key) order its build validates. One entry per distinct
+/// kernel of `systems`; a constraint kernel lists every component it serves (global, system-major
+/// indices: the Cairo parametric scheme does not bound them). The reorder and witness kernels are
+/// `systems[0]`'s; every other system must have the same ones or none.
+pub fn productManifest(allocator: std.mem.Allocator, systems: []const System) ![]u8 {
+    var scratch = std.heap.ArenaAllocator.init(allocator);
+    defer scratch.deinit();
+    const sa = scratch.allocator();
+    const first = systems[0].catalog;
+    for (systems[1..]) |s| {
+        if (s.catalog.reorder) |r| if (first.reorder == null or r.cache_key != first.reorder.?.cache_key) return error.CudaCatalogCollision;
+        if (s.catalog.witness) |*w| {
+            const fw = if (first.witness) |*x| x else return error.CudaCatalogCollision;
+            for (w.all(), fw.all()) |g, h| if (g.cache_key != h.cache_key) return error.CudaCatalogCollision;
+        }
+    }
+    const bodies = try uniqueBodies(sa, systems);
+    const kernels = try uniqueLogup(sa, systems);
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    errdefer out.deinit();
+    const w = &out.writer;
+    try w.writeAll("[\n");
+    for (bodies, 0..) |u, n| {
+        const b = u.kernel.*;
+        const file = try b.fileName(sa);
+        var source_sha: [32]u8 = undefined;
+        std.crypto.hash.sha2.Sha256.hash(b.source, &source_sha, .{});
+        try w.print(
+            \\  {{
+            \\    "kind": "constraint",
+            \\    "label": "starked_eval_{x:0>16}",
+            \\    "abi_schema": "cairo_eval_part_v1",
+            \\    "kernel_name": "{s}",
+            \\    "cache_key": "{x:0>16}",
+            \\    "semantic_hash": "{x:0>16}",
+            \\    "program_identity": "{x}",
+            \\    "file": "{s}",
+            \\    "module_globals": "none",
+            \\    "catalog_identity": "{s}",
+            \\    "codegen_version": {d},
+            \\    "identity_scheme": "{s}",
+            \\    "occurrences": [
+            \\
+        , .{
+            b.semantic_hash,
+            b.kernel_name,
+            b.cache_key,
+            b.semantic_hash,
+            &b.normalized_program_identity,
+            file,
+            parametric.authority_hex,
+            codegen.parametric_version,
+            identity_scheme,
+        });
+        for (u.components.items, 0..) |c, k| try w.print(
+            \\      {{
+            \\        "component_index": {d},
+            \\        "part_index": 0
+            \\      }}{s}
+            \\
+        , .{ c, if (k + 1 == u.components.items.len) "" else "," });
+        try w.print(
+            \\    ],
+            \\    "source_sha256": "{x}"
+            \\  }}{s}
+            \\
+        , .{ &source_sha, if (n + 1 == bodies.len and kernels.len == 0 and first.reorder == null and first.witness == null) "" else "," });
+    }
+    // LogUp fraction kernels (`kind: witness` sorts after every constraint): stwo-zig's
+    // native-authenticated identity (`aot_identity.validate_native_aot_identity`).
+    for (kernels, 0..) |u, n| {
+        const k = u.kernel.*;
+        try w.print(
+            \\  {{
+            \\    "kind": "witness",
+            \\    "label": "{s}",
+            \\    "abi_schema": "{s}",
+            \\    "kernel_name": "{s}",
+            \\    "cache_key": "{x:0>16}",
+            \\    "semantic_hash": "{x:0>16}",
+            \\    "program_identity": "{x}",
+            \\    "file": "{s}",
+            \\    "module_globals": "none",
+            \\    "identity_scheme": "{s}",
+            \\    "semantic_contract": "{s}"
+            \\  }}{s}
+            \\
+        , .{
+            try k.label(sa),
+            logup.abi_schema_name,
+            k.kernel_name,
+            k.cache_key,
+            k.semantic_hash,
+            &k.program_identity,
+            try k.fileName(sa),
+            logup.identity_scheme,
+            k.semantic_contract,
+            if (n + 1 == kernels.len and first.reorder == null and first.witness == null) "" else ",",
+        });
+    }
+    // The reorder kernel: label `starked_reorder_*` sorts after every `starked_logup_*`.
+    if (first.reorder) |r| {
+        try w.print(
+            \\  {{
+            \\    "kind": "witness",
+            \\    "label": "{s}",
+            \\    "abi_schema": "{s}",
+            \\    "kernel_name": "{s}",
+            \\    "cache_key": "{x:0>16}",
+            \\    "semantic_hash": "{x:0>16}",
+            \\    "program_identity": "{x}",
+            \\    "file": "{s}",
+            \\    "module_globals": "none",
+            \\    "identity_scheme": "{s}",
+            \\    "semantic_contract": "{s}"
+            \\  }}{s}
+            \\
+        , .{ try r.label(sa), reorder.abi_schema_name, r.kernel_name, r.cache_key, r.semantic_hash, &r.program_identity, try r.fileName(sa), reorder.identity_scheme, reorder.semantic_contract, if (first.witness == null) "" else "," });
+    }
+    // The device witness generators: labels `starked_witness_{b2s,bytes,msg,pre,sha_columns,sha_words,walk}_*`
+    // sort after `starked_reorder_*`, in this order.
+    if (first.witness) |*ws| for (ws.all(), 0..) |g, n| {
+        try w.print(
+            \\  {{
+            \\    "kind": "witness",
+            \\    "label": "{s}",
+            \\    "abi_schema": "{s}",
+            \\    "kernel_name": "{s}",
+            \\    "cache_key": "{x:0>16}",
+            \\    "semantic_hash": "{x:0>16}",
+            \\    "program_identity": "{x}",
+            \\    "file": "{s}",
+            \\    "module_globals": "none",
+            \\    "identity_scheme": "{s}",
+            \\    "semantic_contract": "{s}"
+            \\  }}{s}
+            \\
+        , .{ try g.label(sa), witness.abi_schema_name, g.kernel_name, g.cache_key, g.semantic_hash, &g.program_identity, try g.fileName(sa), witness.identity_scheme, g.semantic_contract, if (n + 1 == ws.all().len) "" else "," });
+    };
+    try w.writeAll("]\n");
+    return out.toOwnedSlice();
+}
+
+/// `catalog.json`: which AIR (system, name, digest, component index) each kernel is, per system in
+/// component order. The index is the system's own (the manifest's is global: system-major).
+pub fn productSidecar(allocator: std.mem.Allocator, systems: []const System) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    errdefer out.deinit();
+    const w = &out.writer;
+    try w.writeAll("[\n");
+    for (systems, 0..) |s, si| {
+        const self = s.catalog;
         for (self.bodies, 0..) |b, i| {
-            try w.print("  {{ \"component_index\": {d}, \"air\": \"{s}\", \"air_digest\": \"{x}\", \"kernel_name\": \"{s}\", \"cache_key\": \"{x:0>16}\", \"constant_count\": {d}", .{
+            try w.writeAll("  { ");
+            if (systems.len > 1) try w.print("\"system\": \"{s}\", ", .{s.name});
+            try w.print("\"component_index\": {d}, \"air\": \"{s}\", \"air_digest\": \"{x}\", \"kernel_name\": \"{s}\", \"cache_key\": \"{x:0>16}\", \"constant_count\": {d}", .{
                 i, b.air, &b.air_digest, b.kernel_name, b.cache_key, b.constant_count,
             });
             if (i < self.logup.len) if (self.logup[i]) |k| try w.print(", \"logup_kernel\": \"{s}\", \"logup_cache_key\": \"{x:0>16}\", \"logup_batches\": {d}, \"logup_sources\": {d}", .{ k.kernel_name, k.cache_key, k.batches, k.sources.len });
-            try w.print(" }}{s}\n", .{if (i + 1 == self.bodies.len) "" else ","});
+            try w.print(" }}{s}\n", .{if (si + 1 == systems.len and i + 1 == self.bodies.len) "" else ","});
         }
-        try w.writeAll("]\n");
-        return out.toOwnedSlice();
     }
-};
+    try w.writeAll("]\n");
+    return out.toOwnedSlice();
+}
+
+/// A generated source file (`gpu/cuda_aot/<name>`).
+pub const File = struct { name: []u8, source: []const u8 };
+
+/// Every source file of the product, each distinct file once.
+pub fn productFiles(allocator: std.mem.Allocator, systems: []const System) ![]File {
+    const F = File;
+    var out = std.ArrayList(F).empty;
+    const add = struct {
+        fn f(a: std.mem.Allocator, list: *std.ArrayList(F), name: []u8, source: []const u8) !void {
+            for (list.items) |x| if (std.mem.eql(u8, x.name, name)) {
+                if (!std.mem.eql(u8, x.source, source)) return error.CudaCatalogCollision;
+                return;
+            };
+            try list.append(a, .{ .name = name, .source = source });
+        }
+    }.f;
+    for (systems) |s| {
+        for (s.catalog.bodies) |b| try add(allocator, &out, try b.fileName(allocator), b.source);
+        for (s.catalog.logup) |k| if (k) |x| try add(allocator, &out, try x.fileName(allocator), x.source);
+    }
+    const first = systems[0].catalog;
+    if (first.reorder) |r| try add(allocator, &out, try r.fileName(allocator), r.source);
+    if (first.witness) |*ws| for (ws.all()) |g| try add(allocator, &out, try g.fileName(allocator), g.source);
+    return out.toOwnedSlice(allocator);
+}
 
 // ------------------------------------------------------------------ tests
 
@@ -374,14 +501,15 @@ fn blockAirs(a: std.mem.Allocator) ![block.N_COMP]ir.Air {
     return block.parseAirs(a);
 }
 
-test "cuda catalog: one kernel per AIR, independent of log size and public inputs" {
+test "cuda catalog: one kernel per AIR, independent of log size and public inputs (block and set systems)" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const airs = try blockAirs(a);
+    const block_airs = try blockAirs(a);
+    const set_airs = try sb.block.set_seg.parseAirs(a);
     var prng = std.Random.DefaultPrng.init(7);
     const r = prng.random();
-    for (airs) |air| {
+    for (&[_][]const ir.Air{ &block_airs, &set_airs }) |airs| for (airs) |air| {
         // Statements whose public inputs collide with each other and with AIR literals (all zero,
         // all one) and random ones, at three log sizes: one normal form.
         var identity: ?[32]u8 = null;
@@ -402,31 +530,37 @@ test "cuda catalog: one kernel per AIR, independent of log size and public input
             if (count) |want| try std.testing.expectEqual(want, n) else count = n;
             stwzeva.composition.deinitComponent(a, &lowered);
         };
-    }
+    };
 }
 
 test "cuda catalog: generated sources and manifest match gpu/cuda_aot (drift check)" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const airs = try blockAirs(a);
-    var catalog = try Catalog.init(a, &airs);
-    const manifest = try catalog.manifest(a);
+    var product = try Product.init(a);
+    const systems = product.systems();
+    const manifest = try productManifest(a, &systems);
+    const sidecar = try productSidecar(a, &systems);
+    const files = try productFiles(a, &systems);
+    var n_constraint: usize = 0;
+    var n_logup: usize = 0;
     var total: usize = 0;
-    for (catalog.bodies) |b| total += b.source.len;
+    for (files) |f| {
+        total += f.source.len;
+        n_constraint += @intFromBool(std.mem.startsWith(u8, f.name, "constraint_"));
+        n_logup += @intFromBool(std.mem.startsWith(u8, f.name, "witness_starked_logup_"));
+    }
+    const n_witness = files.len - n_constraint - n_logup;
     const write = std.process.hasEnvVarConstant("STARKED_CUDA_AOT_WRITE");
     if (write) {
         try std.fs.cwd().deleteTree(directory);
         try std.fs.cwd().makePath(directory);
         var dir = try std.fs.cwd().openDir(directory, .{});
         defer dir.close();
-        for (catalog.bodies) |b| try dir.writeFile(.{ .sub_path = try b.fileName(a), .data = b.source });
-        for (catalog.logup) |k| if (k) |x| try dir.writeFile(.{ .sub_path = try x.fileName(a), .data = x.source });
-        if (catalog.reorder) |r| try dir.writeFile(.{ .sub_path = try r.fileName(a), .data = r.source });
-        if (catalog.witness) |*ws| for (ws.all()) |g| try dir.writeFile(.{ .sub_path = try g.fileName(a), .data = g.source });
+        for (files) |f| try dir.writeFile(.{ .sub_path = f.name, .data = f.source });
         try dir.writeFile(.{ .sub_path = "aot_manifest.json", .data = manifest });
-        try dir.writeFile(.{ .sub_path = "catalog.json", .data = try catalog.sidecar(a) });
-        std.debug.print("cuda catalog: wrote {d} constraint, {d} LogUp, {d} reorder and {d} witness kernels to {s}\n", .{ catalog.bodies.len, catalog.logupCount(), @intFromBool(catalog.reorder != null), if (catalog.witness) |*ws| ws.all().len else 0, directory });
+        try dir.writeFile(.{ .sub_path = "catalog.json", .data = sidecar });
+        std.debug.print("cuda catalog: wrote {d} constraint, {d} LogUp and {d} reorder/witness kernels (block + set systems) to {s}\n", .{ n_constraint, n_logup, n_witness, directory });
         return;
     }
     var dir = std.fs.cwd().openDir(directory, .{ .iterate = true }) catch |e| {
@@ -436,31 +570,19 @@ test "cuda catalog: generated sources and manifest match gpu/cuda_aot (drift che
     defer dir.close();
     const pinned = try dir.readFileAlloc(a, "aot_manifest.json", 1 << 20);
     try std.testing.expectEqualStrings(pinned, manifest);
-    try std.testing.expectEqualStrings(try dir.readFileAlloc(a, "catalog.json", 1 << 20), try catalog.sidecar(a));
+    try std.testing.expectEqualStrings(try dir.readFileAlloc(a, "catalog.json", 1 << 20), sidecar);
     var expected = std.StringHashMap(void).init(a);
-    for (catalog.bodies) |b| {
-        const name = try b.fileName(a);
-        try expected.put(name, {});
-        const on_disk = try dir.readFileAlloc(a, name, 64 << 20);
-        try std.testing.expect(std.mem.eql(u8, on_disk, b.source));
+    for (files) |f| {
+        try expected.put(f.name, {});
+        const on_disk = dir.readFileAlloc(a, f.name, 64 << 20) catch |e| {
+            std.debug.print("cuda catalog: missing {s}/{s}; run with STARKED_CUDA_AOT_WRITE=1\n", .{ directory, f.name });
+            return e;
+        };
+        if (!std.mem.eql(u8, on_disk, f.source)) {
+            std.debug.print("cuda catalog: {s}/{s} differs; run with STARKED_CUDA_AOT_WRITE=1\n", .{ directory, f.name });
+            return error.CudaCatalogDrift;
+        }
     }
-    for (catalog.logup) |k| if (k) |x| {
-        const name = try x.fileName(a);
-        try expected.put(name, {});
-        const on_disk = try dir.readFileAlloc(a, name, 64 << 20);
-        try std.testing.expect(std.mem.eql(u8, on_disk, x.source));
-        total += x.source.len;
-    };
-    if (catalog.reorder) |r| {
-        const name = try r.fileName(a);
-        try expected.put(name, {});
-        try std.testing.expect(std.mem.eql(u8, try dir.readFileAlloc(a, name, 1 << 20), r.source));
-    }
-    if (catalog.witness) |*ws| for (ws.all()) |g| {
-        const name = try g.fileName(a);
-        try expected.put(name, {});
-        try std.testing.expect(std.mem.eql(u8, try dir.readFileAlloc(a, name, 1 << 20), g.source));
-    };
     // No stale kernels.
     var it = dir.iterate();
     while (try it.next()) |entry| {
@@ -470,7 +592,10 @@ test "cuda catalog: generated sources and manifest match gpu/cuda_aot (drift che
             return error.CudaCatalogDrift;
         }
     }
-    std.debug.print("cuda catalog: {d} constraint, {d} LogUp, {d} reorder and {d} witness kernels ({d} KiB of CUDA) match {s}\n", .{ catalog.bodies.len, catalog.logupCount(), @intFromBool(catalog.reorder != null), if (catalog.witness) |*ws| ws.all().len else 0, total / 1024, directory });
+    // The block system's own manifest (one system) lists the same kernels as before the set system
+    // joined: its bodies and LogUp kernels are all in the product.
+    for (product.block.bodies) |bb| try std.testing.expect(expected.contains(try bb.fileName(a)));
+    std.debug.print("cuda catalog: {d} constraint, {d} LogUp and {d} reorder/witness kernels ({d} KiB of CUDA; block + set systems) match {s}\n", .{ n_constraint, n_logup, n_witness, total / 1024, directory });
 }
 
 // The catalog's own kernels (parametric, wide trace offsets, constants from the live program)
@@ -632,7 +757,20 @@ test "cuda catalog: AOT kernels (host C++ build) equal the interpreter, statemen
     defer arena.deinit();
     const a = arena.allocator();
     const airs = try blockAirs(a);
-    const catalog = try Catalog.init(a, &airs);
+    try hostParityAll(a, &airs, "block");
+}
+
+test "cuda catalog: set-system AOT kernels (host C++ build) equal the interpreter, statement in base_params" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const airs = try sb.block.set_seg.parseAirs(a);
+    try hostParityAll(a, &airs, "set");
+}
+
+/// Every kernel of a system's catalog built as host C++ and run against the interpreter.
+fn hostParityAll(a: std.mem.Allocator, airs: []const ir.Air, system_name: []const u8) !void {
+    const catalog = try Catalog.init(a, airs);
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const dir = try tmp.dir.realpathAlloc(a, ".");
@@ -661,7 +799,7 @@ test "cuda catalog: AOT kernels (host C++ build) equal the interpreter, statemen
         std.debug.print("zig c++ failed:\n{s}\n", .{res.stderr});
         return error.CompileFailed;
     }
-    std.debug.print("cuda catalog: host C++ build of {d} AOT kernels {d} ms\n", .{ catalog.bodies.len, timer.read() / std.time.ns_per_ms });
+    std.debug.print("cuda catalog: host C++ build of {d} {s}-system AOT kernels {d} ms\n", .{ catalog.bodies.len, system_name, timer.read() / std.time.ns_per_ms });
     var lib = try std.DynLib.open(try std.fs.path.join(a, &.{ dir, "kernels.so" }));
     defer lib.close();
     for (airs, catalog.bodies, 0..) |air, *b, i| {

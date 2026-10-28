@@ -105,6 +105,7 @@ fn usage() noreturn {
         \\  chainproof prove-chain <vk> <file.sbchain> <out-dir> [--max-m M] <dir>:<to>[:<from>:<prev-set.bin>][#<prev-hex|->,<fin-hex>]...
         \\  chainproof verify-chain <vk> <file.sbchain> <out-dir> [--min-work <hex> | --min-work 0] [--unpinned] [--set-proofs] <dir>:<to>[:<from>:<prev-set.bin>]...
         \\  chainproof prove-set <set.bin> <dir>:<to>[:<from>:<prev-set.bin>] <work-dir> [--test-strength] [--logs l0,...,l11]
+        \\  chainproof set-challenge <dir>:<to>[:<from>:<prev-set.bin>] <out.bin>
         \\  chainproof verify-set <work-dir> <dir>:<to>[:<from>:<prev-set.bin>] [--unpinned]
         \\  chainproof set-cut <set.bin> [--logs l0,...,l11]
         \\  chainproof set-member <set.bin> <work-dir> <txid>:<vout> <out.sbmember>
@@ -309,6 +310,12 @@ pub fn main() !void {
             } else usage();
         }
         return proveSet(gpa, a, args[2], parseChainSpec(args[3]) catch usage(), args[4], weak, logs orelse default_set_logs);
+    }
+    if (std.mem.eql(u8, cmd, "set-challenge") and args.len == 4) {
+        const ch = try epochChallenge(gpa, a, parseChainSpec(args[2]) catch usage());
+        try S.writeFileAtomic(args[3], try ST.encodeChallenge(a, ch));
+        std.debug.print("set challenge of {s} written to {s}\n", .{ args[2], args[3] });
+        return;
     }
     if (std.mem.eql(u8, cmd, "set-cut") and (args.len == 3 or (args.len == 5 and std.mem.eql(u8, args[3], "--logs")))) {
         var logs = default_set_logs;
@@ -1600,6 +1607,8 @@ fn epochChallenge(gpa: std.mem.Allocator, a: std.mem.Allocator, sp: ChainSpec) !
     return ERoot.challengeOf(sums, .{ .from = sp.from.height, .to = sp.to, .prev = prev, .fin = fin });
 }
 
+/// `set-challenge <epoch> <out.bin>` writes the epoch's challenge (`set_tree.encodeChallenge`), for the GPU
+/// set drivers (`cuda-set`), which do not read the forest or the sets' digests.
 /// `prove-set <set.bin> <epoch> <work-dir>`: the pass over `set.bin` under the epoch's challenge;
 /// writes `<work-dir>/pass.bin` and `<work-dir>/setvk.bin` (segments under `<work-dir>/seg`).
 fn proveSet(gpa: std.mem.Allocator, a: std.mem.Allocator, set_path: []const u8, sp: ChainSpec, work: []const u8, weak: bool, logs: ST.Logs) !void {

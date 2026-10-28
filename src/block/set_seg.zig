@@ -338,6 +338,54 @@ pub fn cut(a: std.mem.Allocator, file: []const u8, logs: [N_COMP]u32) ![]usize {
     return ends.toOwnedSlice(a);
 }
 
+/// The state after segment `seg` from `in` (`buildAt`'s `out`) without its witnesses: the records'
+/// checks, fractions and both hashes only. The GPU driver (`cuda-set`) chains the segments' incoming
+/// states with it and checks each against its witness's `out`.
+pub fn advance(gpa: std.mem.Allocator, ch: coin.Challenge, in: State, seg: []const u8) !State {
+    var scratch = std.heap.ArenaAllocator.init(gpa);
+    defer scratch.deinit();
+    const a = scratch.allocator();
+    const recs = try parse(a, seg);
+    var out = in;
+    var tos: std.ArrayList(u8) = .empty;
+    for (recs) |r| {
+        const k = r.key();
+        if (out.last) |p| if (std.mem.order(u8, &p, &k) != .lt) return error.SetNotSorted;
+        out.last = k;
+        out.sum = out.sum.add(try coin.coinFrac(ch, r.head[0..32].*, std.mem.readInt(u32, r.head[32..36], .little), r.height(), r.cb() == 1, r.ser, std.mem.readInt(u32, r.head[41..45], .little)));
+        out.amount += std.mem.readInt(u64, r.ser[0..8], .little);
+        out.max_h = @max(out.max_h, r.height());
+        try tos.appendSlice(a, try txOutSer(a, r));
+    }
+    out.i = in.i + @as(u32, @intCast(recs.len));
+    if (out.amount >= @as(u128, 1) << 96) return error.AmountOverflow;
+    // Blake2s over P_in ‖ seg: every block but the last compressed.
+    {
+        const xs = try std.mem.concat(a, u8, &.{ in.b2.pendSlice(), seg });
+        if (xs.len <= 64) return error.SegmentTooShort;
+        const m_b2 = (xs.len + 63) / 64 - 1;
+        var h = in.b2.h;
+        for (0..m_b2) |blk| {
+            var m: [16]u32 = undefined;
+            for (0..16) |k| m[k] = std.mem.readInt(u32, xs[64 * blk + 4 * k ..][0..4], .little);
+            h = b2.compress(.{ .h = h, .m = m, .t = 64 * (@as(u64, in.b2.nb) + blk + 1), .f = false });
+        }
+        out.b2 = .{ .h = h, .nb = in.b2.nb + @as(u32, @intCast(m_b2)), .plen = @intCast(xs.len - 64 * m_b2) };
+        @memcpy(out.b2.pend[0..out.b2.plen], xs[64 * m_b2 ..]);
+    }
+    // SHA-256 over Q_in ‖ TxOutSer: every whole block compressed.
+    {
+        const ys = try std.mem.concat(a, u8, &.{ in.sha.pendSlice(), tos.items });
+        const m_sha = ys.len / 64;
+        if (m_sha == 0) return error.SegmentTooShort;
+        var H = in.sha.h;
+        for (0..m_sha) |blk| H = shs.compress(H, shs.blockFromBytes(ys[64 * blk ..][0..64]));
+        out.sha = .{ .h = H, .nb = in.sha.nb + @as(u32, @intCast(m_sha)), .plen = @intCast(ys.len - 64 * m_sha) };
+        @memcpy(out.sha.pend[0..out.sha.plen], ys[64 * m_sha ..]);
+    }
+    return out;
+}
+
 /// `build` at fixed component logs `fixed` (a pass's leaves share one shape), when given: the segment
 /// must fit them.
 pub fn buildAt(a: std.mem.Allocator, ch: coin.Challenge, in: State, seg: []const u8, fixed: ?[N_COMP]u32) !Built {
@@ -884,6 +932,26 @@ test "set segments: every segment of the sets after blocks 170 and 1000 satisfie
         try std.testing.expectEqual(want.max_height, got.st.max_h);
         try std.testing.expect(want.sums[0].eql(got.st.sum));
     }
+}
+
+test "set segments: advance (no witness) gives buildAt's outgoing state, segment by segment" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const ch = EP.challenge(@splat(7));
+    const file = std.fs.cwd().readFileAlloc(a, "data/epoch/set-170.bin", 1 << 30) catch return error.SkipZigTest;
+    const logs = [N_COMP]u32{ 10, 8, 6, 6, 10, 8, 11, 10, 11, 10, 12, 13 };
+    const ends = try cut(a, file, logs);
+    var st = begin(file[0..4].*);
+    var at: usize = 4;
+    for (ends) |end| {
+        const b = try buildAt(a, ch, st, file[at..end], logs);
+        const next = try advance(std.testing.allocator, ch, st, file[at..end]);
+        try std.testing.expect(std.meta.eql(b.out, next));
+        st = next;
+        at = end;
+    }
+    try std.testing.expectEqual(std.mem.readInt(u32, file[0..4], .little), st.i);
 }
 
 test "set segments: a tampered outgoing value is rejected (each carried part)" {
