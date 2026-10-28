@@ -38,6 +38,9 @@ Evidence:
 Problems / lessons:
 - Production set logs need a ~152 GiB arena: halved or quartered logs for H100/H200.
 - The host witness (single-threaded) will bound the pass, not the device: device generators next.
+- On this Mac, after the rebase, something outside the build deleted each new ReleaseFast `cuda-set`
+  binary within seconds (zig-out and the cache; ReleaseSafe builds stayed); the mock test ran with
+  ReleaseSafe drivers. Not seen before the rebase; cause unknown.
 Next: on a pod, `prove_set.sh check` (byte identity of one segment), then a timed `--first 300`, then the passes.
 
 ## 2026-10-27 (session 24) — Membership (D-050): Merkle root over the set, proven in Lean

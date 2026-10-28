@@ -251,13 +251,13 @@ storage: same bytes as the default). On the pod, `cuda-set --cpu-check 1 --first
 (`prove_set.sh check`) proves segment 0 both ways and compares the encoded files; full runs keep
 `--cpu-check 500`. The tree side is `cuda-epoch-tree`'s, already byte-identical on an H100.
 
-**Device memory** (`set_test.zig`, planned and bound on the host, production FRI):
+**Device memory** (`set_test.zig`, planned and bound on the host, production FRI; `set_mt` with 329 main columns):
 
 | Logs (bytes, tables, pend, rec, fpwalk, b2w, b2c, tmsg, shac, lw, lc, mt) | Arena (device LogUp) | Host trees = H2D | Fits |
 |---|---|---|---|
-| production `23,8,6,16,22,21,23,23,23,22,23,23` | **151.8 GiB** | 42.9 GiB | B200 (180 GB) only; not H200 (141 GB) |
-| halved `22,8,6,15,21,20,22,22,22,21,22,22` | 75.9 GiB | 21.4 GiB | H100 NVL 94 GB, H200; H100 80 GB (79.6 GiB) only just |
-| quartered `21,8,6,14,20,19,21,21,21,20,21,21` | 37.9 GiB | 10.7 GiB | any 48 GB+ device |
+| production `23,8,6,16,22,21,23,23,23,22,23,23` | **152.9 GiB** | 43.0 GiB | B200 (180 GB) only; not H200 (141 GB) |
+| halved `22,8,6,15,21,20,22,22,22,21,22,22` | 76.4 GiB | 21.5 GiB | H100 NVL 94 GB, H200; H100 80 GB (79.6 GiB) only just |
+| quartered `21,8,6,14,20,19,21,21,21,20,21,21` | 38.2 GiB | 10.7 GiB | any 48 GB+ device |
 
 The trees are 96 % of it (coefficients, two evaluation copies, Merkle). Halving the logs about doubles
 the segment count (production: ~2,330 per set, [set-pass.md](set-pass.md) step 6; halved ~4,650,
@@ -269,9 +269,9 @@ the same list.
 - the 12 set constraint kernels, built as host C++, equal the interpreter (logs 6 and 9, random traces
   and statements); invariance of the normal form over logs 8/12/22 and statements;
 - a CPU proof of segment 0 of `set-170` (test logs `10,8,6,6,10,8,11,10,11,10,12,13`): the resident
-  plans reproduce its shape (323/1,360/368/8 columns, 4,642 OODS samples, 13 FRI layers, 7,079
+  plans reproduce its shape (323/1,363/376/8 columns, 4,653 OODS samples, 13 FRI layers, 7,082
   constraints), the host channel and the device-sink model every challenge (3,012 statement mixes);
-- its 12 LogUp kernels (host C++) and the completion model equal `system.interactionTrace` (368 tree-2
+- its 12 LogUp kernels (host C++) and the completion model equal `system.interactionTrace` (376 tree-2
   columns, 12 claims); the host trees borrow the witness columns;
 - the three arenas above plan and bind; drift check; `cuda-archive-plan` (stwo-zig's validator) accepts
   the 105-source selection; `cuda-check` links the device schedule.

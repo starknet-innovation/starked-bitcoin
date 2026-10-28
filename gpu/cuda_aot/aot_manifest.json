@@ -169,6 +169,27 @@
   },
   {
     "kind": "constraint",
+    "label": "starked_eval_607b56dbc4cf74e1",
+    "abi_schema": "cairo_eval_part_v1",
+    "kernel_name": "stwo_cairo_cuda_eval_v6_607b56dbc4cf74e1",
+    "cache_key": "25defbcae324e33f",
+    "semantic_hash": "607b56dbc4cf74e1",
+    "program_identity": "c97f6c1de4cbbb2aae8899f303862c107801cd3587791c6b9d9165a29f2f621e",
+    "file": "constraint_starked_eval_607b56dbc4cf74e1_25defbcae324e33f.cu",
+    "module_globals": "none",
+    "catalog_identity": "550200479d03f3cc5df12d3795cfe4645824bd96368f3cd6e70c0df8669c62ec",
+    "codegen_version": 6,
+    "identity_scheme": "sha256-cairo-eval-parametric-source-v6",
+    "occurrences": [
+      {
+        "component_index": 27,
+        "part_index": 0
+      }
+    ],
+    "source_sha256": "b717ce97d64d8f3f575d1c664c897f8e1be54e2ae29e4c477f1475d7ad0440da"
+  },
+  {
+    "kind": "constraint",
     "label": "starked_eval_66f7ad92d02d7570",
     "abi_schema": "cairo_eval_part_v1",
     "kernel_name": "stwo_cairo_cuda_eval_v6_66f7ad92d02d7570",
@@ -279,27 +300,6 @@
       }
     ],
     "source_sha256": "08e06571f3a0d2dd6d6b0e003adc92323a0590eafe45bc1aa2b5b86bf0e2e353"
-  },
-  {
-    "kind": "constraint",
-    "label": "starked_eval_8f3b825275be5dbd",
-    "abi_schema": "cairo_eval_part_v1",
-    "kernel_name": "stwo_cairo_cuda_eval_v6_8f3b825275be5dbd",
-    "cache_key": "8d21de8ef908f643",
-    "semantic_hash": "8f3b825275be5dbd",
-    "program_identity": "6c9793935e91b5ff952e0f14ecd8b4cb42391e12ab5d7e66bab589fb6b5bef35",
-    "file": "constraint_starked_eval_8f3b825275be5dbd_8d21de8ef908f643.cu",
-    "module_globals": "none",
-    "catalog_identity": "550200479d03f3cc5df12d3795cfe4645824bd96368f3cd6e70c0df8669c62ec",
-    "codegen_version": 6,
-    "identity_scheme": "sha256-cairo-eval-parametric-source-v6",
-    "occurrences": [
-      {
-        "component_index": 27,
-        "part_index": 0
-      }
-    ],
-    "source_sha256": "0db77239e9840061e08e5fd8c4fbc2c8f655517b658131f73aba2bdb5593cbb8"
   },
   {
     "kind": "constraint",
@@ -629,19 +629,6 @@
   },
   {
     "kind": "witness",
-    "label": "starked_logup_6528d65b4de79501",
-    "abi_schema": "native_blake_exact_interaction_v1",
-    "kernel_name": "starked_logup_v1_6528d65b4de79501",
-    "cache_key": "595e4f99f38f044e",
-    "semantic_hash": "6528d65b4de79501",
-    "program_identity": "0e2f6f15056ead849e5434c7d1327cee8650e3ec414c2fe08ad5e237a3fb1077",
-    "file": "witness_starked_logup_6528d65b4de79501_595e4f99f38f044e.cu",
-    "module_globals": "none",
-    "identity_scheme": "sha256-source-and-contract-v1",
-    "semantic_contract": "starked-bitcoin/logup-fractions/v1;air=set_mt;digest=6ba4ebeb4840deedfab807aa97d38404004dcce861ff131f2b9dcaabd52c984e;args=sources,outputs,pubs,powers,z,denominators,error,log_size;rows=storage;threads=256"
-  },
-  {
-    "kind": "witness",
     "label": "starked_logup_6ce5361c1ab293e7",
     "abi_schema": "native_blake_exact_interaction_v1",
     "kernel_name": "starked_logup_v1_6ce5361c1ab293e7",
@@ -821,6 +808,19 @@
     "module_globals": "none",
     "identity_scheme": "sha256-source-and-contract-v1",
     "semantic_contract": "starked-bitcoin/logup-fractions/v1;air=block_coin;digest=83b833e5f49fc09d3fbde5829d4bd7f36d7cdeeab1837b7c9467c123e74c4994;args=sources,outputs,pubs,powers,z,denominators,error,log_size;rows=storage;threads=256"
+  },
+  {
+    "kind": "witness",
+    "label": "starked_logup_f3c8e1434d43fe86",
+    "abi_schema": "native_blake_exact_interaction_v1",
+    "kernel_name": "starked_logup_v1_f3c8e1434d43fe86",
+    "cache_key": "8675aeb1a6739d48",
+    "semantic_hash": "f3c8e1434d43fe86",
+    "program_identity": "0019aa9f769efdf4555cf330254f2b43ca312d1a278d50778dbb6f4fcc617ba2",
+    "file": "witness_starked_logup_f3c8e1434d43fe86_8675aeb1a6739d48.cu",
+    "module_globals": "none",
+    "identity_scheme": "sha256-source-and-contract-v1",
+    "semantic_contract": "starked-bitcoin/logup-fractions/v1;air=set_mt;digest=2cdfac5edbf111f58ef8d4bbf253afd8322a269c77f1349be7ccb184ec42e101;args=sources,outputs,pubs,powers,z,denominators,error,log_size;rows=storage;threads=256"
   },
   {
     "kind": "witness",
