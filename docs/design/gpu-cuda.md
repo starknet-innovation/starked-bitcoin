@@ -313,6 +313,15 @@ log and the 40 segment files are in `data/gpu-set-20261028/` on the Mac.
 
 Not yet run on a GPU: `cuda-set-tree` and a whole pass.
 
+**Where the device time goes** (`cuda-set --stages`, same pod type, 2026-10-28, pod `an77xfr91q0vys`;
+`data/gpu-set-20261028/prof{A,B}.out`): **ingress**, the pageable upload of the 21.5 GiB host trees, is
+7.8 s per segment on average with one witness job (5.9–15.8 s) and 9.1 s with six (6.8–19.1 s: host
+memory traffic slows it); everything else is a constant ~3.3 s (constraint evaluation 2.5 s, trace commit
+0.5 s, OODS 0.14 s, the rest < 0.1 s). Of the upload, 14.1 GiB is the Blake2s gadget's 300 columns in
+`set_b2c`, `set_lc` and `set_mt`, 2.0 GiB `set_shac`, 3.75 GiB the preprocessed tree (the same for every
+segment). Levers: generate those columns on the device (as `block_b2s` and `block_sha` already are),
+upload from pinned host memory, keep the preprocessed tree resident.
+
 ### Runbook (pod)
 
 Image, bootstrap and `env.sh` as in § Running on a pod; the branch is not pushed, so ship a tarball.
