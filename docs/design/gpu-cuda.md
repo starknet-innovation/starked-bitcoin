@@ -373,6 +373,19 @@ memory traffic slows it); everything else is a constant ~3.3 s (constraint evalu
 segment). Levers: generate those columns on the device (as `block_b2s` and `block_sha` already are),
 upload from pinned host memory, keep the preprocessed tree resident.
 
+### Measured with the device witness (2026-10-28, 6ed9373)
+
+H200 SXM (secure, $5.29/h, 24 vCPU), pod `8iuwtx7pv578r8`, ~40 min; `prove_set.sh stages` on the 8M-coin
+prefix of the set after 935,000, halved logs; logs in `data/gpu-set-20261028/devwitness/`.
+
+- **Byte identity**: segment 0 (device witness) equals the CPU proof (1,224,312 bytes, sha256
+  `16eaa3b5…`); the 4 host-witness segments' files equal the device-witness ones (`SET STAGES OK`).
+- **Per segment** (segments 1–19, six jobs): H2D **1.79 GiB** (was 21.5), ingress 0.2–1.2 s (was 7.8–9.1),
+  device **3.5–4.5 s** (mean 3.9 s over 20, was 10.7–12.4), host witness **1.7–2.0 s** per job (was
+  29–42 s); the other stages as before (constraint evaluation 2.59 s, trace commit 0.49 s).
+- **A whole set** at halved logs (*est.*): ~7,000 segments × ~4 s ≈ 8 h of segments plus ~1.5 h of tree:
+  about $50 per set at $5.29/h (secure), ~$35 at $3.59/h (community).
+
 ### Runbook (pod)
 
 Image, bootstrap and `env.sh` as in § Running on a pod; the branch is not pushed, so ship a tarball.
