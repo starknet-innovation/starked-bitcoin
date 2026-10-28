@@ -235,7 +235,7 @@ witnesses only (`prover.Input.witness = null`): tree 0 and every main column are
 is a file (`chainproof set-challenge <epoch> <ch.bin>`, `set_tree.encodeChallenge`), copied to
 `<work>/challenge.bin`. Options: `--cpu-check n` (CPU proof of the first and every n-th segment, byte
 comparison; a mismatch keeps the device file as `.gpu` and stops), `--verify`, `--first n`, `--only
-<list>`, `--mock` (CPU proofs through the same pipeline), `--host-only` (witness and plans only: host time
+<list>`, `--mock` (CPU proofs through the same pipeline), `--stages` (per segment: H2D bytes and each device stage's time), `--host-only` (witness and plans only: host time
 and memory). Existing segment files are skipped (resume).
 
 **`cuda-set-tree`** (`src/gpu/cuda/set_tree_gpu.zig`, linked like `cuda-epoch-tree`; the shared GPU

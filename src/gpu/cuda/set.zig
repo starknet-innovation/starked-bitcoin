@@ -2,7 +2,7 @@
 //! resident CUDA prover, in one process and one CUDA session (docs/design/gpu-cuda.md § Set pass).
 //!
 //!   cuda-set <set.bin> <work-dir> --challenge <ch.bin> [--test-strength] [--logs l0,...,l11]
-//!            [--jobs n] [--only <list>] [--first n] [--cpu-check n] [--verify] [--mock] [--host-only]
+//!            [--jobs n] [--only <list>] [--first n] [--cpu-check n] [--verify] [--mock] [--host-only] [--stages]
 //!
 //! Writes `<work-dir>/challenge.bin` (the challenge used; a rerun must use the same) and
 //! `<work-dir>/seg/<i>.sbseg` exactly as `set_tree.provePass` does (same cut, same witnesses, the
@@ -42,7 +42,7 @@ const FriConfigV2 = core.pcs.config_v2.FriConfigV2;
 const default_logs: ST.Logs = .{ 23, 8, 6, 16, 22, 21, 23, 23, 23, 22, 23, 23 };
 
 fn usage() noreturn {
-    std.debug.print("usage: cuda-set <set.bin> <work-dir> (--challenge <ch.bin> | --testing-challenge) [--test-strength] [--logs l0,...,l11] [--jobs n] [--only <list>] [--first n] [--cpu-check n] [--verify] [--mock] [--host-only]\n", .{});
+    std.debug.print("usage: cuda-set <set.bin> <work-dir> (--challenge <ch.bin> | --testing-challenge) [--test-strength] [--logs l0,...,l11] [--jobs n] [--only <list>] [--first n] [--cpu-check n] [--verify] [--mock] [--host-only] [--stages]\n", .{});
     std.process.exit(2);
 }
 
@@ -162,6 +162,7 @@ pub fn main() !void {
     var weak = false;
     var verify = false;
     var mock = false;
+    var stages = false;
     var host_only = false;
     var logs = default_logs;
     var jobs: usize = 2;
@@ -174,7 +175,7 @@ pub fn main() !void {
     while (i < args.len) : (i += 1) {
         const x = args[i];
         const has = i + 1 < args.len;
-        if (std.mem.eql(u8, x, "--test-strength")) weak = true else if (std.mem.eql(u8, x, "--verify")) verify = true else if (std.mem.eql(u8, x, "--mock")) mock = true else if (std.mem.eql(u8, x, "--testing-challenge")) testing_ch = true else if (std.mem.eql(u8, x, "--host-only")) host_only = true else if (std.mem.eql(u8, x, "--challenge") and has) {
+        if (std.mem.eql(u8, x, "--test-strength")) weak = true else if (std.mem.eql(u8, x, "--verify")) verify = true else if (std.mem.eql(u8, x, "--stages")) stages = true else if (std.mem.eql(u8, x, "--mock")) mock = true else if (std.mem.eql(u8, x, "--testing-challenge")) testing_ch = true else if (std.mem.eql(u8, x, "--host-only")) host_only = true else if (std.mem.eql(u8, x, "--challenge") and has) {
             i += 1;
             ch_path = args[i];
         } else if (std.mem.eql(u8, x, "--logs") and has) {
@@ -299,6 +300,14 @@ pub fn main() !void {
                 return err;
             };
             t_device = lap.lap();
+            // Device telemetry: H2D bytes and each stage's device time (`--stages`).
+            if (stages) {
+                const ct = result.verdict.counters;
+                std.debug.print("  stages {d}: h2d {d:.2} GiB, peak {d:.2} GiB, launches {d}", .{ jj, @as(f64, @floatFromInt(ct.h2d_bytes)) / (1 << 30), @as(f64, @floatFromInt(ct.peak_live_bytes)) / (1 << 30), ct.kernel_launches });
+                if (ct.device_timing_intervals != 0) for (ct.stages, 0..) |st, si| if (st.device_elapsed_ns != 0)
+                    std.debug.print(", {s} {d:.0} ms", .{ @tagName(@as(@import("stwo_cuda_backend").runtime.telemetry.Stage, @enumFromInt(si))), @as(f64, @floatFromInt(st.device_elapsed_ns)) / 1e6 });
+                std.debug.print("\n", .{});
+            }
             break :blk .{ .logs = b.logs, .pubs = b.pubs, .proof = result.proof };
         };
         const bytes = try ST.encodeSeg(ba, &seg);
