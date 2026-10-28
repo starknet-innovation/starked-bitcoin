@@ -44,7 +44,7 @@ def EncSha (pub : ℕ → F) (bs : ℕ) (s : Spec.SetFile.Sha) : Prop :=
 /-- **The incoming state.** -/
 structure EncIn (pub : ℕ → F) (s : Spec.SetFile.St QM) : Prop where
   i : pub PUB_I_IN = (s.i : F)
-  last : (pub PUB_HASLAST = 0 ∧ s.last = none) ∨
+  last : (pub PUB_HASLAST = 0 ∧ s.last = none ∧ ∀ j < 36, pub (PUB_LAST_IN j) = 0) ∨
     (pub PUB_HASLAST = 1 ∧ ∃ p, s.last = some p ∧ Spec.SetFile.RecOk p ∧
       ∀ j < 36, (pub (PUB_LAST_IN j)).val = Rec.keyB p j)
   lastB : ∀ j < 36, (pub (PUB_LAST_IN j)).val < 256
@@ -523,14 +523,17 @@ theorem set_seg_sound (s : Spec.SetFile.St QM) (hin : EncIn pub s) :
       (∀ x ∈ seg, Spec.SetFile.RecOk x) ∧
       EncOut pub (seg.foldl (Spec.SetFile.step [Rec.frac pub]) s) ∧
       (seg.foldl (Spec.SetFile.step [Rec.frac pub]) s).n = s.n ∧
-      (seg.foldl (Spec.SetFile.step [Rec.frac pub]) s).ok = s.ok := by
+      (seg.foldl (Spec.SetFile.step [Rec.frac pub]) s).ok = s.ok ∧
+      ∃ e, Rec.OnPre (2 ^ Ls 3) (inst 3).main e ∧ (∀ r < e, (inst 3).main Rec.IDX r = (r : F)) ∧
+        pub PUB_I_OUT - pub PUB_I_IN = (e : F) ∧ seg = Rec.recs (inst 3).main (Sb inst pub) e ∧
+        Rec.Hyp (2 ^ Ls 3) pub (inst 3).main (Sb inst pub) := by
   have hHL : pub PUB_HASLAST = 0 ∨ pub PUB_HASLAST = 1 := by
-    rcases hin.last with ⟨h, -⟩ | ⟨h, -⟩
+    rcases hin.last with ⟨h, -, -⟩ | ⟨h, -⟩
     · exact Or.inl h
     · exact Or.inr h
   have H := rec_hyp hL hsat hsz hHL hin.lastB hin.amtB (by rw [hin.maxh]; exact hin.maxh_lt)
   have rs := rec_sat hL hsat
-  obtain ⟨e, E, -, hcnt, hparse, hok, hsorted, hfirst, hlastout, hamt, hamtB, hmax, hmaxlt, hsum⟩ :=
+  obtain ⟨e, E, hidx, hcnt, hparse, hok, hsorted, hfirst, hlastout, hamt, hamtB, hmax, hmaxlt, hsum⟩ :=
     Rec.rec_sound rs (by positivity) H
   set seg := Rec.recs (inst 3).main (Sb inst pub) e with hseg
   have he1 := E.pos
@@ -549,7 +552,7 @@ theorem set_seg_sound (s : Spec.SetFile.St QM) (hin : EncIn pub s) :
     simp only [show e - 1 + 1 - 1 = e - 1 by omega]; rfl
   -- the checks
   have hchain : Spec.SetFile.chainOk s.last seg = true := by
-    rcases hin.last with ⟨-, hn⟩ | ⟨h1, p, hp, hpok, hpk⟩
+    rcases hin.last with ⟨-, hn, -⟩ | ⟨h1, p, hp, hpok, hpk⟩
     · rw [hn, Spec.SetFile.chainOk_none]; exact hsorted
     · rw [hp, Spec.SetFile.chainOk_some]
       have hs := hsorted
@@ -559,7 +562,7 @@ theorem set_seg_sound (s : Spec.SetFile.St QM) (hin : EncIn pub s) :
       refine ⟨?_, hs⟩
       have h0ok := hrok (Rec.recR (inst 3).main (Sb inst pub) 0) (by rw [hr0]; exact List.mem_cons_self ..)
       exact Rec.keyLt_of_lex hpok.1 h0ok.1 hpok.2.1 h0ok.2.1 (keyLex_congr hpk (hfirst h1))
-  refine ⟨seg, hne, hbytes, hrok, ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, f1, ?_⟩
+  refine ⟨seg, hne, hbytes, hrok, ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩, f1, ?_, e, E, hidx, hcnt, hseg, H⟩
   · rw [f2, hlen, Nat.cast_add, ← hin.i, ← hcnt]; ring
   · refine ⟨_, by rw [f8, hlast], (hok _ (by rw [hseg, Rec.recs]; exact List.mem_map.mpr ⟨e - 1,
       List.mem_range.mpr (by omega), rfl⟩)).1, hlastout⟩

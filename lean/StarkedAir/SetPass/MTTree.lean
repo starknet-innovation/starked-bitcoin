@@ -231,6 +231,54 @@ theorem slot_flags {s j half cnt : ℕ} (hs : s < 2 ^ Ls 11) (hs0 : s % 88 = 0) 
       have := natCast_inj_of_lt (by unfold P; omega) (by unfold P; omega) e
       rw [h1]; exact ⟨fun _ => by omega, fun _ => rfl⟩
 
+/-- **A root word**: `ROOT`'s limbs `2w`, `2w + 1` are the halves of output word `w` of a used period of
+node 1. -/
+theorem root_word : ∀ w < 8, ∃ s', s' % 88 = 0 ∧ s' + 88 ≤ 2 ^ Ls 11 ∧ (inst 11).main MT.USEW s' = 1 ∧
+    (inst 11).main MT.ID s' = 1 ∧
+    pub (PUB_ROOT (2 * w)) = ((half16 (outWord (inst 11).main s' w) 0 : ℕ) : F) ∧
+    pub (PUB_ROOT (2 * w + 1)) = ((half16 (outWord (inst 11).main s' w) 1 : ℕ) : F) := by
+  have hpre : (segSys.comp 11).air.pre = MT.preCols := rfl
+  have h0 : 0 < 2 ^ Ls 11 := by positivity
+  have hf : (MT.p MT.P_FIRST).eval (2 ^ Ls 11) MT.preCols pub (inst 11).main 0 = 1 := by
+    rw [MT.ev_first (pub := pub) (M := (inst 11).main) h0, if_pos rfl]
+  intro w hw8
+  have hl : MT.lookups.getD (10 + w) ⟨0, .const 0, []⟩ = ⟨REL_NODE, .neg (MT.p MT.P_FIRST),
+      [cst 1, cst w, .pub (PUB_ROOT (2 * w)), .pub (PUB_ROOT (2 * w + 1))]⟩ := by
+    interval_cases w <;> rfl
+  have hsl : siteLookup segSys ((11, 0, 10 + w) : Site) = _ := hl
+  have hsite := site_mem hL (i := 11) (by decide) h0 (k := 10 + w) (by
+    show 10 + w < MT.lookups.length; simp [MT.lookups]; omega)
+  have hm : siteMult segSys inst pub (11, 0, 10 + w) = -1 := by
+    simp only [siteMult, hsl, siteEval, hpre, hL 11 (by decide), Expr.eval, hf]
+  obtain ⟨i', r', k', hr', hy, hsm, hsv⟩ := link hL hsat hHL hsz hsite (by simp [isUse]) hm
+  rw [show siteRel segSys ((11, 0, 10 + w) : Site) = 40 by simp [siteRel, hsl, REL_NODE]] at hy
+  replace hy := yt hy; simp only [YT, Bool.or_eq_true, Bool.and_eq_true, beq_iff_eq, decide_eq_true_eq] at hy
+  obtain ⟨rfl, hk2, hk10⟩ : i' = 11 ∧ 2 ≤ k' ∧ k' < 10 := by omega
+  obtain ⟨hs0', hsn', hu', hv'⟩ := mt_yield hL hsat hr' hk2 hk10 hsm
+  have hv0 : siteVals segSys inst pub (11, 0, 10 + w) = [1, (w : F), pub (PUB_ROOT (2 * w)), pub (PUB_ROOT (2 * w + 1))] := by
+    simp [siteVals, hsl, siteEval, hpre, hL 11 (by decide), Expr.eval, StarkedAir.Sha256.eval_cst]
+  rw [hv', hv0] at hsv
+  simp only [List.cons.injEq, and_true] at hsv
+  obtain ⟨eid, ewx, elo, ehi⟩ := hsv
+  have hwx : MT.widx k' = w := natCast_inj_of_lt (by have := MT.widx_lt hk2 hk10; unfold P; omega)
+    (by unfold P; omega) ewx
+  rw [hwx] at elo ehi
+  exact ⟨_, hs0', hsn', hu', eid, elo.symm, ehi.symm⟩
+
+/-- **A proven segment's root limbs are a state's.** -/
+theorem root_state : ∃ st : Spec.Sha256.State, ∀ i < 16, pub (PUB_ROOT i) = (StarkedAir.HeaderTree.limbsOf st).getD i 0 := by
+  have h := root_word hL hsat hHL hsz
+  choose! S hS using h
+  refine ⟨toState (fun w => outWord (inst 11).main (S w) w), fun i hi => ?_⟩
+  rw [StarkedAir.HeaderTree.limbsOf_get hi]
+  have hw : i / 2 < 8 := by omega
+  rw [show stWord (toState fun w => outWord (inst 11).main (S w) w) (i / 2) = outWord (inst 11).main (S (i / 2)) (i / 2) by
+    interval_cases (i / 2) <;> rfl]
+  obtain ⟨-, -, -, -, elo, ehi⟩ := hS (i / 2) hw
+  rcases Nat.mod_two_eq_zero_or_one i with h2 | h2
+  · rw [h2, ← elo, show 2 * (i / 2) = i by omega]
+  · rw [h2, ← ehi, show 2 * (i / 2) + 1 = i by omega]
+
 end Tree
 
 namespace MT
@@ -413,39 +461,14 @@ theorem node_ok : ∀ m j, 2 * half - j = m → 1 ≤ j → j < 2 * half →
 /-- **The public root is the heap tree's root**: `ROOT`'s limbs are node 1's words' halves. -/
 theorem root_ok (h1 : 1 ≤ half) : ∀ i < 16, pub (PUB_ROOT i) =
     ((half16 (stWord (Spec.SetMerkle.node half ((List.range cnt).map lf) 1) (i / 2)) (i % 2) : ℕ) : F) := by
-  have hpre : (segSys.comp 11).air.pre = MT.preCols := rfl
-  have h0 : 0 < 2 ^ Ls 11 := by positivity
-  have hf : (MT.p MT.P_FIRST).eval (2 ^ Ls 11) MT.preCols pub (inst 11).main 0 = 1 := by
-    rw [MT.ev_first (pub := pub) (M := (inst 11).main) h0, if_pos rfl]
   intro i hi
-  set w := i / 2 with hw
-  have hw8 : w < 8 := by omega
-  have hl : MT.lookups.getD (10 + w) ⟨0, .const 0, []⟩ = ⟨REL_NODE, .neg (MT.p MT.P_FIRST),
-      [cst 1, cst w, .pub (PUB_ROOT (2 * w)), .pub (PUB_ROOT (2 * w + 1))]⟩ := by
-    interval_cases w <;> rfl
-  have hsl : siteLookup segSys ((11, 0, 10 + w) : Site) = _ := hl
-  have hsite := site_mem hL (i := 11) (by decide) h0 (k := 10 + w) (by
-    show 10 + w < MT.lookups.length; simp [MT.lookups]; omega)
-  have hm : siteMult segSys inst pub (11, 0, 10 + w) = -1 := by
-    simp only [siteMult, hsl, siteEval, hpre, hL 11 (by decide), Expr.eval, hf]
-  obtain ⟨i', r', k', hr', hy, hsm, hsv⟩ := link hL hsat hHL hsz hsite (by simp [isUse]) hm
-  rw [show siteRel segSys ((11, 0, 10 + w) : Site) = 40 by simp [siteRel, hsl, REL_NODE]] at hy
-  replace hy := yt hy; simp only [YT, Bool.or_eq_true, Bool.and_eq_true, beq_iff_eq, decide_eq_true_eq] at hy
-  obtain ⟨rfl, hk2, hk10⟩ : i' = 11 ∧ 2 ≤ k' ∧ k' < 10 := by omega
-  obtain ⟨hs0', hsn', hu', hv'⟩ := mt_yield hL hsat hr' hk2 hk10 hsm
-  have hv0 : siteVals segSys inst pub (11, 0, 10 + w) = [1, (w : F), pub (PUB_ROOT (2 * w)), pub (PUB_ROOT (2 * w + 1))] := by
-    simp [siteVals, hsl, siteEval, hpre, hL 11 (by decide), Expr.eval, StarkedAir.Sha256.eval_cst]
-  rw [hv', hv0] at hsv
-  simp only [List.cons.injEq, and_true] at hsv
-  obtain ⟨eid, ewx, elo, ehi⟩ := hsv
+  obtain ⟨s', hs0', hsn', hu', hid', elo, ehi⟩ := root_word hL hsat hHL hsz (i / 2) (by omega)
   have hok := node_ok hL hsat hHL hsz hhalf h24 hcnt hc hleaf (2 * half - 1) 1 rfl le_rfl (by omega) _ hs0' hsn' hu'
-    (by rw [eid]; simp)
-  have hwx : MT.widx k' = w := natCast_inj_of_lt (by have := MT.widx_lt hk2 hk10; unfold P; omega)
-    (by unfold P; omega) ewx
-  rw [hok _ (MT.widx_lt hk2 hk10), hwx] at elo ehi
+    (by rw [hid']; simp)
+  rw [hok _ (by omega)] at elo ehi
   rcases Nat.mod_two_eq_zero_or_one i with h2 | h2
-  · rw [h2, show i = 2 * w by omega, ← elo]
-  · rw [h2, show i = 2 * w + 1 by omega, ← ehi]
+  · rw [h2]; rw [show 2 * (i / 2) = i by omega] at elo; exact elo
+  · rw [h2]; rw [show 2 * (i / 2) + 1 = i by omega] at ehi; exact ehi
 
 end Nodes
 

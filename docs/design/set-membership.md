@@ -1,6 +1,6 @@
 # Coin-set membership (D-050)
 
-Status: draft · Updated: 2026-10-27 (circuit, root, proofs and CLI tested; the root's content proof in Lean open)
+Status: current · Updated: 2026-10-28 (circuit, root, proofs, CLI and the Lean soundness of the root done; GPU run pending)
 
 Part of the coin-set pass ([set-pass.md](set-pass.md)).
 
@@ -38,22 +38,23 @@ pass's segment logs from `<work-dir>/seg/0.sbseg`; the txid in display order) an
 pass's root; `chainproof verify-member <work-dir> <dir>:<to>[…] <file>` verifies the pass under the epoch's
 challenge, then the proof against its root and last key.
 
-**Proof status (Lean).** The link layer covers the twelve components (`Link`, `LinkUse`: every new use
-has multiplicity `−1` or `0`; `set_lw` and `set_mt` carry boolean constraints on `PKU`, `USEW`, `LU`,
-`MUN`, `MUL` for this). The set tree folds the segments' public roots: `stree_sound` returns a segment
-tree of the verifier's shape whose root is the summary's, each leaf a proven segment's public root
-(`SetTree.SegTree`), and `set_root_sound` states it for the pass's root. The spec of a segment's root is
-`Spec/SetMerkle.lean` (`segRoot`).
+**Proof status (Lean): proven.** `set_root_sound` (`SetPass/PassChain.lean`): a verified pass root of
+shape `t` with root limbs `R` gives records `es` (the segments' records, in order) that fold the pass from
+the verifier's start state to its final one, and `R` is the root of a segment tree of shape `t` whose
+leaves are the segments' Merkle roots `Spec.SetMerkle.passRoots s0.last segs`: each segment's root is
+`segRoot HALF last seg`, the heap tree of its records' leaves `Blake2s-256(key(previous) ‖ encRec)`
+(`Spec/SetMerkle.lean`), or Blake2s has a collision. The pieces:
 
-- `set_mt` (`MTSound`, `MTLink`, `MTTree`): proven. `root_ok`: if every `set_lc` digest yield carries
-  record `s`'s leaf words (`s` below the record count), the public `ROOT` is `node HALF leaves 1`.
-  `set_mt` range-checks `1 ≤ HALF ≤ 2^24` on row 0, so heap indices stay far below `P`.
-- `set_lc` (`LCSound`): its constraints contain `block_b2s`'s, so the block Blake2s period lemmas
-  apply; the per-record chain is open.
-- `set_lw`: open (each record's leaf message is `key(r − 1) ‖ encRec(r)`).
-
-Until the last two are done, `set_root_sound` takes "a proven segment's root limbs are a state's" as a
-hypothesis.
+- `set_seg_root` (`SegRoot`): a sound segment's public `ROOT` is `segRoot HALF s.last seg`.
+- `set_mt` (`MTSound`, `MTLink`, `MTTree`): every node yield of node `j` carries `node HALF leaves j`
+  (strong induction from the heap's bottom); the public root is node 1. `set_mt` range-checks
+  `1 ≤ HALF ≤ 2^24`.
+- `set_lc` (`LCSound`, `LeafLink`): `block_b2s`'s constraints are `set_lc`'s; each used period reads
+  its record's words, chains within the record, and the last block's yields are the leaf's words.
+- `set_lw` (`LWSound`, `LeafLink`): each row lies in its record's window; its word is the leaf message's
+  (previous-key words from `set_rec`, file bytes from the byte table, zero past the end).
+- `EncIn` now requires zero last-key bytes when there is no last record (the verifier's start state has
+  them), so the set's first leaf starts with 36 zero bytes.
 
 **Cost** (*est.*): about 4.75 Blake2s compressions per record instead of 1.35 (the file's 1.35, the
 leaf's 2, the tree's ~1.4 with `HALF = 2^15`). Segments shrink to ~47k records (the leaf compressions

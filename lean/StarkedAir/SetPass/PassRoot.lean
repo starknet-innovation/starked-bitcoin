@@ -21,8 +21,8 @@ theorem encIn_congr {q r : ℕ → F} {s : Spec.SetFile.St QM} (hv : ∀ t < NV,
   refine ⟨?_, ?_, fun j hj => by rw [hlast j hj]; exact h.lastB j hj, ?_, h.maxh_lt, fun j hj => ?_, ?_, ?_, ?_, ?_⟩
   · rw [get 112 PUB_I_IN (by decide) rfl]; exact h.i
   · rw [h3]
-    rcases h.last with ⟨a, b⟩ | ⟨a, p, hp, hok, hk⟩
-    · exact Or.inl ⟨a, b⟩
+    rcases h.last with ⟨a, b, c⟩ | ⟨a, p, hp, hok, hk⟩
+    · exact Or.inl ⟨a, b, fun j hj => by rw [hlast j hj]; exact c j hj⟩
     · exact Or.inr ⟨a, p, hp, hok, fun j hj => by rw [hlast j hj]; exact hk j hj⟩
   · rw [get 150 PUB_MAXH_IN (by decide) rfl]; exact h.maxh
   · have := ((blk (155 + j) (by unfold NV; omega)).2.2.2.2.2.1 (by omega) (by omega)).1

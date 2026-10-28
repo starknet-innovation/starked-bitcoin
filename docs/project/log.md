@@ -21,6 +21,32 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-10-27 (session 24) — Membership (D-050): Merkle root over the set, proven in Lean
+Who: Claude (agent, Opus 5.5), owner: "go ahead. You can also proceed with the GPU run"; "keep going"
+Roadmap: coin-set pass membership (D-050) done in Lean and Zig; GPU set prover prepared (branch `gpu-set`)
+Done:
+- 9c39156: the segment system grows to twelve components (`set_lw`, `set_lc`, `set_mt`); the set tree folds
+  segment roots; membership proofs and CLI (`set-member`, `verify-member`); link layer for twelve components.
+- 7ae5497: `set_mt` soundness (`node_ok`, `root_ok`); `set_mt` now range-checks `1 ≤ HALF ≤ 2^24` (found in
+  the proof: `HALF` was only bound through `2·HALF − cnt`, which can wrap mod `P`).
+- This commit: `set_lw` (`LWSound`), the leaf link (`LeafLink`: walker words are the leaf message's,
+  compressions chain per record, the last block yields `Blake2s-256(key(r − 1) ‖ encRec(r))`), `set_seg_root`
+  (a segment's public root is `segRoot HALF last seg`), and `set_root_sound` with the root: the pass root is
+  the fold, in the verifier's shape, of the segments' Merkle roots (`passRoots`). `EncIn` now requires zero
+  last-key bytes without a last record.
+- Branch `gpu-set` (6ce1c9d, by a sub-agent, not pushed, not run on a GPU): AOT kernels for the set AIRs,
+  `cuda-set`, `cuda-set-tree`, runbook. Built against 9c39156, so its kernels need regenerating for 7ae5497.
+Evidence:
+- `lake build`: Build completed successfully; no `sorry`/`native_decide`/`bv_decide`; `#print axioms` of
+  `set_seg_sound`, `set_seg_root`, `set_root_sound`: propext, Classical.choice, Quot.sound; JSON drift: none.
+- `zig build test -Dtest-filter="set segments"` and `"set tree"`: 4/4 each (membership test on set-1000).
+Problems / lessons:
+- The GPU agent found the production set logs need ~152 GiB of device memory: a GPU run needs halved logs
+  (H100 NVL / H200) or smaller; the single-threaded host witness will set the pace.
+Next: rebase `gpu-set` on main, regenerate its kernels, then a timed GPU run (price stated first).
+
+---
+
 ## 2026-10-27 (session 23) — Coin-set pass step 3 done: the segment system's soundness
 Who: Claude (agent, Opus 5.5), owner: "Go for it. Don't stop working until you need something from me."
 Roadmap: coin-set pass (D-048) step 3 done; step 4 (the set tree) next

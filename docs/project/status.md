@@ -99,9 +99,10 @@ scheduled as `UTXO-TREE`, the aggregator as `BLOCK-REC` — design in
 
 ## In flight
 
-- **Membership (D-050):** the segment circuit, set tree root, membership proofs and CLI are in and
-  tested; the Lean soundness of the root's content (`set_lw`, `set_lc`, `set_mt` against
-  `Spec/SetMerkle.lean`) is in progress; then the CUDA set prover and the production run.
+- **Membership (D-050):** circuit, set tree root, membership proofs, CLI and the Lean soundness of the root
+  (`set_root_sound`) are done. Next: rebase `gpu-set` (the CUDA set prover, not yet run on a GPU), regenerate
+  its kernels for the current `set_mt`, then the GPU run (device memory: production logs need ~152 GiB;
+  halved logs fit an H100 NVL or H200).
 
 ## Needs owner
 
@@ -136,6 +137,7 @@ open StarkedAir.HeaderChain StarkedAir.Spec.Bitcoin
 #print axioms StarkedAir.Block.commit_sound
 #print axioms StarkedAir.Block.hash_pub
 #print axioms StarkedAir.SetPass.set_seg_sound
+#print axioms StarkedAir.SetPass.set_seg_root
 #print axioms StarkedAir.SetPass.set_root_sound
 EOS
 (cd lean && lake env lean /tmp/ax.lean)  # expect: propext, Classical.choice, Quot.sound

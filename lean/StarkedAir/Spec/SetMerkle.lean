@@ -51,6 +51,11 @@ termination_by 2 * half - j
 /-- A segment's root: node 1 over its records' leaves (following `last`). -/
 def segRoot (half : ℕ) (last : Option CEv) (seg : List CEv) : State := node half (leaves last seg) 1
 
+/-- The roots of consecutive segments `(HALF, records)` following `last`. -/
+def passRoots : Option CEv → List (ℕ × List CEv) → List State
+  | _, [] => []
+  | last, (h, seg) :: rest => segRoot h last seg :: passRoots (seg.getLast?.or last) rest
+
 theorem leaves_length : ∀ (last : Option CEv) (es : List CEv), (leaves last es).length = es.length
   | _, [] => rfl
   | _, _ :: es => by simp [leaves, leaves_length _ es]

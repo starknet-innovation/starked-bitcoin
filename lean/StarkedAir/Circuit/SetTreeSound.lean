@@ -9,7 +9,8 @@
   `hnode` of the children's roots).
 - `stree_sound`: under the recursion `Trust` (as the block and header trees), a satisfied tree circuit
   with the expected hash and key of shape `t` outputs the digest of a chain of proven segments over a
-  segment tree of shape `t` whose root is the summary's root (`Chain`), or Blake2s has a collision.
+  segment tree of shape `t` (`Chain`), or Blake2s has a collision; when every segment's root limbs are
+  16-bit (`RootValid`), the summary's root is the tree's (the segments' roots folded with `hnode`).
 -/
 import StarkedAir.Circuit.SetTree
 import StarkedAir.Circuit.HeaderRec
@@ -311,36 +312,67 @@ theorem shook_mem1 : ∃ root : List ℕ, root.length = 8 ∧
 /-- Consecutive segments link: the next one's incoming digest is the previous one's outgoing digest. -/
 def Links (p q : ℕ → F) : Prop := ∀ j < 16, summ p (16 + j) = summ q j
 
-/-- A tree of segments, each leaf with its Merkle root (a state). -/
+/-- A segment's root, decoded from its public limbs. -/
+def decodeRoot (p : ℕ → F) : Spec.Sha256.State :=
+  Spec.HeaderTree.toState fun w => BitVec.ofNat 32 ((p (ROOT0 + 2 * w)).val + 65536 * (p (ROOT0 + 2 * w + 1)).val)
+
+/-- A segment's root limbs are a state's. -/
+def RootValid (p : ℕ → F) : Prop := segRootL p = limbsOf (decodeRoot p)
+
+/-- A state's limbs decode to it. -/
+theorem decode_of_limbs {p : ℕ → F} {st : Spec.Sha256.State} (h : segRootL p = limbsOf st) :
+    decodeRoot p = st ∧ RootValid p := by
+  have hl : ∀ j < 16, p (ROOT0 + j) = ((Sha256.half16 (Spec.HeaderTree.stWord st (j / 2)) (j % 2) : ℕ) : F) := by
+    intro j hj
+    have := congrArg (fun l => l.getD j 0) h
+    simp only [segRootL, List.getD_eq_getElem?_getD, List.getElem?_map, List.getElem?_range hj, Option.map_some,
+      Option.getD_some] at this
+    rw [this, ← List.getD_eq_getElem?_getD, StarkedAir.HeaderTree.limbsOf_get hj]
+  have v : ∀ x h, (((Sha256.half16 x h : ℕ) : F)).val = Sha256.half16 x h := fun x h =>
+    ZMod.val_natCast_of_lt (lt_of_lt_of_le (Sha256.half16_lt x h) (by unfold P; norm_num))
+  have hw : ∀ w < 8, BitVec.ofNat 32 ((p (ROOT0 + 2 * w)).val + 65536 * (p (ROOT0 + 2 * w + 1)).val) =
+      Spec.HeaderTree.stWord st w := by
+    intro w hw
+    have h1 : p (ROOT0 + 2 * w + 1) =
+        ((Sha256.half16 (Spec.HeaderTree.stWord st ((2 * w + 1) / 2)) ((2 * w + 1) % 2) : ℕ) : F) := by
+      rw [Nat.add_assoc]; exact hl (2 * w + 1) (by omega)
+    rw [hl (2 * w) (by omega), h1, v, v, show 2 * w / 2 = w by omega,
+      show (2 * w + 1) / 2 = w by omega, show 2 * w % 2 = 0 by omega, show (2 * w + 1) % 2 = 1 by omega,
+      ← Sha256.half16_split]
+    simp
+  have hd : decodeRoot p = st := by
+    obtain ⟨a, b, c, d, e, f, g, hh⟩ := st
+    simp only [decodeRoot, Spec.HeaderTree.toState, Spec.Sha256.State.mk.injEq]
+    exact ⟨by simpa [Spec.HeaderTree.stWord] using hw 0 (by norm_num), by simpa [Spec.HeaderTree.stWord] using hw 1 (by norm_num), by simpa [Spec.HeaderTree.stWord] using hw 2 (by norm_num),
+      by simpa [Spec.HeaderTree.stWord] using hw 3 (by norm_num), by simpa [Spec.HeaderTree.stWord] using hw 4 (by norm_num), by simpa [Spec.HeaderTree.stWord] using hw 5 (by norm_num),
+      by simpa [Spec.HeaderTree.stWord] using hw 6 (by norm_num), by simpa [Spec.HeaderTree.stWord] using hw 7 (by norm_num)⟩
+  exact ⟨hd, by unfold RootValid; rw [hd]; exact h⟩
+
+/-- A tree of segments. -/
 inductive SegTree where
-  | leaf (p : ℕ → F) (st : Spec.Sha256.State)
+  | leaf (p : ℕ → F)
   | node (l r : SegTree)
 
 /-- The segments, in order. -/
 def SegTree.segs : SegTree → List (ℕ → F)
-  | .leaf p _ => [p]
+  | .leaf p => [p]
   | .node l r => l.segs ++ r.segs
 
-/-- The root: the segments' roots folded with `hnode`. -/
+/-- The root: the segments' decoded roots folded with `hnode`. -/
 def SegTree.root : SegTree → Spec.Sha256.State
-  | .leaf _ st => st
+  | .leaf p => decodeRoot p
   | .node l r => hnode l.root r.root
-
-/-- Each leaf's state is its segment's public root. -/
-def SegTree.Ok : SegTree → Prop
-  | .leaf p st => segRootL p = limbsOf st
-  | .node l r => l.Ok ∧ r.Ok
 
 /-- The segment tree has the verifier's shape. -/
 def SegTree.Fits : SegTree → BlockRec.Tree → Prop
-  | .leaf _ _, .leaf _ => True
+  | .leaf _, .leaf _ => True
   | .node l r, .node a b => l.Fits a ∧ r.Fits b
   | _, _ => False
 
 /-- **A chain of proven segments** over segment tree `τ` with summary `v`: each `SegOk`, linked, `v` the
-first's incoming limbs, the last's outgoing ones and `τ`'s root. -/
+first's incoming limbs and the last's outgoing ones, and, when the segments' roots are valid, `τ`'s root. -/
 def ChainT (SegOk : (ℕ → F) → Prop) (τ : SegTree) (v : ℕ → F) : Prop :=
-  τ.Ok ∧ (∀ p ∈ τ.segs, SegOk p) ∧ τ.segs.IsChain Links ∧ rootL v = limbsOf τ.root ∧
+  (∀ p ∈ τ.segs, SegOk p) ∧ τ.segs.IsChain Links ∧ ((∀ p ∈ τ.segs, RootValid p) → rootL v = limbsOf τ.root) ∧
     ∃ p0 pk : ℕ → F, τ.segs.head? = some p0 ∧ τ.segs.getLast? = some pk ∧ (∀ j < 16, v j = summ p0 j) ∧
       (∀ j < 16, v (16 + j) = summ pk (16 + j))
 
@@ -356,11 +388,13 @@ theorem rootL_congr {v w : ℕ → F} (h : ∀ i < NS, v i = w i) : rootL v = ro
 
 theorem chainT_join {SegOk : (ℕ → F) → Prop} {τl τr : SegTree} {u v w : ℕ → F} (hu : ChainT SegOk τl u)
     (hv : ChainT SegOk τr v) (hl : ∀ j < 16, v j = u (16 + j))
-    (hw : ∀ i < 32, w i = if i < 16 then u i else v i) (hr : rootL w = limbsOf (hnode τl.root τr.root)) :
+    (hw : ∀ i < 32, w i = if i < 16 then u i else v i)
+    (hr : rootL u = limbsOf τl.root → rootL v = limbsOf τr.root → rootL w = limbsOf (hnode τl.root τr.root)) :
     ChainT SegOk (.node τl τr) w := by
-  obtain ⟨hal, haok, hac, -, a0, ak, ha0, hak, hai, hao⟩ := hu
-  obtain ⟨hbl, hbok, hbc, -, b0, bk, hb0, hbk, hbi, hbo⟩ := hv
-  refine ⟨⟨hal, hbl⟩, ?_, ?_, hr, a0, bk, ?_, ?_, ?_, ?_⟩
+  obtain ⟨haok, hac, har, a0, ak, ha0, hak, hai, hao⟩ := hu
+  obtain ⟨hbok, hbc, hbr, b0, bk, hb0, hbk, hbi, hbo⟩ := hv
+  refine ⟨?_, ?_, fun hval => hr (har fun p hp => hval p (List.mem_append_left _ hp))
+    (hbr fun p hp => hval p (List.mem_append_right _ hp)), a0, bk, ?_, ?_, ?_, ?_⟩
   · intro p hp
     rcases List.mem_append.mp hp with h | h
     · exact haok p h
@@ -385,19 +419,17 @@ variable {Acc SatC : List Word → List Word → Prop} {VGates : (ℕ → Q) →
 
 /-- **A set tree is sound.** A satisfied circuit with the hash and key of tree shape `t`, outputting
 `pubsDigest(key, v)`, has `v` the summary of a chain of proven, linked segments over a segment tree of
-shape `t` with root `v`'s (or Blake2s has a collision). `hroot`: a proven segment's root limbs are a
-state's. -/
+shape `t`, its root `v`'s when the segments' roots are valid (or Blake2s has a collision). -/
 theorem stree_sound (T : Trust Acc SatC VGates leafH nodeH setNodeProgram (LeafOkS SegOk))
-    (hl : ∀ L, (leafH L).length = 8) (hn : nodeH.length = 8)
-    (hroot : ∀ p, SegOk p → ∃ st, segRootL p = limbsOf st) :
+    (hl : ∀ L, (leafH L).length = 8) (hn : nodeH.length = 8) :
     ∀ (t : BlockRec.Tree) (v : ℕ → F), SatC (t.hash leafH nodeH) (sd (t.key leafH nodeH) v) → Chain SegOk t v ∨ Collision
   | .leaf L, v, hs => by
     obtain ⟨p, hp, hd⟩ := T.leafSound L _ hs
     rcases sd_eq (Tree.key_length leafH nodeH (.leaf L)) (by simp [zeroKey]) hd with ⟨-, e⟩ | c
-    · obtain ⟨st, hst⟩ := hroot p hp
-      refine Or.inl ⟨.leaf p st, trivial, hst, by simpa [SegTree.segs] using hp, List.isChain_singleton _,
-        ?_, p, p, rfl, rfl, fun j hj => e j (by unfold NS; omega), fun j hj => e (16 + j) (by unfold NS; omega)⟩
-      rw [rootL_congr e, rootL_summ, hst]; rfl
+    · refine Or.inl ⟨.leaf p, trivial, by simpa [SegTree.segs] using hp, List.isChain_singleton _,
+        fun hval => ?_, p, p, rfl, rfl, fun j hj => e j (by unfold NS; omega), fun j hj => e (16 + j) (by unfold NS; omega)⟩
+      rw [rootL_congr e, rootL_summ]
+      exact hval p (by simp [SegTree.segs])
     · exact Or.inr c
   | .node l r, v, hs => by
     obtain ⟨ρ, hρ, hres, hg⟩ := T.nodeCircuit _ hs
@@ -430,15 +462,16 @@ theorem stree_sound (T : Trust Acc SatC VGates leafH nodeH setNodeProgram (LeafO
       rw [← e1', ← e2']; exact s0
     have s1' : SatC (r.hash leafH nodeH) (sd (r.key leafH nodeH) (childSum ρ sC1)) := by
       rw [← e3', ← e4']; exact s1
-    rcases stree_sound T hl hn hroot l _ s0' with ⟨τl, fl, cl⟩ | c
+    rcases stree_sound T hl hn l _ s0' with ⟨τl, fl, cl⟩ | c
     swap; · exact Or.inr c
-    rcases stree_sound T hl hn hroot r _ s1' with ⟨τr, fr, cr⟩ | c
+    rcases stree_sound T hl hn r _ s1' with ⟨τr, fr, cr⟩ | c
     swap; · exact Or.inr c
     refine Or.inl ⟨.node τl τr, ⟨fl, fr⟩, chainT_join cl cr (snode_link hρ) (fun i hi => ?_) ?_⟩
     · rw [← ev i (by unfold NS; omega)]
       simp only [outSum, outR, childSum]
       split_ifs <;> rfl
-    · rw [← rootL_congr ev]; exact snode_root hρ cl.2.2.2.1 cr.2.2.2.1
+    · intro h0 h1'
+      rw [← rootL_congr ev]; exact snode_root hρ h0 h1'
 
 end
 

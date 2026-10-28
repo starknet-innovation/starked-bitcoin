@@ -138,6 +138,7 @@ import StarkedAir.Circuit.SetTreeSound
 import StarkedAir.SetPass.PassChain
 import StarkedAir.SetPass.LCSound
 import StarkedAir.SetPass.MTTree
+import StarkedAir.SetPass.SegRoot
 import StarkedAir.Block.ExtSum
 import StarkedAir.Block.FpWalk
 import StarkedAir.Block.URec

@@ -749,6 +749,20 @@ theorem key_val {r j : ℕ} (hr : r < e) (hj : j < 36) :
 def prevKey (pub : ℕ → F) (M : ℕ → ℕ → F) (S : ℕ → ℕ) (r j : ℕ) : ℕ :=
   if r = 0 then (pub (PUB_LAST_IN j)).val else keyB (recR M S (r - 1)) j
 
+/-- **A record row's previous key**: the previous record's, or the incoming one at row 0 (bytes). -/
+theorem prev_val {r : ℕ} (hr : r < e) : ∀ j < 36, (M (PREV j) r).val = prevKey pub M S r j ∧ (M (PREV j) r).val < 256 := by
+  have hrn : r < n := by have := E.lt; omega
+  intro j hj
+  have := lc hsat hrn (memPrev hj)
+  simp only [Expr.eval, ev_k hrn, ev_notFirst hrn, ev_first hrn, sub_eq_zero] at this
+  by_cases h0 : r = 0
+  · subst h0; simp only [if_true, zero_mul, one_mul, zero_add] at this
+    rw [this]; exact ⟨by simp [prevKey], H.lastIn j hj⟩
+  · obtain ⟨r', rfl⟩ : ∃ r', r = r' + 1 := ⟨r - 1, by omega⟩
+    simp only [if_neg h0, one_mul, zero_mul, add_zero, ev_kp hrn] at this
+    rw [this]; simp only [prevKey, if_neg h0, show r' + 1 - 1 = r' by omega]
+    exact key_val hsat E H (by omega) hj
+
 /-- **A comparing row's key is above the previous key.** -/
 theorem row_above {r : ℕ} (hr : r < e) (hc : r ≠ 0 ∨ pub PUB_HASLAST = 1) :
     KeyLex (prevKey pub M S r) (keyB (recR M S r)) := by
@@ -761,17 +775,7 @@ theorem row_above {r : ℕ} (hr : r < e) (hc : r ≠ 0 ∨ pub PUB_HASLAST = 1) 
     · simp [h]
     · by_cases h0 : r = 0 <;> simp [h0, h]
   -- the previous key
-  have hprev : ∀ j < 36, (M (PREV j) r).val = prevKey pub M S r j ∧ (M (PREV j) r).val < 256 := by
-    intro j hj
-    have := lc hsat hrn (memPrev hj)
-    simp only [Expr.eval, ev_k hrn, ev_notFirst hrn, ev_first hrn, sub_eq_zero] at this
-    by_cases h0 : r = 0
-    · subst h0; simp only [if_true, zero_mul, one_mul, zero_add] at this
-      rw [this]; exact ⟨by simp [prevKey], H.lastIn j hj⟩
-    · obtain ⟨r', rfl⟩ : ∃ r', r = r' + 1 := ⟨r - 1, by omega⟩
-      simp only [if_neg h0, one_mul, zero_mul, add_zero, ev_kp hrn] at this
-      rw [this]; simp only [prevKey, if_neg h0, show r' + 1 - 1 = r' by omega]
-      exact key_val hsat E H (by omega) hj
+  have hprev := prev_val hsat E H hr
   -- one differing byte
   have hdb : ∀ j < 36, M (DIFF j) r = 0 ∨ M (DIFF j) r = 1 := fun j hj => bool_of hsat hrn (memD hj)
   have hsum := lc hsat hrn (c := .sub ((List.range 36).foldl (fun acc j => .add acc (k (DIFF j))) (cst 0)) cmp)
