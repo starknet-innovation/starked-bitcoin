@@ -10,7 +10,8 @@ final). Per period: the node `ID`, flags `NIL` (unused) and `LEAFL` (the node's 
   slot flags are range-checked (three bytes each way).
 * Every node yields its digest words `node(ID, w, lo, hi)` at the final rows (a whole period); row 0
   consumes `node(1, ROOT)`: node 1, the root, is computed and is the public `ROOT`.
-* Row 0 checks `e ≤ 2·HALF`: every record has a slot.
+* Row 0 checks `e ≤ 2·HALF` (every record has a slot) and `1 ≤ HALF ≤ 2^24` (heap indices stay far below
+  `P`).
 -/
 import StarkedAir.SetPass.Layout
 import StarkedAir.Block.B2s
@@ -44,7 +45,9 @@ def DD (i : ℕ) : ℕ := 314 + i
 def UL (i : ℕ) : ℕ := 317 + i
 def UR (i : ℕ) : ℕ := 320 + i
 def EB (i : ℕ) : ℕ := 323 + i
-def N_MAIN : ℕ := 326
+/-- `HALF − 1`, as three bytes. -/
+def HB (i : ℕ) : ℕ := 326 + i
+def N_MAIN : ℕ := 329
 
 /-- The gadget's 50 preprocessed columns, then: row 0 of a period, rows < 16, rows < 8, the word index
 `r mod 8` on rows < 16, the trace's row 0, and one-hot selectors for rows 0–15. -/
@@ -95,6 +98,7 @@ def flagC : List Expr :=
       (.mul (om (k USER)) (.sub (.add slotL one) cnt))) (b3 UR)),
     -- every record has a slot
     .mul (p P_FIRST) (.sub (.sub (.mul (cst 2) half) cnt) (b3 EB)),
+    .mul (p P_FIRST) (.sub (.sub half one) (b3 HB)),
     -- an unused slot is 32 zero bytes
     .mul (p P_LT16) (.mul (k ZW) (k WLO)), .mul (p P_LT16) (.mul (k ZW) (k WHI)) ] ++
   perConst.map (fun c => .mul (om (p P_R0)) (.sub (k c) (kp c)))
@@ -132,7 +136,8 @@ def lookups : List Lookup :=
   (List.range 3).map (fun i => r8 (k (DD i)) (.mul (k USEW) (p P_R0))) ++
   (List.range 3).map (fun i => r8 (k (UL i)) (.mul (k LU) (p P_R0))) ++
   (List.range 3).map (fun i => r8 (k (UR i)) (.mul (k LU) (p P_R0))) ++
-  (List.range 3).map (fun i => r8 (k (EB i)) (p P_FIRST))
+  (List.range 3).map (fun i => r8 (k (EB i)) (p P_FIRST)) ++
+  (List.range 3).map (fun i => r8 (k (HB i)) (p P_FIRST))
 
 def mt : Comp where
   air := { name := "set_mt", nMain := N_MAIN, pre := preCols, constraints := constraints }

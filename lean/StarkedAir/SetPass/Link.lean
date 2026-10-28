@@ -42,7 +42,7 @@ def yieldTable : List (ℕ × ℕ × ℕ) :=
   (List.range 9).map (fun w => (3, 89 + w, 36)) ++ [(9, 6, 37), (9, 7, 38)] ++
   (List.range 8).map (fun j => (10, 2 + j, 39)) ++ (List.range 8).map (fun j => (11, 2 + j, 40))
 
-theorem lookups_len : ∀ i < 12, (segSys.comp i).lookups.length = [1, 2, 4, 98, 4, 14, 2, 8, 2, 8, 10, 30].getD i 0 := by
+theorem lookups_len : ∀ i < 12, (segSys.comp i).lookups.length = [1, 2, 4, 98, 4, 14, 2, 8, 2, 8, 10, 33].getD i 0 := by
   decide
 
 def yieldOK : Bool :=
@@ -63,10 +63,10 @@ theorem yield_table : ∀ i < 12, ∀ k < (segSys.comp i).lookups.length, isUse 
 
 /-- Lookup sites over all rows: `Σᵢ kᵢ · 2^(Ls i)` (bytes 1, tables 2, pending 4, records 98,
 fingerprints 4, Blake2s words 14, Blake2s 2, `TxOutSer` 8, SHA-256 2, leaf words 8, leaf compressions 10,
-tree nodes 30). -/
+tree nodes 33). -/
 def segRows (Ls : ℕ → ℕ) : ℕ :=
   2 ^ Ls 0 + 2 * 2 ^ Ls 1 + 4 * 2 ^ Ls 2 + 98 * 2 ^ Ls 3 + 4 * 2 ^ Ls 4 + 14 * 2 ^ Ls 5 + 2 * 2 ^ Ls 6 +
-    8 * 2 ^ Ls 7 + 2 * 2 ^ Ls 8 + 8 * 2 ^ Ls 9 + 10 * 2 ^ Ls 10 + 30 * 2 ^ Ls 11
+    8 * 2 ^ Ls 7 + 2 * 2 ^ Ls 8 + 8 * 2 ^ Ls 9 + 10 * 2 ^ Ls 10 + 33 * 2 ^ Ls 11
 
 /-- **The size condition**: every component has at most `2^24` rows and the site count is below `P`. -/
 def SegSizeOk (Ls : ℕ → ℕ) : Prop := (∀ i < 12, Ls i ≤ 24) ∧ segRows Ls < P
@@ -133,7 +133,7 @@ theorem mem_sites {i r k : ℕ} : ((i, r, k) : Site) ∈ sites segSys inst ↔
 
 omit hsat in
 theorem sites_len : (sites segSys inst).length = segRows Ls := by
-  have hl : ∀ i < 12, (segSys.comp i).lookups.length = [1, 2, 4, 98, 4, 14, 2, 8, 2, 8, 10, 30].getD i 0 :=
+  have hl : ∀ i < 12, (segSys.comp i).lookups.length = [1, 2, 4, 98, 4, 14, 2, 8, 2, 8, 10, 33].getD i 0 :=
     lookups_len
   have hm : segSys.m = 12 := rfl
   simp only [sites, List.length_flatMap, List.length_map, List.length_range, hm]

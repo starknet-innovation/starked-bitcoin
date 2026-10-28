@@ -31,7 +31,7 @@ set is checked with ~1 KB.
 | `set_mt` | 88 per node | one compression per node of `left ‖ right` (counter 64, final); children from `node` or `leaf` yields (zero past the record count, by range-checked flags); yields `node(j, digest)`; row 0 consumes `node(1, ROOT)`, so the root is computed and public |
 
 Public inputs: `ROOT` (16 limbs at 550), `HALF` (566); 567 in all. The record count must not exceed
-`2·HALF` (checked in `set_mt`).
+`2·HALF`, and `1 ≤ HALF ≤ 2^24` (both checked in `set_mt`).
 
 **Use.** `chainproof set-member <set.bin> <work-dir> <txid>:<vout> <out.sbmember>` writes the proof (the
 pass's segment logs from `<work-dir>/seg/0.sbseg`; the txid in display order) and checks it against the
@@ -42,10 +42,18 @@ challenge, then the proof against its root and last key.
 has multiplicity `−1` or `0`; `set_lw` and `set_mt` carry boolean constraints on `PKU`, `USEW`, `LU`,
 `MUN`, `MUL` for this). The set tree folds the segments' public roots: `stree_sound` returns a segment
 tree of the verifier's shape whose root is the summary's, each leaf a proven segment's public root
-(`SetTree.SegTree`), and `set_root_sound` states it for the pass's root. The spec of a segment's root
-is `Spec/SetMerkle.lean` (`segRoot`). Still open: that a proven segment's public root is
-`segRoot HALF last seg` of its records (soundness of `set_lw`, `set_lc`, `set_mt`); until then
-`set_root_sound` takes "a proven segment's root limbs are a state's" as a hypothesis.
+(`SetTree.SegTree`), and `set_root_sound` states it for the pass's root. The spec of a segment's root is
+`Spec/SetMerkle.lean` (`segRoot`).
+
+- `set_mt` (`MTSound`, `MTLink`, `MTTree`): proven. `root_ok`: if every `set_lc` digest yield carries
+  record `s`'s leaf words (`s` below the record count), the public `ROOT` is `node HALF leaves 1`.
+  `set_mt` range-checks `1 ≤ HALF ≤ 2^24` on row 0, so heap indices stay far below `P`.
+- `set_lc` (`LCSound`): its constraints contain `block_b2s`'s, so the block Blake2s period lemmas
+  apply; the per-record chain is open.
+- `set_lw`: open (each record's leaf message is `key(r − 1) ‖ encRec(r)`).
+
+Until the last two are done, `set_root_sound` takes "a proven segment's root limbs are a state's" as a
+hypothesis.
 
 **Cost** (*est.*): about 4.75 Blake2s compressions per record instead of 1.35 (the file's 1.35, the
 leaf's 2, the tree's ~1.4 with `HALF = 2^15`). Segments shrink to ~47k records (the leaf compressions

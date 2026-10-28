@@ -251,7 +251,7 @@ theorem use_mult (hHL : pub PUB_HASLAST = 0 ∨ pub PUB_HASLAST = 1) : ∀ s ∈
       fun _ => rfl
     have ep : (segSys.comp 11).air.pre = MT.preCols := rfl
     rw [e, ep]
-    have hk30 : k < 30 := by simpa [segSys, comps, MT.mt, MT.lookups] using hk
+    have hk33 : k < 33 := by simpa [segSys, comps, MT.mt, MT.lookups] using hk
     have hb : ∀ c ∈ [MT.NIL, MT.LEAFL, MT.USEL, MT.USER, MT.USEW, MT.LU, MT.MUN, MT.MUL],
         (inst 11).main c r = 0 ∨ (inst 11).main c r = 1 :=
       fun c hc => air_bool (air := MT.mt.air) cs (c := c)

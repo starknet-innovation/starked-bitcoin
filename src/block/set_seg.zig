@@ -1123,12 +1123,14 @@ fn mtColumns(a: std.mem.Allocator, log_size: u32, leaves: []const Leaf, tree: []
     const UL = 317;
     const UR = 320;
     const EB = 323;
+    const HB = 326;
     const n = @as(usize, 1) << @intCast(log_size);
     const nodes = 2 * half - 1;
     const cnt = leaves.len;
     if (b2.PERIOD * nodes > n) return error.TreeDoesNotFit;
     if (cnt > 2 * half or 2 * half - cnt >= 1 << 24) return error.TooManyRecords;
-    const cols = try zeros(a, 326, n);
+    if (half == 0 or half - 1 >= 1 << 24) return error.TreeOutOfRange;
+    const cols = try zeros(a, 329, n);
     var p: usize = 0;
     while (p * b2.PERIOD < n) : (p += 1) {
         const base = p * b2.PERIOD;
@@ -1187,6 +1189,10 @@ fn mtColumns(a: std.mem.Allocator, log_size: u32, leaves: []const Leaf, tree: []
     }
     for (bytes3(2 * half - cnt), 0..) |x, i| {
         cols[EB + i][0] = f(x);
+        try ranges.append(a, x);
+    }
+    for (bytes3(half - 1), 0..) |x, i| {
+        cols[HB + i][0] = f(x);
         try ranges.append(a, x);
     }
     return cols;
