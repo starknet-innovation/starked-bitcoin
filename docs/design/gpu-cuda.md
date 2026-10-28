@@ -209,7 +209,7 @@ assembles the forest, and `scripts/pod/node_tree.sh` drives a run from the node.
 
 Rehearsal: 11,432 proofs in 67 min on an H100 SXM, GPU about 60 % busy (more host workers next).
 
-## Set pass: `cuda-set`, `cuda-set-tree` (2026-10-28, branch `gpu-set`; not yet run on a GPU)
+## Set pass: `cuda-set`, `cuda-set-tree` (2026-10-28, branch `gpu-set`; segments validated on an H200)
 
 The coin-set pass ([set-pass.md](set-pass.md), step 6) on the same two provers: the segment system
 (`block/set_seg.zig`, 12 components) on our resident prover, the set tree (`set_leaf_out` leaves,
@@ -295,6 +295,23 @@ file, a lower bound; a loaded machine), so roughly 20 s halved and 40 s producti
 cores; at ~30 GB of host memory per halved job, a 250 GB pod runs ~6–8 jobs, i.e. ~5–15 s per segment of
 host time against ~3 s of device time. Levers: device witness generators for `set_b2c`/`set_lc`/`set_mt`
 (Blake2s, as `block_b2s`) and `set_shac` (as `block_sha`), the bulk of the columns; or more pods' CPUs.
+
+### Measured on an H200 (2026-10-28)
+
+RunPod H200 SXM (secure, $5.29/h, 12 vCPU, 251 GB host), pod `73uw67ne4o1ed4`, ~1 h. Logs, the check
+log and the 40 segment files are in `data/gpu-set-20261028/` on the Mac.
+
+- **Build** (`prove_set.sh build`, `sm_90`): 18 min. nvcc took every new kernel.
+- **Byte identity**: segment 0 of the set after 935,000 at halved logs: the device proof equals the CPU
+  proof byte for byte and verifies (`SET CHECK OK`; the CPU proof took ~8 min and 93 GB RSS).
+- **Throughput** (`cuda-set --first 40 --jobs 6`, an 8M-coin prefix of the same set, halved logs):
+  **12.7 s per segment** wall clock; device 10.7 s per segment on average (6.3–18.4 s), host witness 29–42 s
+  per job (six jobs keep up); peak device memory 79.1 GB, peak host RSS 137 GB; proofs ~1.22 MB each.
+  The device time is ~4× the estimate above, so the GPU, not the host, bounds the pass.
+- **A whole set** at halved logs: ~23,460 coins per segment, so ~7,000 segments for the 164M-coin sets,
+  ~25 h of segments plus ~1.5 h of tree (*est.*), about $135 per set at $5.29/h.
+
+Not yet run on a GPU: `cuda-set-tree` and a whole pass.
 
 ### Runbook (pod)
 
