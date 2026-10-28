@@ -183,7 +183,31 @@ fn txOutSer(a: std.mem.Allocator, r: Rec) ![]u8 {
     return out;
 }
 
+/// The hash gadgets' inputs (`hash/blake2s_air.zig fillPeriod`, `sha256/witness.zig generate`): what a
+/// device witness generator needs to write the gadget columns (`src/gpu/cuda/witness.zig`, set system).
+pub const Gadgets = struct {
+    /// One input per 88-row period of `set_b2c`, `set_lc`, `set_mt` (all periods, used or not).
+    b2c: []const b2.Input = &.{},
+    lc: []const b2.Input = &.{},
+    mt: []const b2.Input = &.{},
+    /// `set_shac`'s compressions (the periods past them carry the zero dummy).
+    sha: []const shaw.Compression = &.{},
+};
+
+/// `buildAt` options.
+pub const Options = struct {
+    /// Leave the hash gadgets' columns (0..299 of `set_b2c`, `set_lc`, `set_mt`; 0..123 of `set_shac`)
+    /// empty: the device writes them from `Built.gadgets`. The other columns are built as usual.
+    skip_gadgets: bool = false,
+};
+
+/// Columns of each Blake2s gadget component (`set_b2c`, `set_lc`, `set_mt`) written by the gadget.
+pub const B2_GADGET_COLUMNS = b2.N_MAIN;
+/// Columns of `set_shac` written by the SHA-256 gadget.
+pub const SHA_GADGET_COLUMNS = shaw.N_MAIN;
+
 pub const Built = struct {
+    gadgets: Gadgets = .{},
     logs: [N_COMP]u32,
     /// The segment's Merkle root (D-050).
     root: [8]u32 = @splat(0),
@@ -199,6 +223,20 @@ fn f(x: anytype) M31 {
 
 fn invOrZero(x: M31) M31 {
     return x.inv() catch M31.zero();
+}
+
+/// `zeros`, the first `skip` columns left empty (written elsewhere).
+fn zerosFrom(a: std.mem.Allocator, n_cols: usize, n: usize, skip: usize) ![][]M31 {
+    const cols = try a.alloc([]M31, n_cols);
+    for (cols, 0..) |*c, i| {
+        if (i < skip) {
+            c.* = &.{};
+            continue;
+        }
+        c.* = try a.alloc(M31, n);
+        @memset(c.*, M31.zero());
+    }
+    return cols;
 }
 
 fn zeros(a: std.mem.Allocator, n_cols: usize, n: usize) ![][]M31 {
@@ -389,6 +427,12 @@ pub fn advance(gpa: std.mem.Allocator, ch: coin.Challenge, in: State, seg: []con
 /// `build` at fixed component logs `fixed` (a pass's leaves share one shape), when given: the segment
 /// must fit them.
 pub fn buildAt(a: std.mem.Allocator, ch: coin.Challenge, in: State, seg: []const u8, fixed: ?[N_COMP]u32) !Built {
+    return buildAtOpts(a, ch, in, seg, fixed, .{});
+}
+
+/// `buildAt` with options (`Options.skip_gadgets` for a device witness).
+pub fn buildAtOpts(a: std.mem.Allocator, ch: coin.Challenge, in: State, seg: []const u8, fixed: ?[N_COMP]u32, opts: Options) !Built {
+    const skip = opts.skip_gadgets;
     const recs = try parse(a, seg);
     var out = in;
     var reads: std.ArrayList(u32) = .empty;
@@ -396,6 +440,7 @@ pub fn buildAt(a: std.mem.Allocator, ch: coin.Challenge, in: State, seg: []const
     var pend_reads: PendReads = @splat(@splat(0));
     var b: Built = undefined;
     b.recs = recs.len;
+    b.gadgets = .{};
 
     // The TxOutSer stream and the native state after the segment.
     var tos: std.ArrayList(u8) = .empty;
@@ -461,9 +506,10 @@ pub fn buildAt(a: std.mem.Allocator, ch: coin.Challenge, in: State, seg: []const
     var no_undo: std.ArrayList(u32) = .empty;
     b.mains[C.fpwalk] = try coin.fpwalkColumns(a, b.logs[C.fpwalk], seg, &.{}, segs, ch.gamma, &reads, &no_undo);
     b.mains[C.b2w] = try b2wColumns(a, b.logs[C.b2w], in.b2, out.b2, seg.len, xs, m_b2, &reads, &pend_reads);
-    b.mains[C.b2c] = try b2cColumns(a, b.logs[C.b2c], in.b2, b2_blocks, b2_hs);
+    b.mains[C.b2c] = try b2cColumns(a, b.logs[C.b2c], in.b2, b2_blocks, b2_hs, skip, &b.gadgets.b2c);
     b.mains[C.tmsg] = try tmsgColumns(a, b.logs[C.tmsg], in.sha, recs, ys, m_sha, &reads, &pend_reads);
-    b.mains[C.shac] = try shacColumns(a, b.logs[C.shac], sha_comps);
+    b.mains[C.shac] = try shacColumns(a, b.logs[C.shac], sha_comps, skip);
+    b.gadgets.sha = sha_comps;
     // The Merkle root (D-050): leaves, the heap tree over `2·HALF` slots, its three components.
     const half: usize = @as(usize, 1) << @intCast(b.logs[C.rec] - 1);
     if (recs.len > 2 * half) return error.TooManyRecords;
@@ -476,8 +522,8 @@ pub fn buildAt(a: std.mem.Allocator, ch: coin.Challenge, in: State, seg: []const
     b.pubs[PUB_HALF] = f(half);
     b.root = tree[1];
     b.mains[C.lw] = try lwColumns(a, b.logs[C.lw], recs, leaves, &reads);
-    b.mains[C.lc] = try lcColumns(a, b.logs[C.lc], leaves);
-    b.mains[C.mt] = try mtColumns(a, b.logs[C.mt], leaves, tree, half, &ranges);
+    b.mains[C.lc] = try lcColumns(a, b.logs[C.lc], leaves, skip, &b.gadgets.lc);
+    b.mains[C.mt] = try mtColumns(a, b.logs[C.mt], leaves, tree, half, &ranges, skip, &b.gadgets.mt);
     b.mains[C.pend] = try pendColumns(a, b.logs[C.pend], &pend_reads);
     b.mains[C.tables] = try checks.tables(a, b.logs[C.tables], ranges.items, &.{});
     b.mains[C.bytes] = try bytes.generate(a, b.logs[C.bytes], seg, reads.items);
@@ -673,7 +719,7 @@ fn b2wColumns(a: std.mem.Allocator, log_size: u32, in: HashSt, out: HashSt, len:
     return cols;
 }
 
-fn b2cColumns(a: std.mem.Allocator, log_size: u32, in: HashSt, blocks: []const [16]u32, hs: []const [8]u32) ![][]M31 {
+fn b2cColumns(a: std.mem.Allocator, log_size: u32, in: HashSt, blocks: []const [16]u32, hs: []const [8]u32, skip: bool, inputs: *[]const b2.Input) ![][]M31 {
     const BLKI = 300;
     const NIL = 301;
     const LASTU = 302;
@@ -686,13 +732,16 @@ fn b2cColumns(a: std.mem.Allocator, log_size: u32, in: HashSt, blocks: []const [
     const n = @as(usize, 1) << @intCast(log_size);
     const m = blocks.len;
     if (b2.PERIOD * m > n) return error.B2DoesNotFit;
-    const cols = try zeros(a, 309, n);
+    const cols = try zerosFrom(a, 309, n, if (skip) b2.N_MAIN else 0);
+    const ins = try a.alloc(b2.Input, (n + b2.PERIOD - 1) / b2.PERIOD);
+    inputs.* = ins;
     var p: usize = 0;
     while (p * b2.PERIOD < n) : (p += 1) {
         const used = p < m;
         const input: b2.Input = if (used) .{ .h = if (p == 0) in.h else hs[p - 1], .m = blocks[p], .t = 64 * (@as(u64, in.nb) + p + 1), .f = false } else .{ .h = commit.H0, .m = @splat(0), .t = 0, .f = false };
+        ins[p] = input;
         const base = p * b2.PERIOD;
-        b2.fillPeriod(cols, base, n, input);
+        if (!skip) b2.fillPeriod(cols, base, n, input);
         for (0..b2.PERIOD) |q| {
             const row = base + q;
             if (row >= n) break;
@@ -784,7 +833,7 @@ fn tmsgColumns(a: std.mem.Allocator, log_size: u32, in: HashSt, recs: []const Re
     return cols;
 }
 
-fn shacColumns(a: std.mem.Allocator, log_size: u32, comps: []const shaw.Compression) ![][]M31 {
+fn shacColumns(a: std.mem.Allocator, log_size: u32, comps: []const shaw.Compression, skip: bool) ![][]M31 {
     const BLKI = 124;
     const NIL = 125;
     const LASTS = 126;
@@ -793,9 +842,14 @@ fn shacColumns(a: std.mem.Allocator, log_size: u32, comps: []const shaw.Compress
     const LINV = 129;
     const n = @as(usize, 1) << @intCast(log_size);
     const m = comps.len;
-    const w = try shaw.generate(a, log_size, comps);
+    if (m > shaw.capacity(log_size)) return error.TooManyCompressions;
     const cols = try a.alloc([]M31, 130);
-    for (cols[0..shaw.N_MAIN], w.main) |*c, x| c.* = x;
+    if (skip) {
+        for (cols[0..shaw.N_MAIN]) |*c| c.* = &.{};
+    } else {
+        const w = try shaw.generate(a, log_size, comps);
+        for (cols[0..shaw.N_MAIN], w.main) |*c, x| c.* = x;
+    }
     for (cols[shaw.N_MAIN..]) |*c| {
         c.* = try a.alloc(M31, n);
         @memset(c.*, M31.zero());
@@ -1111,7 +1165,7 @@ fn lwColumns(a: std.mem.Allocator, log_size: u32, recs: []const Rec, leaves: []c
     return cols;
 }
 
-fn lcColumns(a: std.mem.Allocator, log_size: u32, leaves: []const Leaf) ![][]M31 {
+fn lcColumns(a: std.mem.Allocator, log_size: u32, leaves: []const Leaf, skip: bool, inputs: *[]const b2.Input) ![][]M31 {
     const BLKI = 300;
     const FST = 301;
     const NIL = 302;
@@ -1129,14 +1183,17 @@ fn lcColumns(a: std.mem.Allocator, log_size: u32, leaves: []const Leaf) ![][]M31
     var total: usize = 0;
     for (leaves) |lf| total += lf.blocks.len;
     if (b2.PERIOD * total > n) return error.LeafBlocksDoNotFit;
-    const cols = try zeros(a, 313, n);
+    const cols = try zerosFrom(a, 313, n, if (skip) b2.N_MAIN else 0);
+    const ins = try a.alloc(b2.Input, (n + b2.PERIOD - 1) / b2.PERIOD);
+    inputs.* = ins;
     var p: usize = 0;
     for (leaves, 0..) |lf, ri| for (lf.blocks, lf.ins, 0..) |bw, hin, bi| {
         const nb = lf.blocks.len;
         const last = bi + 1 == nb;
         const input: b2.Input = .{ .h = hin, .m = bw, .t = leafT(lf.msg.len, bi, nb), .f = last };
+        ins[p] = input;
         const base = p * b2.PERIOD;
-        b2.fillPeriod(cols, base, n, input);
+        if (!skip) b2.fillPeriod(cols, base, n, input);
         for (0..b2.PERIOD) |q| {
             const row = base + q;
             if (row >= n) break;
@@ -1159,7 +1216,8 @@ fn lcColumns(a: std.mem.Allocator, log_size: u32, leaves: []const Leaf) ![][]M31
     };
     while (p * b2.PERIOD < n) : (p += 1) {
         const base = p * b2.PERIOD;
-        b2.fillPeriod(cols, base, n, .{ .h = commit.H0, .m = @splat(0), .t = 0, .f = false });
+        ins[p] = .{ .h = commit.H0, .m = @splat(0), .t = 0, .f = false };
+        if (!skip) b2.fillPeriod(cols, base, n, ins[p]);
         for (0..b2.PERIOD) |q| {
             if (base + q >= n) break;
             cols[NIL][base + q] = M31.one();
@@ -1172,7 +1230,7 @@ fn bytes3(x: usize) [3]u32 {
     return .{ @intCast(x & 0xff), @intCast((x >> 8) & 0xff), @intCast((x >> 16) & 0xff) };
 }
 
-fn mtColumns(a: std.mem.Allocator, log_size: u32, leaves: []const Leaf, tree: []const [8]u32, half: usize, ranges: *std.ArrayList(u32)) ![][]M31 {
+fn mtColumns(a: std.mem.Allocator, log_size: u32, leaves: []const Leaf, tree: []const [8]u32, half: usize, ranges: *std.ArrayList(u32), skip: bool, inputs: *[]const b2.Input) ![][]M31 {
     const ID = 300;
     const NIL = 301;
     const USEW = 302;
@@ -1198,7 +1256,9 @@ fn mtColumns(a: std.mem.Allocator, log_size: u32, leaves: []const Leaf, tree: []
     if (b2.PERIOD * nodes > n) return error.TreeDoesNotFit;
     if (cnt > 2 * half or 2 * half - cnt >= 1 << 24) return error.TooManyRecords;
     if (half == 0 or half - 1 >= 1 << 24) return error.TreeOutOfRange;
-    const cols = try zeros(a, 329, n);
+    const cols = try zerosFrom(a, 329, n, if (skip) b2.N_MAIN else 0);
+    const ins = try a.alloc(b2.Input, (n + b2.PERIOD - 1) / b2.PERIOD);
+    inputs.* = ins;
     var p: usize = 0;
     while (p * b2.PERIOD < n) : (p += 1) {
         const base = p * b2.PERIOD;
@@ -1212,7 +1272,8 @@ fn mtColumns(a: std.mem.Allocator, log_size: u32, leaves: []const Leaf, tree: []
             @memcpy(m[0..8], &l);
             @memcpy(m[8..16], &r);
         }
-        b2.fillPeriod(cols, base, n, if (used) .{ .h = commit.H0, .m = m, .t = 64, .f = true } else .{ .h = commit.H0, .m = @splat(0), .t = 0, .f = false });
+        ins[p] = if (used) .{ .h = commit.H0, .m = m, .t = 64, .f = true } else .{ .h = commit.H0, .m = @splat(0), .t = 0, .f = false };
+        if (!skip) b2.fillPeriod(cols, base, n, ins[p]);
         const slot_l = if (leafl) 2 * (j - half) else 0;
         const use_l = leafl and slot_l < cnt;
         const use_r = leafl and slot_l + 1 < cnt;

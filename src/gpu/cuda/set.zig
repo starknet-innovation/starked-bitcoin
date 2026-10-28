@@ -2,7 +2,8 @@
 //! resident CUDA prover, in one process and one CUDA session (docs/design/gpu-cuda.md § Set pass).
 //!
 //!   cuda-set <set.bin> <work-dir> --challenge <ch.bin> [--test-strength] [--logs l0,...,l11]
-//!            [--jobs n] [--only <list>] [--first n] [--cpu-check n] [--verify] [--mock] [--host-only] [--stages]
+//!            [--jobs n] [--only <list>] [--first n] [--cpu-check n] [--verify] [--mock] [--host-only]
+//!            [--host-witness] [--stages]
 //!
 //! Writes `<work-dir>/challenge.bin` (the challenge used; a rerun must use the same) and
 //! `<work-dir>/seg/<i>.sbseg` exactly as `set_tree.provePass` does (same cut, same witnesses, the
@@ -12,8 +13,11 @@
 //!
 //! The segments' incoming states are chained first, without witnesses (`set_seg.advance`); each
 //! witness's outgoing state must equal the next incoming one. Then `--jobs` workers (default 2) build
-//! witnesses, plans and host trees (`prover.Input.witness = null`: every column built on the host)
-//! while the main thread, which owns the runtime, proves on the device.
+//! witnesses, plans and host trees while the main thread, which owns the runtime, proves on the device.
+//! The device writes tree 0 and the hash gadgets' columns (`set_b2c`, `set_lc`, `set_mt`: 300 each;
+//! `set_shac`: 124) from their inputs (`witness.SetInputs`, `prover.Input.set_witness`); the host builds
+//! and uploads the rest (`set_seg.buildAtOpts` with `skip_gadgets`). `--host-witness`: every column on
+//! the host (the first version, for A/B runs).
 //!
 //! `--cpu-check n`: the first segment proved and every n-th after it are also proved on the CPU
 //! (`set_tree.proveSeg`) and the files must be byte-identical. `--verify`: every proof is verified on
@@ -42,7 +46,7 @@ const FriConfigV2 = core.pcs.config_v2.FriConfigV2;
 const default_logs: ST.Logs = .{ 23, 8, 6, 16, 22, 21, 23, 23, 23, 22, 23, 23 };
 
 fn usage() noreturn {
-    std.debug.print("usage: cuda-set <set.bin> <work-dir> (--challenge <ch.bin> | --testing-challenge) [--test-strength] [--logs l0,...,l11] [--jobs n] [--only <list>] [--first n] [--cpu-check n] [--verify] [--mock] [--host-only] [--stages]\n", .{});
+    std.debug.print("usage: cuda-set <set.bin> <work-dir> (--challenge <ch.bin> | --testing-challenge) [--test-strength] [--logs l0,...,l11] [--jobs n] [--only <list>] [--first n] [--cpu-check n] [--verify] [--mock] [--host-only] [--host-witness] [--stages]\n", .{});
     std.process.exit(2);
 }
 
@@ -76,6 +80,8 @@ const Job = struct {
     mains: *[SS.N_COMP][]const []const M31 = undefined,
     prepared: ?prover.Prepared = null,
     host: ?prover.HostTrees = null,
+    /// The device witness's inputs (null with `--host-witness` or `--mock`).
+    set_inputs: ?*res.witness.SetInputs = null,
     t_witness: u64 = 0,
     t_plans: u64 = 0,
     err: ?anyerror = null,
@@ -107,6 +113,10 @@ const Pipe = struct {
     todo: []const usize,
     slots: []Slot,
     mock: bool,
+    /// `--host-witness`: every column built on the host and uploaded (no device witness).
+    host_witness: bool,
+    /// `--cpu-check n`: these jobs (todo index % n == 0) also need the full host witness.
+    cpu_check: ?usize,
     airs: *const [SS.N_COMP]sb.air.ir.Air,
     catalog: *const res.catalog.Catalog,
     cfg: rec.Config,
@@ -124,7 +134,7 @@ const Pipe = struct {
                 std.process.exit(1);
             };
             job.* = .{ .arena = std.heap.ArenaAllocator.init(self.gpa) };
-            self.build(job, self.todo[j]) catch |e| {
+            self.build(job, self.todo[j], j) catch |e| {
                 job.err = e;
             };
             slot.job = job;
@@ -132,11 +142,14 @@ const Pipe = struct {
         }
     }
 
-    fn build(self: *Pipe, job: *Job, i: usize) !void {
+    fn build(self: *Pipe, job: *Job, i: usize, j: usize) !void {
         const ba = job.arena.allocator();
         var lap = try std.time.Timer.start();
+        const device_witness = !self.mock and !self.host_witness;
+        // The gadget columns are left to the device, unless a CPU proof of this segment needs them.
+        const full = !device_witness or (if (self.cpu_check) |every| j % every == 0 else false);
         const b = try ba.create(SS.Built);
-        b.* = try SS.buildAt(ba, self.ch, self.states[i], self.file[self.starts[i]..self.ends[i]], self.logs);
+        b.* = try SS.buildAtOpts(ba, self.ch, self.states[i], self.file[self.starts[i]..self.ends[i]], self.logs, .{ .skip_gadgets = !full });
         if (!std.meta.eql(b.out, self.states[i + 1])) return error.StateChainMismatch;
         job.b = b;
         job.t_witness = lap.lap();
@@ -145,9 +158,15 @@ const Pipe = struct {
         job.mains = try ba.create([SS.N_COMP][]const []const M31);
         for (job.mains, b.mains) |*m, x| m.* = @ptrCast(x);
         if (self.mock) return;
-        const in = prover.Input{ .parts = job.parts, .mains = job.mains, .config = self.cfg, .catalog = self.catalog };
-        job.prepared = try prover.Prepared.init(ba, job.parts, self.catalog, self.cfg, .device_logup);
-        job.host = try prover.hostTraceTrees(ba, in);
+        if (device_witness) {
+            const b2s = try ba.create([3]res.witness.SetInputs.B2);
+            const si = try ba.create(res.witness.SetInputs);
+            si.* = res.witness.SetInputs.ofSegment(b, b2s);
+            job.set_inputs = si;
+        }
+        const in = prover.Input{ .parts = job.parts, .mains = job.mains, .config = self.cfg, .catalog = self.catalog, .set_witness = job.set_inputs };
+        job.prepared = try prover.Prepared.initSource(ba, job.parts, self.catalog, self.cfg, .device_logup, in.source());
+        job.host = try prover.hostTraceTreesFor(ba, in, job.prepared.?.witness);
         job.t_plans = lap.lap();
     }
 };
@@ -164,6 +183,7 @@ pub fn main() !void {
     var mock = false;
     var stages = false;
     var host_only = false;
+    var host_witness = false;
     var logs = default_logs;
     var jobs: usize = 2;
     var only: ?[]const u32 = null;
@@ -175,7 +195,7 @@ pub fn main() !void {
     while (i < args.len) : (i += 1) {
         const x = args[i];
         const has = i + 1 < args.len;
-        if (std.mem.eql(u8, x, "--test-strength")) weak = true else if (std.mem.eql(u8, x, "--verify")) verify = true else if (std.mem.eql(u8, x, "--stages")) stages = true else if (std.mem.eql(u8, x, "--mock")) mock = true else if (std.mem.eql(u8, x, "--testing-challenge")) testing_ch = true else if (std.mem.eql(u8, x, "--host-only")) host_only = true else if (std.mem.eql(u8, x, "--challenge") and has) {
+        if (std.mem.eql(u8, x, "--test-strength")) weak = true else if (std.mem.eql(u8, x, "--verify")) verify = true else if (std.mem.eql(u8, x, "--stages")) stages = true else if (std.mem.eql(u8, x, "--mock")) mock = true else if (std.mem.eql(u8, x, "--testing-challenge")) testing_ch = true else if (std.mem.eql(u8, x, "--host-only")) host_only = true else if (std.mem.eql(u8, x, "--host-witness")) host_witness = true else if (std.mem.eql(u8, x, "--challenge") and has) {
             i += 1;
             ch_path = args[i];
         } else if (std.mem.eql(u8, x, "--logs") and has) {
@@ -251,7 +271,7 @@ pub fn main() !void {
     defer if (twiddles) |*t| t.deinit();
 
     const n_jobs: usize = @max(1, @min(jobs, todo.items.len));
-    var pipe: Pipe = .{ .gpa = gpa, .file = file, .starts = starts, .ends = ends, .states = states, .ch = ch, .logs = logs, .todo = todo.items, .slots = try a.alloc(Slot, n_jobs), .mock = mock, .airs = airs, .catalog = &catalog, .cfg = cfg };
+    var pipe: Pipe = .{ .gpa = gpa, .file = file, .starts = starts, .ends = ends, .states = states, .ch = ch, .logs = logs, .todo = todo.items, .slots = try a.alloc(Slot, n_jobs), .mock = mock, .host_witness = host_witness, .cpu_check = cpu_check, .airs = airs, .catalog = &catalog, .cfg = cfg };
     for (pipe.slots) |*sl| sl.* = .{};
     for (pipe.slots) |*sl| sl.free.set();
     const threads = try a.alloc(std.Thread, n_jobs);
@@ -293,7 +313,7 @@ pub fn main() !void {
             t_device = lap.lap();
             break :blk f;
         } else blk: {
-            const in = prover.Input{ .parts = job.parts, .mains = job.mains, .config = cfg, .catalog = &catalog, .runtime = &runtime.? };
+            const in = prover.Input{ .parts = job.parts, .mains = job.mains, .config = cfg, .catalog = &catalog, .set_witness = job.set_inputs, .runtime = &runtime.? };
             if (twiddles == null) twiddles = try prover.Twiddles.init(gpa, job.prepared.?.plans.twiddle_words);
             const result = prover.proofPass(ba, &job.prepared.?, &job.host.?, &twiddles.?, in, null) catch |err| {
                 if (err == error.InsufficientDeviceMemory) std.debug.print("cuda-set: the segment arena ({d:.1} GiB) does not fit this device; use smaller --logs (docs/design/gpu-cuda.md § Set pass)\n", .{@as(f64, @floatFromInt(try job.prepared.?.memory.bytes())) / (1 << 30)});

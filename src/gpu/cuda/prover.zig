@@ -71,9 +71,19 @@ pub const Input = struct {
     /// Device witness (`witness.zig`): the inputs of the generated components, whose `mains` may
     /// then be empty; null: every column comes from `mains`.
     witness: ?*const witness.Inputs = null,
+    /// The coin-set pass's device witness (`witness.SetInputs`: the hash gadgets and tree 0); the
+    /// generated columns' `mains` entries may then be empty. At most one of `witness`, `set_witness`.
+    set_witness: ?*const witness.SetInputs = null,
     /// A process-owned CUDA runtime kept open across proofs (`cuda-epoch`): the context and the AOT
     /// loader (and its loaded functions) are reused; null: one session per proof.
     runtime: ?*cuda.runtime.NativeRuntime = null,
+
+    /// The device witness's source, if any.
+    pub fn source(self: Input) ?Prepared.Source {
+        if (self.witness) |w| return .{ .block = w };
+        if (self.set_witness) |w| return .{ .set = w };
+        return null;
+    }
 };
 
 pub const Result = struct {
@@ -107,11 +117,22 @@ pub const Prepared = struct {
 
     /// `init`, with the device generating the columns of `inputs`' components and tree 0.
     pub fn initWitness(allocator: std.mem.Allocator, parts: []const system.Part, cat: *const catalog_mod.Catalog, config: core.pcs.config_v2.PcsConfigV2, mode: Mode, inputs: ?*const witness.Inputs) !Prepared {
-        const witness_plan: ?*witness.Plan = if (inputs) |in| blk: {
+        return initSource(allocator, parts, cat, config, mode, if (inputs) |in| .{ .block = in } else null);
+    }
+
+    /// The device witness of either system.
+    pub const Source = union(enum) { block: *const witness.Inputs, set: *const witness.SetInputs };
+
+    /// `init`, with the device generating `source`'s columns and tree 0.
+    pub fn initSource(allocator: std.mem.Allocator, parts: []const system.Part, cat: *const catalog_mod.Catalog, config: core.pcs.config_v2.PcsConfigV2, mode: Mode, source: ?Source) !Prepared {
+        const witness_plan: ?*witness.Plan = if (source) |src| blk: {
             if (cat.witness == null) return error.CudaCatalogPlacementMismatch;
             const p = try allocator.create(witness.Plan);
             errdefer allocator.destroy(p);
-            p.* = try witness.Plan.init(allocator, parts, in);
+            p.* = switch (src) {
+                .block => |in| try witness.Plan.init(allocator, parts, in),
+                .set => |in| try witness.Plan.initSet(allocator, parts, in),
+            };
             break :blk p;
         } else null;
         errdefer if (witness_plan) |p| {
@@ -258,20 +279,21 @@ pub fn hostTraceTreesFor(allocator: std.mem.Allocator, input: Input, plan: ?*con
     out.trees[1] = main;
     var k: usize = 0;
     for (input.parts, input.mains) |p, m| {
-        const skip = if (plan) |w| w.generated_main[k] else false;
-        if (skip) {
-            // Generated on the device: the host columns, if any, are not read.
-            if (m.len != 0 and m.len != p.air.n_main) return error.InvalidPreparedGeometry;
-            for (0..p.air.n_main) |_| {
+        // A component's columns are generated on the device all (block system: its `mains` may be
+        // empty) or in part (the coin-set pass's gadgets): the host values of a generated column,
+        // if any, are not read.
+        if (m.len == 0) {
+            for (0..p.air.n_main) |j| if (!(if (plan) |w| w.generated_main[k + j] else false)) return error.InvalidPreparedGeometry;
+        } else if (m.len != p.air.n_main) return error.InvalidPreparedGeometry;
+        for (0..p.air.n_main) |j| {
+            const generated = if (plan) |w| w.generated_main[k] else false;
+            if (generated) {
                 main[k] = .{ .log_size = p.log_size, .values = &.{} };
-                k += 1;
+            } else {
+                const col = m[j];
+                if (col.len != @as(usize, 1) << @intCast(p.log_size)) return error.InvalidPreparedGeometry;
+                main[k] = .{ .log_size = p.log_size, .values = col };
             }
-            continue;
-        }
-        if (m.len != p.air.n_main) return error.InvalidPreparedGeometry;
-        for (m) |col| {
-            if (col.len != @as(usize, 1) << @intCast(p.log_size)) return error.InvalidPreparedGeometry;
-            main[k] = .{ .log_size = p.log_size, .values = col };
             k += 1;
         }
     }
@@ -280,7 +302,7 @@ pub fn hostTraceTreesFor(allocator: std.mem.Allocator, input: Input, plan: ?*con
 
 /// The whole proof, LogUp on the device (see the file comment).
 pub fn prove(allocator: std.mem.Allocator, input: Input) !Result {
-    var prepared = try Prepared.initWitness(allocator, input.parts, input.catalog, input.config, .device_logup, input.witness);
+    var prepared = try Prepared.initSource(allocator, input.parts, input.catalog, input.config, .device_logup, input.source());
     defer prepared.deinit();
     var host = try hostTraceTreesFor(allocator, input, prepared.witness);
     defer host.deinit(allocator);
@@ -297,7 +319,7 @@ pub const HostLogup = struct {
 
 /// The whole proof, LogUp on the host (the first version, for A/B runs).
 pub fn proveHostLogup(allocator: std.mem.Allocator, input: Input) !Result {
-    var prepared = try Prepared.initWitness(allocator, input.parts, input.catalog, input.config, .host_logup, input.witness);
+    var prepared = try Prepared.initSource(allocator, input.parts, input.catalog, input.config, .host_logup, input.source());
     defer prepared.deinit();
     var host = try hostTraceTreesFor(allocator, input, prepared.witness);
     defer host.deinit(allocator);

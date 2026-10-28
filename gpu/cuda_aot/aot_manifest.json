@@ -863,6 +863,19 @@
   },
   {
     "kind": "witness",
+    "label": "starked_witness_b2_gadget_3ed740400ecb76ed",
+    "abi_schema": "native_indexed_recurrence_trace_v1",
+    "kernel_name": "starked_witness_b2_gadget_v1_3ed740400ecb76ed",
+    "cache_key": "5eaea175aef66203",
+    "semantic_hash": "3ed740400ecb76ed",
+    "program_identity": "1993858e78b181954742f5c6bb51eb46eee20c823f8234a6f7cc0c66e118d3ee",
+    "file": "witness_starked_witness_b2_gadget_3ed740400ecb76ed_5eaea175aef66203.cu",
+    "module_globals": "none",
+    "identity_scheme": "sha256-source-and-contract-v1",
+    "semantic_contract": "starked-bitcoin/witness-b2-gadget/v1;args=sigma,periods,count,columns,rows;the Blake2s gadget's 300 natural columns of any component: fillPeriod(periods[27 min(r/88, count-1)..]: h8,m16,tlo,thi,last);columns=u64 pointers (300);grid=rows/256;threads=256"
+  },
+  {
+    "kind": "witness",
     "label": "starked_witness_b2s_c4b4ebb36a86c7dd",
     "abi_schema": "native_indexed_recurrence_trace_v1",
     "kernel_name": "starked_witness_b2s_v1_c4b4ebb36a86c7dd",
@@ -925,6 +938,19 @@
     "module_globals": "none",
     "identity_scheme": "sha256-source-and-contract-v1",
     "semantic_contract": "starked-bitcoin/witness-sha-columns/v1;args=words,meta,count,columns,rows;block_sha 144 natural columns: sha256 columns(shaRole, K=meta[0..64]) + Extra(meta[64+6p]: mid,blk,flags,lid,rid,ym);columns=u64 pointers;grid=rows/256;threads=256"
+  },
+  {
+    "kind": "witness",
+    "label": "starked_witness_sha_gadget_03fc951e760ce382",
+    "abi_schema": "native_indexed_recurrence_trace_v1",
+    "kernel_name": "starked_witness_sha_gadget_v1_03fc951e760ce382",
+    "cache_key": "eaf85ad3a3a6e817",
+    "semantic_hash": "03fc951e760ce382",
+    "program_identity": "4d5e97675af340bccb26001215e780e0e6942c52786fd8591d6e20e2fe8c1f17",
+    "file": "witness_starked_witness_sha_gadget_03fc951e760ce382_eaf85ad3a3a6e817.cu",
+    "module_globals": "none",
+    "identity_scheme": "sha256-source-and-contract-v1",
+    "semantic_contract": "starked-bitcoin/witness-sha-gadget/v1;args=words,ktab,count(unused),columns,rows;the SHA-256 gadget's 124 natural columns of any component: sha256 columns(shaRole, K=ktab[0..64]) from the sha_words trace;columns=u64 pointers (124);grid=rows/256;threads=256"
   },
   {
     "kind": "witness",

@@ -3,6 +3,9 @@
 # the tree with cuda-set-tree (stwo-zig's circuit archive), both resumable.
 #   prove_set.sh build                                  cuda-set, cuda-set-tree (circuit archive reused if built), chainproof (CPU)
 #   prove_set.sh check <set.bin> <ch.bin> <logs>        segment 0 on the device and the CPU: byte-identical, verified
+#   prove_set.sh stages <set.bin> <ch.bin> <logs> [n] [jobs]
+#                                                       the first n segments (default 20) with --stages (H2D bytes and
+#                                                       device stage times), device witness; then 4 with --host-witness (A/B)
 #   prove_set.sh run <name> <set.bin> <ch.bin> <logs> [cuda-set options]
 #                                                       every segment, then the tree and pass.bin, verified
 # <ch.bin>: `chainproof set-challenge <dir>:<to>[:<from>:<prev-set.bin>] <ch.bin>` (where the epoch's
@@ -52,6 +55,16 @@ check)
   # Segment 0: device proof, CPU proof of the same witness, byte comparison, host verification.
   /usr/bin/time -v zig-out/bin/cuda-set "$set_bin" "$dir" --challenge "$ch" --logs "$logs" --first 1 --cpu-check 1 --verify --jobs 1 2>&1 | tee "$LOGS/set-check.log" | grep -vE "^\s"
   grep -q "byte-identical" "$LOGS/set-check.log" && echo "== SET CHECK OK: $dir/seg/0.sbseg ==" || { echo "== SET CHECK FAILED =="; exit 1; }
+  ;;
+stages)
+  set -e
+  set_bin=${1:?set.bin}; ch=${2:?ch.bin}; logs=${3:?logs}; n=${4:-20}; jobs=${5:-6}
+  dir=$WORK/set-stages-$(date -u +%Y%m%dT%H%M%S)
+  zig-out/bin/cuda-set "$set_bin" "$dir/device" --challenge "$ch" --logs "$logs" --first "$n" --jobs "$jobs" --stages --cpu-check 1000000 2>&1 | tee "$LOGS/set-stages.log" | grep -E "^[0-9]|stages|SEGMENTS|byte-identical|MISMATCH"
+  zig-out/bin/cuda-set "$set_bin" "$dir/host" --challenge "$ch" --logs "$logs" --first 4 --jobs "$jobs" --stages --host-witness 2>&1 | tee "$LOGS/set-stages-host.log" | grep -E "^[0-9]|stages|SEGMENTS"
+  # The two runs prove the same segments: the files must be equal.
+  for f in "$dir"/host/seg/*.sbseg; do cmp -s "$f" "$dir/device/seg/$(basename "$f")" || { echo "== DEVICE/HOST WITNESS FILES DIFFER: $f =="; exit 1; }; done
+  echo "== SET STAGES OK: $dir (device-witness and host-witness segment files equal) =="
   ;;
 run)
   name=${1:?name}; set_bin=${2:?set.bin}; ch=${3:?ch.bin}; logs=${4:?logs}

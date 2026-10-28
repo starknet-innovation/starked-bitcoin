@@ -21,6 +21,24 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-10-28 (session 26, branch gpu-set) — Set pass device witness: hash gadgets and tree 0 on the GPU
+Who: Claude (agent, Opus 5.5), owner-approved items A and C of the H200 profile (ingress 7.8–9.1 s of 12.7 s)
+Roadmap: coin-set pass (D-048) step 6: device witness built and host-checked; not yet run on a GPU
+Done:
+- `witness.zig`: generic `b2_gadget` and `sha_gadget` kernels, `SetInputs`, `Plan.initSet` (with the block's
+  `sha_words` and `pre`); `prover.Input.set_witness`, `Prepared.initSource`, `hostTraceTreesFor` per column;
+  `set_seg.buildAtOpts(.skip_gadgets)` and `Built.gadgets`; `cuda-set` uses it (`--host-witness` for A/B);
+  `prove_set.sh stages`; gpu-cuda.md § Set pass (device witness, H2D table, runbook step 1b).
+- C as tree 0 generated on the device (`pre`), not kept resident: no cross-transaction slot in the runtime.
+Evidence:
+- `zig build cuda-test -Dcuda=true -Doptimize=ReleaseFast`: 20/21 (1 optional skipped), including the new
+  gadget-kernels = host witness (set-170 segments 0, 12, 24; set-1000; mutations; `STARKED_SET_WITNESS_LARGE`
+  at 2^17–2^19 also run) and the whole `.trace_generation` = CPU storage order; block witness tests unchanged.
+- `cuda-archive-plan` (107 sources), `cuda-check`, `zig build test` on "set tree"/"set segments" (9/9),
+  `scripts/test_cuda_set_mock.sh` (byte-identical to prove-set). Planned H2D per halved segment 1.76 GiB (was 21.5).
+- `cuda-set --host-only`, quartered set-1000 segment: witness 0.30 s vs 9.9 s with `--host-witness`.
+Next: on a pod, `prove_set.sh check` then `prove_set.sh stages` (byte identity, H2D and stage times), then the passes.
+
 ## 2026-10-28 (session 25, branch gpu-set) — GPU set pass prepared: kernels, cuda-set, cuda-set-tree, runbook
 Who: Claude (agent, Opus 5.5), delegated by the session working on set-pass step 6
 Roadmap: coin-set pass (D-048) step 6: GPU code built and host-checked; no GPU run yet
