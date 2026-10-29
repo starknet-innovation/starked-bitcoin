@@ -17,7 +17,8 @@
 //! with the native summary. `--cpu-check n`: the first proof of each level and every n-th after it are
 //! also proved on the CPU and must be byte-identical. `--cpu-prover`: no GPU (any host).
 //!
-//! Stdout: one line per proof, `<lo> <n> <h> <gpu s> <total s> <bytes>`; stderr: progress.
+//! Stdout: one line per proof, `<lo> <n> <h> <gpu s> <total s> <bytes>`; stderr: progress, and per proof
+//! `phases` (read, circuit, pad, check, prove, verify, CPU check; seconds).
 
 const std = @import("std");
 const sb = @import("starked_bitcoin");
@@ -52,6 +53,7 @@ const Run = struct {
     tables: *const leaf.Tables,
     shape: *const ST.Shape,
     vk: *const ST.Vk,
+    pre: ST.PreRoot, // the segments' preprocessed root (`ST.preRoot`), once for the pass
     g: *CG.Gpu,
     opts: Opts,
 
@@ -93,6 +95,7 @@ const Run = struct {
         const path = try ST.proofPath(a, r.dir, t.lo, t.n);
         if (std.fs.cwd().access(path, .{})) |_| return else |e| if (e != error.FileNotFound) return e;
         var timer = try std.time.Timer.start();
+        var ph: [7]f64 = @splat(0); // read+expected, circuit, pad, valid, prove, verify, cpu-check
 
         var kids: [2]ST.Proved = undefined;
         var n_kids: usize = 0;
@@ -109,13 +112,17 @@ const Run = struct {
             }
             break :blk try ST.expectedProof(r.vk, t, null, .{ &kids[0], &kids[1] });
         };
+        ph[0] = secs(timer.lap());
         var ctx = if (t.n == 1)
-            try ST.leafCircuitOf(r.gpa, a, r.airs, &seg, r.sfri)
+            try ST.leafCircuitOfPre(r.gpa, a, r.airs, &seg, r.sfri, r.pre)
         else
             try ST.nodeCircuitOf(r.gpa, a, r.tables, r.shape, &kids[0], &kids[1]);
         defer ctx.deinit();
+        ph[1] = secs(timer.lap());
         try finalize.padToTargets(QM31, &ctx, r.shape.target);
+        ph[2] = secs(timer.lap());
         if (!try ctx.isCircuitValid()) return error.CircuitUnsatisfied;
+        ph[3] = secs(timer.lap());
 
         var gpu_s: f64 = 0;
         var cp = if (r.opts.cpu_prover) blk: {
@@ -125,11 +132,13 @@ const Run = struct {
             break :blk c;
         } else try CG.gpuProve(r.gpa, a, r.g, &ctx, r.shape.fri, w.id.root, &gpu_s);
         defer cp.deinit();
+        ph[4] = secs(timer.lap());
         // The VK's identity, the circuit verifier, the native summary.
         if (!std.mem.eql(u32, &cp.request.preprocessed_root, &w.id.root)) return error.WrongPreprocessedRoot;
         if (!std.mem.eql(u32, &cp.circuit_hash, &w.id.hash)) return error.WrongCircuitHash;
         const out = try leaf.verifyCircuit(r.gpa, r.tables, &cp);
         if (!std.mem.eql(u32, &out, &leaf.pubsDigest(w.key, &w.sum))) return error.WrongDigest;
+        ph[5] = secs(timer.lap());
         if (!r.opts.cpu_prover) if (r.opts.cpu_check) |every| if (i % every == 0) {
             var cc = try leaf.proveCircuit(r.gpa, a, &ctx, null, r.shape.fri);
             defer cc.deinit();
@@ -139,6 +148,8 @@ const Run = struct {
             }
             std.debug.print("  lo {d} n {d}: CPU proof byte-identical\n", .{ t.lo, t.n });
         };
+        ph[6] = secs(timer.lap());
+        std.debug.print("phases lo {d} n {d}: {any}\n", .{ t.lo, t.n, ph });
         const p: ST.Proved = .{ .proof = cp, .key = w.key, .sum = w.sum };
         try store.writeFileAtomic(path, try ST.encodeProved(a, &p));
 
@@ -147,7 +158,7 @@ const Run = struct {
         r.done += 1;
         r.gpu_total += gpu_s;
         const o = std.fs.File.stdout().deprecatedWriter();
-        o.print("{d} {d} {d} {d:.3} {d:.3} {d}\n", .{ t.lo, t.n, t.h, gpu_s, secs(timer.read()), cp.bytes.len }) catch {};
+        o.print("{d} {d} {d} {d:.3} {d:.3} {d}\n", .{ t.lo, t.n, t.h, gpu_s, @reduce(.Add, @as(@Vector(7, f64), ph)) + secs(timer.read()), cp.bytes.len }) catch {};
     }
 
     fn runLevel(r: *Run, level: []const ST.Task) !void {
@@ -231,6 +242,7 @@ pub fn main() !void {
     if (store.readFile(a, vk_path)) |old| {
         if (!std.mem.eql(u8, old, vk_bytes)) return error.SetVkChanged; // another strength or other logs
     } else |e| if (e == error.FileNotFound) try store.writeFileAtomic(vk_path, vk_bytes) else return e;
+    const pre = try ST.preRoot(a, airs, su.vk.logs, sfri);
     std.debug.print("setup: {d} segments at logs {any}; leaves and nodes at 2^{d} ({d:.1}s)\n", .{ k, su.vk.logs, su.vk.trace_log, secs(timer.lap()) });
 
     var g = try CG.Gpu.init(gpa, !opts.cpu_prover);
@@ -238,7 +250,7 @@ pub fn main() !void {
     std.debug.print("{s}; {d} jobs\n", .{ if (opts.cpu_prover) "CPU circuit prover (--cpu-prover)" else "GPU: CUDA runtime open", opts.jobs });
 
     const all = try ST.tasks(a, k);
-    var run: Run = .{ .gpa = gpa, .dir = dir, .airs = airs, .sfri = sfri, .tables = tables, .shape = &su.shape, .vk = &su.vk, .g = &g, .opts = opts };
+    var run: Run = .{ .gpa = gpa, .dir = dir, .airs = airs, .sfri = sfri, .tables = tables, .shape = &su.shape, .vk = &su.vk, .pre = pre, .g = &g, .opts = opts };
     var at: usize = 0;
     while (at < all.len) {
         var end = at;

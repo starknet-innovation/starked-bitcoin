@@ -248,6 +248,16 @@ the VK identity, verified natively and its digest compared with the native summa
 `--cpu-prover`. Then `pass.bin` (final state = the last segment's outgoing state, `set_tree.outState`)
 and `verifyPass` under `<work>/challenge.bin` (or `--challenge`).
 
+**Tree leaves: the preprocessed root** (2026-10-29, H200, first rehearsal). Each leaf took ~35 s, of
+which ~32 s was the circuit build: `set_tree.leafInputs` computed the segments' preprocessed Merkle
+root (all 12 components at the pass's logs, multithreaded, ~30 GB RSS per job) twice, inside the native
+verify and again for the circuit. It depends only on the logs, so `cuda-set-tree` computes it once
+(`set_tree.preRoot`) and passes it in (`leafCircuitOfPre`); `leafInputs` computes it once. Safe: the
+native verify still checks it against each proof's own commitment, and the leaf circuit, which embeds
+it, is pinned by the VK's circuit hash. Per leaf after (stderr `phases`: read, circuit, pad, check,
+prove, verify, CPU check): 0.005 / **0.8** / 1.0 / 0.15 / ~1.0 / ~0.6 s; 3 jobs 51 proofs/min (36 GB
+RSS), 6 jobs 97 proofs/min (38 GB). At 8 jobs the old build was OOM-killed (cgroup 251 GB).
+
 **Byte identity.** The device proof must equal `set_tree.proveSeg`'s (the CPU prover, `.compact`
 storage: same bytes as the default). On the pod, `cuda-set --cpu-check 1 --first 1 --verify`
 (`prove_set.sh check`) proves segment 0 both ways and compares the encoded files; full runs keep

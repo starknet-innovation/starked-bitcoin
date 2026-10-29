@@ -281,16 +281,32 @@ pub const LeafInputs = struct {
 
 /// A segment proof verified natively with capture, and what its leaf circuit is built from.
 pub fn leafInputs(a: std.mem.Allocator, airs: *const [N_COMP]ir.Air, f: *const SegFile, fri: FriConfigV2) !LeafInputs {
+    return leafInputsPre(a, airs, f, fri, null);
+}
+
+pub const PreRoot = rec.Hasher.Hash;
+
+/// The segments' preprocessed root at `logs` (the same for every segment of a pass; the native
+/// verify still checks it against each proof's commitment).
+pub fn preRoot(a: std.mem.Allocator, airs: *const [N_COMP]ir.Air, logs: Logs, fri: FriConfigV2) !PreRoot {
+    var pubs: [N_PUB]M31 = @splat(M31.zero());
+    const ps = partsOf(airs, logs, &pubs);
+    return system.preprocessedRoot(a, rec.Config.fromFriAndTraceSize(fri, maxLog(logs)), &ps);
+}
+
+/// `leafInputs` with the preprocessed root (`preRoot` at `f.logs`) when given: computed once otherwise.
+pub fn leafInputsPre(a: std.mem.Allocator, airs: *const [N_COMP]ir.Air, f: *const SegFile, fri: FriConfigV2, pre: ?PreRoot) !LeafInputs {
     const ps = partsOf(airs, f.logs, &f.pubs);
     const cfg = rec.Config.fromFriAndTraceSize(fri, maxLog(f.logs));
+    const pre_root = pre orelse try system.preprocessedRoot(a, cfg, &ps);
     var capture: core.verifier.ProofCapture(rec.Hasher) = undefined;
-    try system.verifyCaptureBorrowedPre(a, cfg, &ps, &.{}, &f.proof, &capture, null);
+    try system.verifyCaptureBorrowedPre(a, cfg, &ps, &.{}, &f.proof, &capture, pre_root);
     const pc = try configOf(a, airs, f.logs, fri);
     var in: LeafInputs = .{
         .values = try pv.fromCapture(a, rec.Hasher, &f.proof.stark, &capture, pc, f.proof.claimed_sums),
         .config = pc,
         .digests = undefined,
-        .pre_root = std.mem.toBytes(try system.preprocessedRoot(a, cfg, &ps)),
+        .pre_root = std.mem.toBytes(pre_root),
     };
     for (&in.digests, airs) |*d, *air| d.* = try air.digest(a);
     return in;
@@ -322,7 +338,12 @@ pub fn buildLeafCircuit(gpa: std.mem.Allocator, in: *const LeafInputs, airs: *co
 }
 
 pub fn leafCircuitOf(gpa: std.mem.Allocator, a: std.mem.Allocator, airs: *const [N_COMP]ir.Air, f: *const SegFile, fri: FriConfigV2) !Context(QM31) {
-    const in = try leafInputs(a, airs, f, fri);
+    return leafCircuitOfPre(gpa, a, airs, f, fri, null);
+}
+
+/// `leafCircuitOf` with a cached `preRoot`.
+pub fn leafCircuitOfPre(gpa: std.mem.Allocator, a: std.mem.Allocator, airs: *const [N_COMP]ir.Air, f: *const SegFile, fri: FriConfigV2, pre: ?PreRoot) !Context(QM31) {
+    const in = try leafInputsPre(a, airs, f, fri, pre);
     return buildLeafCircuit(gpa, &in, airs, &f.pubs);
 }
 

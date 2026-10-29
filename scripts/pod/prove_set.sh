@@ -78,7 +78,7 @@ run)
   /usr/bin/time -v zig-out/bin/cuda-set "$set_bin" "$dir" --challenge "$ch" --logs "$logs" --cpu-check 500 "$@" 2>> "$LOGS/$name.seg.log"
   rc=$?
   if [ $rc = 0 ]; then
-    /usr/bin/time -v zig-out/bin/cuda-set-tree "$dir" --jobs "$(( $(cpus) > 8 ? 8 : $(cpus) ))" --cpu-check 1000 >> "$LOGS/$name.tree.lines" 2>> "$LOGS/$name.tree.log"
+    /usr/bin/time -v zig-out/bin/cuda-set-tree "$dir" --jobs "$(( $(cpus) > 6 ? 6 : $(cpus) ))" --cpu-check 1000 >> "$LOGS/$name.tree.lines" 2>> "$LOGS/$name.tree.log"
     rc=$?
   fi
   kill $smi 2>/dev/null; wait $smi 2>/dev/null
