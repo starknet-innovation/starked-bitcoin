@@ -886,11 +886,25 @@ pub fn proveMembers(a: std.mem.Allocator, file: []const u8, logs: Logs, keys: []
 }
 
 fn memberIn(a: std.mem.Allocator, file: []const u8, logs: Logs, ends: []const usize, roots: []const [8]u32, key: [36]u8) !Member {
+    if (ends.len == 0) return error.EmptySet;
     const half: usize = @as(usize, 1) << @intCast(logs[SS.C.rec] - 1);
-    var at: usize = 4;
+    // The segment holding `key` or the record above it: the last one whose first key is not above `key`
+    // (each segment starts with a record head; the first segment's first record is the smallest).
+    var si: usize = 0;
+    while (si + 1 < ends.len and std.mem.order(u8, &recKey(file[ends[si]..]), &key) != .gt) si += 1;
+    var scratch = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer scratch.deinit();
+    const sa = scratch.allocator();
+    // The previous segment's last key (the first leaf's previous key).
     var last: ?[36]u8 = null;
-    for (ends, 0..) |end, si| {
-        const recs = try SS.parse(a, file[at..end]);
+    if (si > 0) {
+        const prev = try SS.parse(sa, file[if (si == 1) 4 else ends[si - 2]..ends[si - 1]]);
+        last = recKey(prev[prev.len - 1].head);
+    }
+    // `key` above every record of segment `si` (not the last): the bracket is the next one's first record.
+    while (si < ends.len) : (si += 1) {
+        const at: usize = if (si == 0) 4 else ends[si - 1];
+        const recs = try SS.parse(sa, file[at..ends[si]]);
         const is_last_seg = si + 1 == ends.len;
         for (recs, 0..) |r, ri| {
             const k = recKey(r.head);
@@ -900,15 +914,13 @@ fn memberIn(a: std.mem.Allocator, file: []const u8, logs: Logs, ends: []const us
             // Record `ri` of segment `si`: present (`o == .eq`), the bracket above `key` (`.gt`), or the last.
             var st: SS.State = .{ .b2 = undefined, .sha = undefined };
             st.last = last;
-            const leaves = try SS.leafHashes(a, st, recs);
-            const nodes = try SS.treeNodes(a, leaves, half);
+            const leaves = try SS.leafHashes(sa, st, recs);
+            const nodes = try SS.treeNodes(sa, leaves, half);
             var path: std.ArrayList(Step) = .empty;
-            var s = ri;
-            const other = s ^ 1;
-            try path.append(a, .{ .sib = if (other < leaves.len) leaves[other].digest else @splat(0), .left = (s & 1) == 1 });
-            var j = half + s / 2;
+            const other = ri ^ 1;
+            try path.append(a, .{ .sib = if (other < leaves.len) leaves[other].digest else @splat(0), .left = (ri & 1) == 1 });
+            var j = half + ri / 2;
             while (j > 1) : (j /= 2) try path.append(a, .{ .sib = nodes[j ^ 1], .left = (j & 1) == 1 });
-            s = 0;
             try treePath(a, roots, si, &path);
             return .{
                 .key = key,
@@ -920,7 +932,6 @@ fn memberIn(a: std.mem.Allocator, file: []const u8, logs: Logs, ends: []const us
             };
         }
         last = recKey(recs[recs.len - 1].head);
-        at = end;
     }
     return error.EmptySet;
 }
@@ -1144,6 +1155,22 @@ test "set tree: several membership proofs in one file; P2WSH and multisig of a w
         try std.testing.expectEqualSlices(u8, &k, &m.key);
         try verifyMember(m, root, last);
         if (m.present) _ = try recordOutput(m.record);
+    }
+    // Around every segment boundary: the first key, one below it, one above the previous segment's last.
+    var at: usize = 4;
+    for (ps.ends[0 .. ps.ends.len - 1]) |end| {
+        const seg = try SS.parse(a, file[at..end]);
+        const first = recKey(file[end..]);
+        var below = first;
+        below[35] -%= 1;
+        var above = recKey(seg[seg.len - 1].head);
+        above[35] +%= 1;
+        for ([_][36]u8{ first, below, above }) |k| {
+            const m = (try proveMembers(a, file, logs, &.{k}))[0];
+            try verifyMember(&m, root, last);
+            if (std.mem.eql(u8, &k, &first)) try std.testing.expect(m.present);
+        }
+        at = end;
     }
     // A single-proof file decodes as a list of one.
     const one = try decodeMembers(a, try encodeMember(a, &got[0]));

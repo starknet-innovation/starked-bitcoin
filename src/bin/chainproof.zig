@@ -1757,7 +1757,13 @@ fn setMember(gpa: std.mem.Allocator, a: std.mem.Allocator, set_path: []const u8,
     const keys = try a.alloc([36]u8, ops.len);
     for (keys, ops) |*k, op| k.* = try parseOutpoint(op);
     const seg0 = try ST.decodeSeg(a, try S.readFile(a, try std.fmt.allocPrint(a, "{s}/seg/0.sbseg", .{work})));
-    const file = try S.readFile(a, set_path);
+    // Mapped, not read: a set file (~14 GB) can be as large as a small host's memory.
+    const fd = try std.fs.cwd().openFile(set_path, .{});
+    defer fd.close();
+    const size = try fd.getEndPos();
+    if (size == 0) return error.EmptySet;
+    const file = try std.posix.mmap(null, size, std.posix.PROT.READ, .{ .TYPE = .PRIVATE }, fd.handle, 0);
+    defer std.posix.munmap(file);
     const ms = try ST.proveMembers(a, file, seg0.logs, keys);
     var p = try ST.decodePass(gpa, a, try S.readFile(a, try std.fmt.allocPrint(a, "{s}/pass.bin", .{work})));
     defer p.root.proof.deinit();

@@ -35,7 +35,9 @@ Public inputs: `ROOT` (16 limbs at 550), `HALF` (566); 567 in all. The record co
 
 **Use.** `chainproof set-member <set.bin> <work-dir> <out.sbmember> <txid>:<vout>...` writes the proofs
 of one or more outpoints to one file (the pass's segment logs from `<work-dir>/seg/0.sbseg`; txids in
-display order; the segment roots computed once) and checks each against the pass's root.
+display order; the segment roots computed once, the set file mapped, each outpoint's segment found by
+the segments' first keys) and checks each against the pass's root. On the node (4 cores, 15 GB), four
+outpoints of the set after 945,000: 4.6 min, 8.7 GB peak RSS.
 `chainproof verify-member <work-dir> <dir>:<to>[…] <file>... [--witness-script <hex>]` verifies the pass
 under the epoch's challenge once, then every proof in the files (single-proof files from before are
 read too) against its root and last key, rejects an outpoint given twice, and prints each coin (amount,
