@@ -805,6 +805,8 @@ test "set tree: three segments of set-170 proved, folded and verified; unlinked 
 // Membership proofs (D-050): a coin's leaf and its path to a pass's root
 
 pub const MEMBER_MAGIC = "SBMEMBER";
+/// A file of several membership proofs against one pass.
+pub const MEMBERS_MAGIC = "SBMEMBRS";
 
 /// One step up a path: the sibling digest and whether it is the left child.
 pub const Step = struct { sib: [8]u32, left: bool };
@@ -871,13 +873,25 @@ pub fn passSegments(a: std.mem.Allocator, file: []const u8, logs: Logs) !struct 
 
 /// The membership proof of `key` in the set `file` (proved at `logs`).
 pub fn proveMember(a: std.mem.Allocator, file: []const u8, logs: Logs, key: [36]u8) !Member {
+    return (try proveMembers(a, file, logs, &.{key}))[0];
+}
+
+/// The membership proofs of `keys` in the set `file` (proved at `logs`), in order; the segment roots
+/// are computed once.
+pub fn proveMembers(a: std.mem.Allocator, file: []const u8, logs: Logs, keys: []const [36]u8) ![]Member {
     const ps = try passSegments(a, file, logs);
+    const out = try a.alloc(Member, keys.len);
+    for (out, keys) |*m, k| m.* = try memberIn(a, file, logs, ps.ends, ps.roots, k);
+    return out;
+}
+
+fn memberIn(a: std.mem.Allocator, file: []const u8, logs: Logs, ends: []const usize, roots: []const [8]u32, key: [36]u8) !Member {
     const half: usize = @as(usize, 1) << @intCast(logs[SS.C.rec] - 1);
     var at: usize = 4;
     var last: ?[36]u8 = null;
-    for (ps.ends, 0..) |end, si| {
+    for (ends, 0..) |end, si| {
         const recs = try SS.parse(a, file[at..end]);
-        const is_last_seg = si + 1 == ps.ends.len;
+        const is_last_seg = si + 1 == ends.len;
         for (recs, 0..) |r, ri| {
             const k = recKey(r.head);
             const o = std.mem.order(u8, &k, &key);
@@ -895,7 +909,7 @@ pub fn proveMember(a: std.mem.Allocator, file: []const u8, logs: Logs, key: [36]
             var j = half + s / 2;
             while (j > 1) : (j /= 2) try path.append(a, .{ .sib = nodes[j ^ 1], .left = (j & 1) == 1 });
             s = 0;
-            try treePath(a, ps.roots, si, &path);
+            try treePath(a, roots, si, &path);
             return .{
                 .key = key,
                 .present = o == .eq,
@@ -937,6 +951,22 @@ pub fn encodeMember(a: std.mem.Allocator, m: *const Member) ![]u8 {
     var e: store.Enc = .{ .a = a };
     try e.buf.appendSlice(a, MEMBER_MAGIC);
     try e.int(u32, store.VERSION);
+    try putMember(&e, m);
+    return store.seal(&e);
+}
+
+/// Several membership proofs in one file (`MEMBERS_MAGIC`).
+pub fn encodeMembers(a: std.mem.Allocator, ms: []const Member) ![]u8 {
+    var e: store.Enc = .{ .a = a };
+    try e.buf.appendSlice(a, MEMBERS_MAGIC);
+    try e.int(u32, store.VERSION);
+    try e.int(u32, @intCast(ms.len));
+    for (ms) |*m| try putMember(&e, m);
+    return store.seal(&e);
+}
+
+fn putMember(e: *store.Enc, m: *const Member) !void {
+    const a = e.a;
     try e.buf.appendSlice(a, &m.key);
     try e.int(u8, @intFromBool(m.present));
     try e.int(u8, @intFromBool(m.after_last));
@@ -947,12 +977,34 @@ pub fn encodeMember(a: std.mem.Allocator, m: *const Member) ![]u8 {
         try e.words(&st.sib);
         try e.int(u8, @intFromBool(st.left));
     }
-    return store.seal(&e);
 }
 
 pub fn decodeMember(a: std.mem.Allocator, bytes: []const u8) !Member {
     var d: store.Dec = .{ .bytes = try store.unseal(bytes) };
     try d.magic(MEMBER_MAGIC);
+    const m = try getMember(a, &d);
+    if (d.pos != d.bytes.len) return error.TrailingBytes;
+    return m;
+}
+
+/// The proofs of a `MEMBERS_MAGIC` file, or the one of a `MEMBER_MAGIC` file.
+pub fn decodeMembers(a: std.mem.Allocator, bytes: []const u8) ![]Member {
+    if (bytes.len >= MEMBER_MAGIC.len and std.mem.eql(u8, bytes[0..MEMBER_MAGIC.len], MEMBER_MAGIC)) {
+        const one = try a.alloc(Member, 1);
+        one[0] = try decodeMember(a, bytes);
+        return one;
+    }
+    var d: store.Dec = .{ .bytes = try store.unseal(bytes) };
+    try d.magic(MEMBERS_MAGIC);
+    const n = try d.int(u32);
+    if (n > d.bytes.len) return error.TooManyMembers;
+    const ms = try a.alloc(Member, n);
+    for (ms) |*m| m.* = try getMember(a, &d);
+    if (d.pos != d.bytes.len) return error.TrailingBytes;
+    return ms;
+}
+
+fn getMember(a: std.mem.Allocator, d: *store.Dec) !Member {
     var m: Member = undefined;
     m.key = (try d.take(36))[0..36].*;
     m.present = (try d.int(u8)) == 1;
@@ -967,8 +1019,54 @@ pub fn decodeMember(a: std.mem.Allocator, bytes: []const u8) !Member {
         st.left = (try d.int(u8)) == 1;
     }
     m.path = path;
-    if (d.pos != d.bytes.len) return error.TrailingBytes;
     return m;
+}
+
+/// A present record's amount (sat) and scriptPubKey (its `TxOut` after the head: amount, compact size,
+/// script).
+pub fn recordOutput(record: []const u8) !struct { amount: u64, script: []const u8 } {
+    if (record.len < SS.HEAD + 9) return error.BadRecord;
+    const amount = std.mem.readInt(u64, record[SS.HEAD..][0..8], .little);
+    const t = record[SS.HEAD + 8 ..];
+    const n: usize, const at: usize = switch (t[0]) {
+        0xfd => if (t.len >= 3) .{ std.mem.readInt(u16, t[1..3], .little), 3 } else return error.BadRecord,
+        0xfe => if (t.len >= 5) .{ std.mem.readInt(u32, t[1..5], .little), 5 } else return error.BadRecord,
+        0xff => return error.BadRecord,
+        else => .{ t[0], 1 },
+    };
+    if (t.len != at + n) return error.BadRecord;
+    return .{ .amount = amount, .script = t[at..] };
+}
+
+/// The P2WSH scriptPubKey of a witness script: `OP_0 <32> sha256(script)`.
+pub fn p2wsh(script: []const u8) [34]u8 {
+    var out: [34]u8 = undefined;
+    out[0] = 0x00;
+    out[1] = 0x20;
+    std.crypto.hash.sha2.Sha256.hash(script, out[2..34], .{});
+    return out;
+}
+
+/// A bare `m <key>… n OP_CHECKMULTISIG` script's threshold and keys (33- or 65-byte pushes), or null.
+pub fn multisigOf(a: std.mem.Allocator, script: []const u8) !?struct { m: u8, keys: []const []const u8 } {
+    if (script.len < 3 or script[script.len - 1] != 0xae) return null;
+    const small = struct {
+        fn f(op: u8) ?u8 {
+            return if (op >= 0x51 and op <= 0x60) op - 0x50 else null;
+        }
+    }.f;
+    const m = small(script[0]) orelse return null;
+    const n = small(script[script.len - 2]) orelse return null;
+    var keys: std.ArrayList([]const u8) = .empty;
+    var i: usize = 1;
+    while (i < script.len - 2) {
+        const l = script[i];
+        if ((l != 33 and l != 65) or i + 1 + l > script.len - 2) return null;
+        try keys.append(a, script[i + 1 ..][0..l]);
+        i += 1 + l;
+    }
+    if (keys.items.len != n or m > n) return null;
+    return .{ .m = m, .keys = keys.items };
 }
 
 test "set tree: membership proofs verify against the pass root (present, absent between, after the last)" {
@@ -1005,4 +1103,50 @@ test "set tree: membership proofs verify against the pass root (present, absent 
         try verifyMember(&ab, root, last);
         try std.testing.expectEqual(i + 1 == recs.len, ab.after_last);
     }
+}
+
+test "set tree: several membership proofs in one file; P2WSH and multisig of a witness script" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    // The strkBTC bridge's 3-of-5 (mainnet, first funded at height 952,508).
+    const hex = "532102346e434e22ce057662358aeb1ea43e8e6e2280f14bb7731205f97f2896ab78e7210254b093c11c3fb5f1a7240ad7f69ed468424684952a4a0d5df3723be3824745fb2102fd4d3d91ee7c9dd0f865637d76ea7cc3a82d123a660f795839e30f491a834ac921035df754188d82480df4ed463d58de803f29ca65e5739fdb9f0445e3ec5972aaf72103a739e7bf45535e0833f0aae06bcf888e26a2ea0e569daac138729ddcf299412d55ae";
+    var script: [hex.len / 2]u8 = undefined;
+    _ = try std.fmt.hexToBytes(&script, hex);
+    var want: [34]u8 = undefined;
+    _ = try std.fmt.hexToBytes(&want, "00208e4e9838d3804acc26f5684692f12ef19d774d4aeea64a816d1b4543f1d9754b");
+    try std.testing.expectEqualSlices(u8, &want, &p2wsh(&script));
+    const ms = (try multisigOf(a, &script)).?;
+    try std.testing.expectEqual(@as(u8, 3), ms.m);
+    try std.testing.expectEqual(@as(usize, 5), ms.keys.len);
+    try std.testing.expect(try multisigOf(a, script[0 .. script.len - 1]) == null);
+    // A record's output: amount, compact size, script.
+    var r: [SS.HEAD + 8 + 1 + 34]u8 = @splat(0);
+    std.mem.writeInt(u64, r[SS.HEAD..][0..8], 120243798, .little);
+    r[SS.HEAD + 8] = 34;
+    @memcpy(r[SS.HEAD + 9 ..], &want);
+    const o = try recordOutput(&r);
+    try std.testing.expectEqual(@as(u64, 120243798), o.amount);
+    try std.testing.expectEqualSlices(u8, &want, o.script);
+    try std.testing.expectError(error.BadRecord, recordOutput(r[0 .. r.len - 1]));
+
+    const file = std.fs.cwd().readFileAlloc(a, "data/epoch/set-1000.bin", 1 << 30) catch return error.SkipZigTest;
+    const logs: Logs = .{ 10, 8, 6, 6, 10, 9, 11, 10, 11, 10, 12, 13 };
+    const ps = try passSegments(a, file, logs);
+    const root = foldRoots(ps.roots);
+    const recs = try SS.parse(a, file[4..]);
+    const last = recKey(recs[recs.len - 1].head);
+    var keys = [_][36]u8{ recKey(recs[3].head), recKey(recs[recs.len / 3].head), recKey(recs[recs.len - 1].head) };
+    keys[1][35] +%= 1; // absent, or the next record
+    const got = try decodeMembers(a, try encodeMembers(a, try proveMembers(a, file, logs, &keys)));
+    try std.testing.expectEqual(keys.len, got.len);
+    for (got, keys) |*m, k| {
+        try std.testing.expectEqualSlices(u8, &k, &m.key);
+        try verifyMember(m, root, last);
+        if (m.present) _ = try recordOutput(m.record);
+    }
+    // A single-proof file decodes as a list of one.
+    const one = try decodeMembers(a, try encodeMember(a, &got[0]));
+    try std.testing.expectEqual(@as(usize, 1), one.len);
+    try verifyMember(&one[0], root, last);
 }

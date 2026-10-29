@@ -33,10 +33,21 @@ set is checked with ~1 KB.
 Public inputs: `ROOT` (16 limbs at 550), `HALF` (566); 567 in all. The record count must not exceed
 `2·HALF`, and `1 ≤ HALF ≤ 2^24` (both checked in `set_mt`).
 
-**Use.** `chainproof set-member <set.bin> <work-dir> <txid>:<vout> <out.sbmember>` writes the proof (the
-pass's segment logs from `<work-dir>/seg/0.sbseg`; the txid in display order) and checks it against the
-pass's root; `chainproof verify-member <work-dir> <dir>:<to>[…] <file>` verifies the pass under the epoch's
-challenge, then the proof against its root and last key.
+**Use.** `chainproof set-member <set.bin> <work-dir> <out.sbmember> <txid>:<vout>...` writes the proofs
+of one or more outpoints to one file (the pass's segment logs from `<work-dir>/seg/0.sbseg`; txids in
+display order; the segment roots computed once) and checks each against the pass's root.
+`chainproof verify-member <work-dir> <dir>:<to>[…] <file>... [--witness-script <hex>]` verifies the pass
+under the epoch's challenge once, then every proof in the files (single-proof files from before are
+read too) against its root and last key, rejects an outpoint given twice, and prints each coin (amount,
+height, scriptPubKey) and the total of the unspent ones.
+
+**Witness script** (`--witness-script`): every unspent coin in the files must pay to the script's P2WSH
+scriptPubKey `OP_0 <32> sha256(script)`; a bare `m <key>… n OP_CHECKMULTISIG` script is decoded and
+printed (threshold and keys). The script is public, so this is a check outside the proof, not a new
+statement. What it shows: those coins were unspent in the set after `<to>`, locked by that script, so
+the multisig held *at least* their total. It does not show the multisig held nothing else (there is no
+completeness proof over a script). Test vector: the strkBTC bridge's 3-of-5, P2WSH `00208e4e98…9754b`
+(`set_tree.zig`).
 
 **Proof status (Lean): proven.** `set_root_sound` (`SetPass/PassChain.lean`): a verified pass root of
 shape `t` with root limbs `R` gives records `es` (the segments' records, in order) that fold the pass from

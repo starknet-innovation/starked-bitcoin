@@ -21,6 +21,22 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-10-29 (session 25) — Membership: several UTXOs per file, `--witness-script`
+Who: Claude (agent, Opus 5.5), owner: "build the witness check script yes. Don't bother with the scan. But do make it possible for a verifier to check various UTXOs at the same time"
+Roadmap: membership (D-050) CLI extended; no AIR or Lean change
+Done:
+- `set-member` takes several outpoints into one file (`set_tree.proveMembers`, `encodeMembers`, segment roots
+  once); `verify-member` takes several files, verifies the pass once, totals the unspent coins, rejects an
+  outpoint twice; `--witness-script <hex>`: each coin must pay to the script's P2WSH, multisig decoded.
+  New argument order: `set-member <set.bin> <work-dir> <out> <txid>:<vout>...`.
+- On `gpu-set` (eb1d3d3, pushed): set-tree leaves 32 s -> 0.8 s (preprocessed root once per pass).
+Evidence:
+- `zig build test -Dtest-filter=membership`: 3/3 (P2WSH of the strkBTC 3-of-5 equals its on-chain
+  scriptPubKey; multisig decode; several proofs round-trip and verify on set-1000).
+Problems / lessons:
+- A completeness claim ("the multisig holds exactly X") needs more than membership proofs; documented.
+Next: run the CLI on the rehearsal pass and on the set after 972,500 once its pass is proved.
+
 ## 2026-10-27 (session 24) — Membership (D-050): Merkle root over the set, proven in Lean
 Who: Claude (agent, Opus 5.5), owner: "go ahead. You can also proceed with the GPU run"; "keep going"
 Roadmap: coin-set pass membership (D-050) done in Lean and Zig; GPU set prover prepared (branch `gpu-set`)
