@@ -24,6 +24,8 @@
 //! the host (`set_tree.verifySeg`). `--mock`: CPU proofs through the same pipeline (any host).
 //! `--only <list>` proves only the listed segment indices, `--first n` only segments 0..n−1.
 //! `--host-only`: witnesses, plans and host trees only (no runtime, no files): host time and memory.
+//! `--keep-going`: a segment whose host work fails is reported and skipped (`SEGMENTS FAILED`, exit
+//! status nonzero) instead of ending the run; prove it with `--only` (e.g. `--mock`) before the tree.
 //!
 //! Stdout-like lines on stderr: `<i> witness_s plans_s device_s total_s bytes`, a summary at the end.
 
@@ -46,7 +48,7 @@ const FriConfigV2 = core.pcs.config_v2.FriConfigV2;
 const default_logs: ST.Logs = .{ 23, 8, 6, 16, 22, 21, 23, 23, 23, 22, 23, 23 };
 
 fn usage() noreturn {
-    std.debug.print("usage: cuda-set <set.bin> <work-dir> (--challenge <ch.bin> | --testing-challenge) [--test-strength] [--logs l0,...,l11] [--jobs n] [--only <list>] [--first n] [--cpu-check n] [--verify] [--mock] [--host-only] [--host-witness] [--stages]\n", .{});
+    std.debug.print("usage: cuda-set <set.bin> <work-dir> (--challenge <ch.bin> | --testing-challenge) [--test-strength] [--logs l0,...,l11] [--jobs n] [--only <list>] [--first n] [--cpu-check n] [--verify] [--mock] [--host-only] [--host-witness] [--stages] [--keep-going]\n", .{});
     std.process.exit(2);
 }
 
@@ -191,11 +193,12 @@ pub fn main() !void {
     var cpu_check: ?usize = null;
     var ch_path: ?[]const u8 = null;
     var testing_ch = false;
+    var keep_going = false;
     var i: usize = 3;
     while (i < args.len) : (i += 1) {
         const x = args[i];
         const has = i + 1 < args.len;
-        if (std.mem.eql(u8, x, "--test-strength")) weak = true else if (std.mem.eql(u8, x, "--verify")) verify = true else if (std.mem.eql(u8, x, "--stages")) stages = true else if (std.mem.eql(u8, x, "--mock")) mock = true else if (std.mem.eql(u8, x, "--testing-challenge")) testing_ch = true else if (std.mem.eql(u8, x, "--host-only")) host_only = true else if (std.mem.eql(u8, x, "--host-witness")) host_witness = true else if (std.mem.eql(u8, x, "--challenge") and has) {
+        if (std.mem.eql(u8, x, "--test-strength")) weak = true else if (std.mem.eql(u8, x, "--verify")) verify = true else if (std.mem.eql(u8, x, "--stages")) stages = true else if (std.mem.eql(u8, x, "--mock")) mock = true else if (std.mem.eql(u8, x, "--testing-challenge")) testing_ch = true else if (std.mem.eql(u8, x, "--host-only")) host_only = true else if (std.mem.eql(u8, x, "--host-witness")) host_witness = true else if (std.mem.eql(u8, x, "--keep-going")) keep_going = true else if (std.mem.eql(u8, x, "--challenge") and has) {
             i += 1;
             ch_path = args[i];
         } else if (std.mem.eql(u8, x, "--logs") and has) {
@@ -285,6 +288,7 @@ pub fn main() !void {
     var device_total: f64 = 0;
     var bytes_total: usize = 0;
     var checked: usize = 0;
+    var failed: std.ArrayList(usize) = .empty;
     std.debug.print("segment witness_s plans_s device_s total_s bytes\n", .{});
     for (todo.items, 0..) |k, jj| {
         const slot = &pipe.slots[jj % n_jobs];
@@ -298,7 +302,9 @@ pub fn main() !void {
         }
         if (job.err) |e| {
             std.debug.print("cuda-set: segment {d}: {s}\n", .{ k, @errorName(e) });
-            return e;
+            if (!keep_going) return e;
+            try failed.append(a, k);
+            continue;
         }
         if (host_only) {
             std.debug.print("{d} {d:.3} {d:.3} host only: arena {d:.1} GiB, host trees {d:.1} GiB, peak RSS {d:.1} GiB\n", .{ k, secs(job.t_witness), secs(job.t_plans), gibOf(try job.prepared.?.memory.bytes()), gibOf(job.host.?.bytes(0) + job.host.?.bytes(1)), rssGib() });
@@ -357,5 +363,11 @@ pub fn main() !void {
     }
     const elapsed = secs(run.read());
     const n = todo.items.len;
+    if (failed.items.len != 0) {
+        std.debug.print("SEGMENTS FAILED ({d}, --keep-going):", .{failed.items.len});
+        for (failed.items) |k| std.debug.print(" {d}", .{k});
+        std.debug.print("\n", .{});
+    }
     std.debug.print("SEGMENTS DONE: {d} proved ({d:.1} MB), {d} already there, {d} CPU-checked; {d:.1} s, {d:.3} s/segment (device {d:.3} s)\n", .{ n, @as(f64, @floatFromInt(bytes_total)) / 1e6, skipped, checked, elapsed, elapsed / @as(f64, @floatFromInt(@max(n, 1))), device_total / @as(f64, @floatFromInt(@max(n, 1))) });
+    if (failed.items.len != 0) return error.SegmentsFailed;
 }

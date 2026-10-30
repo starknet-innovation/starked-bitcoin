@@ -248,6 +248,14 @@ the VK identity, verified natively and its digest compared with the native summa
 `--cpu-prover`. Then `pass.bin` (final state = the last segment's outgoing state, `set_tree.outState`)
 and `verifyPass` under `<work>/challenge.bin` (or `--challenge`).
 
+**Open issue: segment 5258 of the set after 972,500** (2026-10-30). Its host work fails in the plan:
+the lowered program of one component does not pass stwo-zig's `Program.validate` (`ReadBeforeWrite`,
+`parametric.normalize` in `Catalog.admit`); the other 7,013 segments pass. The CPU prover does not use the
+lowering: `cuda-set --mock --only` proved and verified it (352 s). `cuda-set --keep-going` reports such a
+segment and goes on (`SEGMENTS FAILED`, nonzero exit); prove it that way before the tree. `plan.zig` now
+names the component when admission fails. Cause not found yet (the lowering is value-independent apart
+from literal values).
+
 **Tree leaves: the preprocessed root** (2026-10-29, H200, first rehearsal). Each leaf took ~35 s, of
 which ~32 s was the circuit build: `set_tree.leafInputs` computed the segments' preprocessed Merkle
 root (all 12 components at the pass's logs, multithreaded, ~30 GB RSS per job) twice, inside the native
