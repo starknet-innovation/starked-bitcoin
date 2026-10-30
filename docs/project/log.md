@@ -35,6 +35,9 @@ Evidence:
   scriptPubKey; multisig decode; several proofs round-trip and verify on set-1000).
 Problems / lessons:
 - A completeness claim ("the multisig holds exactly X") needs more than membership proofs; documented.
+- `verify-chain --set-proofs --members <files> [--witness-script]`: coins checked against the chain-proven
+  final set in the same command (no set file on the verifier's side). `set-member` maps the set file
+  (7e4f141; on the node 4 outpoints in 4.6 min, 8.7 GB).
 Next: run the CLI on the rehearsal pass and on the set after 972,500 once its pass is proved.
 
 ## 2026-10-27 (session 24) — Membership (D-050): Merkle root over the set, proven in Lean

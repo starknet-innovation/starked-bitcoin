@@ -103,7 +103,7 @@ fn usage() noreturn {
         \\  chainproof setup-vks <out-dir> [--max-m M] [--test-strength] <dir>:<to>[:<from>:<prev-set.bin>]...
         \\  chainproof prove-epoch <headers.bin> <dir> <to> <file.sbchain> [--from <a> <prev-set.bin>] [--test-strength]
         \\  chainproof prove-chain <vk> <file.sbchain> <out-dir> [--max-m M] <dir>:<to>[:<from>:<prev-set.bin>][#<prev-hex|->,<fin-hex>]...
-        \\  chainproof verify-chain <vk> <file.sbchain> <out-dir> [--min-work <hex> | --min-work 0] [--unpinned] [--set-proofs] <dir>:<to>[:<from>:<prev-set.bin>]...
+        \\  chainproof verify-chain <vk> <file.sbchain> <out-dir> [--min-work <hex> | --min-work 0] [--unpinned] [--set-proofs [--members <f.sbmember>... [--witness-script <hex>]]] <dir>:<to>[:<from>:<prev-set.bin>]...
         \\  chainproof prove-set <set.bin> <dir>:<to>[:<from>:<prev-set.bin>] <work-dir> [--test-strength] [--logs l0,...,l11]
         \\  chainproof verify-set <work-dir> <dir>:<to>[:<from>:<prev-set.bin>] [--unpinned]
         \\  chainproof set-cut <set.bin> [--logs l0,...,l11]
@@ -272,8 +272,23 @@ pub fn main() !void {
         var unpinned = false;
         var set_proofs = false;
         var specs: std.ArrayList(ChainSpec) = .empty;
+        var members: std.ArrayList([]const u8) = .empty;
+        var script: ?[]const u8 = null;
         var i: usize = 5;
         while (i < args.len) {
+            if (std.mem.eql(u8, args[i], "--members")) {
+                i += 1;
+                while (i < args.len and std.mem.endsWith(u8, args[i], ".sbmember")) : (i += 1) try members.append(a, args[i]);
+                if (members.items.len == 0) usage();
+                continue;
+            }
+            if (std.mem.eql(u8, args[i], "--witness-script") and i + 1 < args.len) {
+                const hex = args[i + 1];
+                if (hex.len % 2 != 0 or hex.len == 0) usage();
+                script = try std.fmt.hexToBytes(try a.alloc(u8, hex.len / 2), hex);
+                i += 2;
+                continue;
+            }
             if (std.mem.eql(u8, args[i], "--min-work") and i + 1 < args.len) {
                 min_work = try std.fmt.parseInt(u256, args[i + 1], 16);
                 i += 2;
@@ -289,6 +304,9 @@ pub fn main() !void {
             }
         }
         if (specs.items.len < 2) usage();
+        if ((members.items.len != 0 or script != null) and !set_proofs) usage();
+        if (script != null and members.items.len == 0) usage();
+        if (set_proofs) return verifyChainSetProofs(gpa, a, args[2], args[3], args[4], min_work, unpinned, specs.items, members.items, script);
         return verifyChainCmd(gpa, a, args[2], args[3], args[4], min_work, unpinned, set_proofs, specs.items);
     }
     if (std.mem.eql(u8, cmd, "prove-set") and args.len >= 5) {
@@ -1317,7 +1335,7 @@ fn setPassModel(gpa: std.mem.Allocator, path: []const u8, per: u32) !void {
 /// the last epoch's) under `<out>/joinvk.bin`, each epoch's tree VK from its dir, and each epoch's
 /// balance against its sets (the previous set given, the final `<dir>/set-<to>.bin`).
 fn verifyChainCmd(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8, chain_path: []const u8, out: []const u8, min_work: u256, unpinned: bool, set_proofs: bool, specs: []const ChainSpec) !void {
-    if (set_proofs) return verifyChainSetProofs(gpa, a, vk_path, chain_path, out, min_work, unpinned, specs);
+    if (set_proofs) return verifyChainSetProofs(gpa, a, vk_path, chain_path, out, min_work, unpinned, specs, &.{}, null);
     var timer = try std.time.Timer.start();
     const vk = try loadVk(a, vk_path);
     const tables = try L.Tables.init(gpa);
@@ -1664,7 +1682,8 @@ fn passFacts(gpa: std.mem.Allocator, a: std.mem.Allocator, work: []const u8) !ST
 /// `verify-chain --set-proofs`: as `verify-chain`, with each epoch's sets given by set-pass proofs instead
 /// of set files (`<dir>/pass-<to>` for the final set, `<dir>/pass-<from−1>` for the previous one), each
 /// under the epoch's challenge; the chain's start set against Core's assumeUTXO anchor when it has one.
-fn verifyChainSetProofs(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8, chain_path: []const u8, out: []const u8, min_work: u256, unpinned: bool, specs: []const ChainSpec) !void {
+fn verifyChainSetProofs(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8, chain_path: []const u8, out: []const u8, min_work: u256, unpinned: bool, specs: []const ChainSpec, member_paths: []const []const u8, witness_script: ?[]const u8) !void {
+    const members = try readMembers(a, member_paths, witness_script);
     var timer = try std.time.Timer.start();
     const vk = try loadVk(a, vk_path);
     const tables = try L.Tables.init(gpa);
@@ -1730,6 +1749,10 @@ fn verifyChainSetProofs(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: [
     std.debug.print("VERIFIED blocks {d}..{d} as one chain proof, sets by set-pass proofs: the coin set after block {d} is {d} coins\n", .{ specs[0].from.height, specs[specs.len - 1].to, specs[specs.len - 1].to, last.count });
     std.debug.print("  total amount     {d} sat\n", .{last.amount});
     std.debug.print("  hash_serialized  {x}  (Core's HASH_SERIALIZED of this set)\n", .{last.hash});
+    if (members.len != 0) {
+        std.debug.print("coins in the set after block {d}:\n", .{specs[specs.len - 1].to});
+        try checkMembers(members, last, witness_script);
+    }
 }
 
 /// An outpoint `<txid>:<vout>` (txid in display order, as Core prints it) as a set key: the txid's
@@ -1784,6 +1807,17 @@ fn setMember(gpa: std.mem.Allocator, a: std.mem.Allocator, set_path: []const u8,
 /// root (and last key), and totals the unspent coins (an outpoint twice is rejected). With
 /// `--witness-script`, every unspent coin must pay to its P2WSH scriptPubKey (`OP_0 sha256(script)`).
 fn verifyMemberCmd(gpa: std.mem.Allocator, a: std.mem.Allocator, work: []const u8, sp: ChainSpec, paths: []const []const u8, unpinned: bool, witness_script: ?[]const u8) !void {
+    const ms = try readMembers(a, paths, witness_script);
+    const ch = try epochChallenge(gpa, a, sp);
+    const tables = try L.Tables.init(gpa);
+    defer tables.deinit(gpa);
+    const f = try openPass(gpa, a, tables, work, ch, unpinned);
+    std.debug.print("VERIFIED set pass: the set after block {d} ({d} coins)\n", .{ sp.to, f.count });
+    try checkMembers(ms, f, witness_script);
+}
+
+/// The membership proofs of `paths` (an outpoint twice is rejected); prints the witness script.
+fn readMembers(a: std.mem.Allocator, paths: []const []const u8, witness_script: ?[]const u8) ![]const ST.Member {
     var ms: std.ArrayList(ST.Member) = .empty;
     for (paths) |path| try ms.appendSlice(a, try ST.decodeMembers(a, try S.readFile(a, path)));
     var seen = std.AutoHashMap([36]u8, void).init(a);
@@ -1793,22 +1827,23 @@ fn verifyMemberCmd(gpa: std.mem.Allocator, a: std.mem.Allocator, work: []const u
         std.debug.print("\n", .{});
         return error.DuplicateOutpoint;
     };
-    const spk: ?[34]u8 = if (witness_script) |ws| ST.p2wsh(ws) else null;
     if (witness_script) |ws| {
-        std.debug.print("witness script ({d} bytes): P2WSH scriptPubKey {x}\n", .{ ws.len, &spk.? });
+        std.debug.print("witness script ({d} bytes): P2WSH scriptPubKey {x}\n", .{ ws.len, &ST.p2wsh(ws) });
         if (try ST.multisigOf(a, ws)) |msig| {
             std.debug.print("  {d}-of-{d} OP_CHECKMULTISIG over\n", .{ msig.m, msig.keys.len });
             for (msig.keys) |k| std.debug.print("    {x}\n", .{k});
         } else std.debug.print("  (not a bare m-of-n multisig script)\n", .{});
     }
-    const ch = try epochChallenge(gpa, a, sp);
-    const tables = try L.Tables.init(gpa);
-    defer tables.deinit(gpa);
-    const f = try openPass(gpa, a, tables, work, ch, unpinned);
-    std.debug.print("VERIFIED set pass: the set after block {d} ({d} coins)\n", .{ sp.to, f.count });
+    return ms.items;
+}
+
+/// Checks membership proofs against a verified pass's root (and last key) and totals the unspent
+/// coins; with a witness script, each must pay to its P2WSH.
+fn checkMembers(ms: []const ST.Member, f: ST.Facts, witness_script: ?[]const u8) !void {
+    const spk: ?[34]u8 = if (witness_script) |ws| ST.p2wsh(ws) else null;
     var total: u64 = 0;
     var n_present: usize = 0;
-    for (ms.items) |*m| {
+    for (ms) |*m| {
         ST.verifyMember(m, f.root, f.last) catch |e| {
             std.debug.print("REJECTED: {s} for ", .{@errorName(e)});
             printOutpoint(m.key);
@@ -1833,7 +1868,7 @@ fn verifyMemberCmd(gpa: std.mem.Allocator, a: std.mem.Allocator, work: []const u
         total += o.amount;
         n_present += 1;
     }
-    std.debug.print("VERIFIED {d} proofs: {d} unspent coins, {d} sat{s}\n", .{ ms.items.len, n_present, total, if (spk != null) " under the witness script" else "" });
+    std.debug.print("VERIFIED {d} proofs: {d} unspent coins, {d} sat{s}\n", .{ ms.len, n_present, total, if (spk != null) " under the witness script" else "" });
 }
 
 /// `set-cut`: the segments a set file cuts into at `logs` (`set_seg.cut`, streamed coin by coin).

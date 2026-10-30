@@ -43,6 +43,12 @@ under the epoch's challenge once, then every proof in the files (single-proof fi
 read too) against its root and last key, rejects an outpoint given twice, and prints each coin (amount,
 height, scriptPubKey) and the total of the unspent ones.
 
+**With the chain** (the way to hand coins to someone else): `chainproof verify-chain <vk> <file.sbchain>
+<out-dir> --set-proofs --members <file.sbmember>... [--witness-script <hex>] <epochs>...` verifies the
+chain proof and the set-pass proofs (`<dir>/pass-<to>`), then the proofs against the final set's root:
+the coins are bound to the chain-proven set, and the verifier needs no set file (`verify-member`
+rebuilds the epoch's challenge from the set files).
+
 **Witness script** (`--witness-script`): every unspent coin in the files must pay to the script's P2WSH
 scriptPubKey `OP_0 <32> sha256(script)`; a bare `m <key>… n OP_CHECKMULTISIG` script is decoded and
 printed (threshold and keys). The script is public, so this is a check outside the proof, not a new
