@@ -440,7 +440,7 @@ tail -f $WORK/logs/s935000.seg.log                       # one line per segment;
 cat $WORK/logs/s935000.status                            # START / END, counts, VERIFIED line
 
 # 3. Off the pod: $WORK/s935000/{setvk.bin,pass.bin} (and seg/ for membership proofs), then on the Mac
-#    chainproof verify-set <work-dir> <dir>:945000:935001:<set-935000.bin> --unpinned
+#    chainproof verify-set <work-dir> <dir>:945000:935001:<set-935000.bin>   # the pass VK must be the pinned vk/epoch/set-l22.vk (--unpinned only for tests)
 ```
 
 Before the full run, a few hundred segments (`cuda-set ... --first 300`) give the real per-segment host

@@ -477,8 +477,12 @@ const pinned_vks = struct {
     const join = [_]PinnedVk{
         .{ .name = "vk/epoch/join-935001-972500.vk", .bytes = @embedFile("vk:epoch/join-935001-972500") },
     };
-    // The coin-set pass (set-pass step 6 pins it after the real runs).
-    const set = [_]PinnedVk{};
+    // The coin-set pass at the segment logs every real pass used (max component log 22, leaf trace
+    // log 23: the "halved" logs that fit an H200). The three passes of 2026-10-29/30 (sets after
+    // 935,000, 945,000 and 972,500) all wrote this VK byte for byte (docs/design/set-pass.md § Step 6).
+    const set = [_]PinnedVk{
+        .{ .name = "vk/epoch/set-l22.vk", .bytes = @embedFile("vk:epoch/set-l22") },
+    };
 };
 
 fn pinnedOf(kind: VkKind) []const PinnedVk {

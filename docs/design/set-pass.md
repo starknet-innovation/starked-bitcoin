@@ -1,6 +1,6 @@
 # The coin-set pass: a set file's facts proved, so a verifier needs no set
 
-Status: current · Updated: 2026-10-27 (accepted as D-048; steps 1–5 done on small sets; step 6, the real sets on GPU, next)
+Status: current · Updated: 2026-11-02 (D-048; steps 1–5 done; step 6: three of the four real passes proved on H200s 2026-10-29/30, the set after 945,000 under epoch 2's challenge still to prove; set VK pinned 2026-11-02)
 
 Figures marked *est.* are rough; the native model (step 1) measures them.
 
@@ -245,8 +245,10 @@ sets of the current chain: ~$50–60. For scale, the chain's 37,500 block proofs
    `<work-dir>/seg/*.sbseg`, `setvk.bin`, `pass.bin` (segment count, the count bytes, the final state,
    the root). `verify-set` checks one. Tested: three segments of `set-170` proved, folded and verified
    (swapped children unsatisfiable; a wrong final state, segment count or non-root proof rejected),
-   and the test chain's five passes (one with five segments). The set VK is pinned after the real runs
-   (step 6; `chainproof` has the `set` kind, empty until then).
+   and the test chain's five passes (one with five segments). The set VK is pinned since 2026-11-02:
+   `vk/epoch/set-l22.vk` (max component log 22, leaf trace log 23: the halved logs every real pass used),
+   the VK `prove-set` wrote byte for byte for the passes after 935,000, 945,000 and 972,500; `verify-set`,
+   `verify-member` and `verify-chain --set-proofs` accept only it (`--unpinned` for tests).
 5. **`verify-chain` without set files:** **Built (2026-10-27):** `verify-chain --set-proofs` reads each
    epoch's passes (`<dir>/pass-<to>` for its final set, `<dir>/pass-<from−1>` for its start set, both
    under its challenge) instead of set files: the digests the joins bind come from the passes' final
