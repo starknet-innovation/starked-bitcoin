@@ -561,7 +561,7 @@ pub fn build(b: *std.Build) void {
             const plan_cmd = archiveCommand(b, aot_root.getDirectory(), native_set, .{ .nvcc = "/cuda-plan-only/bin/nvcc", .host_cxx = "/cuda-plan-only/bin/c++", .ar = "/cuda-plan-only/bin/ar", .home = "/cuda-plan-only", .lib = "/cuda-plan-only/lib64", .jobs = tc.jobs }, cuda_arch, true);
             _ = plan_cmd.addOutputDirectoryArg("starked-cuda-plan");
             const plan_json = plan_cmd.captureStdOut();
-            b.step("cuda-archive-plan", "Validate the CUDA archive selection (stwo-zig runtime + our 16 kernels) without NVIDIA tools").dependOn(&b.addInstallFile(plan_json, "cuda-archive-plan.json").step);
+            b.step("cuda-archive-plan", "Validate the CUDA archive selection (stwo-zig runtime + our block and set kernels) without NVIDIA tools").dependOn(&b.addInstallFile(plan_json, "cuda-archive-plan.json").step);
 
             // `cuda-prove`: the runner (src/gpu/cuda/runner.zig); `cuda-epoch`: an epoch's block proofs
             // (src/gpu/cuda/epoch.zig). With the toolchain options they link the real archive (built
@@ -575,6 +575,7 @@ pub fn build(b: *std.Build) void {
             for ([_][3][]const u8{
                 .{ "cuda-prove", "src/gpu/cuda/runner.zig", "Resident CUDA block proof vs CPU (device build with -Dcuda-nvcc=...; stubs otherwise)" },
                 .{ "cuda-epoch", "src/gpu/cuda/epoch.zig", "An epoch's block proofs on the resident CUDA prover, one CUDA session (chainproof prove-epoch's files)" },
+                .{ "cuda-set", "src/gpu/cuda/set.zig", "A coin-set pass's segment proofs on the resident CUDA prover, one CUDA session (chainproof prove-set's segment files)" },
             }) |spec| {
                 const runner_module = b.createModule(.{ .root_source_file = b.path(spec[1]), .target = target, .optimize = optimize });
                 for (resident.import_table.keys(), resident.import_table.values()) |name, module| runner_module.addImport(name, module);
@@ -607,11 +608,12 @@ pub fn build(b: *std.Build) void {
             // libstwo_cuda_kernels.a>`; without it, the stubs (`--plan-only` only).
             // `cuda-widenode` (src/gpu/cuda/widenode.zig): the wide block node and a fold-1 leaf on the same
             // prover, linked the same way.
-            const circuit_archive = b.option([]const u8, "cuda-circuit-archive", "Directory with stwo-zig's circuit libstwo_cuda_kernels.a (cuda-pack, cuda-widenode, cuda-epoch-tree)");
+            const circuit_archive = b.option([]const u8, "cuda-circuit-archive", "Directory with stwo-zig's circuit libstwo_cuda_kernels.a (cuda-pack, cuda-widenode, cuda-epoch-tree, cuda-set-tree)");
             for ([_][2][]const u8{
                 .{ "cuda-pack", "src/gpu/cuda/pack.zig" },
                 .{ "cuda-widenode", "src/gpu/cuda/widenode.zig" },
                 .{ "cuda-epoch-tree", "src/gpu/cuda/epoch_tree.zig" },
+                .{ "cuda-set-tree", "src/gpu/cuda/set_tree_gpu.zig" },
             }) |spec| {
                 const pack_module = b.createModule(.{ .root_source_file = b.path(spec[1]), .target = target, .optimize = optimize });
                 for (resident.import_table.keys(), resident.import_table.values()) |name, module| pack_module.addImport(name, module);

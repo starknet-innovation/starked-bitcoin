@@ -40,4 +40,5 @@ test {
     _ = @import("witness_test.zig");
     _ = @import("cpu_parity_test.zig");
     _ = @import("arena_test.zig");
+    _ = @import("set_test.zig");
 }

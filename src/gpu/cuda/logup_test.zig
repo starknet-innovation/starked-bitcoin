@@ -40,7 +40,7 @@ const shim =
 
 const Drive = *const fn ([*]const u32, [*]const [*]u32, [*]const u32, [*]const u32, [*]const u32, [*]u32, *u32, u32) callconv(.c) void;
 
-fn build(a: std.mem.Allocator, dir: std.fs.Dir, kernels: []const ?logup.Kernel) !std.DynLib {
+pub fn build(a: std.mem.Allocator, dir: std.fs.Dir, kernels: []const ?logup.Kernel) !std.DynLib {
     const path = try dir.realpathAlloc(a, ".");
     var argv = std.ArrayList([]const u8).empty;
     try argv.appendSlice(a, &.{ "zig", "c++", "-shared", "-O1", "-std=c++17", "-w", "-o", try std.fs.path.join(a, &.{ path, "logup.so" }) });
@@ -89,7 +89,7 @@ fn words(a: std.mem.Allocator, xs: []const QM31) ![]u32 {
 }
 
 /// One system: device model vs `system.interactionTrace`.
-fn check(a: std.mem.Allocator, lib: *std.DynLib, kernels: []const ?logup.Kernel, parts: []const system.Part, mains: []const []const []const M31, seed: u64, what: []const u8) !void {
+pub fn check(a: std.mem.Allocator, lib: *std.DynLib, kernels: []const ?logup.Kernel, parts: []const system.Part, mains: []const []const []const M31, seed: u64, what: []const u8) !void {
     var prng = std.Random.DefaultPrng.init(seed);
     const el = core.channel.lookup_transcript.LookupElements{ .z = randQ(prng.random()), .alpha = randQ(prng.random()) };
     var timer = try std.time.Timer.start();

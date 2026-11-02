@@ -209,13 +209,250 @@ assembles the forest, and `scripts/pod/node_tree.sh` drives a run from the node.
 
 Rehearsal: 11,432 proofs in 67 min on an H100 SXM, GPU about 60 % busy (more host workers next).
 
+## Set pass: `cuda-set`, `cuda-set-tree` (2026-10-28, branch `gpu-set`; segments validated on an H200)
+
+The coin-set pass ([set-pass.md](set-pass.md), step 6) on the same two provers: the segment system
+(`block/set_seg.zig`, 12 components) on our resident prover, the set tree (`set_leaf_out` leaves,
+`set_node_glue` nodes) on stwo-zig's resident circuit prover. Both drivers write exactly the files of
+`chainproof prove-set` (`<work>/seg/<i>.sbseg`, `setvk.bin`, `pass.bin`), so `chainproof verify-set`
+and `verify-chain --set-proofs` read them unchanged.
+
+**Kernels.** `gpu/cuda_aot/` now holds both systems (`catalog.Product`): 25 constraint kernels (16
+block + 9 set; `block_bytes`, `block_tables`, `block_fpwalk` are shared and listed once, with both
+placements, because stwo-zig's build rejects a repeated cache key), 24 LogUp kernels (15 + 9), the
+reorder and 9 witness generators (the block's 7, two of which, `sha_words` and `pre`, the set system
+uses too, and the generic gadget kernels `b2_gadget` and `sha_gadget`, § Set pass device witness). Manifest component indices are global, system-major (block
+0–15, set 16–27); the Cairo parametric scheme does not bound them. `catalog.json` names the system.
+The block entries' kernels and cache keys did not change (the diff only adds entries and the three
+shared placements). `cuda-archive-plan`: 105 AOT sources (48 native + 57). After any change to the set
+AIRs (Lean export), regenerate: `STARKED_CUDA_AOT_WRITE=1 zig build cuda-test -Dcuda=true
+-Doptimize=ReleaseFast -Dtest-filter="drift check"`, then run the drift check without the variable.
+
+**`cuda-set`** (`src/gpu/cuda/set.zig`, linked like `cuda-epoch`): cuts the file at `--logs` as
+`provePass`, chains every segment's incoming state without witnesses (`set_seg.advance`, checked
+against each witness's outgoing state), then `--jobs` workers build witnesses, plans and host trees while
+the main thread proves (one runtime, the prepared-arena cache: one size for the whole pass). The device
+generates tree 0 and the hash gadgets' columns (§ Set pass device witness); the host builds and uploads
+the rest (`--host-witness`: everything on the host, the first version). The challenge
+is a file (`chainproof set-challenge <epoch> <ch.bin>`, `set_tree.encodeChallenge`), copied to
+`<work>/challenge.bin`. Options: `--cpu-check n` (CPU proof of the first and every n-th segment, byte
+comparison; a mismatch keeps the device file as `.gpu` and stops), `--verify`, `--first n`, `--only
+<list>`, `--mock` (CPU proofs through the same pipeline), `--stages` (per segment: H2D bytes and each device stage's time), `--host-only` (witness and plans only: host time
+and memory). Existing segment files are skipped (resume).
+
+**`cuda-set-tree`** (`src/gpu/cuda/set_tree_gpu.zig`, linked like `cuda-epoch-tree`; the shared GPU
+part moved to `circuit_gpu.zig`): `setup` from segment 0 (`setvk.bin`, refused if one with other
+contents is there), then `set_tree.tasks` level by level (leaves, then nodes by height; one padded
+shape for all), one file per proof `<work>/stree/<lo>-<n>.sbproof` (resume), every proof checked against
+the VK identity, verified natively and its digest compared with the native summary; `--cpu-check n`,
+`--cpu-prover`. Then `pass.bin` (final state = the last segment's outgoing state, `set_tree.outState`)
+and `verifyPass` under `<work>/challenge.bin` (or `--challenge`).
+
+**Open issue: segment 5258 of the set after 972,500** (2026-10-30). Its host work fails in the plan:
+the lowered program of one component does not pass stwo-zig's `Program.validate` (`ReadBeforeWrite`,
+`parametric.normalize` in `Catalog.admit`); the other 7,013 segments pass. The CPU prover does not use the
+lowering: `cuda-set --mock --only` proved and verified it (352 s). `cuda-set --keep-going` reports such a
+segment and goes on (`SEGMENTS FAILED`, nonzero exit); prove it that way before the tree. `plan.zig` now
+names the component when admission fails. Cause not found yet (the lowering is value-independent apart
+from literal values).
+
+**Tree leaves: the preprocessed root** (2026-10-29, H200, first rehearsal). Each leaf took ~35 s, of
+which ~32 s was the circuit build: `set_tree.leafInputs` computed the segments' preprocessed Merkle
+root (all 12 components at the pass's logs, multithreaded, ~30 GB RSS per job) twice, inside the native
+verify and again for the circuit. It depends only on the logs, so `cuda-set-tree` computes it once
+(`set_tree.preRoot`) and passes it in (`leafCircuitOfPre`); `leafInputs` computes it once. Safe: the
+native verify still checks it against each proof's own commitment, and the leaf circuit, which embeds
+it, is pinned by the VK's circuit hash. Per leaf after (stderr `phases`: read, circuit, pad, check,
+prove, verify, CPU check): 0.005 / **0.8** / 1.0 / 0.15 / ~1.0 / ~0.6 s; 3 jobs 51 proofs/min (36 GB
+RSS), 6 jobs 97 proofs/min (38 GB). At 8 jobs the old build was OOM-killed (cgroup 251 GB).
+
+**Byte identity.** The device proof must equal `set_tree.proveSeg`'s (the CPU prover, `.compact`
+storage: same bytes as the default). On the pod, `cuda-set --cpu-check 1 --first 1 --verify`
+(`prove_set.sh check`) proves segment 0 both ways and compares the encoded files; full runs keep
+`--cpu-check 500`; a CPU-checked segment gets the full host witness (the device still generates its own
+gadget columns). The tree side is `cuda-epoch-tree`'s, already byte-identical on an H100.
+
+**Device memory** (`set_test.zig`, planned and bound on the host, production FRI; `set_mt` with 329 main columns):
+
+| Logs (bytes, tables, pend, rec, fpwalk, b2w, b2c, tmsg, shac, lw, lc, mt) | Arena (device LogUp and witness) | Planned H2D, device witness | Host witnesses (`--host-witness`) | Fits |
+|---|---|---|---|---|
+| production `23,8,6,16,22,21,23,23,23,22,23,23` | **152.9 GiB** | **3.52 GiB** (40 MiB inputs) | 43.0 GiB | B200 (180 GB) only; not H200 (141 GB) |
+| halved `22,8,6,15,21,20,22,22,22,21,22,22` | 76.4 GiB | **1.76 GiB** (20 MiB inputs) | 21.5 GiB | H100 NVL 94 GB, H200; H100 80 GB (79.6 GiB) only just |
+| quartered `21,8,6,14,20,19,21,21,21,20,21,21` | 38.2 GiB | **0.88 GiB** (10 MiB inputs) | 10.7 GiB | any 48 GB+ device |
+
+The device witness does not change the arena: its inputs and the SHA-256 word scratch overlap buffers
+that are not live yet, as for the block system.
+
+The trees are 96 % of it (coefficients, two evaluation copies, Merkle). Halving the logs about doubles
+the segment count (production: ~2,330 per set, [set-pass.md](set-pass.md) step 6; halved ~4,650,
+quartered ~9,300, *est.*) and the tree's leaves, not the rows. `chainproof`'s `default_set_logs` is
+unchanged (provisional); the runs pass `--logs` explicitly, and `prove-set`, `set-cut` and the VK take
+the same list.
+
+**Host checks** (`zig build cuda-test -Dcuda=true`; this Mac, no nvcc):
+- the 12 set constraint kernels, built as host C++, equal the interpreter (logs 6 and 9, random traces
+  and statements); invariance of the normal form over logs 8/12/22 and statements;
+- a CPU proof of segment 0 of `set-170` (test logs `10,8,6,6,10,8,11,10,11,10,12,13`): the resident
+  plans reproduce its shape (323/1,363/376/8 columns, 4,653 OODS samples, 13 FRI layers, 7,082
+  constraints), the host channel and the device-sink model every challenge (3,012 statement mixes);
+- its 12 LogUp kernels (host C++) and the completion model equal `system.interactionTrace` (376 tree-2
+  columns, 12 claims); the host trees borrow the witness columns;
+- the three arenas above plan and bind; drift check; `cuda-archive-plan` (stwo-zig's validator) accepts
+  the 107-source selection; `cuda-check` links the device schedule.
+- **Device witness** (`set_test.zig`): the generators as host C++ (`b2_gadget`, `sha_words`,
+  `sha_gadget`, `pre`; each launch over its whole grid with its own arguments) equal the host witness's
+  1,024 gadget columns and all 323 tree-0 columns for segments 0, 12 and 24 of `set-170` and segment 0
+  of `set-1000` (test logs), and with `STARKED_SET_WITNESS_LARGE=1` for `set-1000` with the hash
+  components at 2^17 and `set_mt` at 2^19; a flipped Blake2s message word, counter, tree-node word and
+  SHA-256 block word each change the output. The whole `.trace_generation` (generators, reorder, LogUp
+  gather, over a host-memory arena bound with the real plans, ingress from the lean witness through
+  `prover.uploadTree`) gives every one of the 1,686 tree-0/1 columns of a `set-170` segment in the CPU
+  prover's storage order, and the LogUp sources; ingress 1.7 MiB instead of 23.0 MiB.
+- **Plumbing** (`scripts/test_cuda_set_mock.sh`, stub-linked binaries): `cuda-set --mock` +
+  `cuda-set-tree --cpu-prover` write the same segment files, `setvk.bin` and `pass.bin` as `chainproof
+  prove-set` (test chain, set after 8, epoch 4..8), `verify-set` accepts; set-170 under the testing
+  challenge (25 segments, 49 tree proofs) verifies, and a run with a segment and a node removed resumes
+  to the same `pass.bin`.
+
+**Device witness** (2026-10-28, owner-approved A and C; `witness.zig` `SetInputs`, `Plan.initSet`;
+`set_seg.buildAtOpts` with `skip_gadgets`). The ingress of 21.5 GiB per halved segment (7.8–9.1 s on
+the H200, § Measured on an H200) is mostly columns the device can compute from a few MB:
+
+| Kernel | Grid | Writes | Host reference |
+|---|---|---|---|
+| `b2_gadget` (new, generic) | one thread per row; recomputes its period's earlier G steps | the Blake2s gadget's 300 columns of `set_b2c`, `set_lc`, `set_mt` (one launch each, its own pointer table and inputs) | `blake2s_air.zig fillPeriod` |
+| `sha_words` (the block's) | one thread per 72-row period | the word trace `a, e, w` (scratch) | `sha256/witness.zig Words.place` |
+| `sha_gadget` (new, generic) | one thread per row | `set_shac`'s 124 gadget columns | `sha256/witness.zig columns` (`shaRole`) |
+| `pre` (the block's) | one thread per (row, column), one launch per tree-0 cohort | every preprocessed column | `ir.PreCol.at` |
+
+- **Inputs** (`witness_inputs`, 20 MiB at halved logs): the σ table and SHA-256 round constants, the
+  tree-0 descriptors and periodic values, per Blake2s component one input per 88-row period (h, m, t,
+  last: every period, used or not, so the kernel has no padding logic; the host knows each component's
+  dummy), `set_shac`'s compressions (the zero dummy past them, as `sha_words` already does), and the
+  column pointer tables. Regions are sized by the logs, so one memory plan serves the whole pass.
+- **Host**: `buildAtOpts(.{ .skip_gadgets = true })` records the gadget inputs (`Built.gadgets`) and
+  leaves the 1,024 gadget columns empty; every other column (the components' extras: 9 in `set_b2c`,
+  13 in `set_lc`, 29 in `set_mt`, 6 in `set_shac`, and the other eight components) is built as before
+  and uploaded. `prover.hostTraceTreesFor` now takes a component whose columns are generated in part
+  (`generated_main` per column). The block kernels' sources are unchanged.
+- **C, tree 0**: generated on the device by the block's `pre` kernel instead of kept resident. Each
+  proof is its own transaction: host writes are allowed only at ingress, and the commitments
+  interpolate the staged columns in place, so a resident copy would need a slot outside the per-proof
+  arena that the runtime carries across transactions, which stwo-zig's resident runtime does not offer.
+  The kernel costs a few ms (a memory-bound write of 3.75 GiB).
+- **Expected** (*est.*): ingress ~0.7 s for 1.76 GiB (the measured ~2.7 GiB/s pageable rate), the
+  generators ~0.2–0.4 s (`block_b2s` and `block_sha` at 2^20–2^22 took < 0.1 s on an H100; the set has
+  three Blake2s components at 2^22), the rest unchanged at ~3.3 s: **~4.3 s of device time per halved
+  segment instead of ~10.7–12.4 s**. The host witness loses its largest part: `cuda-set --host-only` on
+  the M4 Pro, one quartered segment of `set-1000` (padded, so a lower bound for real segments), builds the
+  witness in **0.30 s instead of 9.9 s** (`--host-witness`), 0.9 GiB of host trees instead of 10.7. Six
+  jobs should then keep the device fed with room to spare; a whole set at halved logs takes about ~8.5 h
+  instead of ~25 h (*est.*, 7,000 segments). A GPU run settles nvcc on the two new kernels, byte identity
+  and the times.
+
+**Only a GPU settles:** nvcc on the 20 new kernels (18 AIR kernels and the two gadget generators) (`set_b2c`, `set_lc`, `set_mt` have 2,000–2,300
+constraints each; expect register spills), their AOT bind, the device run at the set's shapes (masks up
+to 10 offsets, −88…0), byte identity, the real arena peak and the times below.
+
+**Time** (*est.*, from the block runs: device time ∝ arena; cuda-epoch 2^23 tiered, 51.2 GiB arena,
+1.94 s on the device): ~5.8 s (production), ~2.9 s (halved), ~1.4 s (quartered) per segment, i.e. about
+**3.7 H100-hours of device time per set** whatever the logs. The set's constraints are denser than the
+block's (`set_b2c`/`set_lc`/`set_mt`), so composition may add to it. The tree: ~0.35–0.5 s per proof
+(the block forest's 11,432 proofs in 67 min), ~1 h per set at halved logs. **The host witness is the
+bottleneck:** it is single-threaded, ~10 s for one quartered segment on the M4 Pro (the padded `set-1000`
+file, a lower bound; a loaded machine), so roughly 20 s halved and 40 s production, and 2–4× that on pod
+cores; at ~30 GB of host memory per halved job, a 250 GB pod runs ~6–8 jobs, i.e. ~5–15 s per segment of
+host time against ~3 s of device time. Levers: device witness generators for `set_b2c`/`set_lc`/`set_mt`
+(Blake2s, as `block_b2s`) and `set_shac` (as `block_sha`), the bulk of the columns; or more pods' CPUs.
+
+### Measured on an H200 (2026-10-28)
+
+RunPod H200 SXM (secure, $5.29/h, 12 vCPU, 251 GB host), pod `73uw67ne4o1ed4`, ~1 h. Logs, the check
+log and the 40 segment files are in `data/gpu-set-20261028/` on the Mac.
+
+- **Build** (`prove_set.sh build`, `sm_90`): 18 min. nvcc took every new kernel.
+- **Byte identity**: segment 0 of the set after 935,000 at halved logs: the device proof equals the CPU
+  proof byte for byte and verifies (`SET CHECK OK`; the CPU proof took ~8 min and 93 GB RSS).
+- **Throughput** (`cuda-set --first 40 --jobs 6`, an 8M-coin prefix of the same set, halved logs):
+  **12.7 s per segment** wall clock; device 10.7 s per segment on average (6.3–18.4 s), host witness 29–42 s
+  per job (six jobs keep up); peak device memory 79.1 GB, peak host RSS 137 GB; proofs ~1.22 MB each.
+  The device time is ~4× the estimate above, so the GPU, not the host, bounds the pass.
+- **A whole set** at halved logs: ~23,460 coins per segment, so ~7,000 segments for the 164M-coin sets,
+  ~25 h of segments plus ~1.5 h of tree (*est.*), about $135 per set at $5.29/h.
+
+Not yet run on a GPU: `cuda-set-tree` and a whole pass.
+
+**Where the device time goes** (`cuda-set --stages`, same pod type, 2026-10-28, pod `an77xfr91q0vys`;
+`data/gpu-set-20261028/prof{A,B}.out`): **ingress**, the pageable upload of the 21.5 GiB host trees, is
+7.8 s per segment on average with one witness job (5.9–15.8 s) and 9.1 s with six (6.8–19.1 s: host
+memory traffic slows it); everything else is a constant ~3.3 s (constraint evaluation 2.5 s, trace commit
+0.5 s, OODS 0.14 s, the rest < 0.1 s). Of the upload, 14.1 GiB is the Blake2s gadget's 300 columns in
+`set_b2c`, `set_lc` and `set_mt`, 2.0 GiB `set_shac`, 3.75 GiB the preprocessed tree (the same for every
+segment). Levers: generate those columns on the device (as `block_b2s` and `block_sha` already are),
+upload from pinned host memory, keep the preprocessed tree resident.
+
+### Measured with the device witness (2026-10-28, 6ed9373)
+
+H200 SXM (secure, $5.29/h, 24 vCPU), pod `8iuwtx7pv578r8`, ~40 min; `prove_set.sh stages` on the 8M-coin
+prefix of the set after 935,000, halved logs; logs in `data/gpu-set-20261028/devwitness/`.
+
+- **Byte identity**: segment 0 (device witness) equals the CPU proof (1,224,312 bytes, sha256
+  `16eaa3b5…`); the 4 host-witness segments' files equal the device-witness ones (`SET STAGES OK`).
+- **Per segment** (segments 1–19, six jobs): H2D **1.79 GiB** (was 21.5), ingress 0.2–1.2 s (was 7.8–9.1),
+  device **3.5–4.5 s** (mean 3.9 s over 20, was 10.7–12.4), host witness **1.7–2.0 s** per job (was
+  29–42 s); the other stages as before (constraint evaluation 2.59 s, trace commit 0.49 s).
+- **A whole set** at halved logs (*est.*): ~7,000 segments × ~4 s ≈ 8 h of segments plus ~1.5 h of tree:
+  about $50 per set at $5.29/h (secure), ~$35 at $3.59/h (community).
+
+### Runbook (pod)
+
+Image, bootstrap and `env.sh` as in § Running on a pod; the branch is not pushed, so ship a tarball.
+
+```sh
+# On the Mac (or the node): the source, and each pass's challenge (needs the epoch's forestk-<to>.bin
+# and set files: run where they are).
+scripts/pod/bundle.sh /tmp/sb-gpuset.tar.gz
+zig-out/bin/chainproof set-challenge <dir>:945000:935001:<set-935000.bin> ch-945000.bin   # 935,000's pass under epoch 935,001..945,000
+# copy the tarball, the challenge files and the set files to the pod ($DATA, container disk)
+
+# On the pod:
+NO_BUILD=1 bash scripts/pod/bootstrap.sh --tarball /root/sb-gpuset.tar.gz
+cd /root/starked-bitcoin
+CUDA_ARCH=sm_90 scripts/pod/prove_set.sh build           # cuda-set (our archive), cuda-set-tree (circuit archive), chainproof
+
+# 1. One segment, device vs CPU, byte-identical and verified (stops on a mismatch):
+L=22,8,6,15,21,20,22,22,22,21,22,22                      # halved: H100 NVL / H200 (80 GB H100: quartered, L=21,8,6,14,20,19,21,21,21,20,21,21)
+scripts/pod/prove_set.sh check $DATA/set-935000.bin $DATA/ch-945000.bin $L
+#    the CPU proof of a halved segment takes minutes and tens of GB (block 2^23: 394 s, ~90 GB RSS).
+#    expect "segment 0: CPU proof byte-identical" and "== SET CHECK OK"; on a DIFF compare the files
+#    (seg/0.sbseg vs seg/0.sbseg.gpu) and use cuda-prove's stage diff approach to localise.
+
+# 1b. The device witness's effect: 20 segments with --stages (expect "h2d 1.7x GiB" per halved segment
+#    instead of 21.5, ingress < 1 s, the segment lines' device time ~4-5 s), segment 0 also CPU-checked
+#    (--cpu-check 1000000 checks only the first), then 4 segments with --host-witness whose files must
+#    equal the device-witness ones:
+scripts/pod/prove_set.sh stages $DATA/set-935000.bin $DATA/ch-945000.bin $L 20 6
+#    expect "byte-identical" and "== SET STAGES OK"; keep $WORK/logs/set-stages*.log with the run's data.
+
+# 2. A whole pass (segments, then tree and pass.bin, verified), detached and resumable:
+nohup scripts/pod/prove_set.sh run s935000 $DATA/set-935000.bin $DATA/ch-945000.bin $L --jobs 6 > /dev/null 2>&1 &
+tail -f $WORK/logs/s935000.seg.log                       # one line per segment; then s935000.tree.log
+cat $WORK/logs/s935000.status                            # START / END, counts, VERIFIED line
+
+# 3. Off the pod: $WORK/s935000/{setvk.bin,pass.bin} (and seg/ for membership proofs), then on the Mac
+#    chainproof verify-set <work-dir> <dir>:945000:935001:<set-935000.bin> --unpinned
+```
+
+Before the full run, a few hundred segments (`cuda-set ... --first 300`) give the real per-segment host
+and device times and the jobs count that keeps the GPU busy (`--host-only` measures the host alone).
+
 ## Public inputs
 
 The CPU path bakes public inputs into the program as literals. Our lowering deduplicates equal constants (`stwzeva.ProgramBuilder.constant`), so the program shape depends on the values. New `PubMode.slots`: one `constant` instruction per public input, never shared. stwo-zig's parametric normaliser (`cairo_cuda/parametric_eval.zig:18`) turns every base literal into a session constant and erases the domain size. The kernel then depends on the AIR only: one kernel per AIR, for every statement and log size. The statement reaches the kernel through `args->base_params`, exactly as the circuit binds its literals (`resident_composition.zig`, `writeConstants`). Base `param`s (`lowerTemplate`) are not needed: the parametric path rejects them (`parametric_eval.zig:20`).
 
 ## AOT catalog
 
-- `gpu/cuda_aot/`: 16 kernels (3.2 MiB of CUDA) and an `aot_manifest.json` in stwo-zig's product-set format.
+- `gpu/cuda_aot/`: 16 block kernels (3.2 MiB of CUDA; 25 constraint kernels with the set system's, § Set pass) and an `aot_manifest.json` in stwo-zig's product-set format.
 - Cache key = `parametric.cacheKey(program identity, source identity, Cairo authority)`: stwo-zig's build validator pins the authority. Changing an AIR changes only its own kernel.
 - GPU-host build: a local AOT root that reuses the `circuit` names (see Running on a pod). The script's `--frontend`/`--aot-set` choices are hard-coded (`scripts/cuda_build.py:56-64`).
 

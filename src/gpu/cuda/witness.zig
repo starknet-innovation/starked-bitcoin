@@ -12,6 +12,12 @@
 //! | `bytes` | one thread per row | `block_bytes`' 12 columns | `block/bytes.zig generate` (multiplicities from the host) |
 //! | `msg` | one thread per row (binary search for its message) | `block_msg`'s 38 columns | `block/msg.zig generate`, `setUses`, `merkle.addHeaderUses` |
 //! | `walk` | one thread per row (its record from the host's sequential pass) | `block_walk`'s 51 columns | `block/walk.zig columns` |
+//! | `b2_gadget` | one thread per row (recomputes its period's G steps) | the Blake2s gadget's 300 columns of any component (`set_b2c`, `set_lc`, `set_mt`) | `hash/blake2s_air.zig fillPeriod` |
+//! | `sha_gadget` | one thread per row (from `sha_words`' trace) | the SHA-256 gadget's 124 columns of any component (`set_shac`) | `sha256/witness.zig columns` |
+//!
+//! The coin-set pass (`SetInputs`, `Plan.initSet`) uses `b2_gadget`, `sha_words`, `sha_gadget` and `pre`:
+//! one input per 88-row period of each Blake2s component, `set_shac`'s compressions, tree 0's descriptors;
+//! the components' other columns come from the host.
 //!
 //! Ingress uploads only their small inputs into one slot (`witness_inputs`, `Layout`): the SHA-256
 //! round constants and Blake2s σ table, per `block_sha` period its compression (input state, block)
@@ -63,7 +69,7 @@ const SHA_META_WORDS = 6;
 const B2S_PERIOD_WORDS = 27;
 const PRE_DESC_WORDS = 8;
 
-pub const Which = enum { b2s, bytes, msg, pre, sha_columns, sha_words, walk };
+pub const Which = enum { b2_gadget, b2s, bytes, msg, pre, sha_columns, sha_gadget, sha_words, walk };
 
 /// One fixed kernel and its AOT identity (as `reorder.Kernel`).
 pub const Kernel = struct {
@@ -104,22 +110,26 @@ pub const Kernel = struct {
     }
 };
 
-/// The seven kernels, in manifest (label) order.
+/// The nine kernels, in manifest (label) order. `b2_gadget` and `sha_gadget` write only the hash
+/// gadgets' columns of any component (the coin-set pass's `set_b2c`, `set_lc`, `set_mt`, `set_shac`);
+/// `sha_words` and `pre` serve both systems.
 pub const Kernels = struct {
+    b2_gadget: Kernel,
     b2s: Kernel,
     bytes: Kernel,
     msg: Kernel,
     pre: Kernel,
     sha_columns: Kernel,
+    sha_gadget: Kernel,
     sha_words: Kernel,
     walk: Kernel,
 
     pub fn deinit(self: *Kernels, allocator: std.mem.Allocator) void {
-        inline for (.{ &self.b2s, &self.bytes, &self.msg, &self.pre, &self.sha_columns, &self.sha_words, &self.walk }) |k| k.deinit(allocator);
+        inline for (.{ &self.b2_gadget, &self.b2s, &self.bytes, &self.msg, &self.pre, &self.sha_columns, &self.sha_gadget, &self.sha_words, &self.walk }) |k| k.deinit(allocator);
     }
 
-    pub fn all(self: *const Kernels) [7]*const Kernel {
-        return .{ &self.b2s, &self.bytes, &self.msg, &self.pre, &self.sha_columns, &self.sha_words, &self.walk };
+    pub fn all(self: *const Kernels) [9]*const Kernel {
+        return .{ &self.b2_gadget, &self.b2s, &self.bytes, &self.msg, &self.pre, &self.sha_columns, &self.sha_gadget, &self.sha_words, &self.walk };
     }
 };
 
@@ -137,6 +147,8 @@ fn contract(allocator: std.mem.Allocator, which: Which) ![]u8 {
         .bytes => std.fmt.allocPrint(allocator, "starked-bitcoin/witness-bytes/v{d};args=raw,mults,len,columns,rows;block_bytes 12 natural columns: bytes.generate (pos, byte, bits, active, mult) from raw (bytes, little-endian words) and mults[r] for r < len;columns=u64 pointers;grid=rows/{d};threads={d}", .{ version, threads, threads }),
         .msg => std.fmt.allocPrint(allocator, "starked-bitcoin/witness-msg/v{d};args=raw,msgs,count,columns,rows;block_msg 38 natural columns: msg.generate + setUses + merkle.addHeaderUses from raw (bytes, little-endian words) and msgs[{d}m]: row,id,flags(hdr,wtx,seg,split),i,a,w,l,dl,prev_dl;columns=u64 pointers;grid=rows/{d};threads={d}", .{ version, bmsg.DESC_WORDS, threads, threads }),
         .walk => std.fmt.allocPrint(allocator, "starked-bitcoin/witness-walk/v{d};args=raw,recs,count,columns,rows;block_walk 51 natural columns: walk.columns from raw and recs[0]=sigops, recs[4+4r..]: w0(pos,kind,li,lk,first),rem,val,sums;columns=u64 pointers;grid=rows/{d};threads={d}", .{ version, threads, threads }),
+        .b2_gadget => std.fmt.allocPrint(allocator, "starked-bitcoin/witness-b2-gadget/v{d};args=sigma,periods,count,columns,rows;the Blake2s gadget's 300 natural columns of any component: fillPeriod(periods[27 min(r/88, count-1)..]: h8,m16,tlo,thi,last);columns=u64 pointers (300);grid=rows/{d};threads={d}", .{ version, threads, threads }),
+        .sha_gadget => std.fmt.allocPrint(allocator, "starked-bitcoin/witness-sha-gadget/v{d};args=words,ktab,count(unused),columns,rows;the SHA-256 gadget's 124 natural columns of any component: sha256 columns(shaRole, K=ktab[0..64]) from the sha_words trace;columns=u64 pointers (124);grid=rows/{d};threads={d}", .{ version, threads, threads }),
         .pre => std.fmt.allocPrint(allocator, "starked-bitcoin/witness-pre/v{d};args=desc,values,first,log_size,columns;out[i]=PreCol.at(i,2^log) natural;desc=kind,k,voff,vlen,ptr_lo,ptr_hi,0,0;grid=rows/{d},columns;threads={d}", .{ version, threads, threads }),
     };
 }
@@ -166,6 +178,10 @@ fn kernelOf(allocator: std.mem.Allocator, which: Which) !Kernel {
 
 pub fn kernels(allocator: std.mem.Allocator) !Kernels {
     var out: Kernels = undefined;
+    out.b2_gadget = try kernelOf(allocator, .b2_gadget);
+    errdefer out.b2_gadget.deinit(allocator);
+    out.sha_gadget = try kernelOf(allocator, .sha_gadget);
+    errdefer out.sha_gadget.deinit(allocator);
     out.b2s = try kernelOf(allocator, .b2s);
     errdefer out.b2s.deinit(allocator);
     out.bytes = try kernelOf(allocator, .bytes);
@@ -258,6 +274,73 @@ fn sourceOf(allocator: std.mem.Allocator, which: Which, name: []const u8) ![]u8 
             \\}}
             \\
         , .{ version, header, period_threads, name }),
+        .sha_gadget => std.fmt.allocPrint(allocator,
+            \\// starked-bitcoin device witness v{d} (src/gpu/cuda/witness.zig): the SHA-256 gadget's 124
+            \\// columns of any component (the coin-set pass's set_shac). Row r from the word trace (words:
+            \\// a, e, w, `rows` each; cyclic neighbours; the `sha_words` kernel) as sha256/witness.zig
+            \\// `columns` with `shaRole`; ktab[0..64]: the round constants. count: unused.
+            \\{s}
+            \\__device__ __forceinline__ unsigned starked_S0(unsigned x) {{ return starked_rotr(x, 2u) ^ starked_rotr(x, 13u) ^ starked_rotr(x, 22u); }}
+            \\__device__ __forceinline__ unsigned starked_S1(unsigned x) {{ return starked_rotr(x, 6u) ^ starked_rotr(x, 11u) ^ starked_rotr(x, 25u); }}
+            \\__device__ __forceinline__ unsigned starked_s0(unsigned x) {{ return starked_rotr(x, 7u) ^ starked_rotr(x, 18u) ^ (x >> 3u); }}
+            \\__device__ __forceinline__ unsigned starked_s1(unsigned x) {{ return starked_rotr(x, 17u) ^ starked_rotr(x, 19u) ^ (x >> 10u); }}
+            \\extern "C" __global__ void __launch_bounds__({d}) {s}(
+            \\    const unsigned *words, const unsigned *ktab, unsigned count, const u64 *columns, unsigned rows) {{
+            \\    const unsigned r = blockIdx.x * blockDim.x + threadIdx.x;
+            \\    if (r >= rows) return;
+            \\    const unsigned *wa = words;
+            \\    const unsigned *we = words + (u64)rows;
+            \\    const unsigned *ww = words + 2ull * (u64)rows;
+            \\#define AT(x, back) x[(r + rows - (back)) % rows]
+            \\#define PUT(c, v) (((unsigned *)columns[(c)])[r] = (v))
+            \\    const unsigned av = wa[r], ev = we[r], wv = ww[r];
+            \\    for (unsigned i = 0; i < 32u; ++i) {{
+            \\        PUT(i, (av >> i) & 1u);
+            \\        PUT(32u + i, (ev >> i) & 1u);
+            \\        PUT(64u + i, (wv >> i) & 1u);
+            \\    }}
+            \\    const unsigned a1 = AT(wa, 1u), a2 = AT(wa, 2u), a3 = AT(wa, 3u);
+            \\    const unsigned e1 = AT(we, 1u), e2 = AT(we, 2u), e3 = AT(we, 3u);
+            \\    const unsigned s0v = starked_S0(a1), s1v = starked_S1(e1);
+            \\    const unsigned chv = (e1 & e2) ^ (~e1 & e3);
+            \\    const unsigned mjv = (a1 & a2) ^ (a1 & a3) ^ (a2 & a3);
+            \\    const unsigned ss0 = starked_s0(AT(ww, 15u)), ss1 = starked_s1(AT(ww, 2u));
+            \\    const unsigned pairs[6] = {{ s0v, s1v, chv, mjv, ss0, ss1 }};
+            \\    for (unsigned k = 0; k < 6u; ++k) {{ PUT(96u + 2u * k, pairs[k] & 0xffffu); PUT(97u + 2u * k, pairs[k] >> 16u); }}
+            \\    unsigned ca0 = 0u, ca1 = 0u, ce0 = 0u, ce1 = 0u, cw0 = 0u, cw1 = 0u;
+            \\    const unsigned q = r % 72u;
+            \\    if (q >= 4u && q < 68u) {{
+            \\        const unsigned t = q - 4u;
+            \\        const unsigned k = ktab[t];
+            \\        const unsigned h4 = AT(we, 4u), d4 = AT(wa, 4u);
+            \\        const unsigned t1_lo = (h4 & 0xffffu) + (s1v & 0xffffu) + (chv & 0xffffu) + (k & 0xffffu) + (wv & 0xffffu);
+            \\        const unsigned t1_hi = (h4 >> 16u) + (s1v >> 16u) + (chv >> 16u) + (k >> 16u) + (wv >> 16u);
+            \\        ca0 = (t1_lo + (s0v & 0xffffu) + (mjv & 0xffffu)) >> 16u;
+            \\        ca1 = (t1_hi + (s0v >> 16u) + (mjv >> 16u) + ca0) >> 16u;
+            \\        ce0 = ((d4 & 0xffffu) + t1_lo) >> 16u;
+            \\        ce1 = ((d4 >> 16u) + t1_hi + ce0) >> 16u;
+            \\        if (t >= 16u) {{
+            \\            const unsigned w7 = AT(ww, 7u), w16 = AT(ww, 16u);
+            \\            cw0 = ((ss1 & 0xffffu) + (w7 & 0xffffu) + (ss0 & 0xffffu) + (w16 & 0xffffu)) >> 16u;
+            \\            cw1 = ((ss1 >> 16u) + (w7 >> 16u) + (ss0 >> 16u) + (w16 >> 16u) + cw0) >> 16u;
+            \\        }}
+            \\    }} else if (q >= 68u) {{
+            \\        const unsigned x4 = AT(wa, 4u), x68 = AT(wa, 68u), y4 = AT(we, 4u), y68 = AT(we, 68u);
+            \\        ca0 = ((x4 & 0xffffu) + (x68 & 0xffffu)) >> 16u;
+            \\        ca1 = ((x4 >> 16u) + (x68 >> 16u) + ca0) >> 16u;
+            \\        ce0 = ((y4 & 0xffffu) + (y68 & 0xffffu)) >> 16u;
+            \\        ce1 = ((y4 >> 16u) + (y68 >> 16u) + ce0) >> 16u;
+            \\    }}
+            \\    for (unsigned j = 0; j < 3u; ++j) {{
+            \\        PUT(108u + j, (ca0 >> j) & 1u); PUT(111u + j, (ca1 >> j) & 1u);
+            \\        PUT(114u + j, (ce0 >> j) & 1u); PUT(117u + j, (ce1 >> j) & 1u);
+            \\    }}
+            \\    for (unsigned j = 0; j < 2u; ++j) {{ PUT(120u + j, (cw0 >> j) & 1u); PUT(122u + j, (cw1 >> j) & 1u); }}
+            \\#undef AT
+            \\#undef PUT
+            \\}}
+            \\
+        , .{ version, header, threads, name }),
         .sha_columns => std.fmt.allocPrint(allocator,
             \\// starked-bitcoin device witness v{d} (src/gpu/cuda/witness.zig): block_sha's 144 columns.
             \\// Row r from the word trace (words: a, e, w, `rows` each; cyclic neighbours) as
@@ -363,6 +446,97 @@ fn sourceOf(allocator: std.mem.Allocator, which: Which, name: []const u8) ![]u8 
             \\}}
             \\
         , .{ version, header, m31, threads, name }),
+        .b2_gadget => std.fmt.allocPrint(allocator,
+            \\// starked-bitcoin device witness v{d} (src/gpu/cuda/witness.zig): the Blake2s gadget's 300
+            \\// columns of any component (the coin-set pass's set_b2c, set_lc, set_mt). Row r of period
+            \\// p = r / 88 from its own input periods[27 min(p, count - 1)..]: h[8], m[16], t_lo, t_hi, last
+            \\// (the host gives every period's input, used or not) as hash/blake2s_air.zig fillPeriod
+            \\// (init rows 0-3, G rows 4-83 after recomputing the earlier G steps, final rows 84-87,
+            \\// message limbs 256-287, carries 288-299). sigma: 10 x 16 words.
+            \\{s}
+            \\__device__ __forceinline__ void starked_carries(unsigned *out, unsigned x, unsigned y, unsigned z) {{
+            \\    const unsigned lo = (x & 0xffffu) + (y & 0xffffu) + (z & 0xffffu);
+            \\    const unsigned hi = (x >> 16u) + (y >> 16u) + (z >> 16u);
+            \\    out[0] = lo >> 16u;
+            \\    out[1] = (hi + out[0]) >> 16u;
+            \\}}
+            \\__device__ __forceinline__ void starked_gidx(unsigned g, unsigned *ix) {{
+            \\    if (g < 4u) {{ ix[0] = g; ix[1] = g + 4u; ix[2] = g + 8u; ix[3] = g + 12u; }}
+            \\    else {{ const unsigned k = g - 4u; ix[0] = k; ix[1] = 4u + ((k + 1u) & 3u); ix[2] = 8u + ((k + 2u) & 3u); ix[3] = 12u + ((k + 3u) & 3u); }}
+            \\}}
+            \\extern "C" __global__ void __launch_bounds__({d}) {s}(
+            \\    const unsigned *sigma, const unsigned *periods, unsigned count, const u64 *columns, unsigned rows) {{
+            \\    const unsigned r = blockIdx.x * blockDim.x + threadIdx.x;
+            \\    if (r >= rows) return;
+            \\#define PUT(c, v) (((unsigned *)columns[(c)])[r] = (v))
+            \\    const unsigned p = r / 88u, q = r % 88u;
+            \\    const unsigned *in = periods + (u64)(p < count ? p : count - 1u) * 27u;
+            \\    unsigned h[8], m[16], v[16];
+            \\    for (unsigned i = 0; i < 8u; ++i) h[i] = in[i];
+            \\    for (unsigned i = 0; i < 16u; ++i) m[i] = in[8u + i];
+            \\    const unsigned tlo = in[24], thi = in[25], fl = in[26];
+            \\    const unsigned iv[8] = {{ 0x6A09E667u, 0xBB67AE85u, 0x3C6EF372u, 0xA54FF53Au, 0x510E527Fu, 0x9B05688Cu, 0x1F83D9ABu, 0x5BE0CD19u }};
+            \\    for (unsigned i = 0; i < 8u; ++i) {{ v[i] = h[i]; v[8u + i] = iv[i]; }}
+            \\    v[12] ^= tlo; v[13] ^= thi; if (fl) v[14] ^= 0xffffffffu;
+            \\    unsigned slot[8] = {{ 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u }};
+            \\    unsigned carry[8] = {{ 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u }};
+            \\    if (q < 4u) {{
+            \\        unsigned ix[4];
+            \\        starked_gidx(4u + q, ix);
+            \\        // OUT_W = 4, 7, 6, 5 for roles a, b, c, d.
+            \\        slot[4] = v[ix[0]]; slot[7] = v[ix[1]]; slot[6] = v[ix[2]]; slot[5] = v[ix[3]];
+            \\        if (q == 0u) {{ slot[0] = tlo; slot[1] = thi; slot[2] = fl; }}
+            \\    }} else {{
+            \\        const unsigned steps = q < 84u ? q - 4u : 80u;
+            \\        for (unsigned j = 0; j <= steps && j < 80u; ++j) {{
+            \\            unsigned ix[4];
+            \\            starked_gidx(j % 8u, ix);
+            \\            const unsigned rr = j / 8u, g = j % 8u;
+            \\            const unsigned x = m[sigma[rr * 16u + 2u * g]], y = m[sigma[rr * 16u + 2u * g + 1u]];
+            \\            const unsigned a = v[ix[0]], b = v[ix[1]], c = v[ix[2]], d = v[ix[3]];
+            \\            const unsigned a1 = a + b + x;
+            \\            const unsigned d1 = starked_rotr(d ^ a1, 16u);
+            \\            const unsigned c1 = c + d1;
+            \\            const unsigned b1 = starked_rotr(b ^ c1, 12u);
+            \\            const unsigned a2 = a1 + b1 + y;
+            \\            const unsigned d2 = starked_rotr(d1 ^ a2, 8u);
+            \\            const unsigned c2 = c1 + d2;
+            \\            const unsigned b2 = starked_rotr(b1 ^ c2, 7u);
+            \\            if (j == steps) {{
+            \\                slot[0] = a1; slot[1] = d1; slot[2] = c1; slot[3] = b1;
+            \\                slot[4] = a2; slot[5] = d2; slot[6] = c2; slot[7] = b2;
+            \\                starked_carries(carry + 0, a, b, x);
+            \\                starked_carries(carry + 2, c, d1, 0u);
+            \\                starked_carries(carry + 4, a1, b1, y);
+            \\                starked_carries(carry + 6, c1, d2, 0u);
+            \\            }}
+            \\            v[ix[0]] = a2; v[ix[1]] = b2; v[ix[2]] = c2; v[ix[3]] = d2;
+            \\        }}
+            \\        if (q >= 84u) {{
+            \\            const unsigned k = q - 84u;
+            \\            unsigned ix[4];
+            \\            starked_gidx(4u + k, ix);
+            \\            const unsigned bk = ix[1];
+            \\            slot[2] = h[k] ^ v[k];
+            \\            slot[0] = h[k] ^ v[k] ^ v[k + 8u];
+            \\            slot[3] = h[bk] ^ v[bk];
+            \\            slot[1] = h[bk] ^ v[bk] ^ v[bk + 8u];
+            \\        }}
+            \\    }}
+            \\    for (unsigned s = 0; s < 8u; ++s)
+            \\        for (unsigned i = 0; i < 32u; ++i) PUT(32u * s + i, (slot[s] >> i) & 1u);
+            \\    // Carry bits: 288 (2), 290 (2), 292 (1), 293 (1), 294 (2), 296 (2), 298 (1), 299 (1).
+            \\    PUT(288u, carry[0] & 1u); PUT(289u, (carry[0] >> 1u) & 1u);
+            \\    PUT(290u, carry[1] & 1u); PUT(291u, (carry[1] >> 1u) & 1u);
+            \\    PUT(292u, carry[2] & 1u); PUT(293u, carry[3] & 1u);
+            \\    PUT(294u, carry[4] & 1u); PUT(295u, (carry[4] >> 1u) & 1u);
+            \\    PUT(296u, carry[5] & 1u); PUT(297u, (carry[5] >> 1u) & 1u);
+            \\    PUT(298u, carry[6] & 1u); PUT(299u, carry[7] & 1u);
+            \\    for (unsigned k = 0; k < 16u; ++k) {{ PUT(256u + 2u * k, m[k] & 0xffffu); PUT(257u + 2u * k, m[k] >> 16u); }}
+            \\#undef PUT
+            \\}}
+            \\
+        , .{ version, header, threads, name }),
         .b2s => std.fmt.allocPrint(allocator,
             \\// starked-bitcoin device witness v{d} (src/gpu/cuda/witness.zig): block_b2s's 312 columns.
             \\// Row r of period p = r / 88 (input periods[27 min(p, count)..]: h[8], m[16], t_lo, t_hi,
@@ -721,6 +895,44 @@ pub const Inputs = struct {
     }
 };
 
+/// Columns the generic gadget kernels write (the first ones of their component).
+pub const B2_GADGET_COLUMNS: usize = b2.N_MAIN;
+pub const SHA_GADGET_COLUMNS: usize = shaw.N_MAIN;
+
+/// The coin-set pass's device witness (`block/set_seg.zig`, `Built.gadgets`): the hash gadgets'
+/// inputs per component. Everything else (the components' other columns) comes from the host.
+pub const SetInputs = struct {
+    /// Blake2s gadget components: part index and one input per 88-row period (all of them).
+    b2: []const B2 = &.{},
+    /// The SHA-256 gadget component: part index and its compressions (the zero dummy past them).
+    sha: ?Sha = null,
+
+    pub const B2 = struct { component: usize, periods: []const b2.Input };
+    pub const Sha = struct { component: usize, compressions: []const shaw.Compression };
+
+    /// `set_b2c`, `set_lc`, `set_mt` and `set_shac` of a built segment (`set_seg.buildAtOpts`); the
+    /// three Blake2s entries live in `out`.
+    pub fn ofSegment(built: *const sb.block.set_seg.Built, out: *[3]B2) SetInputs {
+        const C = sb.block.set_seg.C;
+        out.* = .{
+            .{ .component = C.b2c, .periods = built.gadgets.b2c },
+            .{ .component = C.lc, .periods = built.gadgets.lc },
+            .{ .component = C.mt, .periods = built.gadgets.mt },
+        };
+        return .{ .b2 = out, .sha = .{ .component = C.shac, .compressions = built.gadgets.sha } };
+    }
+};
+
+/// Where the coin-set pass's gadget inputs and column tables live (`Plan.initSet`).
+pub const SetPlan = struct {
+    pub const MAX_B2 = 4;
+    pub const B2 = struct { first: usize = 0, log: u32 = 0, periods: usize = 0, count: u32 = 0, columns: usize = 0 };
+    pub const Sha = struct { first: usize, log: u32, comps: usize, count: u32, columns: usize };
+    b2: [MAX_B2]B2 = @splat(.{}),
+    n_b2: usize = 0,
+    sha: ?Sha = null,
+};
+
 /// Word offsets inside the `witness_inputs` slot (each region 8-byte aligned).
 pub const Layout = struct {
     sigma: usize = 0,
@@ -742,7 +954,11 @@ pub const Layout = struct {
 };
 
 pub const Plan = struct {
-    inputs: *const Inputs,
+    /// The block system's inputs; null for the coin-set pass (`set`).
+    inputs: ?*const Inputs,
+    /// The coin-set pass's gadget generators (`initSet`); null: the block system's.
+    set: ?SetPlan = null,
+    set_inputs: ?*const SetInputs = null,
     layout: Layout,
     sha_log: u32,
     b2s_log: u32,
@@ -891,6 +1107,181 @@ pub const Plan = struct {
         };
     }
 
+
+    /// Tree 0's descriptors and periodic values (both systems).
+    fn writePre(self: *const Plan, out: []u32, staging0: []const common.Words) !void {
+        const l = self.layout;
+        for (self.pre_defs, self.pre_offsets, staging0, 0..) |d, off, dst, j| {
+            const o = out[l.pre_desc + PRE_DESC_WORDS * j ..][0..PRE_DESC_WORDS];
+            o.* = switch (d) {
+                .is_first => .{ 0, 0, 0, 1, 0, 0, 0, 0 },
+                .not_last => .{ 1, 0, 0, 1, 0, 0, 0, 0 },
+                .periodic => |v| .{ 2, 0, off, @intCast(v.len), 0, 0, 0, 0 },
+                .row_lt => |k| .{ 3, k, 0, 1, 0, 0, 0, 0 },
+                .row_ge_end => |k| .{ 4, k, 0, 1, 0, 0, 0, 0 },
+            };
+            if (d == .periodic) for (d.periodic, 0..) |x, i| {
+                if (x >= P) return error.InvalidWitnessPlan;
+                out[l.pre_values + off + i] = x;
+            };
+            o[4] = @truncate(dst.address);
+            o[5] = @truncate(dst.address >> 32);
+        }
+    }
+
+    /// Tree 0's definitions, sizes and periodic-value offsets (both systems).
+    fn preOf(allocator: std.mem.Allocator, parts: []const system.Part) !struct { defs: []ir.PreCol, logs: []u32, offsets: []u32, values: usize } {
+        var n_pre: usize = 0;
+        for (parts) |p| n_pre += p.air.preprocessed.len;
+        const defs = try allocator.alloc(ir.PreCol, n_pre);
+        errdefer allocator.free(defs);
+        const logs = try allocator.alloc(u32, n_pre);
+        errdefer allocator.free(logs);
+        const offsets = try allocator.alloc(u32, n_pre);
+        errdefer allocator.free(offsets);
+        var k: usize = 0;
+        var values: usize = 0;
+        for (parts) |p| for (p.air.preprocessed) |d| {
+            defs[k] = d;
+            logs[k] = p.log_size;
+            offsets[k] = @intCast(values);
+            if (d == .periodic) {
+                if (d.periodic.len == 0) return error.InvalidWitnessPlan;
+                values += d.periodic.len;
+            }
+            k += 1;
+        };
+        return .{ .defs = defs, .logs = logs, .offsets = offsets, .values = values };
+    }
+
+    /// The coin-set pass's plan: tree 0 (`pre`), the Blake2s gadget columns (0..299) of each
+    /// `SetInputs.b2` component (`b2_gadget`) and the SHA-256 gadget columns (0..123) of
+    /// `SetInputs.sha` (`sha_words`, `sha_gadget`). The components' other columns come from the host.
+    /// The regions are sized by the components' logs, so every segment of a pass has one memory plan.
+    pub fn initSet(allocator: std.mem.Allocator, parts: []const system.Part, set: *const SetInputs) !Plan {
+        if (set.b2.len > SetPlan.MAX_B2) return error.InvalidWitnessPlan;
+        var firsts = try allocator.alloc(usize, parts.len);
+        defer allocator.free(firsts);
+        var n_main: usize = 0;
+        for (parts, 0..) |p, i| {
+            firsts[i] = n_main;
+            n_main += p.air.n_main;
+        }
+        const generated = try allocator.alloc(bool, n_main);
+        errdefer allocator.free(generated);
+        @memset(generated, false);
+        var sp = SetPlan{};
+        var at: usize = 0;
+        var l = Layout{};
+        const region = struct {
+            fn f(cursor: *usize, words: usize) usize {
+                const start = std.mem.alignForward(usize, cursor.*, 2);
+                cursor.* = start + words;
+                return start;
+            }
+        }.f;
+        const pre = try preOf(allocator, parts);
+        errdefer {
+            allocator.free(pre.defs);
+            allocator.free(pre.logs);
+            allocator.free(pre.offsets);
+        }
+        l.sigma = region(&at, 160);
+        l.meta = region(&at, 64);
+        l.pre_desc = region(&at, pre.defs.len * PRE_DESC_WORDS);
+        l.pre_values = region(&at, @max(pre.values, 1));
+        for (set.b2, 0..) |g, k| {
+            if (g.component >= parts.len) return error.InvalidWitnessPlan;
+            const part = parts[g.component];
+            if (part.air.n_main < B2_GADGET_COLUMNS or part.log_size >= 30) return error.InvalidWitnessPlan;
+            const rows = @as(usize, 1) << @intCast(part.log_size);
+            const periods = (rows + b2.PERIOD - 1) / b2.PERIOD;
+            if (g.periods.len != periods) return error.InvalidWitnessPlan;
+            for (generated[firsts[g.component]..][0..B2_GADGET_COLUMNS]) |*x| {
+                if (x.*) return error.InvalidWitnessPlan; // a component listed twice
+                x.* = true;
+            }
+            sp.b2[k] = .{ .first = firsts[g.component], .log = part.log_size, .periods = region(&at, periods * B2S_PERIOD_WORDS), .count = @intCast(periods), .columns = region(&at, 2 * B2_GADGET_COLUMNS) };
+        }
+        sp.n_b2 = set.b2.len;
+        var scratch: usize = 0;
+        if (set.sha) |g| {
+            if (g.component >= parts.len) return error.InvalidWitnessPlan;
+            const part = parts[g.component];
+            if (part.air.n_main < SHA_GADGET_COLUMNS or part.log_size >= 30) return error.InvalidWitnessPlan;
+            const cap = shaw.capacity(part.log_size);
+            if (g.compressions.len > cap) return error.InvalidWitnessPlan;
+            for (generated[firsts[g.component]..][0..SHA_GADGET_COLUMNS]) |*x| {
+                if (x.*) return error.InvalidWitnessPlan;
+                x.* = true;
+            }
+            sp.sha = .{ .first = firsts[g.component], .log = part.log_size, .comps = region(&at, @max(cap, 1) * SHA_COMP_WORDS), .count = @intCast(g.compressions.len), .columns = region(&at, 2 * SHA_GADGET_COLUMNS) };
+            scratch = 3 * (@as(usize, 1) << @intCast(part.log_size));
+        }
+        l.words = at;
+        return .{
+            .inputs = null,
+            .set = sp,
+            .set_inputs = set,
+            .layout = l,
+            .sha_log = 0,
+            .b2s_log = 0,
+            .msg_log = 0,
+            .walk_log = 0,
+            .bytes_log = 0,
+            .sha_first = 0,
+            .b2s_first = 0,
+            .msg_first = 0,
+            .walk_first = 0,
+            .bytes_first = 0,
+            .generated_main = generated,
+            .pre_defs = pre.defs,
+            .pre_logs = pre.logs,
+            .pre_offsets = pre.offsets,
+            .scratch_words = scratch,
+        };
+    }
+
+    fn putPointers(out: []u32, at: usize, columns: []const common.Words, rows: usize) !void {
+        for (columns, 0..) |dst, c| {
+            if (dst.len != rows) return error.InvalidWitnessPlan;
+            out[at + 2 * c] = @truncate(dst.address);
+            out[at + 2 * c + 1] = @truncate(dst.address >> 32);
+        }
+    }
+
+    fn imageSet(self: *const Plan, allocator: std.mem.Allocator, staging: [2][]const common.Words, sp: *const SetPlan) ![]u32 {
+        const l = self.layout;
+        const set = self.set_inputs.?;
+        if (staging[0].len != self.pre_defs.len or staging[1].len != self.generated_main.len) return error.InvalidWitnessPlan;
+        const out = try allocator.alloc(u32, l.words);
+        errdefer allocator.free(out);
+        @memset(out, 0);
+        const sigma = sigmaTable();
+        @memcpy(out[l.sigma..][0..160], &sigma);
+        @memcpy(out[l.meta..][0..64], &spec.K);
+        try self.writePre(out, staging[0]);
+        for (sp.b2[0..sp.n_b2], set.b2) |g, in| {
+            for (in.periods, 0..) |x, p| {
+                const o = out[g.periods + B2S_PERIOD_WORDS * p ..][0..B2S_PERIOD_WORDS];
+                @memcpy(o[0..8], &x.h);
+                @memcpy(o[8..24], &x.m);
+                o[24] = @truncate(x.t);
+                o[25] = @truncate(x.t >> 32);
+                o[26] = @intFromBool(x.f);
+            }
+            try putPointers(out, g.columns, staging[1][g.first..][0..B2_GADGET_COLUMNS], @as(usize, 1) << @intCast(g.log));
+        }
+        if (sp.sha) |g| {
+            for (set.sha.?.compressions, 0..) |c, i| {
+                @memcpy(out[g.comps + SHA_COMP_WORDS * i ..][0..8], &c.input);
+                @memcpy(out[g.comps + SHA_COMP_WORDS * i + 8 ..][0..16], &c.block);
+            }
+            try putPointers(out, g.columns, staging[1][g.first..][0..SHA_GADGET_COLUMNS], @as(usize, 1) << @intCast(g.log));
+        }
+        return out;
+    }
+
     pub fn deinit(self: *Plan, allocator: std.mem.Allocator) void {
         allocator.free(self.generated_main);
         allocator.free(self.pre_defs);
@@ -906,8 +1297,9 @@ pub const Plan = struct {
     /// The `witness_inputs` image: every input word, with `staging[t][j]` (tree `t`'s column `j`
     /// destination) as the column addresses.
     pub fn image(self: *const Plan, allocator: std.mem.Allocator, staging: [2][]const common.Words) ![]u32 {
+        if (self.set) |*sp| return self.imageSet(allocator, staging, sp);
         const l = self.layout;
-        const in = self.inputs;
+        const in = self.inputs.?;
         if (staging[0].len != self.pre_defs.len or staging[1].len != self.generated_main.len) return error.InvalidWitnessPlan;
         const out = try allocator.alloc(u32, l.words);
         errdefer allocator.free(out);
@@ -939,22 +1331,7 @@ pub const Plan = struct {
                 @memcpy(o[0..8], &commit.H0);
             }
         }
-        for (self.pre_defs, self.pre_offsets, staging[0], 0..) |d, off, dst, j| {
-            const o = out[l.pre_desc + PRE_DESC_WORDS * j ..][0..PRE_DESC_WORDS];
-            o.* = switch (d) {
-                .is_first => .{ 0, 0, 0, 1, 0, 0, 0, 0 },
-                .not_last => .{ 1, 0, 0, 1, 0, 0, 0, 0 },
-                .periodic => |v| .{ 2, 0, off, @intCast(v.len), 0, 0, 0, 0 },
-                .row_lt => |k| .{ 3, k, 0, 1, 0, 0, 0, 0 },
-                .row_ge_end => |k| .{ 4, k, 0, 1, 0, 0, 0, 0 },
-            };
-            if (d == .periodic) for (d.periodic, 0..) |x, i| {
-                if (x >= P) return error.InvalidWitnessPlan;
-                out[l.pre_values + off + i] = x;
-            };
-            o[4] = @truncate(dst.address);
-            o[5] = @truncate(dst.address >> 32);
-        }
+        try self.writePre(out, staging[0]);
         const sha_rows = @as(usize, 1) << @intCast(self.sha_log);
         const b2s_rows = @as(usize, 1) << @intCast(self.b2s_log);
         for (staging[1][self.sha_first..][0..SHA_COLUMNS], 0..) |dst, c| {
@@ -1052,7 +1429,8 @@ pub const Bound = struct {
                 return s.context.deviceSlicePointer(u32, try w.sub(offset, @max(n, 1)), @max(n, 1));
             }
         }.f;
-        const in = plan.inputs;
+        if (plan.set) |*sp| return self.generateSet(session, sp);
+        const in = plan.inputs.?;
         const sha_rows: u32 = @as(u32, 1) << @intCast(plan.sha_log);
         const b2s_rows: u32 = @as(u32, 1) << @intCast(plan.b2s_log);
         const words = try session.context.deviceSlicePointer(u32, b.scratch, b.scratch.len);
@@ -1126,6 +1504,71 @@ pub const Bound = struct {
             var pointers = args.pointers();
             try self.kernels.bytes.launch(session, .{ (rows + threads - 1) / threads, 1, 1 }, threads, &pointers);
         }
+        try self.generatePre(session);
+    }
+
+    /// The coin-set pass's `.trace_generation` generators: each Blake2s gadget, the SHA-256 word
+    /// trace and gadget, tree 0.
+    fn generateSet(self: *const Bound, session: anytype, sp: *const SetPlan) !void {
+        const l = self.plan.layout;
+        const b = self.buffers;
+        const ptr = struct {
+            fn f(s: anytype, w: common.Words, offset: usize, n: usize) ![*]u32 {
+                return s.context.deviceSlicePointer(u32, try w.sub(offset, @max(n, 1)), @max(n, 1));
+            }
+        }.f;
+        for (sp.b2[0..sp.n_b2]) |g| {
+            const rows: u32 = @as(u32, 1) << @intCast(g.log);
+            var args = Args{
+                .p0 = try ptr(session, b.inputs, l.sigma, 160),
+                .p1 = try ptr(session, b.inputs, g.periods, g.count * B2S_PERIOD_WORDS),
+                .n = g.count,
+                .p2 = try ptr(session, b.inputs, g.columns, 2 * B2_GADGET_COLUMNS),
+                .rows = rows,
+            };
+            var pointers = args.pointers();
+            try self.kernels.b2_gadget.launch(session, .{ (rows + threads - 1) / threads, 1, 1 }, threads, &pointers);
+        }
+        if (sp.sha) |g| {
+            const rows: u32 = @as(u32, 1) << @intCast(g.log);
+            const words = try session.context.deviceSlicePointer(u32, b.scratch, b.scratch.len);
+            {
+                var args = Args{
+                    .p0 = try ptr(session, b.inputs, l.meta, 64),
+                    .p1 = try ptr(session, b.inputs, g.comps, @max(g.count, 1) * SHA_COMP_WORDS),
+                    .n = g.count,
+                    .p2 = words,
+                    .rows = rows,
+                };
+                var pointers = args.pointers();
+                const periods = (rows + shaw.PERIOD - 1) / shaw.PERIOD;
+                try self.kernels.sha_words.launch(session, .{ @intCast((periods + period_threads - 1) / period_threads), 1, 1 }, period_threads, &pointers);
+            }
+            {
+                var args = Args{
+                    .p0 = words,
+                    .p1 = try ptr(session, b.inputs, l.meta, 64),
+                    .n = 0,
+                    .p2 = try ptr(session, b.inputs, g.columns, 2 * SHA_GADGET_COLUMNS),
+                    .rows = rows,
+                };
+                var pointers = args.pointers();
+                try self.kernels.sha_gadget.launch(session, .{ (rows + threads - 1) / threads, 1, 1 }, threads, &pointers);
+            }
+        }
+        try self.generatePre(session);
+    }
+
+    /// Tree 0: one `pre` launch per cohort (both systems).
+    fn generatePre(self: *const Bound, session: anytype) !void {
+        const plan = self.plan;
+        const l = plan.layout;
+        const b = self.buffers;
+        const ptr = struct {
+            fn f(s: anytype, w: common.Words, offset: usize, n: usize) ![*]u32 {
+                return s.context.deviceSlicePointer(u32, try w.sub(offset, @max(n, 1)), @max(n, 1));
+            }
+        }.f;
         const desc = try ptr(session, b.inputs, l.pre_desc, plan.pre_defs.len * PRE_DESC_WORDS);
         const values = try ptr(session, b.inputs, l.pre_values, 1);
         for (self.pre_cohorts) |c| {

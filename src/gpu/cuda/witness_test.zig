@@ -55,7 +55,7 @@ const shim =
 /// Runs a kernel over a whole grid with the launch's argument array.
 const Drive = *const fn (u32, u32, u32, [*]const ?*anyopaque) callconv(.c) void;
 
-const Host = struct {
+pub const Host = struct {
     lib: std.DynLib,
     names: []const []const u8,
     drives: []const Drive,
@@ -70,12 +70,12 @@ const Host = struct {
 fn parameterTypes(which: ?witness.Which) [5][]const u8 {
     return if (which) |w| switch (w) {
         .sha_words => .{ "const unsigned *", "const unsigned *", "unsigned", "unsigned *", "unsigned" },
-        .sha_columns, .b2s, .msg, .walk, .bytes => .{ "const unsigned *", "const unsigned *", "unsigned", "const u64 *", "unsigned" },
+        .sha_columns, .sha_gadget, .b2s, .b2_gadget, .msg, .walk, .bytes => .{ "const unsigned *", "const unsigned *", "unsigned", "const u64 *", "unsigned" },
         .pre => .{ "const unsigned *", "const unsigned *", "unsigned", "unsigned", "unsigned" },
     } else .{ "const unsigned *", "unsigned *", "unsigned", "unsigned", "" };
 }
 
-fn build(a: std.mem.Allocator, dir: std.fs.Dir, cat: *const catalog_mod.Catalog) !Host {
+pub fn build(a: std.mem.Allocator, dir: std.fs.Dir, cat: *const catalog_mod.Catalog) !Host {
     const path = try dir.realpathAlloc(a, ".");
     var argv = std.ArrayList([]const u8).empty;
     const so = try std.fs.path.join(a, &.{ path, "witness.so" });
@@ -129,7 +129,7 @@ fn build(a: std.mem.Allocator, dir: std.fs.Dir, cat: *const catalog_mod.Catalog)
 
 /// A session whose device memory is host memory: `launchKernel` runs the host build of the named
 /// kernel with the launch's own grid and arguments; uploads and copies are memcpy.
-const HostSession = struct {
+pub const HostSession = struct {
     context: Context = .{},
     host: *const Host,
     cat: *const catalog_mod.Catalog,
@@ -171,16 +171,16 @@ const HostSession = struct {
     }
 };
 
-fn words(a: std.mem.Allocator, n: usize) !common.Words {
+pub fn words(a: std.mem.Allocator, n: usize) !common.Words {
     const buf = try a.alignedAlloc(u32, .@"64", @max(n, 1));
     return .{ .address = @intFromPtr(buf.ptr), .len = n, .owner = 1, .generation = 1 };
 }
-fn hostWords(w: common.Words) []u32 {
+pub fn hostWords(w: common.Words) []u32 {
     const p: [*]u32 = @ptrFromInt(w.address);
     return p[0..w.len];
 }
 
-fn expectColumns(what: []const u8, want: []const []const M31, got: []const common.Words) !void {
+pub fn expectColumns(what: []const u8, want: []const []const M31, got: []const common.Words) !void {
     try std.testing.expectEqual(want.len, got.len);
     for (want, got, 0..) |w, g, c| {
         const gw = hostWords(g);
@@ -321,7 +321,7 @@ test "cuda witness: the AOT generators (host C++) reproduce block_sha, block_b2s
 }
 
 /// The arena in host memory (`memory.bind`'s transaction interface).
-const HostArena = struct {
+pub const HostArena = struct {
     placement: *const cuda.runtime.arena.Plan,
     base: usize,
 

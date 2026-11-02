@@ -222,7 +222,10 @@ pub fn compositionPlan(allocator: std.mem.Allocator, b: *const composition.Bundl
         if (tp.component_index != i or tp.part_index != 0) return error.ResidentCompositionPlacementMismatch;
         @memcpy(denominators[dd_cursor..][0..c.denominator_inverses.len], c.denominator_inverses);
         dd_cursor += c.denominator_inverses.len;
-        const body = try cat.admit(i, c.parts[0].program);
+        const body = cat.admit(i, c.parts[0].program) catch |e| {
+            std.debug.print("plan: component {d} ({s}) not admitted: {s}\n", .{ i, cat.bodies[i].air, @errorName(e) });
+            return e;
+        };
         const n = body.constant_count;
         try parametric.writeConstants(c.parts[0].program, constants[cc_cursor..][0..n]);
         out.* = .{
