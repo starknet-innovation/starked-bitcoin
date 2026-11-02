@@ -71,6 +71,10 @@ implement these. The Lean definitions are normative.
 
 ## Regenerating `airs/*.json`
 
+`scripts/check_air_drift.sh` compares every committed `airs/*.json` with its export (the AIRs by
+name, the circuit programs by their multi-word arguments: `block_node_k 2`, `epoch_root 16 prev`,
+`epoch_join step`, `leafhash 104`, `transcript lookups`, `pow_check 26`, `channel mix_u32s 8`).
+
 From `lean/`:
 
 ```sh

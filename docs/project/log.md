@@ -21,6 +21,44 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-11-02 (session 27) — Hygiene: `gpu-set` merged into main, worktrees and merged branches removed, set VK pinned, docs refreshed
+Who: Claude (agent, Fable 5.1), owner: "Do the hygiene pass now."
+Roadmap: SET-PASS (3 of 4 passes; VK pinned), SET-MEMBER done, BLOCK-REC done, UTXO done at epoch scale, PROOF-STORE done; backlog BLOCK-VK and SET-VK-SETUP added
+Done:
+- `main` fast-forwarded to `rec/epoch-root` (21f7c1c) and `gpu-set` merged (27fc228): the CUDA set-pass prover is on the main line. The code merged cleanly; log.md keeps both branches' entries in date order (the two "session 25/26, branch gpu-set" entries of 2026-10-28 sit between sessions 24 and 25 of the main line).
+- Worktrees `starked-bitcoin-{gpu,gpuwide,gpuwit,node,ram,survey,gpuset}` removed (all merged; `-ram` only had a deleted `data/sample10.csv.gz` and untracked data); 24 fully merged local branches deleted. Left: `main`, `rec/epoch-root` and `gpu-set` (both merged, kept until the push), `backup/pre-author-rewrite`.
+- Set-pass VK pinned: `vk/epoch/set-l22.vk` is the `setvk.bin` the three real passes wrote on the node (sha256 `84402820…`, identical for s935000, s945000 and s972500; max component log 22, leaf trace log 23); `pinned_vks.set` in `src/bin/chainproof.zig`, the embed list in `build.zig`; docs in set-pass.md, gpu-cuda.md and verification.md.
+- README status table, roadmap rows (PROOF-STORE, UTXO, BLOCK-REC, new SET-PASS and SET-MEMBER, backlog BLOCK-VK and SET-VK-SETUP) and status.md rewritten; session 26 (2026-10-30) logged below from git, the node's logs and session notes.
+Evidence:
+- `zig build test -Doptimize=ReleaseFast -Dtest-filter=…` on 27fc228 + the VK pin: `membership` 3/3, `"set segments"` 5/5, `"set tree"` 6/6, all exit 0.
+- `git worktree list`: only `~/Workshop/starked-bitcoin` (main). `git status --short` before the docs commit: only the files named above.
+- `lake build`: Build completed successfully (8,917 jobs). No `sorry`/`native_decide`/`bv_decide`. `#print axioms` on the 15 theorems of status.md's list: propext, Classical.choice, Quot.sound. `scripts/check_air_drift.sh` (new): all 88 `airs/*.json` ok (AIRs and circuit programs), exit 0.
+- `zig build -Doptimize=ReleaseFast` (Mac, 62 s) and `-Dtarget=aarch64-linux-gnu -Dcpu=neoverse_v1` (66 s) with the pin. On the node, `chainproof-setvk-pin verify-set setgpu/passes/s972500 tree972:972500:945001:out935/set-945000.bin` without `--unpinned`: "set VK …/setvk.bin: pinned (vk/epoch/set-l22.vk)", VERIFIED, 164,539,066 coins, `hash_serialized 9f92d143…`.
+- `python3 ~/.claude/skills/document/scripts/check_docs.py .`: 0 errors outside `data/core-src` (Core's own broken links in the gitignored checkout; 30 of them), the six formerly unreachable docs now in the README map.
+Problems / lessons:
+- `git worktree remove` refuses a worktree that contains the stwo-zig submodule unless `--force`, even when clean.
+- Background shells in this agent harness don't have elan on PATH: call `~/.elan/bin/lake`.
+- The set VK can't yet be remade from public inputs (backlog SET-VK-SETUP): what is pinned is what the runs produced, checked identical across the three passes.
+Next: the missing pass (the set after 945,000 under epoch 2's challenge `ch-972500`, ≈ $55 on an H200, owner's go), then the node's `/data/replay/setgpu/final972.sh`; push `main` (owner's go, D-016).
+
+## 2026-10-30 (session 26) — Set pass after 972,500 proved; the final check stopped at epoch 2 (`WrongDigest`): the 945,000 set needs its second challenge
+Who: Claude (agent, Opus 5.5), with the owner (chose to stop rather than re-run; ≈ $55 declined for now). Written on 2026-11-02 from git, the node's `/data/replay/setgpu/final972.{sh,out}` and session notes: no log entry was written that day.
+Roadmap: SET-PASS 3 of 4 passes done; SET-MEMBER verified on a real pass
+Done:
+- 21f7c1c: `verify-chain --set-proofs --members [--witness-script]`: the coins checked against the chain-proven final set in one command, no set file on the verifier's side.
+- fc4d32c (`gpu-set`): `cuda-set --keep-going`; the component is named when plan admission fails.
+- Pod A (H200, `/root/run972.sh`): the pass after 972,500 (7,014 segment files, device witness) proved under epoch 2's challenge `ch-972500`; on the node `verify-set`: VERIFIED, 164,539,066 coins, 2,010,133,549,560,777 sat, highest coin height 972,500, digest `77a0de28…`, `hash_serialized 9f92d143…` (Core's).
+- The 66 strkBTC-bridge outpoints (`setgpu/bridge972.ops`) proved into `setgpu/passes/bridge-972500.sbmember` (72,417 bytes); under the 3-of-5 P2WSH `00208e4e98…9754b`, 13,689,057,287 sat unspent in the set after 972,500, verified against that pass alone.
+- Pod A deleted; `list-pods` empty; the set-pass pods of 2026-10-28..30 billed $118.06 in all.
+Evidence:
+- `final972.out` on the node: chain proof verified (headers 0..972501, 9.3 s); join and tree VKs pinned; epoch 935,001..945,000 balanced from the set-pass proofs (165,215,167 coins after 945,000; 68,633,620 inputs spent); then `error: WrongDigest` at epoch 945,001..972,500.
+Problems / lessons:
+- The set after 945,000 closes epoch 1 and opens epoch 2, so D-048 asks for its fraction sum under both challenges: four passes. The two H200 pods of 2026-10-29 proved s935000 and s945000 under epoch 1's challenge only, and `final972.sh` then pointed epoch 2's `pass-945000` at that pass; a pass digest commits to its challenge, hence `WrongDigest`. The agent that scheduled the pods missed the two-challenge rule it had itself recorded in D-048. What stands: all three passes verified on their own, epoch 1 balanced, the 66 coins against the 972,500 pass. What is missing: epoch 2's balance, hence the chain-level check and the binding of the 66 coins to the chain proof.
+- Until the missing pass is proved, change no AIR and nothing in the challenge derivation, or the three existing passes go stale too.
+Next: prove s945000 under `ch-972500` (≈ $55 on an H200; owner's go), then rerun `final972.sh`.
+
+---
+
 ## 2026-10-29 (session 25) — Membership: several UTXOs per file, `--witness-script`
 Who: Claude (agent, Opus 5.5), owner: "build the witness check script yes. Don't bother with the scan. But do make it possible for a verifier to check various UTXOs at the same time"
 Roadmap: membership (D-050) CLI extended; no AIR or Lean change

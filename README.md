@@ -21,8 +21,11 @@ interpreted by the Zig prover and verifier.
 | Header chain: SHA256d, linkage, proof of work, height/period state, difficulty retarget, median time past, exact chainwork, minimum block version | Implemented; **proven**: `header_chain_sound` shows any accepted segment satisfies every Bitcoin Core mainnet header rule except wall-clock `time-too-new` (audited against Core, 2026-10-07) |
 | Recursion / aggregation: the whole chain folded into one proof, with an MMR commitment `T` over all block hashes | Implemented; glue and composition **proven** (`chain_from_genesis_T`); in-circuit verifiers trusted and mutation-tested |
 | Chain proof as a file (`chainproof`): saved, standalone-verifiable, extendable at the tip | Implemented (PROOF-STORE, D-036) |
-| Block data (M3a): parsing, txid/wtxid, Merkle root | In progress; M3a.1–M3a.4 **proven** |
-| CUDA, UTXO state | Not yet |
+| Block data (M3a): parsing, txid/wtxid, Merkle roots, Core's structural block checks, Blake2s commitment to block and undo data | Implemented; **proven** (`block_sound`, `commit_sound`, `hash_pub`) |
+| UTXO set (M3b): chain-wide multiset argument over coin events, block proofs aggregated per epoch, one proof per chain of epochs | Implemented; **proven** (`epoch_systems_core`, `rootK_epoch`, `join_sound`); blocks 935,001–972,500 verified as one proof, the final set equal to Core's `hash_serialized` (2026-10-26); epoch VKs pinned (D-047) |
+| Coin-set pass and membership (D-048, D-050): a set file's digest, `hash_serialized`, sums and a Merkle root over its records proven in segments; ~1 KB membership and non-membership proofs | Implemented; **proven** (`set_seg_sound`, `set_root_sound`); three of the four real passes proved on H200s (the set after 945,000 under epoch 2's challenge is still to prove); set VK pinned (2026-11-02) |
+| CUDA prover (blocks, epoch trees, set pass) | Implemented; byte-identical to the CPU prover; 2^23 block in 2.7 s on an H100 |
+| Catch-up from genesis, tip tree, scripts and signatures (assumevalid today) | Not yet |
 
 - Exact guarantees and trust assumptions:
   [docs/reference/verification.md](docs/reference/verification.md).
@@ -91,14 +94,17 @@ docs/              Documentation (see below)
 | Port the resident CUDA prover to the block system (GPU step 3) | [docs/design/gpu-cuda.md](docs/design/gpu-cuda.md) |
 | Know exactly what is proven and what is trusted | [docs/reference/verification.md](docs/reference/verification.md) |
 | Understand an AIR's layout, versions, tests and benchmarks | [docs/airs/sha256.md](docs/airs/sha256.md), [docs/airs/blake2s.md](docs/airs/blake2s.md), [docs/airs/header-chain.md](docs/airs/header-chain.md) (earlier versions: [header-chain-history.md](docs/airs/header-chain-history.md)) |
-| Understand the constraint IR and JSON format, or regenerate `airs/` | [docs/reference/ir.md](docs/reference/ir.md) |
+| Understand the constraint IR and JSON format, or regenerate `airs/` | [docs/reference/ir.md](docs/reference/ir.md); drift check: `scripts/check_air_drift.sh` |
 | Find a Lean file or theorem, or learn the proof rules | [docs/reference/lean.md](docs/reference/lean.md) |
 | Find a Zig module or API, or run the CLI | [docs/reference/zig.md](docs/reference/zig.md) |
 | Know where test data came from | [docs/reference/testdata.md](docs/reference/testdata.md) |
 | Look up a term (pst, nBits, LogUp…) | [docs/reference/glossary.md](docs/reference/glossary.md) |
 | Set up a machine | [docs/guides/setup.md](docs/guides/setup.md) |
 | Add or change an AIR, end to end | [docs/guides/adding-an-air.md](docs/guides/adding-an-air.md) |
+| Understand per-component trace sizes (two profiles, D-045): the design, the Lean/prover interface, the prover's needs | [docs/design/component-sizes.md](docs/design/component-sizes.md), [component-sizes-interface.md](docs/design/component-sizes-interface.md), [component-sizes-prover-needs.md](docs/design/component-sizes-prover-needs.md) |
+| See every mainnet block's trace size and GPU class (the chain survey) | [docs/design/chain-survey.md](docs/design/chain-survey.md) |
 | Read past experiment results | [docs/reports/](docs/reports/) |
+| Read the away-session report (2026-10-09/10) and the replies to the stwo-zig briefs (lift extract, resident CUDA for generic AIRs) | [2026-10-10-away-session.md](docs/reports/2026-10-10-away-session.md), [2026-10-14-lift-extract-reply.md](docs/reports/2026-10-14-lift-extract-reply.md), [2026-10-15-lift-extract-reply.md](docs/reports/2026-10-15-lift-extract-reply.md), [2026-10-15-cuda-generic-air-reply.md](docs/reports/2026-10-15-cuda-generic-air-reply.md) |
 | **Pick up work, log progress, see the roadmap and decisions** | **[docs/project/README.md](docs/project/README.md)** |
 
 ### Documentation structure

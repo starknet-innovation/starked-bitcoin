@@ -4,112 +4,50 @@ Rewritten at the end of every session; see [README.md](README.md#ending-a-sessio
 If `HEAD at last update` doesn't match `git log -1`, this file is stale:
 follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work).
 
-- **Updated:** 2026-10-27 (session 23: coin-set pass steps 3–5 done on small sets)
-- **HEAD at last update:** see `git log -1` (this file is committed with the work)
+- **Updated:** 2026-11-02 (session 27: hygiene pass)
+- **HEAD at last update:** 27fc228 (the `gpu-set` merge), plus the two commits of 2026-11-02 that follow it (the set VK pin, then this session log)
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
-- **Current item:** the coin-set pass (D-048, docs/design/set-pass.md), so `verify-chain` needs no
-  set file. Blocks 935,001–972,500 are proved as ONE chain proof and verify on the node with pinned
-  VKs only (D-047) and with the compact header file (D-049: 0.99 MB instead of 13.8 MB). The pass's
-  native model (`set_pass.zig`), Lean spec (`Spec/SetFile.lean`, `pass_sound`) and the segment
-  circuit (`lean/StarkedAir/SetPass/`, `src/block/set_seg.zig`; tested on small sets) are done, and
-  so is its soundness (`SetPass.set_seg_sound`), the set tree (`set_root_sound`) and `verify-chain
-  --set-proofs` (steps 4–5, tested on the small test chain). Next: step 6, the real sets on GPU
-  (needs the owner's approval of the spend). Branch
-  `rec/epoch-root` pushed through 949cbe3; later commits not pushed. See log.md, sessions 22–23.
-  (The paragraphs below date from 2026-10-12.)
+- **Current item:** SET-PASS (D-048, [set-pass.md](../design/set-pass.md)): one of the four real passes is
+  still to prove. Everything is on `main` (27fc228 + this session's commits): `rec/epoch-root` and
+  `gpu-set` are merged, the stale worktrees are gone, the set VK is pinned.
 
 ## State in one paragraph
 
-The whole mainnet header chain is proven and **saved** as a file that verifies standalone and extends
-at the tip:
-- `data/store/mainnet-0-970347.sbchain` (12.8 MB), and `mainnet-to-970734.sbchain` after extension;
-- the pinned VK is in `vk/`, and `chainproof verify mainnet <file>` checks it;
-- `T` and the tip are checked against an independent recomputation and your node.
-
-Lean proves the chain end to end at the public-input level (`chain_from_genesis_checked`), plus:
-- the MMR inclusion and fold (`Spec/Mmr.lean`);
-- LogUp's Schwartz–Zippel step (`LogUpSZ.lean`);
-- the block rules as a conjunction (`Spec/BlockFlat.lean`);
-- **`block_sound`**: a satisfied block system proves `checkBlock c raw = none` (Core's `CheckBlock`
-  without PoW, and `ContextualCheckBlock`), given no repeated prevout (M3b's obligation, D-031);
-- **`commit_sound`**: its public inputs 9–24 are `blake2s(blake2s(raw) ++ blake2s(undo))` (D-038).
-
-The plain in-circuit verifier is mutation-fuzzed (102k mutations, all rejected). The specs are fuzzed
-against Core's own C++ (about 860k cases, 0 mismatches).
+The header chain from genesis to 972,502 is one proof (`data/store/mainnet-to-972502.sbchain`; compact
+0.99 MB, D-049). Blocks 935,001–972,500 (two epochs) are ONE chain proof (`prove-chain`/`verify-chain`,
+D-047 pinned VKs), verified on the node on 2026-10-26: 164,539,066 coins, `hash_serialized 9f92d143…` =
+Core's. The coin-set pass (D-048) replaces the verifier's set files: three of its four passes are proved
+on H200s and verified on the node (sets after 935,000 and 945,000 under epoch 1's challenge, 972,500
+under epoch 2's). Membership (D-050) is built and proven (`set_root_sound`); 66 strkBTC-bridge coins
+(13,689,057,287 sat under the 3-of-5 P2WSH) verify against the 972,500 pass. Lean: every project
+theorem on standard axioms; trusted items in [verification.md](../reference/verification.md).
 
 ## Next step (concrete)
 
-**M3b (UTXO, D-040) is built and running at small scale.** The block system has 15 components (coin
-events, undo records, segment fingerprints). `chainproof prove-epoch` / `verify-epoch` prove the coin set
-after block N from genesis. Measured: blocks 0–170 proved in 209 s (production strength); the epoch
-verifies to a 171-coin set of 850,000,000,000 sat; a tampered set is rejected.
-
-Proven in Lean (standard axioms):
-- **Spec:** `run_of_balance`, `epoch_sound`, `connect_of_run` (Core's coins view), QM31 is a finite field;
-- **Components:** `extsum_sound`, `seg_sound`, `rows_sound` (undo records);
-- **System:** `block_sound`, `commit_sound`, `hash_pub` still hold for the 15-component system, under
-  `SizeOk` (each component ≤ 2^24 rows and the lookup site count `Σ kᵢ·2^Lᵢ` below P): uniform up to
-  L = 23, tiered up to L = 24 (2026-10-12);
-- **The coin component, end to end (2026-10-11):** `epoch_systems_core`: block systems at consecutive
-  heights sharing the epoch's challenge, with a balanced public sum (outside the fingerprint and LogUp
-  bad sets), connect as Core does from the initial view and end at exactly the final set; every block
-  then passes Core's block checks (`epoch_block_valid`, D-031 from the run). Plan and lemma map in
-  utxo.md, "The coin proof".
-
-**Soundness fixes from the coin proof:** amount comparators could wrap mod P (2026-10-10); and D-041
-(2026-10-11): the final set, the initial set's indices, each input's claimed creating transaction and the
-undo records' boundaries were all chosen after the epoch challenge. Now the seed binds both sets'
-encodings and the undo records commit their index and length. Epochs 0–170 and 171–1000 re-prove and
-verify under the new protocol (same `hash_serialized`).
-
-Not yet:
-1. The coin theorem's hypotheses (updated 2026-10-12): `WFE` remains only for the initial and final sets
-   (the verifier's decoded data; `decodeSet` checks the ranges) — created and spent events are proven
-   (`epoch_systems_wf`); the events are **proven** functions of the committed data (`claim_at_input`, D-041
-   in Lean); distinct created outpoints reduce to distinct txids (`created_nodup_of_txids`), which is the
-   stated assumption (SHA256d collision resistance, BIP34/BIP30; utxo.md).
-2. ~~The fingerprint's Schwartz–Zippel step~~ (done 2026-10-10).
-3. The final sorted pass as a proof (`HASH_SERIALIZED` in-circuit). For now the verifier computes
-   the final set's fractions and hash natively from an explicit, sorted coin list. Fine at height
-   1,000; at a snapshot height that list is ~13 GB. Deprioritized (2026-10-11): a node using
-   assumeUTXO already holds the snapshot file, so a verifier with it checks the set natively without
-   trusting anyone; in-circuit only makes the proof succinct, and its cost is compute-bound at that
-   scale anyway.
-4. ~~Epochs that start from a previous set~~ (done 2026-10-11: `--from <a> <prev-set>`, the previous
-   set's hash in the seed, `epoch_from_sound`; 0..170 then 171..1000 verify and match the genesis run's
-   hash). The aggregator as a circuit (`BLOCK-REC`) is still to do.
-5. **CATCHUP:** a compute wall. Full blocks need lifting or a larger machine, and the in-memory check
-   of a 1 MB block already took ~14 GB before M3b's extra ~190 columns.
-
-**Also scheduled (owner, 2026-10-11):** the remaining VERIFIER-LEAN work, as the
-[VL table in the roadmap](roadmap.md#vl-the-in-circuit-plain-verifier-proven-verifier-lean):
-VL-E2E, VL-POW, VL-OODS and VL-ORACLE are **done** (2026-10-11: `plain_sound`, `plain_leaf_valid`,
-`powCheck_sound`, `shift_sound`, `zig build oracle`).
-
-**BLOCK-REC (2026-10-12, overnight):** the block-proof aggregation runs end to end at small scale — block
-leaves (the plain verifier over the 15-component block system, 8.3 M variables, 5 s to prove), block
-nodes, an epoch as a forest of trees over the seed v3 decomposition, and an outer verifier
-(`chainproof prove-epoch-tree` / `verify-epoch-tree`; epoch 0–3 verified, tampers rejected; **epoch 0–170
-through 5 recursion trees: proved in 90 min, verified in 0.6 s, same coin set `7105b60f…`**); **epoch 171–1000 through 11 recursion trees: proved in 7.2 h on the 24 GB Mac (830 leaves, peak footprint 40.7 GB), proof 10.8 MB, verified in 1.4 s (vs 63.8 s for the 830 flat block proofs), same coin set: 998 coins, `hash_serialized 29a42ec2…` = Core's**. Lean: `SumOk`, `sumOk_leaf`, `sumOk_node`, `rng_forest`, the leaf's checks and context. **D-043**
-accepted (owner chose option A, 2026-10-12): every part is implemented; the previous-block MTP is bound
-inside each block proof by the 16th component `block_anc` (`AncSound.anc_sound`, `BlockPubOk.mtp`). The
-AIR change makes the epoch proofs on disk (0–170, 171–1000) stale; 0–3 re-proved. Needs the owner: VL-FRI and VL-NODE are trust-boundary decisions waiting on the owner. And **D-042** (owner): the hybrid UTXO tip tree is
-scheduled as `UTXO-TREE`, the aggregator as `BLOCK-REC` — design in
-[block-rec.md](../design/block-rec.md); freeze the block-proof interface before CATCHUP.
+1. **The missing pass** (needs the owner's go, ≈ $55 on an H200): the set after 945,000 under epoch 2's
+   challenge `ch-972500`. On the node: `/data/replay/setgpu/` has `ch-972500.bin`, the pod runbook is
+   [gpu-cuda.md § Set pass](../design/gpu-cuda.md) (`scripts/pod/prove_set.sh run s945000-ch972500
+   <set-945000.bin> <ch-972500.bin> …`). Then point `tree972/pass-945000` at the new pass and rerun
+   `/data/replay/setgpu/final972.sh` (verify-set, set-member of the bridge coins, `verify-chain
+   --set-proofs --members --witness-script`): expect VERIFIED for both epochs. Before that, change no AIR
+   and nothing in the challenge derivation (the three existing passes would go stale).
+2. Then: profile `verify-chain`; fold the balance check and the header root into the join (set-pass.md
+   "later"); BLOCK-VK and SET-VK-SETUP from the backlog.
 
 ## In flight
 
-- **Membership (D-050):** circuit, set tree root, membership proofs, CLI and the Lean soundness of the root
-  (`set_root_sound`) are done. Next: rebase `gpu-set` (the CUDA set prover, not yet run on a GPU), regenerate
-  its kernels for the current `set_mt`, then the GPU run (device memory: production logs need ~152 GiB;
-  halved logs fit an H100 NVL or H200).
+- Nothing uncommitted after this session's commits. The node (`/data/replay`) holds the three passes
+  (`setgpu/passes/s{935000,945000,972500}`, ~8 GB each), `bridge-972500.sbmember`, the chain files and the
+  new binary `chainproof-setvk-pin` (built from this session's tree, aarch64).
+- Branches `rec/epoch-root` (origin at 287b9a3…9fec17f…) and `gpu-set` are merged into `main` and kept
+  locally until `main` is pushed; delete them after.
 
 ## Needs owner
 
-- **Pushing:** `main` was pushed to the private repo starknet-innovation/starked-bitcoin on 2026-10-10, on the owner's go. Each later push still needs the owner's approval (D-016).
-- **M3 node:** available (data source only; proving stays on the Mac). Credentials are in `prove-any-chain/.env.local`, never committed.
-- **LICENSE:** none chosen.
-- **STWO-225-FU:** follow up on stwo-zig#225 upstream? This is outward-facing.
+- **Push `main`** (27fc228 and this session's commits; `origin/main` is at 06d7bf7): D-016.
+- **The missing pass:** ≈ $55 of H200 time (see Next step 1).
+- **Block VK pinning (BLOCK-VK):** `verify-block` still reads `blockvk.bin` from the prover's directory.
+- **STWO-225-FU:** follow up on stwo-zig#225 upstream? Outward-facing.
 
 ## Verify the current state
 
@@ -142,10 +80,8 @@ open StarkedAir.HeaderChain StarkedAir.Spec.Bitcoin
 EOS
 (cd lean && lake env lean /tmp/ax.lean)  # expect: propext, Classical.choice, Quot.sound
 
-# JSON drift: committed AIRs must equal the Lean export
-(cd lean && for n in add32_chain sha256_compress header_chain probe_oracle byte_table byte_user blake2s_compress blake2s_tree header_chain_v7 node_glue leaf_glue block_bytes block_reader block_fields block_msg block_sha block_merkle block_tables block_walk block_ctx block_wmerkle block_undo block_b2msg block_b2s extsum_test genesis_checks set_pend set_rec set_b2w set_b2c set_tmsg set_shac set_lw set_lc set_mt set_leaf_out set_node_glue; do
-  lake env lean --run Export.lean $n | cmp -s - ../airs/$n.json && echo "$n ok" || echo "$n DRIFT"; done)
+scripts/check_air_drift.sh                 # expect: every airs/*.json "ok" (88 files, ~10 min; AIRs and circuit programs)
 
-python3 ~/.claude/skills/document/scripts/check_docs.py .   # expect: 0 errors
+python3 ~/.claude/skills/document/scripts/check_docs.py .   # expect: 0 errors outside data/ (it also scans the gitignored data/core-src, Core's own broken links)
 # Optional, slow (~15 min): .venv-fv/bin/python scripts/air_z3.py all --bv
 ```
