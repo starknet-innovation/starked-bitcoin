@@ -1,6 +1,6 @@
 # The coin-set pass: a set file's facts proved, so a verifier needs no set
 
-Status: current · Updated: 2026-11-02 (D-048; steps 1–5 done; step 6: three of the four real passes proved on H200s 2026-10-29/30, the set after 945,000 under epoch 2's challenge still to prove; set VK pinned 2026-11-02)
+Status: current · Updated: 2026-11-03 (D-048 done: all four real passes proved on H200s 2026-10-29 to 11-03 and verified under the pinned set VK; `verify-chain --set-proofs --members` verified with no set file on 2026-11-03)
 
 Figures marked *est.* are rough; the native model (step 1) measures them.
 

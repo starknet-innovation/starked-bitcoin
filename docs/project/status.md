@@ -4,49 +4,52 @@ Rewritten at the end of every session; see [README.md](README.md#ending-a-sessio
 If `HEAD at last update` doesn't match `git log -1`, this file is stale:
 follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work).
 
-- **Updated:** 2026-11-02 (session 27: hygiene pass)
-- **HEAD at last update:** 27fc228 (the `gpu-set` merge), plus the two commits of 2026-11-02 that follow it (the set VK pin, then this session log)
+- **Updated:** 2026-11-03 (session 28: the fourth set pass; chain, sets and bridge coins verified together)
+- **HEAD at last update:** 15e6705 (the 2026-11-02 docs commit) plus this session-log commit
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
-- **Current item:** SET-PASS (D-048, [set-pass.md](../design/set-pass.md)): one of the four real passes is
-  still to prove. Everything is on `main` (27fc228 + this session's commits): `rec/epoch-root` and
-  `gpu-set` are merged, the stale worktrees are gone, the set VK is pinned.
+- **Current item:** SET-PASS (D-048) is complete. All four real passes are proved and verified with
+  the pinned set VK, and on 2026-11-03 `verify-chain --set-proofs --members` on the node verified the
+  chain proof, both epochs' balances and 66 strkBTC-bridge coins together, with no set file and every VK
+  pinned. Everything is on `main`; `origin/main` is behind by this session's and the previous session's
+  commits (push: owner, D-016).
 
 ## State in one paragraph
 
 The header chain from genesis to 972,502 is one proof (`data/store/mainnet-to-972502.sbchain`; compact
 0.99 MB, D-049). Blocks 935,001–972,500 (two epochs) are ONE chain proof (`prove-chain`/`verify-chain`,
-D-047 pinned VKs), verified on the node on 2026-10-26: 164,539,066 coins, `hash_serialized 9f92d143…` =
-Core's. The coin-set pass (D-048) replaces the verifier's set files: three of its four passes are proved
-on H200s and verified on the node (sets after 935,000 and 945,000 under epoch 1's challenge, 972,500
-under epoch 2's). Membership (D-050) is built and proven (`set_root_sound`); 66 strkBTC-bridge coins
-(13,689,057,287 sat under the 3-of-5 P2WSH) verify against the 972,500 pass. Lean: every project
-theorem on standard axioms; trusted items in [verification.md](../reference/verification.md).
+D-047 pinned VKs): 164,539,066 coins after 972,500, `hash_serialized 9f92d143…` = Core's. The coin-set
+pass (D-048) replaces the verifier's set files: the sets after 935,000 and 945,000 under epoch 1's
+challenge and after 945,000 and 972,500 under epoch 2's are proved on H200s and verified under the pinned
+`vk/epoch/set-l22.vk`. Membership (D-050) is proven (`set_root_sound`): the 66 bridge coins
+(13,689,057,287 sat under the 3-of-5 P2WSH) are bound to the chain-proven set after 972,500. Lean:
+every project theorem on standard axioms; trusted items in [verification.md](../reference/verification.md).
 
 ## Next step (concrete)
 
-1. **The missing pass** (needs the owner's go, ≈ $55 on an H200): the set after 945,000 under epoch 2's
-   challenge `ch-972500`. On the node: `/data/replay/setgpu/` has `ch-972500.bin`, the pod runbook is
-   [gpu-cuda.md § Set pass](../design/gpu-cuda.md) (`scripts/pod/prove_set.sh run s945000-ch972500
-   <set-945000.bin> <ch-972500.bin> …`). Then point `tree972/pass-945000` at the new pass and rerun
-   `/data/replay/setgpu/final972.sh` (verify-set, set-member of the bridge coins, `verify-chain
-   --set-proofs --members --witness-script`): expect VERIFIED for both epochs. Before that, change no AIR
-   and nothing in the challenge derivation (the three existing passes would go stale).
-2. Then: profile `verify-chain`; fold the balance check and the header root into the join (set-pass.md
-   "later"); BLOCK-VK and SET-VK-SETUP from the backlog.
+1. **Fold the balance check and the header root into the join** (set-pass.md "later"), so one root proof
+   covers the chain, the blocks and the sets: start from `lean/StarkedAir/Circuit/EpochJoin.lean` and
+   `src/recursion/epoch_join.zig` (the join already verifies epoch roots in-circuit; add the set-pass
+   roots as children and the balance equations; the header root as one more child). New circuits mean
+   new pinned VKs (reviewed commit, D-047).
+2. Backlog items opened on 2026-11-02: BLOCK-VK (pin `blockvk.bin` like the epoch layers), SET-VK-SETUP
+   (remake the set VK from public inputs). Then profile `verify-chain` on the node.
+3. For the next set pass, decide the pod's data path first (log.md session 28): a pull from the node
+   needs a credential on the pod; a push through the pod's exposed port runs at ~1 MB/s.
 
 ## In flight
 
-- Nothing uncommitted after this session's commits. The node (`/data/replay`) holds the three passes
-  (`setgpu/passes/s{935000,945000,972500}`, ~8 GB each), `bridge-972500.sbmember`, the chain files and the
-  new binary `chainproof-setvk-pin` (built from this session's tree, aarch64).
-- Branches `rec/epoch-root` (origin at 287b9a3…9fec17f…) and `gpu-set` are merged into `main` and kept
-  locally until `main` is pushed; delete them after.
+- Nothing uncommitted. No pod is running (`list-pods` empty, 2026-11-03 08:50 UTC).
+- The node (`/data/replay`) holds the four passes (`setgpu/passes/s935000`, `s945000` under epoch 1,
+  `s945000c2` under epoch 2 with pass/VK/challenge only, `s972500`), `bridge-972500.sbmember`, the chain
+  files, and the logs `setgpu/node945.log`, `verifyset945c2.log`, `final945c2.log`. The `s945000c2`
+  segment files (~8 GB) were not fetched (they are only needed for membership proofs against that set).
+- Branches `rec/epoch-root` and `gpu-set` are merged into `main` and kept until the push; delete after.
 
 ## Needs owner
 
-- **Push `main`** (27fc228 and this session's commits; `origin/main` is at 06d7bf7): D-016.
-- **The missing pass:** ≈ $55 of H200 time (see Next step 1).
+- **Push `main`** (D-016): 27fc228 and the commits of 2026-11-02 and 2026-11-03.
 - **Block VK pinning (BLOCK-VK):** `verify-block` still reads `blockvk.bin` from the prover's directory.
+- **Data path for pods:** a deploy key for pods on the node (removed after each run) or another pull route.
 - **STWO-225-FU:** follow up on stwo-zig#225 upstream? Outward-facing.
 
 ## Verify the current state

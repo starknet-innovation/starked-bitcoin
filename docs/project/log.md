@@ -21,6 +21,26 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-11-02/03 (session 28) — The fourth set pass on an H200: chain, sets and bridge coins verified together, no set file
+Who: Claude (agent, Fable 5.1), owner: "Ok go ahead and run the 945 pass on an H200"; "make sure to connect to the pod from the distant box" (owner travelling)
+Roadmap: SET-PASS done (4 of 4 real passes); SET-MEMBER bound to the chain proof
+Done:
+- The set after 945,000 proved under epoch 2's challenge (`ch-972500`) on H200 pod `de23srai6gbh7o` (secure, EUR-IS-4, $5.29/h, 12 vCPU, 251 GB): 7,040 segments at the halved logs, then the set tree; pass files on the node in `/data/replay/setgpu/passes/s945000c2/`; `tree972/pass-945000` relinked to it.
+- The run was driven from the node (`/data/replay/setgpu/node945.sh`, pod side `run945.sh`): inputs pushed, build, byte check, pass, follow, fetch, verify, pod deletion at the end or at a 22 h deadline. The pod built from the node's d81848a tarball plus `main-15e6705.patch.gz` (set-tree leaf fix, `--keep-going`, VK pin, scripts).
+Evidence:
+- Segment 0 device vs CPU: byte-identical (`== SET CHECK OK`, 20:22–20:37 UTC). Segments: 7,040 proved, 15 CPU-checked byte-identical, 33,556 s (4.77 s/segment wall, 3.67 s device). Tree: 14,079 proofs in 9,506 s (GPU 6,923 s). Pod `verifyPass`: VERIFIED, 165,215,167 coins, 2,001,539,802,990,101 sat, `hash_serialized 5b2b0df7…` (the rehearsal's value), digest `fd9f3d57…`.
+- Node, pinned VK: `chainproof-setvk-pin verify-set passes/s945000c2 tree972:972500:945001:out935/set-945000.bin`: "set VK …: pinned (vk/epoch/set-l22.vk)", VERIFIED (`setgpu/verifyset945c2.log`).
+- Node: `verify-chain mainnet-q70-p26-l20.vk tip/mainnet-to-972502.sbchain join972b/out --set-proofs --members setgpu/passes/bridge-972500.sbmember --witness-script <3-of-5> join972b/e945:945000:935001:… tree972:972500:945001:…` with every VK pinned and **no `--unpinned`**: chain proof verified (headers 0..972501, 9.0 s); ONE proof for blocks 935,001..972,500; start set = Core's assumeUTXO `hash_serialized`; epoch 935,001..945,000 balanced (165,215,167 coins, 68,633,620 inputs spent); epoch 945,001..972,500 balanced (164,539,066 coins, 211,328,503 inputs spent); "VERIFIED blocks 935001..972500 as one chain proof, sets by set-pass proofs"; total 2,010,133,549,560,777 sat; "VERIFIED 66 proofs: 66 unspent coins, 13689057287 sat under the witness script" (`setgpu/final945c2.log`). rc=0.
+- RunPod: pod deleted by the node (HTTP 204, 08:47 UTC), `list-pods` empty; billing for the pod $74.17 ($73.89 GPU, $0.27 disk; 17:58 UTC 11-02 to 08:47 UTC 11-03).
+Problems / lessons:
+- Data entering the pod through its exposed SSH port is capped near 1 MB/s whatever the source or stream count; the pod's own outbound downloads run at ~93 MB/s. Letting the pod pull from the node needs a credential on the pod (a key on the node, or agent forwarding), which this agent's permission classifier refuses; the node's firewall allows no other port. The 14.3 GB set therefore went in by `rsync --compress-choice=zstd` (1.6×), ~1.9 h; the build overlapped. For the next run the owner should decide a pull path (e.g. a deploy key for the pod on the node, removed afterwards), which would cut ~2 h ≈ $10 per pass.
+- The H200 SXM was out of stock on 12.8/12.9 hosts; a CUDA 13.2 host ran the cu12.8 image and nvcc fine.
+- `pkill -f <pattern>` over ssh kills the ssh command itself when the pattern appears in it: use `[x]` bracket patterns.
+- Session-numbering note: the two "session 25/26, branch gpu-set" entries of 2026-10-28 are the GPU sub-agent's; the main line's sessions are 25 (10-29), 26 (10-30), 27 (11-02), 28 (this).
+Next: push `main` (owner, D-016); fold the balance check and the header root into the join (one proof for everything); BLOCK-VK; SET-VK-SETUP; profile `verify-chain`; decide the data path for future set passes.
+
+---
+
 ## 2026-11-02 (session 27) — Hygiene: `gpu-set` merged into main, worktrees and merged branches removed, set VK pinned, docs refreshed
 Who: Claude (agent, Fable 5.1), owner: "Do the hygiene pass now."
 Roadmap: SET-PASS (3 of 4 passes; VK pinned), SET-MEMBER done, BLOCK-REC done, UTXO done at epoch scale, PROOF-STORE done; backlog BLOCK-VK and SET-VK-SETUP added
