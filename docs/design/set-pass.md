@@ -272,7 +272,10 @@ sets of the current chain: ~$50–60. For scale, the chain's 37,500 block proofs
    Two findings: the production logs' arena is 152.9 GiB (no H100/H200), so the runs use halved logs
    (76.4 GiB, ~4,650 segments per set) or quartered (38.2 GiB); and the single-threaded host witness, not
    the device, bounds the time until the set's Blake2s/SHA-256 columns get device generators.
-7. Later: the balance folded into the join, so one proof covers everything.
+7. **The balance folded in: done (2026-11-04)** as the chain seal, a circuit over the last join and the
+   set-pass roots ([chain-seal.md](chain-seal.md)): the balance, the set-digest links (the passes'
+   Blake2s states finished in-circuit), the counts and heights, all in one proof; `prove-seal` /
+   `verify-seal`. The header root and the block-hash paths stay native (SEAL-T).
 
 ## Decisions (D-048, owner, 2026-10-27)
 

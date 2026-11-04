@@ -501,3 +501,25 @@ node hash. Only at the proven heights (the epoch boundary sets); every height (a
 spends, or per-block updates) is left for later.
 Why: the pass's existing commitments (the file's Blake2s, `hash_serialized`, the fraction sums) are
 sequential or aggregate, so a single coin can only be checked against them with the whole file.
+
+### D-051 — The chain seal: the balance and set links folded into one proof over the join and the set roots
+Date: 2026-11-04 · By: agent (owner: "do everything that needs to be done to complete our goal, don't stop";
+the goal being status.md's next step, "fold the balance check and the header root into the join") · Status: proposed
+Decision (docs/design/chain-seal.md):
+- **A new top circuit, not a changed join.** `chainSeal ms gen` verifies the chain's last join and the
+  set-pass roots in-circuit and checks there what `verify-chain --set-proofs` checked natively: `acc`
+  and every epoch root's `rest` opened, the set roots' summaries opened to the passes' start and final
+  state vectors, the balance per epoch, the Blake2s finish of each pass to the digest the epoch root
+  bound, the count and height ranges. The join, root, tree and set VKs are unchanged and stay pinned;
+  the seal's identity is pinned as `vk/epoch/seal-935001-972500.vk`.
+- **SHA-256 stays native.** `hash_serialized` is finished natively from the public final state; the
+  seal commits to the Blake2s digest of the SHA-256 state (`shaEnd`, `shaStart`). No SHA-256 gadget
+  exists in the glue language.
+- **The header root and the `T` paths stay native for now** (SEAL-T): per epoch child an in-circuit MMR
+  inclusion with sides computed from the position's and the leaf count's bits, about 2^20 more G gates.
+Why: one proof whose public values state the chain's range, start and end sets and the end set's facts
+is what a Starknet verifier or a Core fork can check; six proofs plus glue is not. A new circuit keeps
+every proven layer (and its $) as is; the seal verifies them.
+Rejected: changing the join's program (every join and root VK would move, and the roots at 2^25 would
+be re-proved); a SHA-256 gadget for the seal (weeks, for two compressions over public bytes).
+

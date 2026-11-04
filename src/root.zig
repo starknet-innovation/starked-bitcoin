@@ -48,6 +48,7 @@ pub const recursion = struct {
     pub const set_tree = @import("recursion/set_tree.zig");
     pub const epoch_root = @import("recursion/epoch_root.zig");
     pub const epoch_join = @import("recursion/epoch_join.zig");
+    pub const chain_seal = @import("recursion/chain_seal.zig");
 };
 pub const air = struct {
     pub const ir = @import("air/ir.zig");

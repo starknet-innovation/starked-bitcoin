@@ -136,6 +136,8 @@ pub fn build(b: *std.Build) void {
     lib.addAnonymousImport("air:set_mt", .{ .root_source_file = b.path("airs/set_mt.json") });
     lib.addAnonymousImport("air:set_leaf_out", .{ .root_source_file = b.path("airs/set_leaf_out.json") });
     lib.addAnonymousImport("air:set_node_glue", .{ .root_source_file = b.path("airs/set_node_glue.json") });
+    lib.addAnonymousImport("air:chain_seal_1_2_3_genesis", .{ .root_source_file = b.path("airs/chain_seal_1_2_3_genesis.json") });
+    lib.addAnonymousImport("air:chain_seal_16_16", .{ .root_source_file = b.path("airs/chain_seal_16_16.json") });
     lib.addAnonymousImport("air:block_reader", .{ .root_source_file = b.path("airs/block_reader.json") });
     lib.addAnonymousImport("air:block_sha", .{ .root_source_file = b.path("airs/block_sha.json") });
     lib.addAnonymousImport("air:block_msg", .{ .root_source_file = b.path("airs/block_msg.json") });
@@ -329,7 +331,7 @@ pub fn build(b: *std.Build) void {
         // The pinned production VK (70 queries, 26 PoW bits, segments up to 4096 headers).
         chainproof.root_module.addAnonymousImport("vk:mainnet", .{ .root_source_file = b.path("vk/mainnet-q70-p26-l20.vk") });
         // The pinned production VKs of the epoch layers (vk/epoch/; `chainproof setup-vks` remakes them).
-        for ([_][]const u8{ "tree-935001-945000", "tree-945001-972500", "root-16-prev", "join-935001-972500", "set-l22" }) |name|
+        for ([_][]const u8{ "tree-935001-945000", "tree-945001-972500", "root-16-prev", "join-935001-972500", "set-l22", "seal-935001-972500" }) |name|
             chainproof.root_module.addAnonymousImport(b.fmt("vk:epoch/{s}", .{name}), .{ .root_source_file = b.path(b.fmt("vk/epoch/{s}.vk", .{name})) });
         chainproof.linkLibC();
         b.installArtifact(chainproof);

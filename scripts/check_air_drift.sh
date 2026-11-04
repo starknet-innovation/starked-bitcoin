@@ -14,6 +14,8 @@ for n in "${names[@]}"; do
     epoch_root_*_prev)       m=${n#epoch_root_}; args="epoch_root ${m%_prev} prev" ;;
     epoch_root_*)            args="epoch_root ${n#epoch_root_}" ;;
     epoch_join_*)            args="epoch_join ${n#epoch_join_}" ;;
+    chain_seal_*_genesis)    m=${n#chain_seal_}; m=${m%_genesis}; args="chain_seal ${m//_/,} genesis" ;;
+    chain_seal_*)            m=${n#chain_seal_}; args="chain_seal ${m//_/,}" ;;
     leafhash_*)              args="leafhash ${n#leafhash_}" ;;
     transcript_*)            args="transcript ${n#transcript_}" ;;
     channel_pow_check_*)     args="pow_check ${n#channel_pow_check_}" ;;

@@ -611,7 +611,8 @@ fn decHash(d: *store.Dec) !SS.HashSt {
     return h;
 }
 
-fn encState(e: *store.Enc, st: SS.State) !void {
+/// A pass state as the pass and seal files store it.
+pub fn encodeState(e: *store.Enc, st: SS.State) !void {
     try e.int(u32, st.i);
     try e.int(u8, @intFromBool(st.last != null));
     try e.buf.appendSlice(e.a, &(st.last orelse @as([36]u8, @splat(0))));
@@ -622,7 +623,7 @@ fn encState(e: *store.Enc, st: SS.State) !void {
     try encHash(e, st.sha);
 }
 
-fn decState(d: *store.Dec) !SS.State {
+pub fn decodeState(d: *store.Dec) !SS.State {
     var st: SS.State = .{ .b2 = undefined, .sha = undefined };
     st.i = try d.int(u32);
     const has = try d.int(u8);
@@ -648,7 +649,7 @@ pub fn encodePass(a: std.mem.Allocator, p: *const Pass) ![]u8 {
     try e.int(u32, store.VERSION);
     try e.int(u32, p.k);
     try e.buf.appendSlice(a, &p.count);
-    try encState(&e, p.final);
+    try encodeState(&e, p.final);
     try store.encodeCircuit(&e, &p.root.proof, p.root.key, &p.root.sum);
     return store.seal(&e);
 }
@@ -659,7 +660,7 @@ pub fn decodePass(gpa: std.mem.Allocator, a: std.mem.Allocator, bytes: []const u
     var p: Pass = undefined;
     p.k = try d.int(u32);
     p.count = (try d.take(4))[0..4].*;
-    p.final = try decState(&d);
+    p.final = try decodeState(&d);
     var sum: Summary = undefined;
     const c = try store.decodeCircuit(gpa, a, &d, &sum);
     p.root = .{ .proof = c.proof, .key = c.key, .sum = sum };

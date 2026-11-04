@@ -469,18 +469,37 @@ pub const EpochIn = struct { tvk: *const BT.Vk, ep: ER.Epoch };
 /// join's, checked against its pinned identity with the replayed output digest. Returns each epoch's
 /// values for its balance against its sets.
 pub fn verifyChain(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const leaf.Tables, vk: *const Vk, f: *const ChainFile, epochs: []const EpochIn, n_headers: usize, t: HT.Words) ![]ER.Verified {
-    if (f.heads.len != epochs.len or epochs.len < 2) return error.WrongEpochs;
+    const r = try replay(a, vk, f.heads, epochs, n_headers, t);
+    const id = vk.joinFor(r.variant);
+    const p = &f.proof;
+    if (!std.mem.eql(u32, &p.request.preprocessed_root, &id.root)) return error.WrongCircuit;
+    if (!std.mem.eql(u32, &p.circuit_hash, &id.hash)) return error.WrongCircuit;
+    if (!std.meta.eql(p.request.pcs_config, PcsConfigV2.fromFriAndTraceSize(vk.fri, vk.join_log))) return error.ConfigNotPinned;
+    const got = try leaf.verifyCircuit(gpa, tables, p);
+    if (!std.mem.eql(u32, &got, &joinOut(&r.join))) return error.WrongDigest;
+    return r.verified;
+}
+
+/// The chain's public part replayed: each epoch's opening (`ER.openHead`) and values for the balance,
+/// the last join's opening (links, keys from the pinned identities, `acc`), its variant and circuit
+/// hash. `verifyChain` checks the proof against it; the seal opens it in-circuit.
+pub const Replayed = struct { opens: []RootOpen, verified: []ER.Verified, join: JoinOpen, variant: Variant, jh: [8]u32 };
+
+pub fn replay(a: std.mem.Allocator, vk: *const Vk, heads: []const ER.Head, epochs: []const EpochIn, n_headers: usize, t: HT.Words) !Replayed {
+    if (heads.len != epochs.len or epochs.len < 2) return error.WrongEpochs;
     if (!std.meta.eql(vk.fri, BT.circuitFri())) return error.ConfigNotPinned;
     const out = try a.alloc(ER.Verified, epochs.len);
+    const opens = try a.alloc(RootOpen, epochs.len);
     var left: Open = undefined;
     var lh: [8]u32 = undefined;
     var last: Variant = undefined;
-    for (f.heads, epochs, out, 0..) |*h, e, *ver, i| {
+    for (heads, epochs, out, opens, 0..) |*h, e, *ver, *op, i| {
         if (!std.meta.eql(e.tvk.fri, vk.fri)) return error.ConfigNotPinned;
         const entry = try vk.rootFor(h.children.len, e.ep.prev != null, nodeTag(e.tvk));
         const o = try ER.openHead(a, e.tvk, entry.lift.hash, h, e.ep, n_headers, t);
         ver.* = o.verified;
         const r: RootOpen = .{ .key = o.key, .ep = e.ep, .rest = o.rest };
+        op.* = r;
         if (i == 0) {
             left = .{ .root = r };
             lh = entry.id.hash;
@@ -492,12 +511,5 @@ pub fn verifyChain(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const 
         left = .{ .join = jo };
         lh = vk.joinFor(last).hash;
     }
-    const id = vk.joinFor(last);
-    const p = &f.proof;
-    if (!std.mem.eql(u32, &p.request.preprocessed_root, &id.root)) return error.WrongCircuit;
-    if (!std.mem.eql(u32, &p.circuit_hash, &id.hash)) return error.WrongCircuit;
-    if (!std.meta.eql(p.request.pcs_config, PcsConfigV2.fromFriAndTraceSize(vk.fri, vk.join_log))) return error.ConfigNotPinned;
-    const got = try leaf.verifyCircuit(gpa, tables, p);
-    if (!std.mem.eql(u32, &got, &joinOut(&left.join))) return error.WrongDigest;
-    return out;
+    return .{ .opens = opens, .verified = out, .join = left.join, .variant = last, .jh = lh };
 }

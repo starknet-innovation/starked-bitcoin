@@ -5,7 +5,8 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 B=zig-out/bin/chainproof; V=data/store/mainnet-q70-p26-l20.vk; C=data/store/mainnet-to-970734.sbchain; T=data/test-chain
-LOGS=11,8,6,6,11,10,12,11,12
+# Twelve component logs since D-050 (leaf words, leaf Blake2s, tree): the tree needs `treeLog(6)` = 13.
+LOGS=11,8,6,6,11,10,12,11,12,10,12,13
 E3="$T/e3:3"; E8="$T/e8:8:4:$T/e3/set-3.bin"; E15="$T/e15:15:9:$T/e8/set-8.bin"
 run() { echo "== $*"; /usr/bin/time -l "$@" 2>&1 | grep -vE "^ {6,}[0-9]" | grep -v "^$" | tail -5; }
 run $B prove-set $T/e3/set-3.bin $E3 $T/e3/pass-3 --logs $LOGS

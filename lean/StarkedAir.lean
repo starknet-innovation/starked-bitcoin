@@ -167,6 +167,8 @@ import StarkedAir.Circuit.BlockRec
 import StarkedAir.Circuit.BlockNodeK
 import StarkedAir.Circuit.EpochRoot
 import StarkedAir.Circuit.EpochJoin
+import StarkedAir.Circuit.ChainSeal
+import StarkedAir.Circuit.ChainSealSound
 import StarkedAir.Circuit.EpochRootSound
 import StarkedAir.Circuit.EpochJoinSound
 import StarkedAir.Circuit.EpochChainSound
