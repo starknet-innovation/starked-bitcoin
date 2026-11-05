@@ -504,7 +504,8 @@ sequential or aggregate, so a single coin can only be checked against them with 
 
 ### D-051 — The chain seal: the balance and set links folded into one proof over the join and the set roots
 Date: 2026-11-04 · By: agent (owner: "do everything that needs to be done to complete our goal, don't stop";
-the goal being status.md's next step, "fold the balance check and the header root into the join") · Status: proposed
+the goal being status.md's next step, "fold the balance check and the header root into the join") · Status: accepted
+(owner, 2026-11-05: "we good. Accept and push."; the pinned seal VK accepted as written by `prove-seal`)
 Decision (docs/design/chain-seal.md):
 - **A new top circuit, not a changed join.** `chainSeal ms gen` verifies the chain's last join and the
   set-pass roots in-circuit and checks there what `verify-chain --set-proofs` checked natively: `acc`

@@ -7,11 +7,10 @@ follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work)
 - **Updated:** 2026-11-04 (session 29: the chain seal)
 - **HEAD at last update:** 9d4a8c3 (the 2026-11-03 docs commit) plus this session's commits
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
-- **Current item:** SEAL done (D-051 proposed): blocks 935,001–972,500 and their coin sets are ONE sealed
+- **Current item:** SEAL done (D-051 accepted 2026-11-05): blocks 935,001–972,500 and their coin sets are ONE sealed
   proof (`seal-972500.bin`, 631 KB) with the balance, the set-digest links and the ranges checked
   in-circuit; verified on the Mac and the node with every VK pinned. Open: SEAL-LEAN (the composed
-  statement), SEAL-T (the header root and the `T` paths in-circuit). `origin/main` is behind by this
-  session's commits (push: owner, D-016).
+  statement), SEAL-T (the header root and the `T` paths in-circuit). `main` pushed 2026-11-05 (owner).
 
 ## State in one paragraph
 
@@ -48,10 +47,6 @@ including the seal's 27 gadget theorems; trusted items in [verification.md](../r
 
 ## Needs owner
 
-- **Review D-051 and the pinned seal VK** (`vk/epoch/seal-935001-972500.vk`, sha256 `d7340b8a…`): the
-  seal's identity over the pinned join's and set tree's shapes, written by `prove-seal` on 2026-11-04;
-  D-047 asks a reviewed commit for a pinned VK.
-- **Push `main`** (D-016): this session's commits.
 - **Block VK pinning (BLOCK-VK):** `verify-block` still reads `blockvk.bin` from the prover's directory.
 - **STWO-225-FU:** follow up on stwo-zig#225 upstream? Outward-facing.
 
