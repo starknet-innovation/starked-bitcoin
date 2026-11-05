@@ -21,6 +21,21 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-11-05 (session 30) — SEAL-LEAN: the seal's soundness as one Lean statement
+Who: Claude (agent, Opus 5.5), owner: "do SEAL-LEAN next, don't stop" (and D-051 accepted and pushed, d8b53cd)
+Roadmap: SEAL-LEAN done
+Done:
+- `lean/StarkedAir/SetPass/PassChainW.lean`: `stree_soundW`, `pass_chainW`, `set_root_soundW`: the set tree and pass statements with the collision named (`segOf`, `spairs`, `linkPairs`, `setPairs`), from `SatC`. Found: `set_root_sound`'s `∨ Collision` is vacuous (`RecCR.collision_true`), so composing with it would have said nothing.
+- `lean/StarkedAir/Circuit/ChainSealCompose.lean` builds on the new `Circuit/ChainSealSet.lean`. The set-side file reads a set child as a pass: `pbOf`/`pfOf`, `inVec_words`/`outVec_words`, `setOpen_summ` (the 48 limbs are `summ2 pb pf R`), `setOpen_begin` (`EncIn` of `begin 1 count`), `setOpen_finish` (the in-circuit compression is `hashBlocks` of the final Blake2s state), and the end facts' words.
+- `seal_soundW` is in `Circuit/ChainSealCompose.lean`. It needs the chain's `TrustEW`, the set trees' `TrustW`, the seal's circuit trust and the verifier's `sealMsg`. It concludes `c.Valid` and, per epoch, `EpochOk`: `rest`'s preimage, the end and start passes under the epoch challenge's fractions, the finishes equal to `fin`/`prev`, `SE.sums = s + SB.sums`, and the ranges. It also concludes `EndOk`, so `W` holds the last end set's facts. The alternative is `Collides (sealPairs …)`.
+- Docs: chain-seal.md § Soundness, verification.md (a proven row and the trusted row updated), roadmap, set-pass.md, set-membership.md, status.md.
+Evidence:
+- `(cd lean && lake build)`: "Build completed successfully (8922 jobs)". `#print axioms` gives `propext, Classical.choice, Quot.sound` for `seal_soundW`, `set_root_soundW`, `setOpen_finish` and `setOpen_begin`. `grep -rnE "\bsorry\b|native_decide|bv_decide" lean/StarkedAir` finds no matches. The docs checker reports 0 errors outside data/.
+Problems / lessons:
+- `set P := parts ms gen` does not fold terms produced later by lemmas. Pass explicit P-form arguments (`checks_epoch (opens := P.opens.map (·.res)) …`) or use `rw [← hP]`.
+- The composed theorem needs `set_option maxHeartbeats 4000000`. Using `rfl` on `summ2` terms unfolds Blake2s and exhausts recursion, so rewrite to syntactic equality first.
+Next: SEAL-T (the header root and `T` paths in-circuit); owner: push `main`.
+
 ## 2026-11-04 (session 29) — The chain seal: one proof over the chain of epochs and its coin sets, mainnet sealed on a laptop
 Who: Claude (agent, Fable 5.1), owner: "do everything that needs to be done to complete our goal, don't stop" (the goal: status.md's next step, fold the balance and the header root into the join)
 Roadmap: SEAL done (D-051 proposed); SEAL-LEAN, SEAL-T, SEAL-VK-SETUP opened

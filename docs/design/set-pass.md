@@ -180,6 +180,8 @@ both vectors, so linked segments share it with no separate check, and a node che
   hypotheses as the block and header trees), and `SetPass.set_root_sound` (`PassChain.lean`): with
   `set_seg_sound` per segment, the root gives a record list folding the pass from the start state to
   the final state, the checks holding iff they held before (standard axioms).
+  Its `∨ Collision` is vacuous (`RecCR.collision_true`); `set_root_soundW` (`PassChainW.lean`,
+  2026-11-05) is the same statement with the collision named (`setPairs`), as the seal uses it.
 - **SHA-256 length:** the pass's SHA-256 block count is a field element, but it cannot wrap: the
   Blake2s block count is checked below `2^30` in-circuit, so the file is under `2^36 + 64` bytes, and
   the `TxOutSer` stream (`40 + len` per record against the file's `49 + len`) is shorter.

@@ -95,11 +95,33 @@ The program for the test chain is 42,375 ops (24,000 Blake2s G gates: 300 blocks
 
 ## Soundness
 
-`Circuit/ChainSealSound.lean` (see its header for the exact statements): the program-level theorem
-`seal_sound` gives, for a satisfied seal, each child's hook with its recomputed digest, the opened
-values and every equation above, and the output digest over the message. Composition with the
-children's trust records (`EpochChainW.chain_verifyW` for the join, `SetPass.set_root_sound` per set
-root) is the obligation that remains; verification.md records what is proven.
+All on standard axioms (`propext`, `Classical.choice`, `Quot.sound`), no `sorry`:
+
+- **Per gadget** (`Circuit/ChainSealSound.lean`, 27 theorems): the children's digests and hooks, `rest`,
+  `acc`, the constants, the challenge expansion, bytes and the count, packing, the one-hot and mask, the
+  counter, `compressFinal_sound` (RFC 7693 `F`), the program's key and output digest, and the checks.
+- **A set child as a pass** (`Circuit/ChainSealSet.lean`): the seal's registers read as the segment
+  system's public inputs, `pbOf` (the start vector) and `pfOf` (the final vector). `setOpen_summ`: the
+  child's 48 limbs are `summ2 pb pf R`; `setOpen_begin`: `pb` encodes `begin 1 count` (`EncIn`), the
+  count from its 4 bytes below `2^30`; `setOpen_finish`: for any final state `pf` encodes, the in-circuit
+  compression is Blake2s's `hashBlocks` of its Blake2s state; `setOpen_i`, `setOpen_cntW`,
+  `setOpen_maxhW`, `setOpen_amtW`, `setOpen_shaDg`, `setOpen_mroot`: the end facts' words.
+- **The set tree with a named collision** (`SetPass/PassChainW.lean`): `set_root_sound` concludes
+  `… ∨ Collision`, which is vacuous (`RecCR.collision_true`: 9-word messages outnumber digests);
+  `set_root_soundW` restates it as `RecCR` does the block trees: the segment tree is computed from the
+  witnesses (`segOf`) and the conclusion is `… ∨ Collides (setPairs …)`.
+- **The seal, composed: `seal_soundW`** (`Circuit/ChainSealCompose.lean`). Hypotheses: the chain's
+  `TrustEW`, the set trees' `TrustW`, the seal's `TC` (a proof accepted under `sealH` with output `d`
+  runs `chainSeal ms gen` with the witness `sealW d`), the verifier's own checks on its chain of epoch
+  openings `c` (as `chain_verifyW` takes them), and `Acc sealH (H (sealMsg …))`, the message the
+  verifier recomputes. Conclusion: `c` is valid; per epoch `EpochOk` (the table above, as statements
+  about records: the passes fold from `begin 1 count` under the fractions of the epoch's challenge,
+  `SE.sums = s + SB.sums`, the finishes are `fin` and `prev`, the ranges); `EndOk` (the end facts in `W`
+  are the last end set's); or two of `sealPairs` collide.
+
+What the theorem does not cover: the header root and `T` (native, SEAL-T); `hash_serialized` (the
+verifier finishes the SHA-256 state whose digest `EndOk` names); that the pinned seal VK is
+`chainSeal ms gen` (SEAL-VK-SETUP); that Zig's `expected` is Lean's `sealMsg` (tested).
 
 ## Next fold: the header root and `T`
 

@@ -4,13 +4,14 @@ Rewritten at the end of every session; see [README.md](README.md#ending-a-sessio
 If `HEAD at last update` doesn't match `git log -1`, this file is stale:
 follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work).
 
-- **Updated:** 2026-11-04 (session 29: the chain seal)
-- **HEAD at last update:** 9d4a8c3 (the 2026-11-03 docs commit) plus this session's commits
+- **Updated:** 2026-11-05 (session 30: SEAL-LEAN, the seal's soundness composed)
+- **HEAD at last update:** d8b53cd (D-051 accepted, pushed) plus this session's commits
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
-- **Current item:** SEAL done (D-051 accepted 2026-11-05): blocks 935,001–972,500 and their coin sets are ONE sealed
-  proof (`seal-972500.bin`, 631 KB) with the balance, the set-digest links and the ranges checked
-  in-circuit; verified on the Mac and the node with every VK pinned. Open: SEAL-LEAN (the composed
-  statement), SEAL-T (the header root and the `T` paths in-circuit). `main` pushed 2026-11-05 (owner).
+- **Current item:** SEAL-LEAN done (2026-11-05): `seal_soundW` (`lean/StarkedAir/Circuit/ChainSealCompose.lean`)
+  states what one accepted seal proof gives: a valid chain of epochs, per epoch the end and start sets as
+  proven passes under the epoch's challenge with the balance, the finishes to `fin`/`prev` and the
+  ranges, and the end facts; or a named Blake2s collision. Next: SEAL-T. This session's commits are not
+  pushed (D-016).
 
 ## State in one paragraph
 
@@ -22,24 +23,21 @@ last join and the four set roots in-circuit and checks there what `verify-chain 
 natively: 164,539,066 coins after 972,500, 2,010,133,549,560,777 sat, Merkle root `f74e9573…`,
 `hash_serialized 9f92d143…` = Core's, from Core's assumeUTXO set after 935,000. Membership (D-050) is
 proven; the 66 bridge coins are bound to the proven set. Lean: every project theorem on standard axioms,
-including the seal's 27 gadget theorems; trusted items in [verification.md](../reference/verification.md).
+including the seal's composed statement (`seal_soundW`); trusted items in [verification.md](../reference/verification.md).
 
 ## Next step (concrete)
 
-1. **SEAL-LEAN:** compose `Circuit/ChainSealSound.lean` into one statement. Start from `checks_epoch`
-   and `setChild_digest`: define the set child's `pb`/`pf` (the incoming and outgoing public-input
-   functions) from the seal's registers (`inVec`/`outVec` positions in `SetTree.inIdx`/`outIdx`), show the
-   48 limbs equal `summ2 pb pf R` (`packEq_sound` + `pubsDigest_res_pack`), and apply
-   `SetPass.set_root_sound`; for the join apply `EpochChainW.chain_verifyW` with `SatC` from hook 0.
-2. **SEAL-T** ([chain-seal.md § Next fold](../design/chain-seal.md#next-fold-the-header-root-and-t)):
+1. **SEAL-T** ([chain-seal.md § Next fold](../design/chain-seal.md#next-fold-the-header-root-and-t)):
    the header root as a child (`HeaderRec` opening, the genesis checks as constants), MMR inclusion per
    epoch child with sides from the bits of the position and the leaf count (`Spec/Mmr.lean` `sides`).
-3. Backlog: BLOCK-VK, SET-VK-SETUP, SEAL-VK-SETUP (remake the seal VK from the pinned join and set
+   Then extend `seal_soundW` (its hypotheses on `c` would come from the header root instead of the
+   verifier).
+2. Backlog: BLOCK-VK, SET-VK-SETUP, SEAL-VK-SETUP (remake the seal VK from the pinned join and set
    shapes); profile `verify-seal`/`verify-chain` on the node.
 
 ## In flight
 
-- Nothing uncommitted after this session's commits. No pod is running.
+- Nothing uncommitted after this session's commits; they are not pushed. No pod is running.
 - Mainnet seal inputs and output on the Mac under `data/seal972/` (gitignored `data/`): `out/seal-972500.bin`,
   `out/sealvk.bin`, the chain file, the join and tree VKs, the four passes' `pass.bin`/`setvk.bin`. On the
   node: `join972b/out/{seal-972500.bin,sealvk.bin}`, the binary `chainproof-seal`, `setgpu/verifyseal972.log`.
@@ -47,6 +45,7 @@ including the seal's 27 gadget theorems; trusted items in [verification.md](../r
 
 ## Needs owner
 
+- **Push `main`** (D-016): this session's SEAL-LEAN commits.
 - **Block VK pinning (BLOCK-VK):** `verify-block` still reads `blockvk.bin` from the prover's directory.
 - **STWO-225-FU:** follow up on stwo-zig#225 upstream? Outward-facing.
 
@@ -81,6 +80,8 @@ open StarkedAir.HeaderChain StarkedAir.Spec.Bitcoin
 #print axioms StarkedAir.Circuit.ChainSeal.compressFinal_sound
 #print axioms StarkedAir.Circuit.ChainSeal.checks_epoch
 #print axioms StarkedAir.Circuit.ChainSeal.seal_digest
+#print axioms StarkedAir.SetPass.set_root_soundW
+#print axioms StarkedAir.Circuit.ChainSeal.seal_soundW
 EOS
 (cd lean && lake env lean /tmp/ax.lean)  # expect: propext, Classical.choice, Quot.sound
 

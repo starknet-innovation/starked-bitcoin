@@ -62,7 +62,8 @@ shape `t` with root limbs `R` gives records `es` (the segments' records, in orde
 the verifier's start state to its final one, and `R` is the root of a segment tree of shape `t` whose
 leaves are the segments' Merkle roots `Spec.SetMerkle.passRoots s0.last segs`: each segment's root is
 `segRoot HALF last seg`, the heap tree of its records' leaves `Blake2s-256(key(previous) ‖ encRec)`
-(`Spec/SetMerkle.lean`), or Blake2s has a collision. The pieces:
+(`Spec/SetMerkle.lean`), or Blake2s has a collision (`set_root_soundW` names the colliding pair;
+`set_root_sound`'s bare `Collision` is vacuous). The pieces:
 
 - `set_seg_root` (`SegRoot`): a sound segment's public `ROOT` is `segRoot HALF s.last seg`.
 - `set_mt` (`MTSound`, `MTLink`, `MTTree`): every node yield of node `j` carries `node HALF leaves j`

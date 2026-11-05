@@ -169,6 +169,9 @@ import StarkedAir.Circuit.EpochRoot
 import StarkedAir.Circuit.EpochJoin
 import StarkedAir.Circuit.ChainSeal
 import StarkedAir.Circuit.ChainSealSound
+import StarkedAir.SetPass.PassChainW
+import StarkedAir.Circuit.ChainSealSet
+import StarkedAir.Circuit.ChainSealCompose
 import StarkedAir.Circuit.EpochRootSound
 import StarkedAir.Circuit.EpochJoinSound
 import StarkedAir.Circuit.EpochChainSound
