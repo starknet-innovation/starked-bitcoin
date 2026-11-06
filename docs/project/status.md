@@ -32,7 +32,7 @@ including the seal's composed statement (`seal_soundW`); trusted items in [verif
    epoch child with sides from the bits of the position and the leaf count (`Spec/Mmr.lean` `sides`).
    Then extend `seal_soundW` (its hypotheses on `c` would come from the header root instead of the
    verifier).
-2. Backlog: BLOCK-VK, SET-VK-SETUP, profile `verify-seal`/`verify-chain` on the node.
+2. Backlog: SET-VK-SETUP (needs one mainnet segment proof from the node), profile `verify-seal`/`verify-chain` on the node.
 
 ## In flight
 
@@ -45,7 +45,6 @@ including the seal's composed statement (`seal_soundW`); trusted items in [verif
 ## Needs owner
 
 - **Push `main`** (D-016): this session's SEAL-LEAN commits.
-- **Block VK pinning (BLOCK-VK):** `verify-block` still reads `blockvk.bin` from the prover's directory.
 - **STWO-225-FU:** follow up on stwo-zig#225 upstream? Outward-facing.
 
 ## Verify the current state
