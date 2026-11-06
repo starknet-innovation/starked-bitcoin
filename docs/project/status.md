@@ -32,8 +32,7 @@ including the seal's composed statement (`seal_soundW`); trusted items in [verif
    epoch child with sides from the bits of the position and the leaf count (`Spec/Mmr.lean` `sides`).
    Then extend `seal_soundW` (its hypotheses on `c` would come from the header root instead of the
    verifier).
-2. Backlog: BLOCK-VK, SET-VK-SETUP, SEAL-VK-SETUP (remake the seal VK from the pinned join and set
-   shapes); profile `verify-seal`/`verify-chain` on the node.
+2. Backlog: BLOCK-VK, SET-VK-SETUP, profile `verify-seal`/`verify-chain` on the node.
 
 ## In flight
 
@@ -90,6 +89,8 @@ scripts/check_air_drift.sh                 # expect: every airs/*.json "ok" (90 
 # The mainnet seal (inputs under data/seal972/, see "In flight"), pinned VKs only:
 zig-out/bin/chainproof verify-seal data/store/mainnet-q70-p26-l20.vk data/store/mainnet-to-972502.compact.sbchain data/seal972/out data/seal972/e945:945000:935001:none data/seal972/e972:972500:945001:none
 # expect: "VERIFIED blocks 935001..972500 as one sealed proof: the coin set after block 972500 is 164539066 coins"
+zig-out/bin/chainproof setup-seal-vk /tmp/sealvk data/seal972/out/chain-972500.bin vk/epoch/join-935001-972500.vk data/seal972/passes/s972500
+# expect: "seal VK remade: trace 2^24 (…); it equals the pinned one"
 
 python3 ~/.claude/skills/document/scripts/check_docs.py .   # expect: 0 errors outside data/ (it also scans the gitignored data/core-src, Core's own broken links)
 # Optional, slow (~15 min): .venv-fv/bin/python scripts/air_z3.py all --bv

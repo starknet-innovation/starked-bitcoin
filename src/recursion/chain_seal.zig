@@ -421,6 +421,19 @@ pub const Vk = struct {
     }
 };
 
+/// A child's verifier configuration from its proof's request, accepted only when the proof is a pinned
+/// circuit's: its preprocessed root is one of `ids` and its PCS configuration is `fri` at `trace_log`.
+/// The column sizes in the request are bound by the preprocessed root (a commitment over columns of
+/// those sizes), so the configuration is the pinned circuit's.
+pub fn pinnedSharedOf(gpa: std.mem.Allocator, cp: *const leaf.CircuitProof, ids: []const BF.Id, fri: FriConfigV2, trace_log: u32) !multiverifier.SharedConfig {
+    const known = for (ids) |id| {
+        if (std.mem.eql(u32, &id.root, &cp.request.preprocessed_root)) break true;
+    } else false;
+    if (!known) return error.WrongCircuit;
+    if (!std.meta.eql(cp.request.pcs_config, PcsConfigV2.fromFriAndTraceSize(fri, trace_log))) return error.ConfigNotPinned;
+    return sharedOf(gpa, cp);
+}
+
 /// The seal's identity over children of the given configurations.
 pub fn setupVk(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const leaf.Tables, ms: []const u32, gen: bool, join_shared: *const multiverifier.SharedConfig, set_shared: *const multiverifier.SharedConfig, fri: FriConfigV2) !Vk {
     var topo = try topology(gpa, &tables.table, ms, gen, join_shared, set_shared);

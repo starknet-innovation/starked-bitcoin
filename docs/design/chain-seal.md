@@ -75,6 +75,10 @@ arithmetic of the statement (balance, links, finish, ranges) is in-circuit. The 
   configurations come from their proofs' requests (`sharedOf`): a child of another shape changes the
   seal's circuit, which the pinned seal VK rejects.
 - `chainproof verify-seal <vk> <file.sbchain> <out-dir> [--min-work …] [--unpinned] <epoch>...`.
+- `chainproof setup-seal-vk <out-dir> <chain-<to>.bin> <joinvk> <pass-dir>`: the seal VK remade from
+  public inputs (the heads' child counts, the join's and the set tree's configurations from their proofs'
+  requests, each accepted only under its pinned VK), no proof made; says whether it is the pinned one.
+  Mainnet: equals `vk/epoch/seal-935001-972500.vk` (8.9 s, 6.3 GB).
 - **The seal file** (`SBSEAL01`): the heads (as the chain file), the set VK the passes were proved
   under (accepted only when pinned), per set child its segment count, count bytes, final state and
   Merkle root, the seal proof.
@@ -121,7 +125,7 @@ All on standard axioms (`propext`, `Classical.choice`, `Quot.sound`), no `sorry`
 
 What the theorem does not cover: the header root and `T` (native, SEAL-T); `hash_serialized` (the
 verifier finishes the SHA-256 state whose digest `EndOk` names); that the pinned seal VK is
-`chainSeal ms gen` (SEAL-VK-SETUP); that Zig's `expected` is Lean's `sealMsg` (tested).
+`chainSeal ms gen` (remade by `setup-seal-vk`, not proven); that Zig's `expected` is Lean's `sealMsg` (tested).
 
 ## Next fold: the header root and `T`
 

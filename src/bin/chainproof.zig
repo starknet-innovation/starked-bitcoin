@@ -66,6 +66,7 @@
 //!   chainproof rebind-forest <vk> <in forestk-<to>.bin> <headers.bin> <file.sbchain> <out>
 //!       The same for a forest's root paths (an epoch proved under an older chain file).
 //!   chainproof setup-vks <out-dir> [--max-m M] [--test-strength] <dir>:<to>[:<from>:<prev-set.bin>]...
+//!   chainproof setup-seal-vk <out-dir> <chain-<to>.bin> <joinvk> <pass-dir>
 //!       Remakes the epoch layers' VKs (tree, root, join) from the forests and one block proof per
 //!       size key, proving nothing, and says which equal the pinned ones (vk/epoch/).
 //!
@@ -101,6 +102,7 @@ fn usage() noreturn {
         \\  chainproof rebind-forest <vk> <in forestk-<to>.bin> <headers.bin> <file.sbchain> <out>
         \\  chainproof set-pass-model <set.bin> [--per N]
         \\  chainproof setup-vks <out-dir> [--max-m M] [--test-strength] <dir>:<to>[:<from>:<prev-set.bin>]...
+        \\  chainproof setup-seal-vk <out-dir> <chain-<to>.bin> <joinvk> <pass-dir>
         \\  chainproof prove-epoch <headers.bin> <dir> <to> <file.sbchain> [--from <a> <prev-set.bin>] [--test-strength]
         \\  chainproof prove-chain <vk> <file.sbchain> <out-dir> [--max-m M] <dir>:<to>[:<from>:<prev-set.bin>][#<prev-hex|->,<fin-hex>]...
         \\  chainproof verify-chain <vk> <file.sbchain> <out-dir> [--min-work <hex> | --min-work 0] [--unpinned] [--set-proofs [--members <f.sbmember>... [--witness-script <hex>]]] <dir>:<to>[:<from>:<prev-set.bin>]...
@@ -333,6 +335,7 @@ pub fn main() !void {
         if (std.mem.eql(u8, cmd, "prove-seal")) return proveSeal(gpa, a, args[2], args[3], args[4], unpinned, specs.items);
         return verifySeal(gpa, a, args[2], args[3], args[4], min_work, unpinned, specs.items);
     }
+    if (std.mem.eql(u8, cmd, "setup-seal-vk") and args.len == 6) return setupSealVk(gpa, a, args[2], args[3], args[4], args[5]);
     if (std.mem.eql(u8, cmd, "prove-set") and args.len >= 5) {
         var weak = false;
         var logs: ?ST.Logs = null;
@@ -1905,6 +1908,36 @@ fn proveSeal(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8, 
     const bytes = try sf.encode(a);
     try S.writeFileAtomic(path, bytes);
     std.debug.print("SEALED blocks {d}..{d}: {s}, {d} bytes; the coin set after block {d} is {d} coins, {d} sat, Merkle root {x}\n", .{ proved.open.a, proved.open.b, path, bytes.len, to, proved.open.count, proved.open.amount, wordBytes(proved.open.mroot) });
+}
+
+/// `setup-seal-vk <out-dir> <chain-<to>.bin> <joinvk> <pass-dir>`: the seal VK remade from public inputs
+/// alone: the epochs' child counts and genesis flag from the chain file's heads, the join's and the set
+/// tree's verifier configurations from their proofs' requests (each accepted only when its preprocessed
+/// root and PCS configuration are the pinned VK's: `<joinvk>`, `<pass-dir>/setvk.bin`), and the seal
+/// program in this binary. No proof is made. Writes `<out>/seal.vk` and says whether it is the pinned one.
+fn setupSealVk(gpa: std.mem.Allocator, a: std.mem.Allocator, out: []const u8, chain_file: []const u8, joinvk: []const u8, pass_dir: []const u8) !void {
+    var timer = try std.time.Timer.start();
+    const tables = try L.Tables.init(gpa);
+    defer tables.deinit(gpa);
+    try std.fs.cwd().makePath(out);
+    const jvk = try EJ.Vk.decode(a, try readPinnedVk(a, .join, joinvk, false));
+    var file = try EJ.ChainFile.decode(gpa, a, try S.readFile(a, chain_file));
+    defer file.proof.deinit();
+    const n = file.heads.len;
+    const ms = try a.alloc(u32, n);
+    for (ms, file.heads) |*m, *h| m.* = @intCast(h.children.len);
+    const gen = file.heads[0].from == 0;
+    var jshared = try CS.pinnedSharedOf(gpa, &file.proof, &jvk.join, jvk.fri, jvk.join_log);
+    defer jshared.deinit(gpa);
+    const svk = try ST.Vk.decode(try readPinnedVk(a, .set, try std.fmt.allocPrint(a, "{s}/setvk.bin", .{pass_dir}), false));
+    var pass = try ST.decodePass(gpa, a, try S.readFile(a, try std.fmt.allocPrint(a, "{s}/pass.bin", .{pass_dir})));
+    defer pass.root.proof.deinit();
+    var sshared = try CS.pinnedSharedOf(gpa, &pass.root.proof, &.{ svk.leaf, svk.node }, svk.fri, svk.trace_log);
+    defer sshared.deinit(gpa);
+    std.debug.print("  children: the join (pinned {s}) and the set tree (pinned set VK), {d} epochs of {any} children{s} ({d:.1}s)\n", .{ joinvk, n, ms, if (gen) ", from genesis" else "", secs(timer.lap()) });
+    const seal_vk = try CS.setupVk(gpa, a, tables, ms, gen, &jshared, &sshared, BT.circuitFri());
+    const pinned = try writeVk(a, .seal, try std.fmt.allocPrint(a, "{s}/seal.vk", .{out}), try seal_vk.encode(a));
+    std.debug.print("seal VK remade: trace 2^{d} ({d:.1}s); {s}\n", .{ seal_vk.trace_log, secs(timer.lap()), if (pinned) "it equals the pinned one" else "it is NOT a pinned one" });
 }
 
 /// `verify-seal <vk> <file.sbchain> <out-dir> <epoch>...`: the header chain proof, then `<out>/seal-<to>.bin`
