@@ -6,6 +6,7 @@ import StarkedAir.Circuit.BlockNodeK
 import StarkedAir.Circuit.EpochRoot
 import StarkedAir.Circuit.EpochJoin
 import StarkedAir.Circuit.ChainSeal
+import StarkedAir.Circuit.ChainSealT
 import StarkedAir.Circuit.Balance
 import StarkedAir.Circuit.Statement
 import StarkedAir.Circuit.LeafHash
@@ -77,6 +78,7 @@ def main (args : List String) : IO Unit := do
   | ["epoch_join", "base_prev"] => IO.println (StarkedAir.Circuit.EpochJoin.epochJoinJson (.base true))
   | ["epoch_join", "base_genesis"] => IO.println (StarkedAir.Circuit.EpochJoin.epochJoinJson (.base false))
   | ["epoch_join", "step"] => IO.println (StarkedAir.Circuit.EpochJoin.epochJoinJson .step)
+  | "chain_seal_t" :: d :: ms :: rest => IO.println (StarkedAir.Circuit.ChainSeal.chainSealTJson ((ms.splitOn ",").map String.toNat!) (rest == ["genesis"]) d.toNat!)
   | "chain_seal" :: ms :: rest => IO.println (StarkedAir.Circuit.ChainSeal.chainSealJson
       ((ms.splitOn ",").map String.toNat!) (rest == ["genesis"]))
   | ["epoch_root", m, "prev"] => IO.println (StarkedAir.Circuit.EpochRoot.epochRootJson m.toNat! true)

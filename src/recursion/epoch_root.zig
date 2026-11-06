@@ -435,7 +435,9 @@ pub const Opened = struct { key: Key, rest: [8]u32, out: [8]u32, verified: Verif
 /// `from..to`, their identities (the tree VK, the lift's circuit hash `lift`, the blocks' size keys)
 /// into the root's key, each block-hash root against the chain's `T`; returns the opening: the root
 /// proof (checked by the caller: alone, or through a join) must output `out`.
-pub fn openHead(a: std.mem.Allocator, tvk: *const BT.Vk, lift: [8]u32, f: *const Head, ep: Epoch, n_headers: usize, t: HT.Words) !Opened {
+/// With `t` null the block-hash roots' inclusion paths are not checked here: the chain seal with the
+/// header chain in-circuit (`chain_seal`, D-052) checks them against `T` in its circuit.
+pub fn openHead(a: std.mem.Allocator, tvk: *const BT.Vk, lift: [8]u32, f: *const Head, ep: Epoch, n_headers: usize, t: ?HT.Words) !Opened {
     if (f.from != ep.from or f.to != ep.to or f.to < f.from) return error.WrongEpoch;
     if ((ep.prev != null) != (ep.from != 0)) return error.PrevSetRequired;
     if (f.to >= n_headers) return error.BeyondChain;
@@ -459,11 +461,13 @@ pub fn openHead(a: std.mem.Allocator, tvk: *const BT.Vk, lift: [8]u32, f: *const
         var w: HT.Words = undefined;
         for (&w, 0..) |*q, i| q.* = c.hash_root[2 * i].toU32() | (c.hash_root[2 * i + 1].toU32() << 16);
         for (c.hash_root) |q| if (q.toU32() >= 1 << 16) return error.BadLimb;
-        const sides = try HT.inclusionSides(a, x, n_headers);
-        if (sides.len != k + c.path.len) return error.BadPath;
-        for (sides[0..k]) |sd| if (sd) return error.BadPath;
-        for (sides[k..], c.path) |sd, st| if (sd != st.left) return error.BadPath;
-        if (!HT.verifyInclusion(w, c.path, t)) return error.HashesNotTheChain;
+        if (t) |tw| {
+            const sides = try HT.inclusionSides(a, x, n_headers);
+            if (sides.len != k + c.path.len) return error.BadPath;
+            for (sides[0..k]) |sd| if (sd) return error.BadPath;
+            for (sides[k..], c.path) |sd, st| if (sd != st.left) return error.BadPath;
+            if (!HT.verifyInclusion(w, c.path, tw)) return error.HashesNotTheChain;
+        } else if (x + (@as(usize, 1) << @intCast(k)) > n_headers) return error.BeyondChain;
         at += @as(usize, 1) << @intCast(k);
     }
     const key = wk.key(hashes, keys);

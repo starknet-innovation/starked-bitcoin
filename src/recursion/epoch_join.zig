@@ -485,7 +485,7 @@ pub fn verifyChain(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const 
 /// hash. `verifyChain` checks the proof against it; the seal opens it in-circuit.
 pub const Replayed = struct { opens: []RootOpen, verified: []ER.Verified, join: JoinOpen, variant: Variant, jh: [8]u32 };
 
-pub fn replay(a: std.mem.Allocator, vk: *const Vk, heads: []const ER.Head, epochs: []const EpochIn, n_headers: usize, t: HT.Words) !Replayed {
+pub fn replay(a: std.mem.Allocator, vk: *const Vk, heads: []const ER.Head, epochs: []const EpochIn, n_headers: usize, t: ?HT.Words) !Replayed {
     if (heads.len != epochs.len or epochs.len < 2) return error.WrongEpochs;
     if (!std.meta.eql(vk.fri, BT.circuitFri())) return error.ConfigNotPinned;
     const out = try a.alloc(ER.Verified, epochs.len);

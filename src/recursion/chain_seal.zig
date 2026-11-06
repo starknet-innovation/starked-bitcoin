@@ -26,6 +26,7 @@ const SS = @import("../block/set_seg.zig");
 const BF = @import("block_forest.zig");
 const BT = @import("block_tree.zig");
 const store = @import("store.zig");
+const node = @import("node.zig");
 const wk = @import("block_node_k.zig");
 const coin = @import("../block/coin.zig");
 const HT = @import("../btc/header_tree.zig");
@@ -79,6 +80,125 @@ fn eState(ms: []const u32, gen: bool, j: usize) usize {
     return eRoot(ms, gen, ms.len) + NST * j;
 }
 
+// ---------------------------------------------------------------------------------------------
+// The header chain in-circuit (SEAL-T, D-052; `ChainSealT.lean`)
+
+/// The exported SEAL-T parameterizations (`Export.lean chain_seal_t <D> <m,m,…> [genesis]`).
+pub fn programJsonT(ms: []const u32, gen: bool, d: usize) ![]const u8 {
+    if (d == 32 and gen and std.mem.eql(u32, ms, &.{ 1, 2, 3 })) return @embedFile("air:chain_seal_t32_1_2_3_genesis");
+    if (d == 32 and !gen and std.mem.eql(u32, ms, &.{ 16, 16 })) return @embedFile("air:chain_seal_t32_16_16");
+    return error.SealNotExported;
+}
+
+/// The header root child's external values (public inputs, key, preprocessed root).
+pub const HEXT = leaf.N_PUB + 16;
+/// Per path: `d` siblings (8 words), `d` side bits, the length.
+pub fn pathExt(d: usize) usize {
+    return 9 * d + 1;
+}
+fn eHdr(ms: []const u32, gen: bool) usize {
+    return eState(ms, gen, nSets(ms.len, gen));
+}
+fn ePath(ms: []const u32, gen: bool, d: usize, p: usize) usize {
+    return eHdr(ms, gen) + HEXT + pathExt(d) * p;
+}
+/// The paths: genesis's, then one per epoch child.
+pub fn nPaths(ms: []const u32) usize {
+    var k: usize = 1;
+    for (ms) |m| k += m;
+    return k;
+}
+
+/// A path's public part: its side bits in two words of 30, its length.
+pub const PathPub = struct { lo: u32, hi: u32, len: u32 };
+
+/// The header chain's facts in the seal's output and file.
+pub const HdrFacts = struct { tip: [8]u32, height: u32, work: [5]u32 };
+
+/// The header chain's part of the seal's output: the tip, its height, the chainwork (5 words), the paths.
+pub const TOpen = struct { tip: [8]u32, height: u32, work: [5]u32, paths: []const PathPub };
+
+/// What the native view needs for the header part: the paths' steps `d`, the header root's circuit hash
+/// and key, the facts, the header count, and each epoch child's position `(x, k)` in chain order.
+pub const TCheck = struct { d: usize, hhash: [8]u32, hkey: Key, tip: [8]u32, height: u32, work: [5]u32, n_headers: usize, pos: []const [2]u32 };
+
+/// A path's private part: the siblings and sides (as many as its length).
+pub const PathIn = struct { sibs: []const [8]u32, sides: []const bool };
+
+/// The header part's circuit inputs.
+pub fn TIn(comptime V: type) type {
+    return struct {
+        d: usize,
+        proof: *const stark_proof.Proof(V),
+        shared: *const multiverifier.SharedConfig,
+        root: [8]u32,
+        pubs: [leaf.N_PUB]M31,
+        key: Key,
+        paths: []const PathIn,
+    };
+}
+
+fn limbWord(pubs: []const M31, i: usize) u32 {
+    return pubs[i].toU32() | (pubs[i + 1].toU32() << 16);
+}
+
+/// The tip, its height and the chainwork words from the header root's public inputs.
+pub fn headerFacts(pubs: []const M31) struct { tip: [8]u32, height: u32, work: [5]u32 } {
+    var tip: [8]u32 = undefined;
+    for (&tip, 0..) |*w, k| w.* = limbWord(pubs, 16 + 2 * k);
+    var work: [5]u32 = undefined;
+    for (&work, 0..) |*w, k| w.* = limbWord(pubs, 98 + 2 * k);
+    return .{ .tip = tip, .height = limbWord(pubs, 38), .work = work };
+}
+
+pub fn workOf(w: [5]u32) u256 {
+    var x: u256 = 0;
+    for (w, 0..) |v, k| x |= @as(u256, v) << @intCast(32 * k);
+    return x;
+}
+
+fn packSides(sides: []const bool, d: usize) !PathPub {
+    if (sides.len > d or d > 60) return error.PathTooLong;
+    var pp: PathPub = .{ .lo = 0, .hi = 0, .len = @intCast(sides.len) };
+    for (sides, 0..) |b, i| if (b) {
+        if (i < 30) pp.lo |= @as(u32, 1) << @intCast(i) else pp.hi |= @as(u32, 1) << @intCast(i - 30);
+    };
+    return pp;
+}
+
+/// **The paths' public part, from positions alone** (arithmetic, no hashing): genesis's (leaf 0, every
+/// sibling on the right, `leftmostDepth(n)` steps), then each child's sides above its own subtree.
+pub fn pathPubs(a: std.mem.Allocator, d: usize, n: usize, pos: []const [2]u32) ![]PathPub {
+    const out = try a.alloc(PathPub, 1 + pos.len);
+    out[0] = .{ .lo = 0, .hi = 0, .len = @intCast(HT.leftmostDepth(n)) };
+    if (out[0].len > d) return error.PathTooLong;
+    for (pos, out[1..]) |xk, *pp| {
+        const sides = try HT.inclusionSides(a, xk[0], n);
+        if (sides.len < xk[1]) return error.BadPath;
+        for (sides[0..xk[1]]) |sd| if (sd) return error.BadPath;
+        pp.* = try packSides(sides[xk[1]..], d);
+    }
+    return out;
+}
+
+fn putT(comptime V: type, ext: []V, ms: []const u32, gen: bool, t: TIn(V)) !void {
+    if (V != QM31) return;
+    const eh = eHdr(ms, gen);
+    for (t.pubs, 0..) |x, k| ext[eh + k] = QM31.fromBase(x);
+    putWords(V, ext, eh + leaf.N_PUB, t.key);
+    putWords(V, ext, eh + leaf.N_PUB + 8, t.root);
+    if (t.paths.len != nPaths(ms)) return error.WrongPaths;
+    for (t.paths, 0..) |pa, p| {
+        const e = ePath(ms, gen, t.d, p);
+        if (pa.sibs.len != pa.sides.len or pa.sibs.len > t.d) return error.PathTooLong;
+        for (0..t.d) |st| {
+            putWords(V, ext, e + 8 * st, if (st < pa.sibs.len) pa.sibs[st] else @splat(0));
+            putM31(V, ext, e + 8 * t.d + st, @intFromBool(st < pa.sides.len and pa.sides[st]));
+        }
+        putM31(V, ext, e + 9 * t.d, @intCast(pa.sibs.len));
+    }
+}
+
 /// An epoch as the seal opens it: the root's opening (its key, range, set digests, `rest`) and
 /// `rest`'s preimage (the summed partial sum, input count, challenge, the children's block-hash roots).
 pub const EpochIn = struct { open: EJ.RootOpen, pubs: ER.Public };
@@ -101,6 +221,8 @@ pub const Open = struct {
     mroot: [8]u32,
     sha_end: [8]u32,
     sha_start: [8]u32,
+    /// The header chain's part (SEAL-T, D-052): null for the seal without it.
+    t: ?TOpen = null,
 };
 
 fn putWord(h: *std.crypto.hash.blake2.Blake2s256, w: u32) void {
@@ -124,6 +246,16 @@ pub fn sealOut(o: *const Open) [8]u32 {
     for (o.mroot) |w| putWord(&h, w);
     for (o.sha_end) |w| putWord(&h, w);
     for (o.sha_start) |w| putWord(&h, w);
+    if (o.t) |t| {
+        for (t.tip) |w| putWord(&h, w);
+        putWord(&h, t.height);
+        for (t.work) |w| putWord(&h, w);
+        for (t.paths) |pp| {
+            putWord(&h, pp.lo);
+            putWord(&h, pp.hi);
+            putWord(&h, pp.len);
+        }
+    }
     var d: [32]u8 = undefined;
     h.final(&d);
     return ER.digestWords(d);
@@ -160,6 +292,11 @@ fn setFacts(s: *const SetIn) !SetFacts {
 /// `join` is the chain's replayed last join (its key, start, end, range, `acc`), `jh` its circuit hash;
 /// `shashes` the set roots' circuit hashes.
 pub fn expected(join: *const EJ.JoinOpen, jh: [8]u32, epochs: []const EpochIn, sets: []const SetIn, shashes: []const [8]u32) !Open {
+    return expectedT(undefined, join, jh, epochs, sets, shashes, null);
+}
+
+/// `expected`, with the header chain's part when `t` is given (SEAL-T).
+pub fn expectedT(a: std.mem.Allocator, join: *const EJ.JoinOpen, jh: [8]u32, epochs: []const EpochIn, sets: []const SetIn, shashes: []const [8]u32, t: ?TCheck) !Open {
     const n = epochs.len;
     if (n < 2) return error.NeedTwoEpochs;
     const gen = epochs[0].open.ep.prev == null;
@@ -203,18 +340,29 @@ pub fn expected(join: *const EJ.JoinOpen, jh: [8]u32, epochs: []const EpochIn, s
         if (!sum.eql(E.sum)) return error.EpochUnbalanced;
         last = E;
     }
-    // The key over every child.
-    var hashes: [65][8]u32 = undefined;
-    var keys: [65]Key = undefined;
-    if (sets.len + 1 > hashes.len) return error.WrongSets;
+    // The key over every child (the header chain root last, with SEAL-T).
+    var hashes: [66][8]u32 = undefined;
+    var keys: [66]Key = undefined;
+    if (sets.len + 2 > hashes.len) return error.WrongSets;
     hashes[0] = jh;
     keys[0] = join.key;
     for (sets, shashes, 0..) |s, h, j| {
         hashes[1 + j] = h;
         keys[1 + j] = s.key;
     }
+    var nk = sets.len + 1;
+    var topen: ?TOpen = null;
+    if (t) |tc| {
+        hashes[nk] = tc.hhash;
+        keys[nk] = tc.hkey;
+        nk += 1;
+        if (tc.height + 1 != tc.n_headers) return error.HeaderCountMismatch;
+        if (epochs[n - 1].open.ep.to >= tc.n_headers) return error.BeyondChain;
+        topen = .{ .tip = tc.tip, .height = tc.height, .work = tc.work, .paths = try pathPubs(a, tc.d, tc.n_headers, tc.pos) };
+    }
     return .{
-        .key = wk.key(hashes[0 .. sets.len + 1], keys[0 .. sets.len + 1]),
+        .t = topen,
+        .key = wk.key(hashes[0..nk], keys[0..nk]),
         .a = join.a,
         .b = join.b,
         .start = start,
@@ -283,14 +431,14 @@ fn putState(comptime V: type, ext: []V, at: usize, st: SS.State, count: [4]u8) v
 
 /// The seal circuit (finalized, unpadded) over the join child, the set children (proof values,
 /// preprocessed roots, configurations, openings) and the epochs' openings.
-pub fn buildCircuit(comptime V: type, gpa: std.mem.Allocator, table: *const circuit.air_eval.component_table.Table, ms: []const u32, gen: bool, join: EJ.ChildIn(V), set_proofs: []const *const stark_proof.Proof(V), set_shareds: []const *const multiverifier.SharedConfig, set_roots: []const [8]u32, sets: []const SetIn, epochs: []const EpochIn) !Context(V) {
+pub fn buildCircuit(comptime V: type, gpa: std.mem.Allocator, table: *const circuit.air_eval.component_table.Table, ms: []const u32, gen: bool, join: EJ.ChildIn(V), set_proofs: []const *const stark_proof.Proof(V), set_shareds: []const *const multiverifier.SharedConfig, set_roots: []const [8]u32, sets: []const SetIn, epochs: []const EpochIn, t: ?TIn(V)) !Context(V) {
     const n = ms.len;
     const S = nSets(n, gen);
     if (set_proofs.len != S or set_shareds.len != S or set_roots.len != S) return error.WrongSets;
     var ctx = try Context(V).init(gpa, component_list.N_RESERVED);
     errdefer ctx.deinit();
-    const prog = try glue.parse(ctx.scratch(), try programJson(ms, gen));
-    const n_ext = eState(ms, gen, S);
+    const prog = try glue.parse(ctx.scratch(), if (t) |x| try programJsonT(ms, gen, x.d) else try programJson(ms, gen));
+    const n_ext = if (t) |x| ePath(ms, gen, x.d, nPaths(ms)) else eState(ms, gen, S);
     const ext = try ctx.scratch().alloc(V, n_ext);
     if (V != QM31) @memset(ext, .{});
     // The join's opening (as `EJ.buildCircuit`'s join child).
@@ -330,20 +478,26 @@ pub fn buildCircuit(comptime V: type, gpa: std.mem.Allocator, table: *const circ
     };
     // The sets' final states and count bytes.
     for (0..S) |k| putState(V, ext, eState(ms, gen, k), sets[k].final, sets[k].count);
-    const proofs = try ctx.scratch().alloc(*const stark_proof.Proof(V), S + 1);
-    const shareds = try ctx.scratch().alloc(*const multiverifier.SharedConfig, S + 1);
+    const nh: usize = if (t != null) 1 else 0;
+    const proofs = try ctx.scratch().alloc(*const stark_proof.Proof(V), S + 1 + nh);
+    const shareds = try ctx.scratch().alloc(*const multiverifier.SharedConfig, S + 1 + nh);
     proofs[0] = join.proof;
     shareds[0] = join.shared;
     for (set_proofs, set_shareds, 1..) |p, sh, k| {
         proofs[k] = p;
         shareds[k] = sh;
     }
+    if (t) |x| {
+        proofs[S + 1] = x.proof;
+        shareds[S + 1] = x.shared;
+        try putT(V, ext, ms, gen, x);
+    }
     try glue.runOutputs(V, &ctx, &prog, ext, EJ.Hook(V){ .ctx = &ctx, .table = table, .proofs = proofs, .shareds = shareds });
     return ctx;
 }
 
 /// The seal's topology (no values) over children of the given configurations: its identity.
-pub fn topology(gpa: std.mem.Allocator, table: *const circuit.air_eval.component_table.Table, ms: []const u32, gen: bool, join_shared: *const multiverifier.SharedConfig, set_shared: *const multiverifier.SharedConfig) !Context(NoValue) {
+pub fn topology(gpa: std.mem.Allocator, table: *const circuit.air_eval.component_table.Table, ms: []const u32, gen: bool, join_shared: *const multiverifier.SharedConfig, set_shared: *const multiverifier.SharedConfig, hdr_shared: ?*const multiverifier.SharedConfig, d: usize) !Context(NoValue) {
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
     const a = arena.allocator();
@@ -370,11 +524,14 @@ pub fn topology(gpa: std.mem.Allocator, table: *const circuit.air_eval.component
             .pubs = .{ .s = @splat(M31.zero()), .nin = M31.zero(), .challenge = @splat(M31.zero()), .hash_roots = roots_i },
         };
     }
-    return buildCircuit(NoValue, gpa, table, ms, gen, .{ .proof = &ej, .preprocessed_root = zero, .shared = join_shared, .open = jo }, proofs, shareds, roots, sets, epochs);
+    const tt: ?TIn(NoValue) = if (hdr_shared) |hs| .{ .d = d, .proof = &(try stark_proof.emptyProof(a, hs.proof_config)), .shared = hs, .root = zero, .pubs = @splat(M31.zero()), .key = zero, .paths = &.{} } else null;
+    return buildCircuit(NoValue, gpa, table, ms, gen, .{ .proof = &ej, .preprocessed_root = zero, .shared = join_shared, .open = jo }, proofs, shareds, roots, sets, epochs, tt);
 }
 
 pub const VK_MAGIC = "SBSEALVK";
 pub const FILE_MAGIC = "SBSEAL01";
+pub const VK_MAGIC_T = "SBSEALVT";
+pub const FILE_MAGIC_T = "SBSEAL02";
 
 /// **The seal's verifying key**: the configuration, the program's parameters, the seal's identity
 /// at its natural size (nothing verifies a seal in-circuit).
@@ -384,11 +541,15 @@ pub const Vk = struct {
     gen: bool,
     trace_log: u32,
     id: BF.Id,
+    /// The paths' steps with the header chain in-circuit (SEAL-T); 0 without (the bytes are then the
+    /// D-051 seal VK's).
+    d: u32 = 0,
 
     pub fn encode(self: *const Vk, a: std.mem.Allocator) ![]u8 {
         var e: store.Enc = .{ .a = a };
-        try e.buf.appendSlice(a, VK_MAGIC);
+        try e.buf.appendSlice(a, if (self.d != 0) VK_MAGIC_T else VK_MAGIC);
         try e.int(u32, store.VERSION);
+        if (self.d != 0) try e.int(u32, self.d);
         try e.fri(self.fri);
         try e.int(u32, @intCast(self.ms.len));
         for (self.ms) |m| try e.int(u32, m);
@@ -401,8 +562,13 @@ pub const Vk = struct {
 
     pub fn decode(a: std.mem.Allocator, bytes: []const u8) !Vk {
         var d: store.Dec = .{ .bytes = try store.unseal(bytes) };
-        try d.magic(VK_MAGIC);
         var vk: Vk = undefined;
+        vk.d = 0;
+        if (bytes.len >= 8 and std.mem.eql(u8, bytes[0..8], VK_MAGIC_T)) {
+            try d.magic(VK_MAGIC_T);
+            vk.d = try d.int(u32);
+            if (vk.d == 0 or vk.d > 60) return error.BadVk;
+        } else try d.magic(VK_MAGIC);
         vk.fri = try d.fri();
         const n = try d.int(u32);
         if (n < 2 or n > 64) return error.BadVk;
@@ -421,6 +587,15 @@ pub const Vk = struct {
     }
 };
 
+/// A circuit's verifier configuration from a pinned identity's preprocessed columns and PCS config (the
+/// header chain's node, `node.Identity`).
+pub fn sharedOfId(gpa: std.mem.Allocator, id: node.Identity) !multiverifier.SharedConfig {
+    var layout: preprocessed.ColumnLayout = undefined;
+    if (id.columns.len != layout.entries.len) return error.BadLayout;
+    for (&layout.entries, id.columns) |*e, c| e.* = .{ .id = c.id, .log_size = c.log_size };
+    return multiverifier.sharedConfig(gpa, layout, id.pcs);
+}
+
 /// A child's verifier configuration from its proof's request, accepted only when the proof is a pinned
 /// circuit's: its preprocessed root is one of `ids` and its PCS configuration is `fri` at `trace_log`.
 /// The column sizes in the request are bound by the preprocessed root (a commitment over columns of
@@ -436,11 +611,16 @@ pub fn pinnedSharedOf(gpa: std.mem.Allocator, cp: *const leaf.CircuitProof, ids:
 
 /// The seal's identity over children of the given configurations.
 pub fn setupVk(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const leaf.Tables, ms: []const u32, gen: bool, join_shared: *const multiverifier.SharedConfig, set_shared: *const multiverifier.SharedConfig, fri: FriConfigV2) !Vk {
-    var topo = try topology(gpa, &tables.table, ms, gen, join_shared, set_shared);
+    return setupVkT(gpa, a, tables, ms, gen, join_shared, set_shared, null, 0, fri);
+}
+
+/// `setupVk`, with the header chain root child and paths of `d` steps when `hdr_shared` is given (SEAL-T).
+pub fn setupVkT(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const leaf.Tables, ms: []const u32, gen: bool, join_shared: *const multiverifier.SharedConfig, set_shared: *const multiverifier.SharedConfig, hdr_shared: ?*const multiverifier.SharedConfig, d: usize, fri: FriConfigV2) !Vk {
+    var topo = try topology(gpa, &tables.table, ms, gen, join_shared, set_shared, hdr_shared, d);
     defer topo.deinit();
     const natural = finalize.computePaddedSizes(.fromBuilder(&topo.circuit));
     const id = try BF.identityOf(gpa, NoValue, &topo, natural, fri.log_blowup_factor);
-    return .{ .fri = fri, .ms = try a.dupe(u32, ms), .gen = gen, .trace_log = id.trace_log, .id = id.id };
+    return .{ .fri = fri, .ms = try a.dupe(u32, ms), .gen = gen, .trace_log = id.trace_log, .id = id.id, .d = @intCast(if (hdr_shared != null) d else 0) };
 }
 
 /// A set child's public part in the seal file: its segment count (its key follows), the file's count
@@ -454,11 +634,18 @@ pub const File = struct {
     setvk: []const u8,
     sets: []SetPublic,
     proof: leaf.CircuitProof,
+    /// The header chain's facts (SEAL-T): the tip, its height, the chainwork.
+    hdr: ?HdrFacts = null,
 
     pub fn encode(self: *const File, a: std.mem.Allocator) ![]u8 {
         var e: store.Enc = .{ .a = a };
-        try e.buf.appendSlice(a, FILE_MAGIC);
+        try e.buf.appendSlice(a, if (self.hdr != null) FILE_MAGIC_T else FILE_MAGIC);
         try e.int(u32, store.VERSION);
+        if (self.hdr) |h| {
+            try e.words(&h.tip);
+            try e.int(u32, h.height);
+            try e.words(&h.work);
+        }
         try e.int(u32, @intCast(self.heads.len));
         for (self.heads) |*h| try h.encode(&e);
         try e.blob(self.setvk);
@@ -475,7 +662,11 @@ pub const File = struct {
 
     pub fn decode(gpa: std.mem.Allocator, a: std.mem.Allocator, bytes: []const u8) !File {
         var d: store.Dec = .{ .bytes = try store.unseal(bytes) };
-        try d.magic(FILE_MAGIC);
+        var hdr: ?HdrFacts = null;
+        if (bytes.len >= 8 and std.mem.eql(u8, bytes[0..8], FILE_MAGIC_T)) {
+            try d.magic(FILE_MAGIC_T);
+            hdr = .{ .tip = try d.words(8), .height = try d.int(u32), .work = try d.words(5) };
+        } else try d.magic(FILE_MAGIC);
         const n = try d.int(u32);
         if (n < 2 or n > 64) return error.BadFile;
         const heads = try a.alloc(ER.Head, n);
@@ -493,7 +684,7 @@ pub const File = struct {
         var none: [0]M31 = .{};
         const c = try store.decodeCircuit(gpa, a, &d, &none);
         if (d.pos != d.bytes.len) return error.TrailingBytes;
-        return .{ .heads = heads, .setvk = setvk, .sets = sets, .proof = c.proof };
+        return .{ .heads = heads, .setvk = setvk, .sets = sets, .proof = c.proof, .hdr = hdr };
     }
 };
 
@@ -519,7 +710,11 @@ pub const Proved = struct { open: Open, n_vars: usize, trace_log: u32, proof: le
 /// Builds the seal over the chain's last join (`join`, its proof `jp`), the set roots (`children`,
 /// in set-child order) and the epochs (in chain order), checks it is satisfied with the native output,
 /// and proves it at its natural size (CPU).
-pub fn prove(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const leaf.Tables, ms: []const u32, join: *const EJ.JoinOpen, jp: *const leaf.CircuitProof, children: []const SetChild, epochs: []const EpochIn, fri: FriConfigV2) !Proved {
+/// The header part for `prove` (SEAL-T): the header chain's root proof, its public inputs and key, each
+/// epoch child's position, the paths (genesis's, then the children's).
+pub const TProve = struct { d: usize, proof: *const leaf.CircuitProof, pubs: [leaf.N_PUB]M31, key: Key, pos: []const [2]u32, paths: []const PathIn };
+
+pub fn prove(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const leaf.Tables, ms: []const u32, join: *const EJ.JoinOpen, jp: *const leaf.CircuitProof, children: []const SetChild, epochs: []const EpochIn, fri: FriConfigV2, t: ?TProve) !Proved {
     const gen = epochs[0].open.ep.prev == null;
     const S = nSets(ms.len, gen);
     if (children.len != S) return error.WrongSets;
@@ -538,8 +733,41 @@ pub fn prove(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const leaf.T
         sets[k] = c.in;
         hashes[k] = c.in.proof.circuit_hash;
     }
-    const want = try expected(join, jp.circuit_hash, epochs, sets, hashes);
-    var ctx = try buildCircuit(QM31, gpa, &tables.table, ms, gen, jchild, proofs, shareds, roots, sets, epochs);
+    var tcheck: ?TCheck = null;
+    var tin: ?TIn(QM31) = null;
+    var hshared: multiverifier.SharedConfig = undefined;
+    defer if (t != null) hshared.deinit(gpa);
+    if (t) |tp| {
+        if (!try node.genesisChecksOk(a, &tp.pubs)) return error.NotFromGenesis;
+        const facts = headerFacts(&tp.pubs);
+        const n_headers = node.headerCount(tp.pubs);
+        // The paths, natively: each leaf (genesis's hash, each child's block-hash root) reaches `T`.
+        const tw = node.treeWords(tp.pubs);
+        if (tp.paths.len != nPaths(ms) or tp.pos.len + 1 != tp.paths.len) return error.WrongPaths;
+        var leaves = try a.alloc([8]u32, tp.paths.len);
+        leaves[0] = store.GENESIS_HASH;
+        var p: usize = 1;
+        for (epochs) |e| for (e.pubs.hash_roots) |r| {
+            for (&leaves[p], 0..) |*w, i| w.* = r[2 * i].toU32() | (r[2 * i + 1].toU32() << 16);
+            p += 1;
+        };
+        for (tp.paths, leaves) |pa, lf| {
+            const steps = try a.alloc(HT.Step, pa.sibs.len);
+            for (steps, pa.sibs, pa.sides) |*st, sb, sd| st.* = .{ .sibling = sb, .left = sd };
+            if (!HT.verifyInclusion(lf, steps, tw)) return error.PathNotToT;
+        }
+        tcheck = .{ .d = tp.d, .hhash = tp.proof.circuit_hash, .hkey = tp.key, .tip = facts.tip, .height = facts.height, .work = facts.work, .n_headers = n_headers, .pos = tp.pos };
+        hshared = try sharedOf(gpa, tp.proof);
+        const hvalues = try a.create(stark_proof.Proof(QM31));
+        hvalues.* = try circuit_cpu.verifier_proof.circuitVerifierValues(a, &tp.proof.prepared.proof, tp.proof.prepared.config);
+        tin = .{ .d = tp.d, .proof = hvalues, .shared = &hshared, .root = tp.proof.request.preprocessed_root, .pubs = tp.pubs, .key = tp.key, .paths = tp.paths };
+    }
+    const want = try expectedT(a, join, jp.circuit_hash, epochs, sets, hashes, tcheck);
+    if (t) |tp| if (want.t) |wt| for (wt.paths, tp.paths) |pp, pa| {
+        // The sides the prover's paths take are the ones the verifier derives from the positions.
+        if (!std.meta.eql(pp, try packSides(pa.sides, tp.d))) return error.PathSidesNotTheChain;
+    };
+    var ctx = try buildCircuit(QM31, gpa, &tables.table, ms, gen, jchild, proofs, shareds, roots, sets, epochs, tin);
     defer ctx.deinit();
     if (!try ctx.isCircuitValid()) return error.CircuitUnsatisfied;
     const out = wk.outputDigest(&ctx);
@@ -562,7 +790,12 @@ pub const Verified = struct { open: Open, hash: [32]u8, start_hash: ?[32]u8 };
 /// (`expected`: every check the circuit makes, on the public values), then the one proof against the
 /// pinned seal identity with that output digest. Returns the output and Core's `hash_serialized` of
 /// the end set (and of the start set, for the anchor).
-pub fn verify(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const leaf.Tables, vk: *const Vk, jvk: *const EJ.Vk, svk: *const ST.Vk, f: *const File, epochs: []const EJ.EpochIn, n_headers: usize, t: HT.Words) !Verified {
+/// What the verifier brings for the header part (SEAL-T): the header chain root's circuit hash and key
+/// (from the chain's plan and the pinned header VK) and the header count the plan gives.
+pub const TVerify = struct { hhash: [8]u32, hkey: Key };
+
+pub fn verify(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const leaf.Tables, vk: *const Vk, jvk: *const EJ.Vk, svk: *const ST.Vk, f: *const File, epochs: []const EJ.EpochIn, n_headers: usize, t: ?HT.Words, tv: ?TVerify) !Verified {
+    if ((vk.d != 0) != (f.hdr != null) or (vk.d != 0) != (tv != null) or (vk.d != 0) == (t != null)) return error.WrongSealKind;
     if (f.heads.len != epochs.len or epochs.len != vk.ms.len) return error.WrongEpochs;
     // Each layer under its production configuration: the seal and the join (`BT.circuitFri`), the set
     // tree (`BF.circuitFri`, fold 1); the set roots verify in-circuit under their own.
@@ -589,7 +822,14 @@ pub fn verify(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const leaf.
         s.* = .{ .proof = undefined, .key = ex.key, .sum = sum, .count = p.count, .final = p.final };
         hh.* = ex.hash;
     }
-    const want = try expected(&r.join, r.jh, eps, sets, hashes);
+    var tcheck: ?TCheck = null;
+    if (tv) |x| {
+        const h = f.hdr.?;
+        var pos: std.ArrayList([2]u32) = .empty;
+        for (f.heads) |*hd| for (hd.children) |c| try pos.append(a, .{ c.x, c.k });
+        tcheck = .{ .d = vk.d, .hhash = x.hhash, .hkey = x.hkey, .tip = h.tip, .height = h.height, .work = h.work, .n_headers = n_headers, .pos = pos.items };
+    }
+    const want = try expectedT(a, &r.join, r.jh, eps, sets, hashes, tcheck);
     const p = &f.proof;
     if (!std.mem.eql(u32, &p.request.preprocessed_root, &vk.id.root)) return error.WrongCircuit;
     if (!std.mem.eql(u32, &p.circuit_hash, &vk.id.hash)) return error.WrongCircuit;
@@ -611,5 +851,25 @@ test "seal programs parse: one hook per child, eight results" {
         };
         try std.testing.expectEqual(nSets(c.ms.len, c.gen) + 1, hooks);
         try std.testing.expectEqual(@as(usize, 8), prog.results.len);
+        // SEAL-T (D-052): one more hook, the header chain root.
+        const pt = try glue.parse(arena.allocator(), try programJsonT(c.ms, c.gen, 32));
+        var ht: usize = 0;
+        for (pt.ops) |op| if (op == .hook) {
+            ht += 1;
+        };
+        try std.testing.expectEqual(nSets(c.ms.len, c.gen) + 2, ht);
     }
+}
+
+test "SEAL-T paths' public part: genesis leftmost, mainnet's children within 32 steps" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const n: usize = 972503;
+    var pos: [2][2]u32 = .{ .{ 935001, 0 }, .{ 945001, 0 } };
+    pos[0][1] = 0;
+    const pp = try pathPubs(a, 32, n, &pos);
+    try std.testing.expectEqual(@as(u32, @intCast(HT.leftmostDepth(n))), pp[0].len);
+    try std.testing.expectEqual(@as(u32, 0), pp[0].lo);
+    for (pp[1..], pos) |x, xk| try std.testing.expectEqual(@as(u32, @intCast((try HT.inclusionSides(a, xk[0], n)).len)), x.len);
 }

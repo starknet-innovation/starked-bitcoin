@@ -524,3 +524,31 @@ every proven layer (and its $) as is; the seal verifies them.
 Rejected: changing the join's program (every join and root VK would move, and the roots at 2^25 would
 be re-proved); a SHA-256 gadget for the seal (weeks, for two compressions over public bytes).
 
+### D-052 — SEAL-T: the header chain root and the block-hash paths inside the seal
+Date: 2026-11-06 · By: agent (owner: "push and go for it, don't stop until you're done or you need me", SEAL-T among the items) · Status: proposed
+Decision (docs/design/chain-seal.md § The header chain in-circuit):
+- **A new program, `chainSealT ms gen D`** (`Circuit/ChainSealT.lean`), additive: `chainSeal ms gen`, its VK
+  and the mainnet seal of D-051 are unchanged. The header chain root proof is one more child (hook
+  `S + 1`, its 124 public inputs opened); the genesis checks (`HeaderTree.genesisChecks`) run in-circuit;
+  `T` is read from its public inputs; every epoch child's block-hash root and the genesis block hash get
+  an MMR inclusion path of `D` steps (guessed siblings, guessed side bits, a guessed length whose one-hot
+  masks the steps), ending at `T`.
+- **The sides and lengths go into the output message, not into the circuit's logic.** They are a
+  function of the position and the header count only (`HT.inclusionSides`), which the verifier computes
+  (arithmetic, no hashing) when it rebuilds the message; this binds each path to its position without an
+  in-circuit MMR-shape gadget. The message also carries the tip, its height and the chainwork, which the
+  verifier's minimum-work check reads.
+- **`D = 32`** for the exported programs: in the MMR over `n < 2^N` leaves a leaf in peak `j` (of size
+  `2^p`, `p ≤ N − 1 − j` as the peaks shrink) is `p + j + 1 ≤ N` steps from the root, so 32 steps cover
+  every chain below 2^31 headers. Mainnet's 32 children need at most 19, genesis 20.
+- **The header root's verifier configuration comes from the pinned header VK** (`node.Identity`: columns
+  and PCS config), so `setup-seal-vk` needs no header proof.
+Why: after D-051 `verify-seal` still verified the header chain root natively and checked 32 block-hash
+paths against `T`; with this, its native work is the plan's key, the positions' sides, the sets' facts
+and one STARK verification. Sides in the message are what a verifier would compute anyway to know which
+blocks the seal covers; an in-circuit sides gadget would cost a bit decomposition of the position and the
+count and a proof of the MMR fold's shape for no change in what the verifier must know.
+Rejected: changing `chainSeal` in place (the D-051 VK and mainnet seal would no longer verify until
+re-proved); one range proof per epoch from the children's roots (the fold's topology depends on the
+positions and the count, so a fixed circuit would need the same guessed structure as paths).
+

@@ -4,14 +4,15 @@ Rewritten at the end of every session; see [README.md](README.md#ending-a-sessio
 If `HEAD at last update` doesn't match `git log -1`, this file is stale:
 follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work).
 
-- **Updated:** 2026-11-05 (session 30: SEAL-LEAN, the seal's soundness composed)
-- **HEAD at last update:** d8b53cd (D-051 accepted, pushed) plus this session's commits
+- **Updated:** 2026-11-06 (session 31: SEAL-VK-SETUP, BLOCK-VK closed, SEAL-T built but not proved)
+- **HEAD at last update:** da95ec7 (pushed) plus this session's commits (not pushed)
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
-- **Current item:** SEAL-LEAN done (2026-11-05): `seal_soundW` (`lean/StarkedAir/Circuit/ChainSealCompose.lean`)
-  states what one accepted seal proof gives: a valid chain of epochs, per epoch the end and start sets as
-  proven passes under the epoch's challenge with the balance, the finishes to `fin`/`prev` and the
-  ranges, and the end facts; or a named Blake2s collision. Next: SEAL-T. This session's commits are not
-  pushed (D-016).
+- **Current item:** SEAL-T (D-052, proposed): the header chain root and the block-hash paths inside the
+  seal. Built: `chainSealT` (Lean, exported), `prove-seal`/`verify-seal --paths 32` (Zig), gadget
+  soundness (`Circuit/ChainSealTSound.lean`). **Not proved yet**: the test-chain proof stopped at 7 GB
+  under memory pressure on the Mac (the owner reported low memory); it needs a machine with more free
+  RAM (a CPU pod with ~64 GB, or the Mac with other apps closed). Done this session: SEAL-VK-SETUP
+  (`setup-seal-vk` remakes the pinned seal VK), BLOCK-VK closed (nothing to pin).
 
 ## State in one paragraph
 
@@ -27,11 +28,14 @@ including the seal's composed statement (`seal_soundW`); trusted items in [verif
 
 ## Next step (concrete)
 
-1. **SEAL-T** ([chain-seal.md § Next fold](../design/chain-seal.md#next-fold-the-header-root-and-t)):
-   the header root as a child (`HeaderRec` opening, the genesis checks as constants), MMR inclusion per
-   epoch child with sides from the bits of the position and the leaf count (`Spec/Mmr.lean` `sides`).
-   Then extend `seal_soundW` (its hypotheses on `c` would come from the header root instead of the
-   verifier).
+1. **SEAL-T, prove it** (owner: where): on the test chain first —
+   `zig-out/bin/chainproof prove-seal data/store/mainnet-q70-p26-l20.vk data/store/mainnet-to-970734.sbchain
+   data/test-chain/outT --unpinned --paths 32 data/test-chain/e3:3 data/test-chain/e8:8:4:data/test-chain/e3/set-3.bin
+   data/test-chain/e15:15:9:data/test-chain/e8/set-8.bin` (`outT` holds copies of `out/chain-15.bin` and
+   `out/joinvk.bin`), then `verify-seal` the same way; if it fails, run the ReleaseSafe build for the panic.
+   Then mainnet (`data/seal972/out`, `--paths 32`), pin `sealvk.bin`, extend `setup-seal-vk` with the header
+   VK (`CS.sharedOfId(vk.node)`), and SEAL-T-LEAN (`seal_soundW` with the header tree's trust record and
+   `Spec.Mmr.mmr_inclusionC`).
 2. Backlog: SET-VK-SETUP (needs one mainnet segment proof from the node), profile `verify-seal`/`verify-chain` on the node.
 
 ## In flight
@@ -44,7 +48,8 @@ including the seal's composed statement (`seal_soundW`); trusted items in [verif
 
 ## Needs owner
 
-- **Push `main`** (D-016): this session's SEAL-LEAN commits.
+- **Push `main`** (D-016): this session's commits.
+- **SEAL-T proving machine:** a CPU pod (~64 GB RAM) or the Mac with memory freed; and review D-052.
 - **STWO-225-FU:** follow up on stwo-zig#225 upstream? Outward-facing.
 
 ## Verify the current state
@@ -80,10 +85,12 @@ open StarkedAir.HeaderChain StarkedAir.Spec.Bitcoin
 #print axioms StarkedAir.Circuit.ChainSeal.seal_digest
 #print axioms StarkedAir.SetPass.set_root_soundW
 #print axioms StarkedAir.Circuit.ChainSeal.seal_soundW
+#print axioms StarkedAir.Circuit.ChainSeal.pathOps_sound
+#print axioms StarkedAir.Circuit.ChainSeal.sealT_cpath
 EOS
 (cd lean && lake env lean /tmp/ax.lean)  # expect: propext, Classical.choice, Quot.sound
 
-scripts/check_air_drift.sh                 # expect: every airs/*.json "ok" (90 files, ~10 min; AIRs and circuit programs)
+LAKE=~/.elan/bin/lake scripts/check_air_drift.sh   # expect: every airs/*.json "ok" (90 files, ~10 min; AIRs and circuit programs)
 
 # The mainnet seal (inputs under data/seal972/, see "In flight"), pinned VKs only:
 zig-out/bin/chainproof verify-seal data/store/mainnet-q70-p26-l20.vk data/store/mainnet-to-972502.compact.sbchain data/seal972/out data/seal972/e945:945000:935001:none data/seal972/e972:972500:945001:none

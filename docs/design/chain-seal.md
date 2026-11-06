@@ -127,7 +127,42 @@ What the theorem does not cover: the header root and `T` (native, SEAL-T); `hash
 verifier finishes the SHA-256 state whose digest `EndOk` names); that the pinned seal VK is
 `chainSeal ms gen` (remade by `setup-seal-vk`, not proven); that Zig's `expected` is Lean's `sealMsg` (tested).
 
-## Next fold: the header root and `T`
+## The header chain in-circuit (SEAL-T, D-052)
+
+Status 2026-11-06: program, prover, verifier and gadget soundness built; **not yet proved** on any
+chain (the test-chain proof stopped at 7 GB under memory pressure on the Mac; it needs a machine with
+more free memory). The D-051 seal above is unchanged and remains the pinned one.
+
+`chainSealT ms gen D` (`Circuit/ChainSealT.lean`) is `chainSeal ms gen` plus:
+
+| Part | Gadget | Replaces (native, before) |
+|---|---|---|
+| the header chain root proof as one more child (hook `S + 1`), its 124 public inputs opened | `hdrChild` | `store.verifyChain` (`node.verifyRoot`) |
+| the genesis input state: 50 equalities on those public inputs | `genesisOps` (`HeaderTree.genesisChecks`) | `genesisChecksOk` |
+| `T` from public inputs 108–123 | `packN` | `node.treeWords` |
+| per epoch child: its block-hash root (16 limbs of `rest`'s preimage) reaches `T` by an MMR path of `D` steps (guessed siblings and side bits, a guessed length masking the steps) | `pathOps`, `pathStep` | `ER.openHead`'s `HT.verifyInclusion` |
+| the genesis block hash reaches `T` the same way | `pathOps` | `HT.verifyLeftmost` |
+| the tip, its height and the chainwork (5 words) in the output; per path its side bits (2 words) and length | `packN`, `bitsWord`, `m2u` | the native summary's `work`, `tip` |
+
+The verifier rebuilds the message with each path's sides and length from the position and the header
+count (`chain_seal.pathPubs`: `HT.inclusionSides`, `HT.leftmostDepth`, arithmetic only); that binds the
+paths to the positions. Its remaining native work: the header chain's plan and the root's key
+(`store.rootExpect`), the epoch children's positions and keys, the sets' facts, the minimum-work check on
+the seal's chainwork, `hash_serialized`, the anchor, one STARK verification.
+
+`D = 32` covers every chain below 2^31 headers (D-052). Exported: `airs/chain_seal_t32_16_16.json`
+(276,024 ops, 107,200 Blake2s G gates) and `airs/chain_seal_t32_1_2_3_genesis.json` (94,289 ops).
+Commands: `prove-seal … --paths 32 …`; `verify-seal` reads the kind from the seal VK (`SBSEALVT`) and the
+file (`SBSEAL02`, carrying the header facts).
+
+Soundness (`Circuit/ChainSealTSound.lean`, standard axioms): `pathStep_sound` (a step is the MMR spec's
+`Step.up` when active), `pathOps_sound` (a path of length `L ≤ D` computes `Spec.Mmr.pathRoot` over its
+first `L` steps), `bitsWord_sound`, `packN_sound`, `hdrChild_digest`, `genesisOps_sound`; for the program
+`sealT_genesis`, `sealT_T`, `sealT_gpath`, `sealT_cpath` (genesis's hash and every child's root reach `T`),
+`sealT_key`, `sealT_digest`. Not yet done: composing these with the header tree's trust record and
+`Spec.Mmr.mmr_inclusionC` into `seal_soundW`'s statement (SEAL-T-LEAN).
+
+## The fold as first planned (2026-11-04)
 
 The seal still trusts the verifier to check each epoch child's block-hash root against the header
 chain's `T` (paths in the heads). Folding it: the header chain root as one more child (its 124

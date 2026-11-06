@@ -21,6 +21,23 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-11-06 (session 31) — SEAL-VK-SETUP, BLOCK-VK closed, SEAL-T built and its gadgets proven (not yet proved on a chain)
+Who: Claude (agent, Opus 5.5), owner: "push and go for it, don't stop until you're done or you need me"; mid-session "low memory on the machine", then "do the SEAL-T Lean gadget proofs"
+Roadmap: SEAL-VK-SETUP done; BLOCK-VK closed; SEAL-T in progress (D-052 proposed)
+Done:
+- Pushed da95ec7 (SEAL-LEAN).
+- `chainproof setup-seal-vk` (cdf3d40): the seal VK from public inputs (the heads' child counts, the join's and set tree's configurations from their proofs' requests accepted only under the pinned VKs, the program); mainnet: equals `vk/epoch/seal-935001-972500.vk` byte for byte.
+- BLOCK-VK closed (0af91dc): `verify-block` reads no block VK; no mainnet `blockvk.bin` exists (the node has none); the wide trees' leaf identities are in the pinned tree VKs.
+- SEAL-T (D-052): `Circuit/ChainSealT.lean` (`chainSealT ms gen D`: the header chain root child, the genesis checks, `T`, MMR paths of `D` steps for genesis and every epoch child, the tip, height, chainwork and paths' sides in the output), exported `airs/chain_seal_t32_{16_16,1_2_3_genesis}.json`; Zig: `chain_seal.zig` (T variant of the layout, `expectedT`, `pathPubs`, `buildCircuit`, `prove`, `verify`, VK `SBSEALVT`, file `SBSEAL02`), `ER.openHead`/`EJ.replay` with an optional `T`, `store.rootExpect`, `chainproof prove-seal`/`verify-seal --paths D`; `Circuit/ChainSealTSound.lean` (path steps, paths as `Spec.Mmr.pathRoot`, packing, the header child, genesis checks, the program's parts, `T`, every path ending at `T`, key, output digest).
+Evidence:
+- `setup-seal-vk /tmp/… data/seal972/out/chain-972500.bin vk/epoch/join-935001-972500.vk data/seal972/passes/s972500`: "seal VK remade: trace 2^24 (3.7s); it equals the pinned one" (8.9 s, 6.3 GB); an unpinned join VK: `VkNotPinned`.
+- `(cd lean && lake build)`: "Build completed successfully (8924 jobs)"; `#print axioms` of the SEAL-T theorems: `propext, Classical.choice, Quot.sound`; no `sorry`. `LAKE=~/.elan/bin/lake scripts/check_air_drift.sh chain_seal_t32_16_16 chain_seal_t32_1_2_3_genesis chain_seal_16_16 chain_seal_1_2_3_genesis`: all ok. `zig build -Doptimize=ReleaseFast`: builds.
+- Test-chain `prove-seal … --paths 32`: the chain replayed and the five set children verified, then the process stopped (`time: command terminated abnormally`, 413 s, 7.1 GB RSS) while the owner's Mac was short of memory; not rerun.
+Problems / lessons:
+- `scripts/check_air_drift.sh` needs `LAKE=~/.elan/bin/lake` in shells without lake on `PATH` (it reports DRIFT for every file otherwise).
+- `seal` is a Lean keyword (a structure field cannot be named so).
+Next: prove SEAL-T on the test chain on a machine with free memory, then mainnet; pin; SEAL-T-LEAN.
+
 ## 2026-11-05 (session 30) — SEAL-LEAN: the seal's soundness as one Lean statement
 Who: Claude (agent, Opus 5.5), owner: "do SEAL-LEAN next, don't stop" (and D-051 accepted and pushed, d8b53cd)
 Roadmap: SEAL-LEAN done

@@ -486,6 +486,22 @@ fn checkProved(gpa: std.mem.Allocator, tables: *const leaf.Tables, vk: *const Vk
 }
 
 /// Steps 1–2 of `verifyChain`: the file names this VK and its parameters; the plan is aligned.
+/// What the root of `chain` must be under `vk` (its plan checked): the node circuit's hash, the key over
+/// the plan's leaves, the header count. The chain seal with the header chain in-circuit (D-052) uses it
+/// in place of verifying the root natively.
+pub fn rootExpect(a: std.mem.Allocator, vk: *const Vk, chain: *const Chain) !struct { hash: [8]u32, key: leaf.Key, n: usize } {
+    try checkPlan(a, vk, chain);
+    const leaf_hashes = try a.alloc([8]u32, chain.logs.len);
+    const sizes = try a.alloc(usize, chain.logs.len);
+    for (chain.logs, leaf_hashes, sizes) |log, *h, *s| {
+        h.* = vk.leafId(log).hash;
+        s.* = HT.segHeaders(log);
+    }
+    if (leaf_hashes.len < 2) return error.RootIsNotANode;
+    const e = try node.expectedRoot(a, leaf_hashes, sizes, vk.node.hash);
+    return .{ .hash = e.hash, .key = e.key, .n = chain.headers() };
+}
+
 fn checkPlan(a: std.mem.Allocator, vk: *const Vk, chain: *const Chain) !void {
     if (!std.mem.eql(u32, &chain.vk_digest, &try vk.digest(a))) return error.VkMismatch;
     if (!std.meta.eql(chain.fri, vk.fri) or chain.max_log != vk.max_log) return error.VkMismatch;

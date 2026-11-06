@@ -138,6 +138,8 @@ pub fn build(b: *std.Build) void {
     lib.addAnonymousImport("air:set_node_glue", .{ .root_source_file = b.path("airs/set_node_glue.json") });
     lib.addAnonymousImport("air:chain_seal_1_2_3_genesis", .{ .root_source_file = b.path("airs/chain_seal_1_2_3_genesis.json") });
     lib.addAnonymousImport("air:chain_seal_16_16", .{ .root_source_file = b.path("airs/chain_seal_16_16.json") });
+    lib.addAnonymousImport("air:chain_seal_t32_1_2_3_genesis", .{ .root_source_file = b.path("airs/chain_seal_t32_1_2_3_genesis.json") });
+    lib.addAnonymousImport("air:chain_seal_t32_16_16", .{ .root_source_file = b.path("airs/chain_seal_t32_16_16.json") });
     lib.addAnonymousImport("air:block_reader", .{ .root_source_file = b.path("airs/block_reader.json") });
     lib.addAnonymousImport("air:block_sha", .{ .root_source_file = b.path("airs/block_sha.json") });
     lib.addAnonymousImport("air:block_msg", .{ .root_source_file = b.path("airs/block_msg.json") });
