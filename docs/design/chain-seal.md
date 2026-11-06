@@ -75,7 +75,8 @@ arithmetic of the statement (balance, links, finish, ranges) is in-circuit. The 
   configurations come from their proofs' requests (`sharedOf`): a child of another shape changes the
   seal's circuit, which the pinned seal VK rejects.
 - `chainproof verify-seal <vk> <file.sbchain> <out-dir> [--min-work …] [--unpinned] <epoch>...`.
-- `chainproof setup-seal-vk <out-dir> <chain-<to>.bin> <joinvk> <pass-dir>`: the seal VK remade from
+- `chainproof setup-seal-vk <out-dir> <chain-<to>.bin> <joinvk> <pass-dir> [--paths D <header-vk>]`
+  (`--paths`: the SEAL-T VK, the header root's configuration from the header VK's node identity): the seal VK remade from
   public inputs (the heads' child counts, the join's and the set tree's configurations from their proofs'
   requests, each accepted only under its pinned VK), no proof made; says whether it is the pinned one.
   Mainnet: equals `vk/epoch/seal-935001-972500.vk` (8.9 s, 6.3 GB).
@@ -132,8 +133,15 @@ verifier finishes the SHA-256 state whose digest `EndOk` names); that the pinned
 Status 2026-11-06: program, prover, verifier and gadget soundness built. The circuit is satisfied with
 the native view's output (`prove-seal --check`: no proof, build and check only) on the test chain
 (81,815,337 variables, 6.3 GB peak) and on mainnet 935,001–972,500 (69,531,575 variables, 5.1 GB; the
-D-051 seal has 56,430,762). **Not yet proved** on any chain (the test-chain proof stopped at 7 GB under memory pressure on the Mac; it needs a machine with
-more free memory). The D-051 seal above is unchanged and remains the pinned one.
+D-051 seal has 56,430,762). **Proved on mainnet 2026-11-06** on the Mac (M4 Pro): 935,001–972,500 with
+`--paths 32`, 69,531,575 variables, trace 2^24, 130.6 s to prove (141 s wall), 14.3 GB peak RSS, 631,231
+bytes, the same coin-set facts as the D-051 seal. `verify-seal` accepts it in 0.2 s with every VK pinned
+(`vk/epoch/sealt-935001-972500.vk`, sha256 `11b274a112525942…`), with no native header-chain verification
+(only `store.rootExpect`: the plan and the root's key). `setup-seal-vk … --paths 32 <header-vk>` remakes
+that VK from public inputs byte for byte. Rejected tampers (checksum recomputed): a bit flipped at body
+offsets 200 and 5,000 (`WrongDigest`), 300,000 and 600,000 (`CircuitProofRejected`); the D-051 VK with the
+SEAL-T file and the reverse (`WrongSealKind`). The test chain's SEAL-T proof (81.8 M variables) was not
+run. The D-051 seal above is unchanged and still pinned.
 
 `chainSealT ms gen D` (`Circuit/ChainSealT.lean`) is `chainSeal ms gen` plus:
 

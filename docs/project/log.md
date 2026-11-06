@@ -21,6 +21,21 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-11-06 (session 32) — SEAL-T proved on mainnet, verified, VK pinned
+Who: Claude (agent, Opus 5.5), owner: "go on, and work on this machine", then "memory is free, have at it"
+Roadmap: SEAL-T proved on mainnet (SEAL-T-LEAN open); D-052 still proposed
+Done:
+- Mainnet SEAL-T seal 935,001–972,500 (`prove-seal … data/seal972/outT --paths 32 …`), verified, its VK pinned as `vk/epoch/sealt-935001-972500.vk` (`build.zig`, `chainproof.zig` `pinned_vks.seal`).
+- `chainproof setup-seal-vk … [--paths D <header-vk>]`: the SEAL-T VK from public inputs (header root's configuration via `CS.sharedOfId(vk.node)`).
+Evidence:
+- `prove-seal`: "seal proved: 69531575 variables, trace 2^24 (130.6s)"; `/usr/bin/time -l`: 141.48 s real, 14,268,547,072 bytes max RSS; `seal-972500.bin` 631,231 bytes; same coin-set facts as D-051 (164,539,066 coins, 2,010,133,549,560,777 sat, root `f74e9573…`).
+- `verify-seal` (pinned): "seal VK …: pinned (vk/epoch/sealt-935001-972500.vk)", "header chain plan checked: headers 0..972501; its root proof, genesis and block-hash paths verified in the seal", "seal verified … (0.2s)", tip height 972501, chainwork `0x1519b7ed4870c6c731710df1c`.
+- `setup-seal-vk <tmp> data/seal972/outT/chain-972500.bin vk/epoch/join-935001-972500.vk data/seal972/passes/s972500 --paths 32 data/store/mainnet-q70-p26-l20.vk`: "seal VK remade: trace 2^24 (2.4s); it equals the pinned one" (2.9 s, 10.0 GB RSS).
+- Tampers (copy in `data/seal972/outTamper`, sha256 checksum recomputed): bit flips at body offsets 200, 5000 → `WrongDigest`; 300000, 600000 → `CircuitProofRejected`; without recomputing the checksum → `ChecksumMismatch`; D-051 VK + SEAL-T file and the reverse → `WrongSealKind`; D-051 seal with its pinned VK still `VERIFIED`.
+Problems / lessons:
+- The proof needs ~14.3 GB resident; it ran once ~15.7 GB was free (an earlier attempt at ~11 GB free was stopped by the watchdog at <1 GB).
+Next: SEAL-T-LEAN (compose `ChainSealTSound` into `seal_soundW` with the header tree's trust and `Spec.Mmr.mmr_inclusionC`); owner review of D-052.
+
 ## 2026-11-06 (session 31) — SEAL-VK-SETUP, BLOCK-VK closed, SEAL-T built and its gadgets proven (not yet proved on a chain)
 Who: Claude (agent, Opus 5.5), owner: "push and go for it, don't stop until you're done or you need me"; mid-session "low memory on the machine", then "do the SEAL-T Lean gadget proofs"
 Roadmap: SEAL-VK-SETUP done; BLOCK-VK closed; SEAL-T in progress (D-052 proposed)

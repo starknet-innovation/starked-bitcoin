@@ -4,17 +4,14 @@ Rewritten at the end of every session; see [README.md](README.md#ending-a-sessio
 If `HEAD at last update` doesn't match `git log -1`, this file is stale:
 follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work).
 
-- **Updated:** 2026-11-06 (session 31: SEAL-VK-SETUP, BLOCK-VK closed, SEAL-T built but not proved)
-- **HEAD at last update:** da95ec7 (pushed) plus this session's commits (not pushed)
+- **Updated:** 2026-11-06 (session 32: SEAL-T proved on mainnet, verified, VK pinned)
+- **HEAD at last update:** 1fccc06 (pushed) plus this session's commit
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
-- **Current item:** SEAL-T (D-052, proposed): the header chain root and the block-hash paths inside the
-  seal. Built: `chainSealT` (Lean, exported), `prove-seal`/`verify-seal --paths 32` (Zig), gadget
-  soundness (`Circuit/ChainSealTSound.lean`). **Circuit checked** (`prove-seal --check`, 2026-11-06):
-  satisfied with the native view's output on the test chain (81,815,337 variables, 6.3 GB) and on mainnet
-  935,001–972,500 (69,531,575 variables, 5.1 GB). **Not proved yet**: the test-chain proof stopped at 7 GB
-  under memory pressure on the Mac (the owner reported low memory); it needs a machine with more free
-  RAM (a CPU pod with ~64 GB, or the Mac with other apps closed). Done this session: SEAL-VK-SETUP
-  (`setup-seal-vk` remakes the pinned seal VK), BLOCK-VK closed (nothing to pin).
+- **Current item:** SEAL-T-LEAN. SEAL-T (D-052, proposed) is proved on mainnet 935,001–972,500
+  (`data/seal972/outT/seal-972500.bin`: 69.5 M variables, 2^24, 131 s, 14.3 GB, 631 KB), verified in
+  0.2 s with the header root, genesis checks and block-hash paths in-circuit, its VK pinned
+  (`vk/epoch/sealt-935001-972500.vk`) and remade by `setup-seal-vk --paths 32`. Its gadgets are proven
+  (`Circuit/ChainSealTSound.lean`); their composition into the seal theorem is not.
 
 ## State in one paragraph
 
@@ -30,28 +27,24 @@ including the seal's composed statement (`seal_soundW`); trusted items in [verif
 
 ## Next step (concrete)
 
-1. **SEAL-T, prove it** (owner: where): on the test chain first —
-   `zig-out/bin/chainproof prove-seal data/store/mainnet-q70-p26-l20.vk data/store/mainnet-to-970734.sbchain
-   data/test-chain/outT --unpinned --paths 32 data/test-chain/e3:3 data/test-chain/e8:8:4:data/test-chain/e3/set-3.bin
-   data/test-chain/e15:15:9:data/test-chain/e8/set-8.bin` (`outT` holds copies of `out/chain-15.bin` and
-   `out/joinvk.bin`), then `verify-seal` the same way; if it fails, run the ReleaseSafe build for the panic.
-   Then mainnet (`data/seal972/out`, `--paths 32`), pin `sealvk.bin`, extend `setup-seal-vk` with the header
-   VK (`CS.sharedOfId(vk.node)`), and SEAL-T-LEAN (`seal_soundW` with the header tree's trust record and
-   `Spec.Mmr.mmr_inclusionC`).
-2. Backlog: SET-VK-SETUP (needs one mainnet segment proof from the node), profile `verify-seal`/`verify-chain` on the node.
+1. **SEAL-T-LEAN:** in a new file `lean/StarkedAir/Circuit/ChainSealTCompose.lean`, state `sealT_soundW`:
+   `seal_soundW`'s conclusion plus "every epoch child's block-hash root is the MMR subtree of the header
+   chain at its position", from `sealT_cpath`/`sealT_gpath` (paths reach `T`), the header tree's trust record
+   (`TrustK`-style for `hdrChild`'s digest) and `Spec.Mmr.mmr_inclusionC`. Child roots sit at level `k`, so
+   a subtree version of `mmr_inclusionC` is needed first (`Spec/Mmr.lean`).
+2. Optional: the test chain's SEAL-T proof (81.8 M variables, likely ~17 GB: more than the Mac has free).
+3. Backlog: SET-VK-SETUP (needs one mainnet segment proof from the node), profile `verify-seal`/`verify-chain` on the node.
 
 ## In flight
 
-- Nothing uncommitted after this session's commits; they are not pushed. No pod is running.
-- Mainnet seal inputs and output on the Mac under `data/seal972/` (gitignored `data/`): `out/seal-972500.bin`,
-  `out/sealvk.bin`, the chain file, the join and tree VKs, the four passes' `pass.bin`/`setvk.bin`. On the
-  node: `join972b/out/{seal-972500.bin,sealvk.bin}`, the binary `chainproof-seal`, `setgpu/verifyseal972.log`.
-- The test chain's five passes were re-proved (twelve logs); its seal is `data/test-chain/out/seal-15.bin`.
+- Nothing uncommitted after this session's commit. No pod is running.
+- Mainnet seal inputs and outputs on the Mac under `data/seal972/` (gitignored `data/`): `out/` (D-051
+  seal), `outT/` (SEAL-T seal, `sealvk.bin`, copies of the chain file and join VK), `outTamper/` (tamper
+  scratch, deletable), the join and tree VKs, the four passes. On the node: the D-051 seal only.
 
 ## Needs owner
 
-- **Push `main`** (D-016): this session's commits.
-- **SEAL-T proving machine:** a CPU pod (~64 GB RAM) or the Mac with memory freed; and review D-052.
+- **Review D-052** (SEAL-T, proposed): proved and pinned now; acceptance is the owner's.
 - **STWO-225-FU:** follow up on stwo-zig#225 upstream? Outward-facing.
 
 ## Verify the current state
@@ -98,6 +91,11 @@ LAKE=~/.elan/bin/lake scripts/check_air_drift.sh   # expect: every airs/*.json "
 zig-out/bin/chainproof verify-seal data/store/mainnet-q70-p26-l20.vk data/store/mainnet-to-972502.compact.sbchain data/seal972/out data/seal972/e945:945000:935001:none data/seal972/e972:972500:945001:none
 # expect: "VERIFIED blocks 935001..972500 as one sealed proof: the coin set after block 972500 is 164539066 coins"
 zig-out/bin/chainproof setup-seal-vk /tmp/sealvk data/seal972/out/chain-972500.bin vk/epoch/join-935001-972500.vk data/seal972/passes/s972500
+# expect: "seal VK remade: trace 2^24 (…); it equals the pinned one"
+# SEAL-T (D-052), pinned VK, header chain in-circuit:
+zig-out/bin/chainproof verify-seal data/store/mainnet-q70-p26-l20.vk data/store/mainnet-to-972502.compact.sbchain data/seal972/outT data/seal972/e945:945000:935001:none data/seal972/e972:972500:945001:none
+# expect: "seal VK …: pinned (vk/epoch/sealt-935001-972500.vk)" and "VERIFIED blocks 935001..972500 as one sealed proof"
+zig-out/bin/chainproof setup-seal-vk /tmp/sealvkT data/seal972/outT/chain-972500.bin vk/epoch/join-935001-972500.vk data/seal972/passes/s972500 --paths 32 data/store/mainnet-q70-p26-l20.vk
 # expect: "seal VK remade: trace 2^24 (…); it equals the pinned one"
 
 python3 ~/.claude/skills/document/scripts/check_docs.py .   # expect: 0 errors outside data/ (it also scans the gitignored data/core-src, Core's own broken links)
