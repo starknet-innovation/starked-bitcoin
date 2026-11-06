@@ -327,6 +327,9 @@ pub fn main() !void {
             } else if (std.mem.eql(u8, args[i], "--unpinned")) {
                 unpinned = true;
                 i += 1;
+            } else if (std.mem.eql(u8, args[i], "--check")) {
+                CS.check_only = true;
+                i += 1;
             } else if (std.mem.eql(u8, args[i], "--paths") and i + 1 < args.len) {
                 paths = try std.fmt.parseInt(usize, args[i + 1], 10);
                 i += 2;
@@ -1911,7 +1914,10 @@ fn proveSeal(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8, 
         };
         tp = .{ .d = d, .proof = &root.proof, .pubs = root.pubs, .key = ex.key, .pos = pos.items, .paths = pins.items };
     }
-    var proved = try CS.prove(gpa, a, tables, ms, &r.join, &file.proof, children, epochs, fri, tp);
+    var proved = CS.prove(gpa, a, tables, ms, &r.join, &file.proof, children, epochs, fri, tp) catch |e| {
+        if (e == error.CheckOnly) return;
+        return e;
+    };
     defer proved.proof.deinit();
     std.debug.print("seal proved: {d} variables, trace 2^{d} ({d:.1}s)\n", .{ proved.n_vars, proved.trace_log, secs(timer.lap()) });
     var jshared = try CS.sharedOf(gpa, &file.proof);

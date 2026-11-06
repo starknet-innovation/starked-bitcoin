@@ -9,7 +9,9 @@ follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work)
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
 - **Current item:** SEAL-T (D-052, proposed): the header chain root and the block-hash paths inside the
   seal. Built: `chainSealT` (Lean, exported), `prove-seal`/`verify-seal --paths 32` (Zig), gadget
-  soundness (`Circuit/ChainSealTSound.lean`). **Not proved yet**: the test-chain proof stopped at 7 GB
+  soundness (`Circuit/ChainSealTSound.lean`). **Circuit checked** (`prove-seal --check`, 2026-11-06):
+  satisfied with the native view's output on the test chain (81,815,337 variables, 6.3 GB) and on mainnet
+  935,001–972,500 (69,531,575 variables, 5.1 GB). **Not proved yet**: the test-chain proof stopped at 7 GB
   under memory pressure on the Mac (the owner reported low memory); it needs a machine with more free
   RAM (a CPU pod with ~64 GB, or the Mac with other apps closed). Done this session: SEAL-VK-SETUP
   (`setup-seal-vk` remakes the pinned seal VK), BLOCK-VK closed (nothing to pin).

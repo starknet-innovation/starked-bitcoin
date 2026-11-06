@@ -129,8 +129,10 @@ verifier finishes the SHA-256 state whose digest `EndOk` names); that the pinned
 
 ## The header chain in-circuit (SEAL-T, D-052)
 
-Status 2026-11-06: program, prover, verifier and gadget soundness built; **not yet proved** on any
-chain (the test-chain proof stopped at 7 GB under memory pressure on the Mac; it needs a machine with
+Status 2026-11-06: program, prover, verifier and gadget soundness built. The circuit is satisfied with
+the native view's output (`prove-seal --check`: no proof, build and check only) on the test chain
+(81,815,337 variables, 6.3 GB peak) and on mainnet 935,001–972,500 (69,531,575 variables, 5.1 GB; the
+D-051 seal has 56,430,762). **Not yet proved** on any chain (the test-chain proof stopped at 7 GB under memory pressure on the Mac; it needs a machine with
 more free memory). The D-051 seal above is unchanged and remains the pinned one.
 
 `chainSealT ms gen D` (`Circuit/ChainSealT.lean`) is `chainSeal ms gen` plus:

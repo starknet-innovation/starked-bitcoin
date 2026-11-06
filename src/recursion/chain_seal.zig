@@ -714,6 +714,9 @@ pub const Proved = struct { open: Open, n_vars: usize, trace_log: u32, proof: le
 /// epoch child's position, the paths (genesis's, then the children's).
 pub const TProve = struct { d: usize, proof: *const leaf.CircuitProof, pubs: [leaf.N_PUB]M31, key: Key, pos: []const [2]u32, paths: []const PathIn };
 
+/// `prove` stops after the circuit check (satisfied, digest = the native view's) when set (`--check`).
+pub var check_only = false;
+
 pub fn prove(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const leaf.Tables, ms: []const u32, join: *const EJ.JoinOpen, jp: *const leaf.CircuitProof, children: []const SetChild, epochs: []const EpochIn, fri: FriConfigV2, t: ?TProve) !Proved {
     const gen = epochs[0].open.ep.prev == null;
     const S = nSets(ms.len, gen);
@@ -773,6 +776,10 @@ pub fn prove(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const leaf.T
     const out = wk.outputDigest(&ctx);
     if (!std.mem.eql(u32, &out, &sealOut(&want))) return error.SealDigestMismatch;
     const n_vars = ctx.circuit.n_vars;
+    if (check_only) {
+        std.debug.print("seal circuit satisfied, output digest = the native view's: {d} variables (no proof made: --check)\n", .{n_vars});
+        return error.CheckOnly;
+    }
     var cp = try leaf.proveCircuit(gpa, a, &ctx, null, fri);
     errdefer cp.deinit();
     const got = try leaf.verifyCircuit(gpa, tables, &cp);
