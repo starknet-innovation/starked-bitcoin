@@ -169,8 +169,23 @@ Soundness (`Circuit/ChainSealTSound.lean`, standard axioms): `pathStep_sound` (a
 `Step.up` when active), `pathOps_sound` (a path of length `L ≤ D` computes `Spec.Mmr.pathRoot` over its
 first `L` steps), `bitsWord_sound`, `packN_sound`, `hdrChild_digest`, `genesisOps_sound`; for the program
 `sealT_genesis`, `sealT_T`, `sealT_gpath`, `sealT_cpath` (genesis's hash and every child's root reach `T`),
-`sealT_key`, `sealT_digest`. Not yet done: composing these with the header tree's trust record and
-`Spec.Mmr.mmr_inclusionC` into `seal_soundW`'s statement (SEAL-T-LEAN).
+`sealT_key`, `sealT_digest`.
+
+Composed (SEAL-T-LEAN, 2026-11-07, standard axioms): `sealT_soundW` (`Circuit/ChainSealTCompose.lean`).
+A seal proof accepted under the pinned identity with the digest the verifier recomputes (`sealMsgT`: the
+key over the join's, the set trees' and the header tree's identities, the D-051 fields, the tip, the
+height `nH − 1`, the chainwork, every path's sides and length from the positions) gives everything
+`seal_soundW` gives, plus a valid header chain of `nH` headers from genesis whose tip and chainwork words
+are the message's, whose block 0 is Bitcoin's genesis block, and in which every epoch child's
+block-hash root (the words of its limbs in `rest`'s preimage) is `BlockTree.rootFrom` of the chain's
+block hashes at its position; or a named Blake2s collision (`sealPairsT`) or node-hash collision
+(`tPairs`). Pieces: `Spec/MmrSub.lean` (`mmr_subC`: an aligned block of `2^k` leaves is a node of the
+canonical MMR and a path to it pins its root; `mmr_sides_eq`: the sides depend on the leaf count only),
+`Circuit/ChainSealTPaths.lean` (`sealT_headerC`), and `seal_core` (`ChainSealCompose.lean`: the D-051
+proof's body, shared by `seal_soundW` and `sealT_soundW`). Hypotheses beyond D-051's: the header tree's
+`TrustW` (`htree_soundW`), `MmrT` (the tree under `T` is the canonical MMR: trusted, HC-HASHTREE), the
+seal circuit trust `TC` for `chainSealT`, and `PathNative` (the verifier's native checks: aligned child
+positions within the chain, dropped sides `false`, paths of at most `D` steps, `nH ≤ 2^31`).
 
 ## The fold as first planned (2026-11-04)
 

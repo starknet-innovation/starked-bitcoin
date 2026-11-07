@@ -239,6 +239,18 @@ theorem sealT_cpathC {ms : List ℕ} {gen : Bool} {D : ℕ} (h : THolds ms gen D
   simp only [cpathF, holds_append] at hT hops ⊢
   exact pathOk_of hops.2 (sealT_C h) (sealT_pw h) hD hT
 
+/-- Child path `p`'s leaf (the packed limbs) holds. -/
+theorem cLeaf_holds {ms : List ℕ} {gen : Bool} {D : ℕ} (h : THolds ms gen D ρ) {p : ℕ} (hp : p < (childIdx ms).length) :
+    Holds ρ (cLeaf ms gen D p).ops := by
+  have hcall : Holds ρ ((cpathsT ms gen D).flatMap (·.ops)) := fun o ho => h.paths o (by
+    rw [partsT_paths, List.flatMap_cons]; exact List.mem_append_right _ ho)
+  have hin : (cpathsT ms gen D).getD p noPath ∈ cpathsT ms gen D := by
+    rw [List.getD_eq_getElem _ _ (by rw [cpathsT, chainOuts_length]; exact hp)]; exact List.getElem_mem _
+  have hops : Holds ρ ((cpathsT ms gen D).getD p noPath).ops := fun o ho => hcall o (List.mem_flatMap.mpr ⟨_, hin, ho⟩)
+  rw [cpath_getD hp] at hops
+  simp only [cpathF, holds_append] at hops
+  exact hops.1
+
 /-! ### The composition -/
 
 /-- **The header tree under `T` is the canonical MMR over its leaves** (trusted, HC-HASHTREE: the

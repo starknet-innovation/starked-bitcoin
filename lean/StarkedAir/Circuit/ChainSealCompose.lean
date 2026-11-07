@@ -527,116 +527,128 @@ theorem tree_hash_length (leafH : ℕ → List Word) (nodeH : List Word) (hl : �
     (hn : nodeH.length = 8) (t : BlockRec.Tree) : (t.hash leafH nodeH).length = 8 := by
   cases t <;> simp [BlockRec.Tree.hash, hl, hn]
 
+/-- The seal's shared parts (D-051's program without its key and digest; SEAL-T's prefix). -/
+def sealOps (ms : List ℕ) (gen : Bool) : List Op :=
+  let P := parts ms gen
+  P.J.ops ++ P.sets.flatMap (·.ops) ++ P.roots.flatMap (·.ops) ++ P.rests.flatMap (·.ops) ++ P.C.ops ++
+    P.chals.flatMap (·.ops) ++ P.opens.flatMap (·.ops) ++ P.accs.flatMap (·.ops) ++ P.checks.ops
+
+theorem chainSeal_ops' (ms : List ℕ) (gen : Bool) :
+    (chainSeal ms gen).ops = sealOps ms gen ++ (parts ms gen).key.ops ++ (parts ms gen).dg.ops := rfl
+
+theorem sealOps_parts {ms : List ℕ} {gen : Bool} {ρ : ℕ → Q} (h : Holds ρ (sealOps ms gen)) :
+    let P := parts ms gen
+    Holds ρ P.J.ops ∧ Holds ρ (P.sets.flatMap (·.ops)) ∧ Holds ρ (P.roots.flatMap (·.ops)) ∧
+    Holds ρ (P.rests.flatMap (·.ops)) ∧ Holds ρ P.C.ops ∧ Holds ρ (P.chals.flatMap (·.ops)) ∧
+    Holds ρ (P.opens.flatMap (·.ops)) ∧ Holds ρ (P.accs.flatMap (·.ops)) ∧ Holds ρ P.checks.ops := by
+  simp only [sealOps, holds_append] at h
+  obtain ⟨⟨⟨⟨⟨⟨⟨⟨hJ, hS⟩, hR⟩, hT⟩, hC⟩, hCh⟩, hO⟩, hA⟩, hK⟩ := h
+  exact ⟨hJ, hS, hR, hT, hC, hCh, hO, hA, hK⟩
+
+theorem mem_sealOps_J {ms : List ℕ} {gen : Bool} {o : Op} (h : o ∈ (parts ms gen).J.ops) : o ∈ sealOps ms gen := by
+  simp only [sealOps, List.mem_append]; tauto
+
+theorem mem_sealOps_sets {ms : List ℕ} {gen : Bool} {o : Op} (h : o ∈ (parts ms gen).sets.flatMap (·.ops)) :
+    o ∈ sealOps ms gen := by
+  simp only [sealOps, List.mem_append]; tauto
+
+/-- The pairs the shared core compares (`sealPairs` after the message and key pairs). -/
+noncomputable def coreSealPairs (X : Ctx) (ρ : ℕ → Q) (ms : List ℕ) (gen : Bool) (c : Chain Ep) (ts : ℕ → BlockRec.Tree) :
+    List (List Word × List Word) :=
+  let P := parts ms gen
+  chainV X c ++ accPairsL ((List.range ms.length).map fun i => wordsOf ρ (rootO P i).res.out) (outsOf X.leafH X.nodeH c) ++
+    (List.range ms.length).map (fun i => (openWords ρ (rootO P i).res (hasStart gen i),
+      rootMsg ((epAt c i).sh.key X.leafH X.nodeH) (hasStart gen i) (epAt c i).o)) ++
+    (List.range (nSets ms.length gen)).flatMap fun j =>
+      SetPass.setPairs X.leafS X.nodeS X.nwS X.lwS (ts j) (pbAt ρ P gen j) (pfAt ρ P gen j) (RAt ρ P j)
+
+theorem parts_msg_drop (ms : List ℕ) (gen : Bool) :
+    (parts ms gen).msg.drop 10 = (parts ms gen).J.res.first ++ (parts ms gen).J.res.last ++ (parts ms gen).J.res.tail ++
+      ([(openO (parts ms gen) (nSets ms.length gen - 1)).res.cntW] ++ (openO (parts ms gen) (nSets ms.length gen - 1)).res.amtW ++
+      [(openO (parts ms gen) (nSets ms.length gen - 1)).res.maxhW] ++ (openO (parts ms gen) (nSets ms.length gen - 1)).res.mroot ++
+      (openO (parts ms gen) (nSets ms.length gen - 1)).res.shaDg ++ shaStartRegs (parts ms gen) gen) := by
+  have hk : (parts ms gen).key.res.length = 8 := by simp [parts, blake2s]
+  rw [parts_msg]
+  simp only [List.append_assoc]
+  rw [show (10 : ℕ) = (parts ms gen).key.res.length + 2 by rw [hk], ← List.drop_drop, List.drop_left]
+  rfl
+
+theorem sealMsg_drop (X : Ctx) (ms : List ℕ) (gen : Bool) (c : Chain Ep) (ts : ℕ → BlockRec.Tree) (W : List Word) :
+    (sealMsg X ms gen c ts W).drop 10 = c.first.o.prev ++ c.last.o.fin ++ c.acc X.leafH X.nodeH ++ W := by
+  simp only [sealMsg, List.append_assoc]
+  rw [show (10 : ℕ) = (H (sealKeyMsg X ms gen c ts)).length + 2 by rw [H_length], ← List.drop_drop, List.drop_left]
+  rfl
+
+
 section
 variable {Acc SatC : List Word → List Word → Prop} {VGates : (ℕ → Q) → ℕ → List ℕ → List ℕ → Prop}
 
 set_option maxHeartbeats 4000000 in
-/-- **The chain seal is sound, up to a named collision (SEAL-LEAN).** -/
-theorem seal_soundW (X : Ctx) {ok : (ℕ → F) → Prop} {sealH : List Word} {ms : List ℕ} {gen : Bool}
+/-- **The seal's shared core** (`seal_soundW`, `sealT_soundW`): the shared parts holding with their hook
+gates, the key message's identities, the range words and the message after the key and range being the
+verifier's give `seal_soundW`'s conclusion for `ρ`, or two of `coreSealPairs` collide. -/
+theorem seal_core (X : Ctx) {ok : (ℕ → F) → Prop} {ms : List ℕ} {gen : Bool}
     (T : EpochChain.TrustEW Acc SatC VGates X.leafH X.nodeH X.rootH X.joinH (RecCR.LeafAt ok) X.nw X.lw X.rootW X.joinW)
     (TS : RecCR.TrustW Acc SatC VGates X.leafS X.nodeS SetTree.setNodeProgram (SetPass.LeafAtS SetPass.SegOk) X.nwS X.lwS)
-    (TC : ∀ d, SatC sealH d → Holds (X.sealW d) (chainSeal ms gen).ops ∧
-      wordsOf (X.sealW d) (chainSeal ms gen).results = d ∧ BlockRec.HookGates VGates (X.sealW d) (chainSeal ms gen).ops)
     (hl : ∀ L, (X.leafH L).length = 8) (hn : ∀ a v, (X.nodeH a v).length = 8)
     (hr : ∀ M p s, (X.rootH M p s).length = 8) (hj : ∀ v, (X.joinH v).length = 8)
     (hlS : ∀ L, (X.leafS L).length = 8) (hnS : X.nodeS.length = 8)
     (c : Chain Ep) (hok : (c.map Ep.sh).Ok) (hw : c.All (fun e => e.o.Fits))
     (hgen : c.gen = false → c.first.o.prev = List.replicate 8 0)
     (hlen : c.epochs.length = ms.length) (hcg : c.gen = !gen) (hms : ∀ i < ms.length, ms.getD i 0 ≤ 64)
-    (hB : 4 * (16 + 16 * nSets ms.length gen) < 2 ^ 32)
-    (ts : ℕ → BlockRec.Tree) (W : List Word) (hW : W.length = 29)
-    (hacc : Acc sealH (H (sealMsg X ms gen c ts W))) :
+    (ts : ℕ → BlockRec.Tree) (W : List Word) (hW : W.length = 29) {ρ : ℕ → Q}
+    (hp9 : Holds ρ (sealOps ms gen)) (hg : BlockRec.HookGates VGates ρ (sealOps ms gen))
+    (hke : wordsOf ρ (keyRegs (parts ms gen)) = sealKeyMsg X ms gen c ts)
+    (hab : BitVec.ofNat 32 (ρ (parts ms gen).J.res.lo).a.val = BitVec.ofNat 32 c.first.o.lo ∧
+      BitVec.ofNat 32 (ρ (parts ms gen).J.res.hi).a.val = BitVec.ofNat 32 c.last.o.hi)
+    (hrest : wordsOf ρ ((parts ms gen).msg.drop 10) = (sealMsg X ms gen c ts W).drop 10) :
     (∃ (x : ℕ → ℕ → F) (cE cB : ℕ → ℕ) (SE SB : ℕ → Spec.SetFile.St Spec.QM31.QM) (rE rB : ℕ → Spec.Sha256.State),
       c.Valid X.leafH X.nodeH X.rootH SatC ∧
       (∀ i < ms.length, EpochOk ts gen i (epAt c i) (ms.getD i 0) (x i) (cE i) (cB i) (SE i) (SB i) (rE i) (rB i)) ∧
-      EndOk W (cE (ms.length - 1)) (SE (ms.length - 1)) (rE (ms.length - 1))
-        (wordsOf (sealRho X ms gen c ts W) (shaStartRegs (parts ms gen) gen)) ∧
-      (gen = true → wordsOf (sealRho X ms gen c ts W) (shaStartRegs (parts ms gen) gen) = List.replicate 8 0) ∧
-      (gen = false → ∃ v : ℕ → F, SetPass.EncSha v 0 (SB 0).sha ∧
-        wordsOf (sealRho X ms gen c ts W) (shaStartRegs (parts ms gen) gen) = shaVec v)) ∨
-    Collides (sealPairs X ms gen c ts W) := by
-  set d := H (sealMsg X ms gen c ts W) with hd
-  obtain ⟨hρ, hres, hg⟩ := TC d (T.stwoSound _ _ hacc)
-  have hρdef : sealRho X ms gen c ts W = X.sealW d := rfl
-  rw [hρdef]
-  set ρ := X.sealW d with hρρ
+      EndOk W (cE (ms.length - 1)) (SE (ms.length - 1)) (rE (ms.length - 1)) (wordsOf ρ (shaStartRegs (parts ms gen) gen)) ∧
+      (gen = true → wordsOf ρ (shaStartRegs (parts ms gen) gen) = List.replicate 8 0) ∧
+      (gen = false → ∃ v : ℕ → F, SetPass.EncSha v 0 (SB 0).sha ∧ wordsOf ρ (shaStartRegs (parts ms gen) gen) = shaVec v) ∧
+      (∀ i < ms.length, ∀ k < 16 * ms.getD i 0, x i (17 + k) = (ρ ((restO (parts ms gen) i).res.hr.getD k 0)).a)) ∨
+    Collides (coreSealPairs X ρ ms gen c ts) := by
   set P := parts ms gen with hP
   set n := ms.length with hnn
   set S := nSets n gen with hS
-  by_cases col : Collides (sealPairs X ms gen c ts W)
+  by_cases col : Collides (coreSealPairs X ρ ms gen c ts)
   · exact Or.inr col
   left
-  have hsp : sealPairs X ms gen c ts W = (wordsOf ρ P.msg, sealMsg X ms gen c ts W) ::
-      (wordsOf ρ (keyRegs P), sealKeyMsg X ms gen c ts) ::
-      (chainV X c ++ accPairsL ((List.range n).map fun i => wordsOf ρ (rootO P i).res.out) (outsOf X.leafH X.nodeH c) ++
-        (List.range n).map (fun i => (openWords ρ (rootO P i).res (hasStart gen i),
-          rootMsg ((epAt c i).sh.key X.leafH X.nodeH) (hasStart gen i) (epAt c i).o)) ++
-        (List.range S).flatMap fun j =>
-          SetPass.setPairs X.leafS X.nodeS X.nwS X.lwS (ts j) (pbAt ρ P gen j) (pfAt ρ P gen j) (RAt ρ P j)) := rfl
   have sub : ∀ x ∈ chainV X c ++ accPairsL ((List.range n).map fun i => wordsOf ρ (rootO P i).res.out) (outsOf X.leafH X.nodeH c) ++
         (List.range n).map (fun i => (openWords ρ (rootO P i).res (hasStart gen i),
           rootMsg ((epAt c i).sh.key X.leafH X.nodeH) (hasStart gen i) (epAt c i).o)) ++
         (List.range S).flatMap (fun j =>
           SetPass.setPairs X.leafS X.nodeS X.nwS X.lwS (ts j) (pbAt ρ P gen j) (pfAt ρ P gen j) (RAt ρ P j)),
-      x ∈ sealPairs X ms gen c ts W := fun x hx => by
-    rw [hsp]; exact List.mem_cons_of_mem _ (List.mem_cons_of_mem _ hx)
+      x ∈ coreSealPairs X ρ ms gen c ts := fun x hx => hx
   have n2 : 2 ≤ n := hlen ▸ epochs_two c
   have S3 : 3 ≤ S := nSets_pos n2
-  obtain ⟨hJ, hSe, hR, hT, hC, hCh, hO, hA, hK, hKey, hD⟩ := seal_parts hρ
+  obtain ⟨hJ, hSe, hR, hT, hC, hCh, hO, hA, hK⟩ := sealOps_parts hp9
   have hCo : ConstsOk ρ P.C.res := consts_sound hC
   have hJeq : P.J = EpochJoin.joinChild 0 0 := rfl
   have hJl := EpochJoin.joinChild_lengths 0 0
   rw [← hJeq] at hJl
-  -- the output message
-  have hml := msg_length (gen := gen) n2
-  obtain ⟨hlo, hhi, hdg⟩ := seal_digest hρ (by rw [hml]; norm_num)
-  have hdw : wordsOf ρ (chainSeal ms gen).results = H (wordsOf ρ P.msg) := by
-    have hrl : (chainSeal ms gen).results.length = 8 :=
-      blake2s_length ((parts ms gen).key.next + 2) (parts ms gen).msg (4 * (parts ms gen).msg.length)
-    rw [wordsOf_eq hrl hdg, H, wordsOf_length]
-  rw [hdw] at hres
-  have hm : wordsOf ρ P.msg = sealMsg X ms gen c ts W := by
-    rcases H_eqC _ _ hres with e | cc
-    · exact e
-    · exact absurd ⟨_, by rw [hsp]; exact List.mem_cons_self, cc⟩ col
-  -- its parts
+  -- the message after the key and the range
   have hFirst := (fits_at hw (i := 0) (by omega))
   have hfirst8 : c.first.o.prev.length = 8 := hw.first.1.2.1
   have hlast8 : c.last.o.fin.length = 8 := hw.last.1.1
-  have hkey8 : (wordsOf ρ P.key.res).length = 8 := by rw [wordsOf_length]; simp [hP, parts, blake2s]
-  obtain ⟨eKey, eAB, eFirst, eLast, eTail, eW⟩ : wordsOf ρ P.key.res = H (sealKeyMsg X ms gen c ts) ∧
-      [word (ρ P.key.next), word (ρ (P.key.next + 1))] = [BitVec.ofNat 32 c.first.o.lo, BitVec.ofNat 32 c.last.o.hi] ∧
-      wordsOf ρ P.J.res.first = c.first.o.prev ∧ wordsOf ρ P.J.res.last = c.last.o.fin ∧
+  obtain ⟨eFirst, eLast, eTail, eW⟩ : wordsOf ρ P.J.res.first = c.first.o.prev ∧ wordsOf ρ P.J.res.last = c.last.o.fin ∧
       wordsOf ρ P.J.res.tail = c.acc X.leafH X.nodeH ∧
       wordsOf ρ ([(openO P (S - 1)).res.cntW] ++ (openO P (S - 1)).res.amtW ++ [(openO P (S - 1)).res.maxhW] ++
         (openO P (S - 1)).res.mroot ++ (openO P (S - 1)).res.shaDg ++ shaStartRegs P gen) = W := by
-    have e := hm
-    rw [parts_msg] at e
-    simp only [sealMsg, wordsOf, List.map_append, List.map_cons, List.map_nil, Function.comp_apply] at e
-    simp only [List.append_assoc] at e
-    obtain ⟨k1, e⟩ := List.append_inj e (by simpa [wordsOf] using hkey8.trans (H_length _).symm)
-    obtain ⟨k2, e⟩ := List.append_inj e (by simp)
+    have e := hrest
+    rw [parts_msg_drop, sealMsg_drop] at e
+    simp only [wordsOf, List.map_append] at e
     have j1 : (parts ms gen).J.res.first.length = 8 := (EpochJoin.joinChild_lengths 0 0).2.1
     have j2 : (parts ms gen).J.res.last.length = 8 := (EpochJoin.joinChild_lengths 0 0).2.2.1
     have j3 : (parts ms gen).J.res.tail.length = 8 := (EpochJoin.joinChild_lengths 0 0).2.2.2.1
+    simp only [List.append_assoc] at e
     obtain ⟨k3, e⟩ := List.append_inj e (by simp [j1, hfirst8])
     obtain ⟨k4, e⟩ := List.append_inj e (by simp [j2, hlast8])
     obtain ⟨k5, e⟩ := List.append_inj e (by simp [j3, EpochChain.Chain.acc_length])
-    refine ⟨k1, ?_, k3, k4, k5, ?_⟩
-    · simpa using k2
-    · simpa [wordsOf, List.append_assoc] using e
-  -- the key message: the children's identities and keys
-  have hkl := keyRegs_length ms gen
-  have hkw := seal_key hρ (by
-    show 4 * (keyRegs (parts ms gen)).length < 2 ^ 32
-    rw [hkl]; exact hB)
-  have hkey : wordsOf ρ P.key.res = H (wordsOf ρ (keyRegs P)) := by
-    rw [wordsOf_eq (by simp [hP, parts, blake2s]) hkw, H, wordsOf_length]; rfl
-  rw [hkey] at eKey
-  have hke : wordsOf ρ (keyRegs P) = sealKeyMsg X ms gen c ts := by
-    rcases H_eqC _ _ eKey with e | cc
-    · exact e
-    · exact absurd ⟨_, by rw [hsp]; exact List.mem_cons_of_mem _ List.mem_cons_self, cc⟩ col
+    refine ⟨k3, k4, k5, ?_⟩
+    simpa [wordsOf, List.append_assoc] using e
   have hsl : P.sets.length = S := chainOuts_length _ _ _
   obtain ⟨eJh, eJk, eSets⟩ : wordsOf ρ P.J.res.chash = X.joinH c.variant ∧
       wordsOf ρ P.J.res.key = (c.map Ep.sh).key X.leafH X.nodeH X.rootH X.joinH ∧
@@ -660,15 +672,12 @@ theorem seal_soundW (X : Ctx) {ok : (ℕ → F) → Prop} {sealH : List Word} {m
     exact ⟨b1, b2⟩
   -- the join: hook 0, a satisfied join with the chain's digest
   obtain ⟨jroot, hjroot, hjmem⟩ := EpochJoin.joinChild_hook 0 0
-  have sJ := T.recVerifies ρ 0 _ _ (hg _ _ _ (mem_seal_J hjmem))
+  have sJ := T.recVerifies ρ 0 _ _ (hg _ _ _ (mem_sealOps_J hjmem))
   rw [List.drop_left' hjroot] at sJ
   change SatC (wordsOf ρ P.J.res.chash) (wordsOf ρ P.J.res.out) at sJ
   have hjo := EpochJoin.joinChild_out hJ
   have hjw : wordsOf ρ P.J.res.out = H (EpochJoin.joinWords ρ P.J.res) := by
     rw [wordsOf_eq hJl.2.2.2.2.1 hjo, H, EpochJoin.joinWords_length hJl.1 hJl.2.1 hJl.2.2.1 hJl.2.2.2.1]; rfl
-  have hab : BitVec.ofNat 32 (ρ P.J.res.lo).a.val = BitVec.ofNat 32 c.first.o.lo ∧
-      BitVec.ofNat 32 (ρ P.J.res.hi).a.val = BitVec.ofNat 32 c.last.o.hi := by
-    rw [← hlo, ← hhi]; simpa using eAB
   have hjm : EpochJoin.joinWords ρ P.J.res = c.msg X.leafH X.nodeH X.rootH X.joinH := by
     simp only [EpochJoin.joinWords, EpochChain.Chain.msg, eJk, eFirst, eLast, eTail, hab.1, hab.2]
   rw [hjw, hjm, eJh] at sJ
@@ -785,8 +794,8 @@ theorem seal_soundW (X : Ctx) {ok : (ℕ → F) → Prop} {sealH : List Word} {m
     -- the hook
     obtain ⟨sroot, hsroot, hsmem⟩ := setChild_hook rc (JEXT + SEXT * j) (j + 1)
     have hmem : Op.hook (j + 1) (sroot ++ (setChild rc (JEXT + SEXT * j) (j + 1)).res.digest)
-        (setChild rc (JEXT + SEXT * j) (j + 1)).res.chash ∈ (chainSeal ms gen).ops :=
-      mem_seal_sets (chainOuts_getD_mem hj ⟨[], ⟨id, [], [], []⟩, 0⟩ (by rw [show (chainOuts _ _ _).getD j _ = _ from hrc]; exact hsmem))
+        (setChild rc (JEXT + SEXT * j) (j + 1)).res.chash ∈ sealOps ms gen :=
+      mem_sealOps_sets (chainOuts_getD_mem hj ⟨[], ⟨id, [], [], []⟩, 0⟩ (by rw [show (chainOuts _ _ _).getD j _ = _ from hrc]; exact hsmem))
     have sC := T.recVerifies ρ _ _ _ (hg _ _ _ hmem)
     rw [List.drop_left' hsroot, setChild_digest hhc] at sC
     obtain ⟨ehash, ekey⟩ := eSets j hj
@@ -839,14 +848,18 @@ theorem seal_soundW (X : Ctx) {ok : (ℕ → F) → Prop} {sealH : List Word} {m
   have l8 : ∀ l : List ℕ, l.length = 8 → (wordsOf ρ l).length = 8 := fun l h => by rw [wordsOf_length, h]
   have hep : ∀ i < n, ∃ x : ℕ → F, EpochOk ts gen i (epAt c i) (ms.getD i 0) x
       (ρ (openO P (endIdx gen i)).res.n).a.val (ρ (openO P (startIdx gen i)).res.n).a.val
-      (Sf (endIdx gen i)) (Sf (startIdx gen i)) (rf (endIdx gen i)) (rf (startIdx gen i)) := by
+      (Sf (endIdx gen i)) (Sf (startIdx gen i)) (rf (endIdx gen i)) (rf (startIdx gen i)) ∧
+      ∀ k < 16 * ms.getD i 0, x (17 + k) = (ρ ((restO P i).res.hr.getD k 0)).a := by
     intro i hi
     obtain ⟨rr, hrr, hhr⟩ := hrests i hi
     obtain ⟨rcl, hrcl, hhcl⟩ := hchals i hi
     obtain ⟨rbase, rhash⟩ := restOpen_sound hhr (hms i hi)
     obtain ⟨rro, hrro, -⟩ := hroots i hi
     obtain ⟨ef, ep, el, er⟩ := hopen i hi
-    refine ⟨fun j => (ρ (rr + j)).a, ?_⟩
+    refine ⟨fun j => (ρ (rr + j)).a, And.intro ?_ (fun k hk => by
+      rw [show (restO P i).res.hr = (List.range (16 * ms.getD i 0)).map (rr + 17 + ·) by rw [hrr]; rfl,
+        List.getD_eq_getElem _ _ (by simpa using hk)]
+      simp [Nat.add_assoc])⟩
     have hch : (restO P i).res.ch = (List.range 12).map (rr + 5 + ·) := by rw [hrr]; rfl
     rw [hch] at hrcl hhcl
     have hcp := chal_pub hhcl hCo (fun k hk => by have := rbase (5 + k) (by omega); rwa [← Nat.add_assoc] at this)
@@ -964,7 +977,7 @@ theorem seal_soundW (X : Ctx) {ok : (ℕ → F) → Prop} {sealH : List Word} {m
   choose! x hx using hep
   refine ⟨x, fun i => (ρ (openO P (endIdx gen i)).res.n).a.val, fun i => (ρ (openO P (startIdx gen i)).res.n).a.val,
     fun i => Sf (endIdx gen i), fun i => Sf (startIdx gen i), fun i => rf (endIdx gen i), fun i => rf (startIdx gen i),
-    hValid, hx, ?_, ?_, ?_⟩
+    hValid, fun i hi => (hx i hi).1, ?_, ?_, ?_, fun i hi => (hx i hi).2⟩
   · -- the end facts
     have hjl : endIdx gen (n - 1) < S := endIdx_lt (by omega)
     obtain ⟨-, -, -, -, hmr, hcw, ham, hmx, v, hv, hsd⟩ := hSf _ hjl
@@ -989,6 +1002,91 @@ theorem seal_soundW (X : Ctx) {ok : (ℕ → F) → Prop} {sealH : List Word} {m
     refine ⟨v, by simp only [hs0]; exact hv, ?_⟩
     simp only [shaStartRegs, hgen', Bool.false_eq_true, if_false]
     exact hsd
+
+
+set_option maxHeartbeats 4000000 in
+/-- **The chain seal is sound, up to a named collision (SEAL-LEAN).** -/
+theorem seal_soundW (X : Ctx) {ok : (ℕ → F) → Prop} {sealH : List Word} {ms : List ℕ} {gen : Bool}
+    (T : EpochChain.TrustEW Acc SatC VGates X.leafH X.nodeH X.rootH X.joinH (RecCR.LeafAt ok) X.nw X.lw X.rootW X.joinW)
+    (TS : RecCR.TrustW Acc SatC VGates X.leafS X.nodeS SetTree.setNodeProgram (SetPass.LeafAtS SetPass.SegOk) X.nwS X.lwS)
+    (TC : ∀ d, SatC sealH d → Holds (X.sealW d) (chainSeal ms gen).ops ∧
+      wordsOf (X.sealW d) (chainSeal ms gen).results = d ∧ BlockRec.HookGates VGates (X.sealW d) (chainSeal ms gen).ops)
+    (hl : ∀ L, (X.leafH L).length = 8) (hn : ∀ a v, (X.nodeH a v).length = 8)
+    (hr : ∀ M p s, (X.rootH M p s).length = 8) (hj : ∀ v, (X.joinH v).length = 8)
+    (hlS : ∀ L, (X.leafS L).length = 8) (hnS : X.nodeS.length = 8)
+    (c : Chain Ep) (hok : (c.map Ep.sh).Ok) (hw : c.All (fun e => e.o.Fits))
+    (hgen : c.gen = false → c.first.o.prev = List.replicate 8 0)
+    (hlen : c.epochs.length = ms.length) (hcg : c.gen = !gen) (hms : ∀ i < ms.length, ms.getD i 0 ≤ 64)
+    (hB : 4 * (16 + 16 * nSets ms.length gen) < 2 ^ 32)
+    (ts : ℕ → BlockRec.Tree) (W : List Word) (hW : W.length = 29)
+    (hacc : Acc sealH (H (sealMsg X ms gen c ts W))) :
+    (∃ (x : ℕ → ℕ → F) (cE cB : ℕ → ℕ) (SE SB : ℕ → Spec.SetFile.St Spec.QM31.QM) (rE rB : ℕ → Spec.Sha256.State),
+      c.Valid X.leafH X.nodeH X.rootH SatC ∧
+      (∀ i < ms.length, EpochOk ts gen i (epAt c i) (ms.getD i 0) (x i) (cE i) (cB i) (SE i) (SB i) (rE i) (rB i)) ∧
+      EndOk W (cE (ms.length - 1)) (SE (ms.length - 1)) (rE (ms.length - 1))
+        (wordsOf (sealRho X ms gen c ts W) (shaStartRegs (parts ms gen) gen)) ∧
+      (gen = true → wordsOf (sealRho X ms gen c ts W) (shaStartRegs (parts ms gen) gen) = List.replicate 8 0) ∧
+      (gen = false → ∃ v : ℕ → F, SetPass.EncSha v 0 (SB 0).sha ∧
+        wordsOf (sealRho X ms gen c ts W) (shaStartRegs (parts ms gen) gen) = shaVec v)) ∨
+    Collides (sealPairs X ms gen c ts W) := by
+  set d := H (sealMsg X ms gen c ts W) with hd
+  obtain ⟨hρ, hres, hg⟩ := TC d (T.stwoSound _ _ hacc)
+  have hρdef : sealRho X ms gen c ts W = X.sealW d := rfl
+  rw [hρdef]
+  set ρ := X.sealW d with hρρ
+  set P := parts ms gen with hP
+  by_cases col : Collides (sealPairs X ms gen c ts W)
+  · exact Or.inr col
+  have hsp : sealPairs X ms gen c ts W = (wordsOf ρ P.msg, sealMsg X ms gen c ts W) ::
+      (wordsOf ρ (keyRegs P), sealKeyMsg X ms gen c ts) :: coreSealPairs X ρ ms gen c ts := rfl
+  have n2 : 2 ≤ ms.length := hlen ▸ epochs_two c
+  -- the output message
+  have hml := msg_length (gen := gen) n2
+  obtain ⟨hlo, hhi, hdg⟩ := seal_digest hρ (by rw [hml]; norm_num)
+  have hdw : wordsOf ρ (chainSeal ms gen).results = H (wordsOf ρ P.msg) := by
+    have hrl : (chainSeal ms gen).results.length = 8 :=
+      blake2s_length ((parts ms gen).key.next + 2) (parts ms gen).msg (4 * (parts ms gen).msg.length)
+    rw [wordsOf_eq hrl hdg, H, wordsOf_length]
+  rw [hdw] at hres
+  have hm : wordsOf ρ P.msg = sealMsg X ms gen c ts W := by
+    rcases H_eqC _ _ hres with e | cc
+    · exact e
+    · exact absurd ⟨_, by rw [hsp]; exact List.mem_cons_self, cc⟩ col
+  have hkey8 : (wordsOf ρ P.key.res).length = 8 := by rw [wordsOf_length]; simp [hP, parts, blake2s]
+  obtain ⟨eKey, eAB⟩ : wordsOf ρ P.key.res = H (sealKeyMsg X ms gen c ts) ∧
+      [word (ρ P.key.next), word (ρ (P.key.next + 1))] = [BitVec.ofNat 32 c.first.o.lo, BitVec.ofNat 32 c.last.o.hi] := by
+    have e := hm
+    rw [parts_msg] at e
+    simp only [sealMsg, wordsOf, List.map_append, List.map_cons, List.map_nil, Function.comp_apply] at e
+    simp only [List.append_assoc] at e
+    obtain ⟨k1, e⟩ := List.append_inj e (by simpa [wordsOf] using hkey8.trans (H_length _).symm)
+    obtain ⟨k2, -⟩ := List.append_inj e (by simp)
+    exact ⟨k1, by simpa using k2⟩
+  -- the key message: the children's identities and keys
+  have hkl := keyRegs_length ms gen
+  have hkw := seal_key hρ (by
+    show 4 * (keyRegs (parts ms gen)).length < 2 ^ 32
+    rw [hkl]; exact hB)
+  have hkey : wordsOf ρ P.key.res = H (wordsOf ρ (keyRegs P)) := by
+    rw [wordsOf_eq (by simp [parts, blake2s]) hkw, H, wordsOf_length]; rfl
+  rw [hkey] at eKey
+  have hke : wordsOf ρ (keyRegs P) = sealKeyMsg X ms gen c ts := by
+    rcases H_eqC _ _ eKey with e | cc
+    · exact e
+    · exact absurd ⟨_, by rw [hsp]; exact List.mem_cons_of_mem _ List.mem_cons_self, cc⟩ col
+  have hab : BitVec.ofNat 32 (ρ P.J.res.lo).a.val = BitVec.ofNat 32 c.first.o.lo ∧
+      BitVec.ofNat 32 (ρ P.J.res.hi).a.val = BitVec.ofNat 32 c.last.o.hi := by
+    rw [← hlo, ← hhi]; simpa using eAB
+  have hrest : wordsOf ρ (P.msg.drop 10) = (sealMsg X ms gen c ts W).drop 10 := by
+    rw [← hm]; simp [wordsOf, List.map_drop]
+  have hp9 : Holds ρ (sealOps ms gen) := fun o ho => hρ o (by
+    rw [chainSeal_ops']; exact List.mem_append_left _ (List.mem_append_left _ ho))
+  have hg9 : BlockRec.HookGates VGates ρ (sealOps ms gen) := fun i a o ho => hg i a o (by
+    rw [chainSeal_ops']; exact List.mem_append_left _ (List.mem_append_left _ ho))
+  rcases seal_core X T TS hl hn hr hj hlS hnS c hok hw hgen hlen hcg hms ts W hW hp9 hg9 hke hab hrest with r | cc
+  · obtain ⟨x, cE, cB, SE, SB, rE, rB, a, b, d, e, f, -⟩ := r
+    exact Or.inl ⟨x, cE, cB, SE, SB, rE, rB, a, b, d, e, f⟩
+  · exact absurd (cc.mono fun x hx => by rw [hsp]; exact List.mem_cons_of_mem _ (List.mem_cons_of_mem _ hx)) col
 
 
 end

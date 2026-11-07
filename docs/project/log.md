@@ -21,6 +21,23 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-11-07 (session 33) — SEAL-T-LEAN: the SEAL-T seal's soundness composed in Lean
+Who: Claude (agent, Opus 5.5), owner: "Go ahead with SEAL-T-LEAN"
+Roadmap: SEAL-T-LEAN done (SEAL-T still awaits the owner's review of D-052)
+Done:
+- `Spec/MmrSub.lean` (f42d5d5): `sub_inclusionC` (a path to an inner node), `mmr_sub`/`mmr_subC` (an aligned block of `2^k` leaves is a node of the canonical MMR, the perfect tree over it), `mmr_sides_eq` (sides depend on the leaf count only).
+- `Circuit/ChainSealTPaths.lean` (f42d5d5): `sealT_headerC` (paths + header chain: genesis leaf, every child's root = `rootFrom` of the chain's block hashes at its position, or a named node-hash collision), `pathOk_steps`, `tState_eq`, `rootFrom_bal`, concrete path registers (`cReg`, `cLeaf`, `sealT_gpathC`, `sealT_cpathC`, `cLeaf_holds`).
+- `Circuit/ChainSealCompose.lean`: `seal_core` (the D-051 proof's body, from the shared parts, the key identities, the range words and the message after them); `seal_soundW` now a wrapper over it (statement unchanged); `seal_core` also states `x i (17 + k)` is the `rest` preimage's register.
+- `Circuit/ChainSealTCompose.lean`: `sealT_soundW`.
+Evidence:
+- `(cd lean && lake build)`: "Build completed successfully (8927 jobs)"; `#print axioms` of `mmr_subC`, `sealT_headerC`, `seal_core`, `seal_soundW`, `sealT_soundW`: `propext, Classical.choice, Quot.sound`; `grep -rnE "\bsorry\b|native_decide|bv_decide" lean/StarkedAir`: no matches.
+- Zig: the verifier's height word is `n_headers − 1` (`chain_seal.zig`: `HeaderCountMismatch` unless `height + 1 = n_headers`), as `sealMsgT` states.
+Problems / lessons:
+- `rfl` on `partsT` projections works only in the left-associated form `partsT` builds; `simp only [List.append_assoc]` before `rfl` breaks it (state the flat form, then a regrouped corollary).
+- `tauto` on membership in `chainSealT`'s ops timed out; `List.mem_append_left` 12× (`mem_chainSealT_hc`) is instant.
+- Named collisions must be over concrete pairs: the paths' registers are fixed via `chainOuts`' last `next` (`chainOuts_getElem_last`), not existentials.
+Next: owner review of D-052; optional: the test chain's SEAL-T proof (~17 GB).
+
 ## 2026-11-06 (session 32) — SEAL-T proved on mainnet, verified, VK pinned
 Who: Claude (agent, Opus 5.5), owner: "go on, and work on this machine", then "memory is free, have at it"
 Roadmap: SEAL-T proved on mainnet (SEAL-T-LEAN open); D-052 still proposed

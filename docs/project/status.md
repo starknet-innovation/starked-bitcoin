@@ -4,14 +4,12 @@ Rewritten at the end of every session; see [README.md](README.md#ending-a-sessio
 If `HEAD at last update` doesn't match `git log -1`, this file is stale:
 follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work).
 
-- **Updated:** 2026-11-06 (session 32: SEAL-T proved on mainnet, verified, VK pinned)
-- **HEAD at last update:** 1fccc06 (pushed) plus this session's commit
+- **Updated:** 2026-11-07 (session 33: SEAL-T-LEAN)
+- **HEAD at last update:** this session's commit (f42d5d5 and the next; not pushed)
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
-- **Current item:** SEAL-T-LEAN. SEAL-T (D-052, proposed) is proved on mainnet 935,001–972,500
-  (`data/seal972/outT/seal-972500.bin`: 69.5 M variables, 2^24, 131 s, 14.3 GB, 631 KB), verified in
-  0.2 s with the header root, genesis checks and block-hash paths in-circuit, its VK pinned
-  (`vk/epoch/sealt-935001-972500.vk`) and remade by `setup-seal-vk --paths 32`. Its gadgets are proven
-  (`Circuit/ChainSealTSound.lean`); their composition into the seal theorem is not.
+- **Current item:** none in progress. SEAL-T (D-052, proposed) is proved on mainnet, pinned, and its
+  soundness is composed in Lean (`sealT_soundW`, `Circuit/ChainSealTCompose.lean`, standard axioms).
+  D-052 awaits the owner's review.
 
 ## State in one paragraph
 
@@ -27,13 +25,11 @@ including the seal's composed statement (`seal_soundW`); trusted items in [verif
 
 ## Next step (concrete)
 
-1. **SEAL-T-LEAN:** in a new file `lean/StarkedAir/Circuit/ChainSealTCompose.lean`, state `sealT_soundW`:
-   `seal_soundW`'s conclusion plus "every epoch child's block-hash root is the MMR subtree of the header
-   chain at its position", from `sealT_cpath`/`sealT_gpath` (paths reach `T`), the header tree's trust record
-   (`TrustK`-style for `hdrChild`'s digest) and `Spec.Mmr.mmr_inclusionC`. Child roots sit at level `k`, so
-   a subtree version of `mmr_inclusionC` is needed first (`Spec/Mmr.lean`).
-2. Optional: the test chain's SEAL-T proof (81.8 M variables, likely ~17 GB: more than the Mac has free).
-3. Backlog: SET-VK-SETUP (needs one mainnet segment proof from the node), profile `verify-seal`/`verify-chain` on the node.
+1. **Owner: review D-052** (`docs/project/decisions.md`), now proved, pinned and composed in Lean.
+2. Optional: the test chain's SEAL-T proof (81.8 M variables, ~17 GB: more than the Mac has free; a pod).
+3. Optional, Lean: discharge `MmrT` (HC-HASHTREE's shape binding) by carrying the tree shape through
+   `htree_soundW` (`RecCR.lean`) and `fold_eq_mmr` (`Spec/Mmr.lean`).
+4. Backlog: SET-VK-SETUP (needs one mainnet segment proof from the node), profile `verify-seal`/`verify-chain` on the node.
 
 ## In flight
 
@@ -44,6 +40,7 @@ including the seal's composed statement (`seal_soundW`); trusted items in [verif
 
 ## Needs owner
 
+- **Push `main`**: this session's Lean commits are local.
 - **Review D-052** (SEAL-T, proposed): proved and pinned now; acceptance is the owner's.
 - **STWO-225-FU:** follow up on stwo-zig#225 upstream? Outward-facing.
 
@@ -82,6 +79,7 @@ open StarkedAir.HeaderChain StarkedAir.Spec.Bitcoin
 #print axioms StarkedAir.Circuit.ChainSeal.seal_soundW
 #print axioms StarkedAir.Circuit.ChainSeal.pathOps_sound
 #print axioms StarkedAir.Circuit.ChainSeal.sealT_cpath
+#print axioms StarkedAir.Circuit.ChainSeal.sealT_soundW
 EOS
 (cd lean && lake env lean /tmp/ax.lean)  # expect: propext, Classical.choice, Quot.sound
 
