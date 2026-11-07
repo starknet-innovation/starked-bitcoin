@@ -174,6 +174,8 @@ import StarkedAir.Circuit.ChainSealSet
 import StarkedAir.Circuit.ChainSealCompose
 import StarkedAir.Circuit.ChainSealT
 import StarkedAir.Circuit.ChainSealTSound
+import StarkedAir.Spec.MmrSub
+import StarkedAir.Circuit.ChainSealTPaths
 import StarkedAir.Circuit.EpochRootSound
 import StarkedAir.Circuit.EpochJoinSound
 import StarkedAir.Circuit.EpochChainSound
