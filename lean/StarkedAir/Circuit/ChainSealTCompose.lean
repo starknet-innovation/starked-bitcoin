@@ -4,9 +4,9 @@ accepted under the pinned seal identity with the digest the verifier recomputes 
 over the join's, the set trees' and the header tree's identities, the range, the start and end set
 digests, `acc`, the end facts `W`, the tip, its height `nH − 1`, the chainwork, every path's sides and
 length from the positions alone) gives, under the trust records of the epoch chain (`TrustEW`), the
-set trees and the header tree (`TrustW`), the header tree's MMR shape (`MmrT`, trusted HC-HASHTREE),
-the seal's own circuit (`THolds` for `sealW d`) and the verifier's native position checks
-(`PathNative`):
+set trees (`TrustW`) and the header tree (`TrustWH`: its leaf guarantee names the leaf's log size, as
+`leaf_valid_S` proves), the seal's own circuit (`THolds` for `sealW d`) and the verifier's native position checks
+(`PathNative`, including the header plan: `th` is `planTree logs` with `logs` aligned):
 
 - everything `seal_soundW` concludes (the chain of epoch openings valid, each epoch's sets proven
   passes with the balance, the end facts), and
@@ -41,6 +41,7 @@ structure HCtx where
   nw : List Word → ℕ → Q
   lw : ℕ → List Word → ℕ → F
   th : BlockRec.Tree
+  logs : List ℕ
   nH : ℕ
   tipW : List Word
   workW : List Word
@@ -48,8 +49,13 @@ structure HCtx where
   lvl : ℕ → ℕ
 
 /-- What `verify-seal` checks natively about the positions (`chain_seal.pathPubs`: `PathTooLong`,
-`BadPath`; `epoch_root.openHead`: aligned sizes, `BeyondChain`; D-052: fewer than `2^31` headers). -/
+`BadPath`; `epoch_root.openHead`: aligned sizes, `BeyondChain`; D-052: fewer than `2^31` headers) and
+about the header plan (`store.rootExpect`: `HT.validPlan`, and the root key `node.expectedRoot` builds,
+`HT.mmrFold` over the plan's leaves). -/
 structure PathNative (ms : List ℕ) (D : ℕ) (Y : HCtx) : Prop where
+  plan : Y.th = HeaderTree.planTree Y.logs
+  logs0 : Y.logs ≠ []
+  align : Spec.Mmr.Aligned 0 (Y.logs.map (· - 8))
   n0 : 0 < Y.nH
   nlt : Y.nH ≤ 2 ^ 31
   gD : (gSides Y.nH).length ≤ D
@@ -242,8 +248,7 @@ theorem sealT_soundW (X : Ctx) (Y : HCtx) {ok : (ℕ → F) → Prop} {sealH : L
     (hD : D ≤ 60)
     (T : EpochChain.TrustEW Acc SatC VGates X.leafH X.nodeH X.rootH X.joinH (RecCR.LeafAt ok) X.nw X.lw X.rootW X.joinW)
     (TS : RecCR.TrustW Acc SatC VGates X.leafS X.nodeS SetTree.setNodeProgram (SetPass.LeafAtS SetPass.SegOk) X.nwS X.lwS)
-    (TH : RecCR.TrustW Acc SatC VGates Y.leafH Y.nodeH nodeProgram RecCR.LeafAtH Y.nw Y.lw)
-    (HS : ∀ p, SatC (Y.th.hash Y.leafH Y.nodeH) (HeaderRec.pubDigest (Y.th.key Y.leafH Y.nodeH) p) → MmrT p)
+    (TH : RecCR.TrustWH Acc SatC VGates Y.leafH Y.nodeH Y.nw Y.lw)
     (TC : ∀ d, SatC sealH d → THolds ms gen D (X.sealW d) ∧
       wordsOf (X.sealW d) (chainSealT ms gen D).results = d ∧ BlockRec.HookGates VGates (X.sealW d) (chainSealT ms gen D).ops)
     (hl : ∀ L, (X.leafH L).length = 8) (hn : ∀ a v, (X.nodeH a v).length = 8)
@@ -377,12 +382,11 @@ theorem sealT_soundW (X : Ctx) (Y : HCtx) {ok : (ℕ → F) → Prop} {sealH : L
   rw [← partsT_hc] at sH
   rw [ehash, ekey] at sH
   have sat : SatC (Y.th.hash Y.leafH Y.nodeH) (HeaderRec.pubDigest (Y.th.key Y.leafH Y.nodeH) (hpub ρ ms gen D)) := sH
-  have hv : PubValidT (hpub ρ ms gen D) := by
-    rcases RecCR.htree_soundW TH hlH hnH Y.th _ sat with v | cc
-    · exact v
+  have hv : HeaderTree.PubValidM (hpub ρ ms gen D) := by
+    rcases RecCR.htree_soundWS TH hlH hnH Y.th _ sat with v | cc
+    · rw [hN.plan] at v; exact v.toM hN.logs0 hN.align
     · exact absurd (cc.mono fun x hx => by
         rw [hsp]; exact List.mem_cons_of_mem _ (List.mem_cons_of_mem _ (List.mem_append_right _ hx))) col
-  have hshape := HS _ sat
   -- the paths' words
   have hP0 : Q.paths.getD 0 noPath = gpathT ms gen D := by rw [hQ, partsT_paths]; rfl
   have hPq : ∀ q, Q.paths.getD (q + 1) noPath = (cpathsT ms gen D).getD q noPath := fun q => by rw [hQ, partsT_paths]; rfl
@@ -419,7 +423,7 @@ theorem sealT_soundW (X : Ctx) (Y : HCtx) {ok : (ℕ → F) → Prop} {sealH : L
     · have := (gq q hq).2.1; rwa [hPq] at this
     · have := (gq q hq).2.2; rwa [hPq] at this
   -- the header chain
-  obtain ⟨Hh, hs, hseg, hg0, himp⟩ := sealT_headerC hT hD hv hshape pp
+  obtain ⟨Hh, hs, hseg, hg0, himp⟩ := sealT_headerC hT hD hv pp
   -- its length is the verifier's count (the height word)
   have hbase : ∀ k < N_PUB, IsBase (ρ (Q.hc.res.pubs k)) := by
     rw [partsT_hc]; exact hdrChild_base hhc

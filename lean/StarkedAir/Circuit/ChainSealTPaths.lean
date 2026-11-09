@@ -1,11 +1,11 @@
 /-
 **SEAL-T's paths, composed with the header chain (SEAL-T-LEAN, D-052).** From the seal's circuit
-facts (`THolds`), the header root child's public inputs `p` being proven (`PubValidT p`, which the
-header tree's trust record gives: `RecCR.htree_soundW`), the tree under `T` being the canonical MMR
-over its leaves (`MmrT p`, trusted: HC-HASHTREE) and what the verifier recomputes for each path
+facts (`THolds`), the header root child's public inputs `p` being proven with `T` the canonical MMR
+root over the chain's block hashes (`HeaderTree.PubValidM p`, which the header tree's trust record and
+the verifier's aligned plan give: `RecCR.htree_soundWS`, `PubValidS.toM`) and what the verifier recomputes for each path
 (`PathPubsOk`: `chain_seal.pathPubs`, and the child positions' alignment and bounds it checks natively):
 
-- the header chain is a valid chain of `H` headers from genesis (`chain_from_genesis_checked`), and
+- the header chain is a valid chain of `H` headers from genesis (`chain_from_genesis_M`), and
   when `H` is the verifier's header count `nH`:
 - its block 0's hash is Bitcoin's genesis hash, and
 - every epoch child's block-hash root (the packed words of its limbs in `rest`'s preimage) is the
@@ -18,6 +18,7 @@ the chain's leaves).
 import StarkedAir.Circuit.ChainSealTSound
 import StarkedAir.Spec.MmrSub
 import StarkedAir.Gadgets.RootChecks
+import StarkedAir.Circuit.HeaderShape
 
 namespace StarkedAir.Circuit.ChainSeal
 
@@ -253,11 +254,6 @@ theorem cLeaf_holds {ms : List ℕ} {gen : Bool} {D : ℕ} (h : THolds ms gen D 
 
 /-! ### The composition -/
 
-/-- **The header tree under `T` is the canonical MMR over its leaves** (trusted, HC-HASHTREE: the
-verifier fixes the segment plan through the root key and checks it is aligned; `fold_eq_mmr`
-proves the aligned fold is `mmr`; that the recursion's tree is that fold is not proven). -/
-def MmrT (p : ℕ → F) : Prop := ∀ t : HTree, pubT p = limbsOf t.root → pubT p = limbsOf (mmr t.leaves).root
-
 /-- The verifier's sides (`chain_seal.pathPubs`): genesis, leaf 0's among `nH`; a child at
 `(pos, k)`, leaf `pos`'s with the first `k` dropped. -/
 def gSides (nH : ℕ) : List Bool := mmrSides nH 0
@@ -298,7 +294,7 @@ genesis whose block hashes are `T`'s leaves; and when `H = nH`, block 0's hash i
 hash and every epoch child's block-hash root (its packed limbs) is the perfect tree's root over block
 hashes `pos q … pos q + 2^(lvl q) − 1`; or two of `tPairs` collide. -/
 theorem sealT_headerC {ms : List ℕ} {gen : Bool} {D nH : ℕ} {pos lvl : ℕ → ℕ} (h : THolds ms gen D ρ) (hD : D ≤ 60)
-    (hv : PubValidT (hpub ρ ms gen D)) (hshape : MmrT (hpub ρ ms gen D)) (pp : PathPubsOk ρ ms gen D nH pos lvl) :
+    (hv : HeaderTree.PubValidM (hpub ρ ms gen D)) (pp : PathPubsOk ρ ms gen D nH pos lvl) :
     ∃ H hs, Spec.Bitcoin.SegmentValid H hs
       ⟨HeaderChain.pubState (hpub ρ ms gen D) 0, 0, HeaderChain.leN (HeaderChain.pubWord (hpub ρ ms gen D) 34),
         HeaderChain.leN (HeaderChain.pubWord (hpub ρ ms gen D) 44), HeaderChain.leN (HeaderChain.pubWord (hpub ρ ms gen D) 36), [], 0⟩
@@ -309,10 +305,10 @@ theorem sealT_headerC {ms : List ℕ} {gen : Bool} {D nH : ℕ} {pos lvl : ℕ �
           ∀ q < (childIdx ms).length,
             regState ρ (cLeaf ms gen D q).res = BlockTree.rootFrom (fun j => Spec.Bitcoin.sha256d (hs j)) (lvl q) (pos q)) ∨
         CollidesIn (tPairs ρ ms gen D nH pos lvl ((List.range H).map fun j => Spec.Bitcoin.sha256d (hs j)))) := by
-  obtain ⟨H, hs, hseg, hg0, t, hleaves, hroot⟩ := HeaderTree.chain_from_genesis_checked hv (sealT_genesis h)
+  obtain ⟨H, hs, hseg, hg0, -, hmr0⟩ := HeaderTree.chain_from_genesis_M hv (sealT_genesis h)
   refine ⟨H, hs, hseg, hg0, fun hH => ?_⟩
   set L := (List.range H).map fun j => Spec.Bitcoin.sha256d (hs j) with hL
-  have hmr : pubT (hpub ρ ms gen D) = limbsOf (mmr L).root := by rw [← hleaves]; exact hshape t hroot
+  have hmr : pubT (hpub ρ ms gen D) = limbsOf (mmr L).root := hmr0
   have hTs : tState ρ ms gen D = (mmr L).root := tState_eq h hmr
   have hLl : L.length = nH := by rw [hL, List.length_map, List.length_range, hH]
   have hLne : L ≠ [] := by intro e; rw [e] at hLl; simp at hLl; exact absurd hLl.symm (Nat.ne_of_gt pp.n0)

@@ -21,6 +21,24 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-11-09 (session 35) — Roadmap for the usable proof; test-chain SEAL-T proved; `MmrT` discharged
+Who: Claude (agent, Opus 5.5), owner: "Add 1 and 3 to the roadmap, in that order, and 2 in a backlog. Also add another item at the top of the roadmap: iterating from the tip. Then do the two optional iteams"
+Roadmap: new "Now" section TIP-ITER, WEB-MEMBER, NODE-BOOT (todo); backlog STARKNET-PATH; SEAL-T's optional items done
+Done:
+- Roadmap (55b76f7): TIP-ITER, WEB-MEMBER, NODE-BOOT in that order at the top; STARKNET-PATH in the backlog.
+- The test chain's SEAL-T seal (`prove-seal … data/test-chain/outT --unpinned --paths 32 …`) on a RunPod CPU pod, binary cross-compiled on the Mac; seal copied to `data/test-chain/outT/` (gitignored), with `pod-run.log`.
+- `Circuit/HeaderShape.lean`: `fill`, `PubValidS`, `leaf_valid_S`, `pub_compose_S`, `node_composeS`, `TrustWH`, `htree_soundWS`, `planTree` (Lean mirror of `HT.mmrFold`), `planTree_fill`, `cnt_planTree`, `PubValidM`, `PubValidS.toM`, `chain_from_genesis_M`. `sealT_headerC` takes `PubValidM`; `sealT_soundW` drops `MmrT`/`HS`, takes `TrustWH`, and `PathNative` gains `plan`, `logs0`, `align` (`HCtx.logs`).
+Evidence:
+- Pod 1 (cpu5g, 16 vCPU, 64 GB): `prove-seal` killed ("Killed") at 61,899,568 KB sampled RSS. Pod 2 (cpu5m, 32 vCPU, 256 GB, $2.08/h): "seal proved: 81815337 variables, trace 2^25 (47.1s)", wall 60 s, peak sampled RSS 64,417,088 KB; `seal-15.bin` 610,117 bytes (sha256 `1ef97f58eeb33f9d…`), `sealvk.bin` 153 bytes.
+- `verify-seal --unpinned`: "header chain plan checked: headers 0..970733; its root proof, genesis and block-hash paths verified in the seal", "VERIFIED blocks 0..15 as one sealed proof: the coin set after block 15 is 15 coins", 75,000,000,000 sat, `hash_serialized d6ab257d…`; pinned only: `VkNotPinned`. Tampers (resealed): proof byte `CircuitProofRejected`, amount `WrongDigest`, Merkle root `WrongDigest`; honest file VERIFIED again. Re-verified on the Mac (0.1 s). Both pods deleted; `list-pods` empty. Cost not read from billing (estimate under $0.50).
+- `(cd lean && lake build)`: "Build completed successfully (8928 jobs)"; `#print axioms` of `sealT_soundW`, `sealT_headerC`, `planTree_fill`, `PubValidS.toM`, `htree_soundWS`, `leaf_valid_S`: `propext, Classical.choice, Quot.sound`; no `sorry`/`native_decide`/`bv_decide` in `HeaderShape.lean`.
+Problems / lessons:
+- The test chain's SEAL-T is a 2^25 trace (mainnet's is 2^24) and needed ~64 GB resident on Linux; the "~17 GB" estimate from the Mac was wrong. Size CPU pods for 2^25 at ≥ 128 GB.
+- `/usr/bin/time` is absent on the RunPod pytorch image (its absence silently hid `prove-seal`'s output in the first run script); sample `ps -o rss=` instead.
+- In zsh, an unquoted `$O` holding several ssh options is one word; use an array.
+- `.leaf`/`.node` resolved to `StarkedAir.Tree` in the `HeaderTree` namespace; write `Circuit.BlockRec.Tree` in full.
+Next: TIP-ITER design and compute estimate (status.md).
+
 ## 2026-11-09 (session 34) — D-052 accepted
 Who: Claude (agent, Opus 5.5), owner: "cool, then validate it"
 Roadmap: SEAL-T done (D-052 accepted)

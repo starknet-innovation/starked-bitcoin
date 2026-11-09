@@ -4,11 +4,12 @@ Rewritten at the end of every session; see [README.md](README.md#ending-a-sessio
 If `HEAD at last update` doesn't match `git log -1`, this file is stale:
 follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work).
 
-- **Updated:** 2026-11-07 (session 33: SEAL-T-LEAN)
-- **HEAD at last update:** this session's commit (f42d5d5 and the next; not pushed)
+- **Updated:** 2026-11-09 (session 35: roadmap for the usable proof; test-chain SEAL-T; `MmrT` discharged)
+- **HEAD at last update:** this session's commit (after 55b76f7; not pushed)
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
-- **Current item:** none in progress. SEAL-T (D-052, accepted 2026-11-09) is proved on mainnet, pinned,
-  and its soundness is composed in Lean (`sealT_soundW`, `Circuit/ChainSealTCompose.lean`, standard axioms).
+- **Current item:** TIP-ITER (top of the roadmap's "Now" section, owner 2026-11-09), not started.
+  SEAL-T (D-052, accepted) is proved on mainnet and the test chain, pinned, and composed in Lean
+  (`sealT_soundW`) with the header tree's MMR shape now proven (`Circuit/HeaderShape.lean`).
 
 ## State in one paragraph
 
@@ -24,10 +25,12 @@ including the seal's composed statement (`seal_soundW`); trusted items in [verif
 
 ## Next step (concrete)
 
-1. Optional: the test chain's SEAL-T proof (81.8 M variables, ~17 GB: more than the Mac has free; a pod).
-2. Optional, Lean: discharge `MmrT` (HC-HASHTREE's shape binding) by carrying the tree shape through
-   `htree_soundW` (`RecCR.lean`) and `fold_eq_mmr` (`Spec/Mmr.lean`).
-3. Backlog: SET-VK-SETUP (needs one mainnet segment proof from the node), profile `verify-seal`/`verify-chain` on the node.
+1. TIP-ITER ([roadmap.md](roadmap.md), "Now"): design the repeatable extension of the seal past 972,500:
+   the header chain from `data/store/mainnet-to-972502.sbchain` (PROOF-STORE `--from`), new block proofs
+   and an epoch from 972,501, rejoin (`prove-chain`), the next set pass, `prove-seal --paths 32`; estimate
+   compute first (block proofs: [gpu-route] figures in [gpu-cuda.md](../design/gpu-cuda.md)).
+2. Then WEB-MEMBER, then NODE-BOOT; STARKNET-PATH is backlog.
+3. Backlog: SET-VK-SETUP, profile `verify-seal`/`verify-chain` on the node.
 
 ## In flight
 
@@ -76,6 +79,8 @@ open StarkedAir.HeaderChain StarkedAir.Spec.Bitcoin
 #print axioms StarkedAir.Circuit.ChainSeal.pathOps_sound
 #print axioms StarkedAir.Circuit.ChainSeal.sealT_cpath
 #print axioms StarkedAir.Circuit.ChainSeal.sealT_soundW
+#print axioms StarkedAir.HeaderTree.planTree_fill
+#print axioms StarkedAir.Circuit.RecCR.htree_soundWS
 EOS
 (cd lean && lake env lean /tmp/ax.lean)  # expect: propext, Classical.choice, Quot.sound
 

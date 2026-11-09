@@ -94,6 +94,7 @@ arithmetic of the statement (balance, links, finish, ranges) is in-circuit. The 
 | Seal | Variables | Trace | Prove (CPU) | Peak RSS | File |
 |---|---|---|---|---|---|
 | test chain 0..15 (3 epochs, 5 set children; M4 Pro, 2026-11-04) | 69,078,170 | 2^24 | 214 s | 14.4 GB | 583,149 bytes |
+| test chain 0..15, SEAL-T `--paths 32` (RunPod cpu5m, 32 vCPU, 256 GB, Linux x86-64; 2026-11-09) | 81,815,337 | 2^25 | 47.1 s | 64.4 GB (sampled `ps` RSS) | 610,117 bytes |
 
 The program for the test chain is 42,375 ops (24,000 Blake2s G gates: 300 blocks, mostly the two
 331-limb state digests per set child); mainnet's is 37,228 ops.
@@ -140,8 +141,13 @@ bytes, the same coin-set facts as the D-051 seal. `verify-seal` accepts it in 0.
 (only `store.rootExpect`: the plan and the root's key). `setup-seal-vk … --paths 32 <header-vk>` remakes
 that VK from public inputs byte for byte. Rejected tampers (checksum recomputed): a bit flipped at body
 offsets 200 and 5,000 (`WrongDigest`), 300,000 and 600,000 (`CircuitProofRejected`); the D-051 VK with the
-SEAL-T file and the reverse (`WrongSealKind`). The test chain's SEAL-T proof (81.8 M variables) was not
-run. The D-051 seal above is unchanged and still pinned.
+SEAL-T file and the reverse (`WrongSealKind`). The test chain's SEAL-T proof (2026-11-09, on a RunPod CPU
+pod: 81,815,337 variables, trace 2^25, 47.1 s, 64.4 GB sampled RSS; a 64 GB pod was killed at 62 GB)
+verifies (`--unpinned`; with pinned VKs only it is rejected, `VkNotPinned`), and three resealed tampers
+are rejected as for the D-051 seal (a proof byte `CircuitProofRejected`, the end amount and the end
+Merkle root `WrongDigest`). The binary was cross-compiled on the Mac (`zig build install
+-Dtarget=x86_64-linux-gnu.2.35 -Dcpu=x86_64_v3 -Doptimize=ReleaseFast --prefix <dir>`). The D-051 seal
+above is unchanged and still pinned.
 
 `chainSealT ms gen D` (`Circuit/ChainSealT.lean`) is `chainSeal ms gen` plus:
 
@@ -183,9 +189,13 @@ block hashes at its position; or a named Blake2s collision (`sealPairsT`) or nod
 canonical MMR and a path to it pins its root; `mmr_sides_eq`: the sides depend on the leaf count only),
 `Circuit/ChainSealTPaths.lean` (`sealT_headerC`), and `seal_core` (`ChainSealCompose.lean`: the D-051
 proof's body, shared by `seal_soundW` and `sealT_soundW`). Hypotheses beyond D-051's: the header tree's
-`TrustW` (`htree_soundW`), `MmrT` (the tree under `T` is the canonical MMR: trusted, HC-HASHTREE), the
-seal circuit trust `TC` for `chainSealT`, and `PathNative` (the verifier's native checks: aligned child
-positions within the chain, dropped sides `false`, paths of at most `D` steps, `nH ≤ 2^31`).
+`TrustWH` (`htree_soundWS`: `TrustW` whose leaf guarantee names the leaf's log size, which `leaf_valid_S`
+proves as `leaf_valid_T` does), the seal circuit trust `TC` for `chainSealT`, and `PathNative` (the
+verifier's native checks: aligned child positions within the chain, dropped sides `false`, paths of at
+most `D` steps, `nH ≤ 2^31`; and the header plan: the root key is `planTree logs`'s, `logs` aligned).
+The header tree's MMR shape was a trusted hypothesis (`MmrT`) until 2026-11-09; it is now proven
+(`Circuit/HeaderShape.lean`): the recursion carries its shape (`PubValidS`), and over an aligned plan the
+recursion's tree is the canonical MMR (`planTree_fill`, via `Spec.Mmr.fold_eq_mmr`).
 
 ## The fold as first planned (2026-11-04)
 
