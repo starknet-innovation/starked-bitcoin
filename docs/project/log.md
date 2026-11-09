@@ -21,6 +21,27 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-11-09 (session 36) — WEB-MEMBER built: the seal verified in the browser, coins checked against it
+Who: Claude (agent, Opus 5.5), owner: "push, then ship 2"
+Roadmap: WEB-MEMBER in progress (built and tested locally on branch `web-member`; node server and public host open)
+Done:
+- Pushed main 944c05a..98e8a71.
+- `src/bin/webverify.zig` + `zig build web -Dtarget=wasm32-wasi`: the SEAL-T verifier as `webverify.wasm` (3.1 MB), with every pinned VK embedded. Exports `verify_seal` and `verify_member`; members are checked against the verified seal's root and last key. `build.zig` skips the prover's C kernels for wasm.
+- `chainproof serve-member <set.bin> <work-dir> <port>`: an HTTP server answering `.sbmember` files, with a cached segment index (`set_tree.SegIndex`, `proveMemberIx`) checked against the pass root at start.
+- `web/`: page, worker, `build.sh`, `test/verify.mjs` (Node) and `test/browser.mjs` (headless Chrome over CDP), `README.md` (build, test, deploy).
+Evidence:
+- `node web/test/verify.mjs …`: ok, 164,539,066 coins, 2,010,133,549,560,777 sat, root `f74e9573…`, 468 ms. The tip hash `0000000000000000000107ead0…4663` equals the node's `getblockhash 972501`.
+- Tampers with the checksum recomputed: offsets 200 and 5000 give `WrongDigest`; 300000 and 600000 give `CircuitProofRejected`. A raw flip gives `ChecksumMismatch`; the D-051 seal gives `WrongSealKind`. These match the native results of session 32.
+- `bridge-972500.sbmember` in wasm: 66 coins, 13,689,057,287 sat, 5 ms.
+- `browser.mjs`: "Verified in 0.4 s", "66 proof(s) verified: 66 unspent, 0 absent".
+- `serve-member` on `data/test-chain/e15`: 3 outpoints (present, below the first key, above the last), 1,275 bytes; `verify-member … --unpinned`: "VERIFIED 3 proofs: 1 unspent coins, 5000000000 sat". A bad outpoint gives 400.
+Problems / lessons:
+- wasm32-freestanding failed: the library links C kernels that need libc. wasm32-wasi in reactor mode (`_initialize`) with a stubbed WASI works. An export named `free` clashes with libc's.
+- The first tip-hash display was byte-swapped per word; it is now checked against Core.
+- Starting `serve-member` on the node was blocked by the auto-mode permission check: this is a long-running service on the owner's machine and needs the owner's go.
+- The Chrome extension was not connected; headless Chrome driven over the DevTools protocol from Node worked (`--dump-dom` does not wait for the worker).
+Next: the owner decides how to run `serve-member` on the node (private tunnel or a public reverse proxy) and where to host the static site; then external review before the public launch. Otherwise TIP-ITER.
+
 ## 2026-11-09 (session 35) — Roadmap for the usable proof; test-chain SEAL-T proved; `MmrT` discharged
 Who: Claude (agent, Opus 5.5), owner: "Add 1 and 3 to the roadmap, in that order, and 2 in a backlog. Also add another item at the top of the roadmap: iterating from the tip. Then do the two optional iteams"
 Roadmap: new "Now" section TIP-ITER, WEB-MEMBER, NODE-BOOT (todo); backlog STARKNET-PATH; SEAL-T's optional items done

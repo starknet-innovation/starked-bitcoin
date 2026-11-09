@@ -1113,6 +1113,53 @@ pub fn proveMembers(a: std.mem.Allocator, file: []const u8, logs: Logs, keys: []
     return out;
 }
 
+/// A set's segment index: each segment's end offset and Merkle root (`passSegments`), cached by
+/// `serve-member` so a query parses one or two segments instead of the whole set.
+pub const SegIndex = struct {
+    ends: []const usize,
+    roots: []const [8]u32,
+
+    const MAGIC = "SBSEGIX1";
+
+    pub fn encode(ix: SegIndex, a: std.mem.Allocator) ![]u8 {
+        const out = try a.alloc(u8, MAGIC.len + 8 + ix.ends.len * 40);
+        @memcpy(out[0..MAGIC.len], MAGIC);
+        std.mem.writeInt(u64, out[MAGIC.len..][0..8], ix.ends.len, .little);
+        var at: usize = MAGIC.len + 8;
+        for (ix.ends, ix.roots) |e, r| {
+            std.mem.writeInt(u64, out[at..][0..8], e, .little);
+            for (r, 0..) |w, i| std.mem.writeInt(u32, out[at + 8 + 4 * i ..][0..4], w, .little);
+            at += 40;
+        }
+        return out;
+    }
+
+    pub fn decode(a: std.mem.Allocator, b: []const u8) !SegIndex {
+        if (b.len < MAGIC.len + 8 or !std.mem.eql(u8, b[0..MAGIC.len], MAGIC)) return error.BadIndex;
+        const n = std.mem.readInt(u64, b[MAGIC.len..][0..8], .little);
+        if (b.len != MAGIC.len + 8 + n * 40) return error.BadIndex;
+        const ends = try a.alloc(usize, n);
+        const roots = try a.alloc([8]u32, n);
+        var at: usize = MAGIC.len + 8;
+        for (ends, roots) |*e, *r| {
+            e.* = @intCast(std.mem.readInt(u64, b[at..][0..8], .little));
+            for (r, 0..) |*w, i| w.* = std.mem.readInt(u32, b[at + 8 + 4 * i ..][0..4], .little);
+            at += 40;
+        }
+        return .{ .ends = ends, .roots = roots };
+    }
+
+    /// The set root these segment roots fold to (the pass's root when the index is the pass's).
+    pub fn root(ix: SegIndex) [8]u32 {
+        return foldRoots(ix.roots);
+    }
+};
+
+/// The membership proof of `key` from a segment index of `file` (`passSegments`' ends and roots).
+pub fn proveMemberIx(a: std.mem.Allocator, file: []const u8, logs: Logs, ix: SegIndex, key: [36]u8) !Member {
+    return memberIn(a, file, logs, ix.ends, ix.roots, key);
+}
+
 fn memberIn(a: std.mem.Allocator, file: []const u8, logs: Logs, ends: []const usize, roots: []const [8]u32, key: [36]u8) !Member {
     if (ends.len == 0) return error.EmptySet;
     const half: usize = @as(usize, 1) << @intCast(logs[SS.C.rec] - 1);

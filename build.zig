@@ -93,7 +93,8 @@ pub fn build(b: *std.Build) void {
             .file = directory.path(b, b.fmt("stwzeva_cpu_air_{d}.c", .{index})),
             .flags = &.{ "-std=c11", "-O3", "-fstrict-aliasing", "-fno-vectorize", "-fno-slp-vectorize", "-gline-tables-only" },
         });
-        registry.linkLibrary(kernels);
+        // The browser verifier (`web`) never runs a prover kernel: skip compiling them for WebAssembly.
+        if (!target.result.cpu.arch.isWasm()) registry.linkLibrary(kernels);
         lib.addImport("stwzeva_cpu_aot", registry);
     }
 
@@ -337,6 +338,28 @@ pub fn build(b: *std.Build) void {
             chainproof.root_module.addAnonymousImport(b.fmt("vk:epoch/{s}", .{name}), .{ .root_source_file = b.path(b.fmt("vk/epoch/{s}.vk", .{name})) });
         chainproof.linkLibC();
         b.installArtifact(chainproof);
+    }
+    // `webverify.wasm` (WEB-MEMBER, web/): the seal verifier and membership check for the browser.
+    // `zig build web -Dtarget=wasm32-freestanding -Doptimize=ReleaseFast` → zig-out/web/webverify.wasm.
+    {
+        const wv = b.addExecutable(.{
+            .name = "webverify",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/bin/webverify.zig"),
+                .target = target,
+                .optimize = optimize,
+                .single_threaded = true,
+                .imports = &.{.{ .name = "starked_bitcoin", .module = lib }},
+            }),
+        });
+        wv.entry = .disabled;
+        wv.rdynamic = true;
+        if (target.result.os.tag == .wasi) wv.wasi_exec_model = .reactor;
+        wv.root_module.addAnonymousImport("vk:mainnet", .{ .root_source_file = b.path("vk/mainnet-q70-p26-l20.vk") });
+        for ([_][]const u8{ "tree-935001-945000", "tree-945001-972500", "join-935001-972500", "set-l22", "sealt-935001-972500" }) |name|
+            wv.root_module.addAnonymousImport(b.fmt("vk:epoch/{s}", .{name}), .{ .root_source_file = b.path(b.fmt("vk/epoch/{s}.vk", .{name})) });
+        const inst = b.addInstallArtifact(wv, .{ .dest_dir = .{ .override = .{ .custom = "web" } } });
+        b.step("web", "Build webverify.wasm (needs -Dtarget=wasm32-freestanding)").dependOn(&inst.step);
     }
     // `survey`: the chain survey (docs/design/chain-survey.md): each block's trace size from its
     // needs, no witness. CPU only; cross-compiles (e.g. -Dtarget=aarch64-linux-gnu).

@@ -113,6 +113,7 @@ fn usage() noreturn {
         \\  chainproof verify-set <work-dir> <dir>:<to>[:<from>:<prev-set.bin>] [--unpinned]
         \\  chainproof set-cut <set.bin> [--logs l0,...,l11]
         \\  chainproof set-member <set.bin> <work-dir> <out.sbmember> <txid>:<vout>...
+        \\  chainproof serve-member <set.bin> <work-dir> <port> [--bind <ip>]
         \\  chainproof verify-member <work-dir> <dir>:<to>[:<from>:<prev-set.bin>] <file.sbmember>... [--unpinned] [--witness-script <hex>]
         \\  chainproof verify-epoch <vk> <file.sbchain> <dir> <to> [--from <a> <prev-set.bin>] [--min-work <hex> | --min-work 0] [--test-strength] [--jobs <n>]
         \\  chainproof prove-epoch-wide|prove-epoch-tree <headers.bin> <dir> <to> <file.sbchain> [--from <a> <prev-set.bin>] [--test-strength]
@@ -382,6 +383,8 @@ pub fn main() !void {
     }
     if (std.mem.eql(u8, cmd, "set-member") and args.len >= 6)
         return setMember(gpa, a, args[2], args[3], args[4], args[5..]);
+    if (std.mem.eql(u8, cmd, "serve-member") and (args.len == 5 or (args.len == 7 and std.mem.eql(u8, args[5], "--bind"))))
+        return serveMember(gpa, a, args[2], args[3], try std.fmt.parseInt(u16, args[4], 10), if (args.len == 7) args[6] else "127.0.0.1");
     if (std.mem.eql(u8, cmd, "verify-member") and args.len >= 5) {
         var files: std.ArrayList([]const u8) = .empty;
         var unpinned = false;
@@ -2117,6 +2120,91 @@ fn setMember(gpa: std.mem.Allocator, a: std.mem.Allocator, set_path: []const u8,
     const bytes = try ST.encodeMembers(a, ms);
     try S.writeFileAtomic(out, bytes);
     std.debug.print("{d} proofs written to {s} ({d} bytes)\n", .{ ms.len, out, bytes.len });
+}
+
+/// The most outpoints one `serve-member` query may ask for.
+const max_query = 16;
+
+/// `serve-member <set.bin> <work-dir> <port> [--bind <ip>]` (WEB-MEMBER): an HTTP server for the website.
+/// `GET /member?op=<txid>:<vout>[,…]` answers an `.sbmember` file (the same bytes `set-member` writes)
+/// with the outpoints' membership or non-membership proofs; the browser checks them against the root
+/// of a seal it verified itself, so this server is not trusted. The segment index (`passSegments`, ~5
+/// min once) is cached as `<work-dir>/segindex.bin`; at start its root must equal the pass's root.
+fn serveMember(gpa: std.mem.Allocator, a: std.mem.Allocator, set_path: []const u8, work: []const u8, port: u16, bind: []const u8) !void {
+    const seg0 = try ST.decodeSeg(a, try S.readFile(a, try std.fmt.allocPrint(a, "{s}/seg/0.sbseg", .{work})));
+    const fd = try std.fs.cwd().openFile(set_path, .{});
+    defer fd.close();
+    const size = try fd.getEndPos();
+    if (size == 0) return error.EmptySet;
+    const file = try std.posix.mmap(null, size, std.posix.PROT.READ, .{ .TYPE = .PRIVATE }, fd.handle, 0);
+    defer std.posix.munmap(file);
+    var p = try ST.decodePass(gpa, a, try S.readFile(a, try std.fmt.allocPrint(a, "{s}/pass.bin", .{work})));
+    defer p.root.proof.deinit();
+    const facts = try ST.factsOf(&p);
+    const ix_path = try std.fmt.allocPrint(a, "{s}/segindex.bin", .{work});
+    var timer = try std.time.Timer.start();
+    const ix: ST.SegIndex = if (fileExists(ix_path)) try ST.SegIndex.decode(a, try S.readFile(a, ix_path)) else blk: {
+        std.debug.print("building the segment index of {s} (once)…\n", .{set_path});
+        const ps = try ST.passSegments(a, file, seg0.logs);
+        const ix: ST.SegIndex = .{ .ends = ps.ends, .roots = ps.roots };
+        try S.writeFileAtomic(ix_path, try ix.encode(a));
+        break :blk ix;
+    };
+    if (!std.mem.eql(u32, &ix.root(), &facts.root)) return error.IndexRootMismatch;
+    std.debug.print("segment index: {d} segments, root {x} = the pass's root ({d:.1}s)\n", .{ ix.ends.len, wordBytes(facts.root), secs(timer.lap()) });
+
+    const addr = try std.net.Address.parseIp(bind, port);
+    var server = try addr.listen(.{ .reuse_address = true });
+    defer server.deinit();
+    std.debug.print("serving membership proofs on http://{s}:{d}/member?op=<txid>:<vout>\n", .{ bind, port });
+    while (true) {
+        const conn = server.accept() catch continue;
+        defer conn.stream.close();
+        handleMember(gpa, conn, file, seg0.logs, ix, facts) catch |e| std.debug.print("request failed: {s}\n", .{@errorName(e)});
+    }
+}
+
+fn handleMember(gpa: std.mem.Allocator, conn: std.net.Server.Connection, file: []const u8, logs: ST.Logs, ix: ST.SegIndex, facts: ST.Facts) !void {
+    var rbuf: [8192]u8 = undefined;
+    var wbuf: [8192]u8 = undefined;
+    var cr = conn.stream.reader(&rbuf);
+    var cw = conn.stream.writer(&wbuf);
+    var http = std.http.Server.init(cr.interface(), &cw.interface);
+    var req = try http.receiveHead();
+    const cors: []const std.http.Header = &.{
+        .{ .name = "access-control-allow-origin", .value = "*" },
+        .{ .name = "cache-control", .value = "no-store" },
+    };
+    const target = req.head.target;
+    if (req.head.method == .OPTIONS) return req.respond("", .{ .status = .no_content, .keep_alive = false, .extra_headers = cors });
+    if (std.mem.eql(u8, target, "/health")) return req.respond("ok\n", .{ .keep_alive = false, .extra_headers = cors });
+    const prefix = "/member?op=";
+    if (!std.mem.startsWith(u8, target, prefix)) return req.respond("not found\n", .{ .status = .not_found, .keep_alive = false, .extra_headers = cors });
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var keys: std.ArrayList([36]u8) = .empty;
+    var it = std.mem.splitScalar(u8, target[prefix.len..], ',');
+    while (it.next()) |op| {
+        // `%3A` for `:` from a URL-encoding client.
+        const clean = try std.mem.replaceOwned(u8, a, op, "%3A", ":");
+        const k = parseOutpoint(clean) catch return req.respond("bad outpoint: use <txid>:<vout>\n", .{ .status = .bad_request, .keep_alive = false, .extra_headers = cors });
+        if (keys.items.len == max_query) return req.respond("too many outpoints\n", .{ .status = .bad_request, .keep_alive = false, .extra_headers = cors });
+        try keys.append(a, k);
+    }
+    var timer = try std.time.Timer.start();
+    const ms = try a.alloc(ST.Member, keys.items.len);
+    for (ms, keys.items) |*m, k| {
+        m.* = try ST.proveMemberIx(a, file, logs, ix, k);
+        try ST.verifyMember(m, facts.root, facts.last);
+    }
+    const bytes = try ST.encodeMembers(a, ms);
+    std.debug.print("{d} outpoint(s): {d} bytes ({d:.0} ms)\n", .{ ms.len, bytes.len, @as(f64, @floatFromInt(timer.read())) / 1e6 });
+    const hdrs: []const std.http.Header = &.{
+        cors[0],                                                          cors[1],
+        .{ .name = "content-type", .value = "application/octet-stream" },
+    };
+    return req.respond(bytes, .{ .keep_alive = false, .extra_headers = hdrs });
 }
 
 /// `verify-member <work-dir> <epoch> <file>... [--witness-script <hex>]`: verifies the set pass at

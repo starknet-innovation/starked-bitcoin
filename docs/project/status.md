@@ -4,10 +4,10 @@ Rewritten at the end of every session; see [README.md](README.md#ending-a-sessio
 If `HEAD at last update` doesn't match `git log -1`, this file is stale:
 follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work).
 
-- **Updated:** 2026-11-09 (session 35: roadmap for the usable proof; test-chain SEAL-T; `MmrT` discharged)
-- **HEAD at last update:** this session's commit (after 55b76f7; not pushed)
+- **Updated:** 2026-11-09 (session 36: WEB-MEMBER built on branch `web-member`)
+- **HEAD at last update:** this session's commit on `web-member` (after 98e8a71; not pushed)
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
-- **Current item:** TIP-ITER (top of the roadmap's "Now" section, owner 2026-11-09), not started.
+- **Current item:** WEB-MEMBER (owner: "ship 2"): built and tested locally ([web/README.md](../../web/README.md)); waiting on the owner for the node server and a host. TIP-ITER not started.
   SEAL-T (D-052, accepted) is proved on mainnet and the test chain, pinned, and composed in Lean
   (`sealT_soundW`) with the header tree's MMR shape now proven (`Circuit/HeaderShape.lean`).
 
@@ -25,11 +25,12 @@ including the seal's composed statement (`seal_soundW`); trusted items in [verif
 
 ## Next step (concrete)
 
+0. WEB-MEMBER: with the owner's go, start `chainproof serve-member out972/set-972500.bin setgpu/passes/s972500 8090` in `/data/replay` on the node (an aarch64 build of branch `web-member`), set `web/config.json`, publish `zig-out/web/site` (`web/build.sh`). Merge `web-member` to main.
 1. TIP-ITER ([roadmap.md](roadmap.md), "Now"): design the repeatable extension of the seal past 972,500:
    the header chain from `data/store/mainnet-to-972502.sbchain` (PROOF-STORE `--from`), new block proofs
    and an epoch from 972,501, rejoin (`prove-chain`), the next set pass, `prove-seal --paths 32`; estimate
    compute first (block proofs: [gpu-route] figures in [gpu-cuda.md](../design/gpu-cuda.md)).
-2. Then WEB-MEMBER, then NODE-BOOT; STARKNET-PATH is backlog.
+2. Then NODE-BOOT; STARKNET-PATH is backlog.
 3. Backlog: SET-VK-SETUP, profile `verify-seal`/`verify-chain` on the node.
 
 ## In flight

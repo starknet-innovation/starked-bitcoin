@@ -90,6 +90,7 @@ docs/              Documentation (see below)
 | Understand the block-proof aggregator and tip following (BLOCK-REC, UTXO-TREE) | [docs/design/block-rec.md](docs/design/block-rec.md) |
 | Understand the coin-set pass (a set file's digest, `hash_serialized` and sums proved, D-048) | [docs/design/set-pass.md](docs/design/set-pass.md) |
 | Prove or check that a coin is (or is not) in a proven set (the pass's Merkle root, D-050) | [docs/design/set-membership.md](docs/design/set-membership.md) |
+| Build, test or deploy the website that verifies the seal in the browser and checks a coin (`webverify.wasm`, `serve-member`, WEB-MEMBER) | [web/README.md](web/README.md) |
 | Understand the chain seal: one proof over the chain of epochs and its coin sets, the balance and set links in-circuit (`prove-seal`, `verify-seal`) | [docs/design/chain-seal.md](docs/design/chain-seal.md) |
 | Resume the parked plan to prove our circuits (plain verifier, node) in Lean | [docs/design/verifier-formalization.md](docs/design/verifier-formalization.md) |
 | Port the resident CUDA prover to the block system (GPU step 3) | [docs/design/gpu-cuda.md](docs/design/gpu-cuda.md) |

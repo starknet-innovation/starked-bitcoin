@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Proven Coin Set</title>
+<meta name="description" content="Verify, in your browser, one STARK proof of Bitcoin's chain and its coin set, then check a coin against it.">
+<style>
+  :root {
+    --bg: #fbfaf7; --fg: #1d1c1a; --muted: #6b6760; --line: #e4e1da; --card: #ffffff;
+    --accent: #b5561c; --ok: #1f7a4d; --bad: #b3261e; --code: #f2efe8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #141412; --fg: #ebe8e1; --muted: #9a958b; --line: #2d2b27; --card: #1c1b18;
+      --accent: #e08a4f; --ok: #5fc08d; --bad: #f08079; --code: #24221e; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 48px 16px 80px; }
+  h1 { font-size: 2rem; line-height: 1.2; margin: 0 0 12px; letter-spacing: -0.01em; }
+  h2 { font-size: 1.15rem; margin: 0 0 4px; }
+  p { margin: 0 0 12px; }
+  .lede { color: var(--muted); font-size: 1.05rem; margin-bottom: 32px; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 22px; margin-bottom: 20px; }
+  .step { color: var(--accent); font-weight: 600; font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; }
+  .hint { color: var(--muted); font-size: .92rem; }
+  button { font: inherit; font-weight: 600; background: var(--fg); color: var(--bg); border: 0; border-radius: 7px;
+    padding: 9px 16px; cursor: pointer; }
+  button:disabled { opacity: .45; cursor: default; }
+  input[type=text] { font: 14px ui-monospace, SFMono-Regular, Menlo, monospace; width: 100%; padding: 10px 12px;
+    border: 1px solid var(--line); border-radius: 7px; background: var(--bg); color: var(--fg); }
+  .row { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
+  .row input[type=text] { flex: 1 1 320px; }
+  .status { margin-top: 14px; font-weight: 600; }
+  .status.ok { color: var(--ok); } .status.bad { color: var(--bad); } .status.run { color: var(--muted); }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; margin: 14px 0 0; font-size: .95rem; }
+  dt { color: var(--muted); }
+  dd { margin: 0; overflow-wrap: anywhere; }
+  code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .86em; }
+  code { background: var(--code); padding: 1px 5px; border-radius: 4px; }
+  .coin { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 12px; }
+  details { margin-top: 10px; } summary { cursor: pointer; color: var(--muted); }
+  a { color: var(--accent); }
+  footer { color: var(--muted); font-size: .88rem; margin-top: 28px; }
+  @media (max-width: 520px) { dl { grid-template-columns: 1fr; gap: 0 0; } dd { margin-bottom: 8px; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Bitcoin's coin set, proven in one proof</h1>
+  <p class="lede">One STARK proof covers Bitcoin's header chain from genesis, every block from 935,001 to
+  972,500, and the full coin set after block 972,500. This page checks that proof in your browser, then
+  checks any coin against the set it proves. No server is trusted: it only supplies data, and your
+  browser recomputes everything.</p>
+
+  <section id="seal">
+    <div class="step">Step 1</div>
+    <h2>Verify the seal</h2>
+    <p class="hint">Downloads the header-chain file and the seal (about 1.6 MB) and checks them with the
+    same verifier as <code>chainproof verify-seal</code>, compiled to WebAssembly. Every verifying key is
+    built into the verifier.</p>
+    <div class="row"><button id="seal-btn">Verify the seal</button></div>
+    <div id="seal-status" class="status"></div>
+    <dl id="seal-out" hidden></dl>
+  </section>
+
+  <section id="member">
+    <div class="step">Step 2</div>
+    <h2>Check a coin</h2>
+    <p class="hint">Enter an outpoint as <code>txid:vout</code>. The server returns its Merkle path (about
+    1 KB). Your browser checks the path against the root of the seal from step 1. A coin that is absent
+    gets a proof of absence: the two neighbouring coins in the sorted set.</p>
+    <div class="row">
+      <input type="text" id="op" placeholder="txid:vout" spellcheck="false" autocomplete="off">
+      <button id="op-btn" disabled>Check</button>
+    </div>
+    <details>
+      <summary>Or check a proof file (<code>.sbmember</code>) without the server</summary>
+      <div class="row"><input type="file" id="file" accept=".sbmember" disabled></div>
+    </details>
+    <div id="op-status" class="status"></div>
+    <div id="op-out"></div>
+  </section>
+
+  <footer>
+    <p>What the proof shows, and what it does not, is in the repository's
+    <code>docs/design/chain-seal.md</code>. This is a preview: the proof system and its Lean soundness
+    statement have not been externally reviewed.</p>
+  </footer>
+</main>
+<script src="app.js"></script>
+</body>
+</html>
