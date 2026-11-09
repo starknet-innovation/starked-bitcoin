@@ -1,6 +1,6 @@
 # Roadmap
 
-Status: current · Updated: 2026-11-02
+Status: current · Updated: 2026-11-09
 
 Rules:
 
@@ -9,6 +9,18 @@ Rules:
 - Order within a milestone is the intended order.
 - New discoveries go to the **Backlog**, with an ID, until they are scheduled.
 - Milestones come from [design/overview.md](../design/overview.md#milestones).
+
+## Now: making the proof usable (owner, 2026-11-09)
+
+The single proof exists (SEAL-T, D-052). The owner's use cases (2026-11-02): a website that checks a
+coin against the proven set, a node that bootstraps from a downloaded set, and (backlog STARKNET-PATH)
+a Starknet contract. Intended order: top to bottom.
+
+| ID | Item | Status | Done when / notes |
+|---|---|---|---|
+| TIP-ITER | Iterate from the tip: extend the sealed proof as new blocks arrive (header chain via PROOF-STORE, new block proofs and epochs, rejoin, the next set pass, reseal), on a repeatable schedule | todo | A documented, repeatable run that takes the current seal past 972,500 to a newer height, verified with pinned VKs. Related: UTXO-TREE (per-block set updates), CATCHUP (genesis side); compute cost to be estimated first |
+| WEB-MEMBER | Website: a visitor picks a coin and checks it is (or is not) in the proven set; the seal checked in the browser (verifier to WebAssembly), the coin's path recomputed locally against the set root; a small backend serves the ~7,000 segment roots and one segment (~6 MB) per query | todo | A page that verifies the seal and a membership/non-membership query client-side. Public launch gated on external review. Uses SET-MEMBER (D-050) |
+| NODE-BOOT | Node bootstrap: check a downloaded coin set (Core `dumptxoutset` snapshot) against the sealed proof, so a node operator can trust a set received from anyone | todo | One `chainproof` command plus a guide; relies on the proven `hash_serialized` equal to Core's (D-037) |
 
 ## M1: header chain, locally, formally verified
 
@@ -100,6 +112,7 @@ history module · browser/phone verifier.
 
 | ID | Item | Notes |
 |---|---|---|
+| STARKNET-PATH | Starknet contract: the caller sends a coin's path to the set root and the chain proof; the contract checks the path in Cairo and returns the amount; the proof checked by the sequencer (SNIP-36-like) | Owner, 2026-11-09: backlog. Needs StarkWare's sequencer side (outward-facing) and a check that our path hash (Blake2s) is cheap in Cairo |
 | STWO-225-FU | Track the upstream fix for stwo-zig#225; drop our workaround if the fix lands | Outward-facing follow-up: ask the owner |
 | AIRSTMT | `AirStatement` carries a pointer and an allocator (prototype ergonomics) | `src/air/prove.zig` |
 | LIFT | Mixed trace sizes / lifting | Needed once components differ in size |
