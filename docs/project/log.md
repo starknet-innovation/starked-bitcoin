@@ -21,6 +21,15 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-11-09 (session 34) — D-052 accepted
+Who: Claude (agent, Opus 5.5), owner: "cool, then validate it"
+Roadmap: SEAL-T done (D-052 accepted)
+Done:
+- Pushed f42d5d5, ec0cfc6 (SEAL-T-LEAN). D-052 marked accepted in `decisions.md`; status, roadmap, verification ledger updated.
+Evidence:
+- `git status -sb`: `main...origin/main` after the push.
+Next: optional: the test chain's SEAL-T proof (a pod); discharge `MmrT` in Lean.
+
 ## 2026-11-07 (session 33) — SEAL-T-LEAN: the SEAL-T seal's soundness composed in Lean
 Who: Claude (agent, Opus 5.5), owner: "Go ahead with SEAL-T-LEAN"
 Roadmap: SEAL-T-LEAN done (SEAL-T still awaits the owner's review of D-052)

@@ -7,9 +7,8 @@ follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work)
 - **Updated:** 2026-11-07 (session 33: SEAL-T-LEAN)
 - **HEAD at last update:** this session's commit (f42d5d5 and the next; not pushed)
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
-- **Current item:** none in progress. SEAL-T (D-052, proposed) is proved on mainnet, pinned, and its
-  soundness is composed in Lean (`sealT_soundW`, `Circuit/ChainSealTCompose.lean`, standard axioms).
-  D-052 awaits the owner's review.
+- **Current item:** none in progress. SEAL-T (D-052, accepted 2026-11-09) is proved on mainnet, pinned,
+  and its soundness is composed in Lean (`sealT_soundW`, `Circuit/ChainSealTCompose.lean`, standard axioms).
 
 ## State in one paragraph
 
@@ -25,11 +24,10 @@ including the seal's composed statement (`seal_soundW`); trusted items in [verif
 
 ## Next step (concrete)
 
-1. **Owner: review D-052** (`docs/project/decisions.md`), now proved, pinned and composed in Lean.
-2. Optional: the test chain's SEAL-T proof (81.8 M variables, ~17 GB: more than the Mac has free; a pod).
-3. Optional, Lean: discharge `MmrT` (HC-HASHTREE's shape binding) by carrying the tree shape through
+1. Optional: the test chain's SEAL-T proof (81.8 M variables, ~17 GB: more than the Mac has free; a pod).
+2. Optional, Lean: discharge `MmrT` (HC-HASHTREE's shape binding) by carrying the tree shape through
    `htree_soundW` (`RecCR.lean`) and `fold_eq_mmr` (`Spec/Mmr.lean`).
-4. Backlog: SET-VK-SETUP (needs one mainnet segment proof from the node), profile `verify-seal`/`verify-chain` on the node.
+3. Backlog: SET-VK-SETUP (needs one mainnet segment proof from the node), profile `verify-seal`/`verify-chain` on the node.
 
 ## In flight
 
@@ -40,8 +38,6 @@ including the seal's composed statement (`seal_soundW`); trusted items in [verif
 
 ## Needs owner
 
-- **Push `main`**: this session's Lean commits are local.
-- **Review D-052** (SEAL-T, proposed): proved and pinned now; acceptance is the owner's.
 - **STWO-225-FU:** follow up on stwo-zig#225 upstream? Outward-facing.
 
 ## Verify the current state

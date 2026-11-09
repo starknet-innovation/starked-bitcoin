@@ -525,7 +525,8 @@ Rejected: changing the join's program (every join and root VK would move, and th
 be re-proved); a SHA-256 gadget for the seal (weeks, for two compressions over public bytes).
 
 ### D-052 — SEAL-T: the header chain root and the block-hash paths inside the seal
-Date: 2026-11-06 · By: agent (owner: "push and go for it, don't stop until you're done or you need me", SEAL-T among the items) · Status: proposed
+Date: 2026-11-06 · By: agent (owner: "push and go for it, don't stop until you're done or you need me", SEAL-T among the items) · Status: accepted
+(owner, 2026-11-09: "cool, then validate it"; after the mainnet proof, the pinned VK `vk/epoch/sealt-935001-972500.vk` and `sealT_soundW`)
 Decision (docs/design/chain-seal.md § The header chain in-circuit):
 - **A new program, `chainSealT ms gen D`** (`Circuit/ChainSealT.lean`), additive: `chainSeal ms gen`, its VK
   and the mainnet seal of D-051 are unchanged. The header chain root proof is one more child (hook
