@@ -16,10 +16,10 @@ concurrency:
   cancel-in-progress: true
 jobs:
   build:
-    # macOS (arm64), as the local builds: stwo-zig's circuit_cpu build gives its host code generator a
+    # arm64, as the local builds: stwo-zig's circuit_cpu build gives its host code generator a
     # module built for the wasm target, which LLVM only warns about on arm64 but crashes on x86_64
     # ("64-bit code requested on a subtarget that doesn't support it"). Fix upstream, then move to Linux.
-    runs-on: macos-14
+    runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
         with:
@@ -28,8 +28,8 @@ jobs:
       # on the org's allow list).
       - name: Install Zig 0.15.2
         run: |
-          curl -sSfL -o zig.tar.xz https://ziglang.org/download/0.15.2/zig-aarch64-macos-0.15.2.tar.xz
-          echo "3cc2bab367e185cdfb27501c4b30b1b0653c28d9f73df8dc91488e66ece5fa6b  zig.tar.xz" | shasum -a 256 -c -
+          curl -sSfL -o zig.tar.xz https://ziglang.org/download/0.15.2/zig-aarch64-linux-0.15.2.tar.xz
+          echo "958ed7d1e00d0ea76590d27666efbf7a932281b3d7ba0c6b01b0ff26498f667f  zig.tar.xz" | sha256sum -c -
           mkdir -p "$RUNNER_TEMP/zig" && tar -xJf zig.tar.xz -C "$RUNNER_TEMP/zig" --strip-components=1
           echo "$RUNNER_TEMP/zig" >> "$GITHUB_PATH"
       - uses: actions/setup-node@v4
