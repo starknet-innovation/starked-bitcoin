@@ -43,7 +43,10 @@ Evidence:
 Problems / lessons:
 - Set-file offsets exceed 4 GB: the index's ends are u64 (wasm32's `usize` is 32 bits).
 - zsh doesn't word-split `$VAR`: an unquoted command in a variable ran nothing; use a function or an array.
-- UNVERIFIED: the Pages workflow has not run (needs Pages enabled and the merge to main).
+- Pushed main 98e8a71..e91b289 (owner: "yes"). The Pages workflow needed two fixes:
+  - `mlugg/setup-zig` is not on the org's allowed-actions list, so Zig now comes from ziglang.org with a SHA-256 check;
+  - on x86_64, LLVM crashes building stwo-zig's host code generator (its `composition_aot_build.zig` imports a wasm-target `stwo_core` into a host module), so the build runs on `ubuntu-24.04-arm`. `macos-14` is not supported in the org.
+- Run 3: build ✓ (2m32s, the seal verified by the built wasm); deploy ✗ "Ensure GitHub Pages has been enabled".
 Next: owner: create the bucket, upload the set file and index from the node, set CORS and the `SET_URL`/`INDEX_URL` variables, enable Pages; merge `web-member`; then external review. Otherwise TIP-ITER.
 
 ## 2026-11-09 (session 36) — WEB-MEMBER built: the seal verified in the browser, coins checked against it

@@ -37,7 +37,7 @@ Not covered:
 
 | Part | Where | Size |
 |---|---|---|
-| Page, `webverify.wasm`, `web/proofs/` | GitHub Pages, built by `.github/workflows/pages.yml` on pushes to `main` | 4.8 MB |
+| Page, `webverify.wasm`, `web/proofs/` | GitHub Pages, built by `.github/workflows/pages.yml` on pushes to `main` (on `ubuntu-24.04-arm`: on x86_64 the build hits an LLVM crash in stwo-zig's host codegen) | 4.8 MB |
 | `set-972500.bin` and `set-972500.segindex` | Object storage with public read, CORS, and HTTP Range support (e.g. Cloudflare R2: no egress fees, about $0.21/month for 14.2 GB) | 14.2 GB + 533 KB |
 
 `config.json` tells the page where the set lives: `{"set": "<URL of the set file>", "index": "<URL of

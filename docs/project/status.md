@@ -25,7 +25,7 @@ including the seal's composed statement (`seal_soundW`); trusted items in [verif
 
 ## Next step (concrete)
 
-0. WEB-MEMBER: the owner sets up the bucket, uploads `/data/replay/out972/set-972500.bin` and `/data/replay/setgpu/set-972500.segindex` from the node, sets CORS, the `SET_URL`/`INDEX_URL` variables and Pages ([web/README.md](../../web/README.md) "Setting up the bucket"); merge `web-member` to main and check the `pages` workflow's first run.
+0. WEB-MEMBER: the owner sets up the bucket, uploads `/data/replay/out972/set-972500.bin` and `/data/replay/setgpu/set-972500.segindex` from the node, sets CORS, the `SET_URL`/`INDEX_URL` variables and Pages ([web/README.md](../../web/README.md) "Setting up the bucket"); then re-run the `pages` workflow (build passes; deploy waits for Pages to be enabled). Upstream: fix stwo-zig `composition_aot_build.zig` (host codegen imports the target `stwo_core`), then move CI back to x86.
 1. TIP-ITER ([roadmap.md](roadmap.md), "Now"): design the repeatable extension of the seal past 972,500:
    the header chain from `data/store/mainnet-to-972502.sbchain` (PROOF-STORE `--from`), new block proofs
    and an epoch from 972,501, rejoin (`prove-chain`), the next set pass, `prove-seal --paths 32`; estimate
