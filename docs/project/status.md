@@ -4,10 +4,10 @@ Rewritten at the end of every session; see [README.md](README.md#ending-a-sessio
 If `HEAD at last update` doesn't match `git log -1`, this file is stale:
 follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work).
 
-- **Updated:** 2026-11-09 (session 36: WEB-MEMBER built on branch `web-member`)
+- **Updated:** 2026-11-10 (session 37: WEB-MEMBER by byte range, Pages workflow, on branch `web-member`)
 - **HEAD at last update:** this session's commit on `web-member` (after 98e8a71; not pushed)
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
-- **Current item:** WEB-MEMBER (owner: "ship 2"): built and tested locally ([web/README.md](../../web/README.md)); waiting on the owner for the node server and a host. TIP-ITER not started.
+- **Current item:** WEB-MEMBER (owner: "ship 2"): built and tested locally ([web/README.md](../../web/README.md)), with no proof server: GitHub Pages plus the set file in object storage; waiting on the owner for the bucket and the Pages settings. TIP-ITER not started.
   SEAL-T (D-052, accepted) is proved on mainnet and the test chain, pinned, and composed in Lean
   (`sealT_soundW`) with the header tree's MMR shape now proven (`Circuit/HeaderShape.lean`).
 
@@ -25,7 +25,7 @@ including the seal's composed statement (`seal_soundW`); trusted items in [verif
 
 ## Next step (concrete)
 
-0. WEB-MEMBER: with the owner's go, start `chainproof serve-member out972/set-972500.bin setgpu/passes/s972500 8090` in `/data/replay` on the node (an aarch64 build of branch `web-member`), set `web/config.json`, publish `zig-out/web/site` (`web/build.sh`). Merge `web-member` to main.
+0. WEB-MEMBER: the owner sets up the bucket, uploads `/data/replay/out972/set-972500.bin` and `/data/replay/setgpu/set-972500.segindex` from the node, sets CORS, the `SET_URL`/`INDEX_URL` variables and Pages ([web/README.md](../../web/README.md) "Setting up the bucket"); merge `web-member` to main and check the `pages` workflow's first run.
 1. TIP-ITER ([roadmap.md](roadmap.md), "Now"): design the repeatable extension of the seal past 972,500:
    the header chain from `data/store/mainnet-to-972502.sbchain` (PROOF-STORE `--from`), new block proofs
    and an epoch from 972,501, rejoin (`prove-chain`), the next set pass, `prove-seal --paths 32`; estimate

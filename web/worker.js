@@ -1,5 +1,6 @@
-// Runs webverify.wasm off the main thread. Messages in: {op:"seal", chain, seal} (ArrayBuffers) or
-// {op:"member", bytes}; out: {op, result} with the wasm's JSON result, or {op, error}.
+// Runs webverify.wasm off the main thread. Messages in: {op:"seal", chain, seal}, {op:"member", bytes},
+// {op:"index", bytes}, {op:"locate", outpoint}, {op:"segment", outpoint, seg, bytes}; out: {op, result}
+// with the wasm's JSON result, or {op, error}.
 let wasm = null;
 const log = [];
 
@@ -65,6 +66,20 @@ onmessage = async (e) => {
       const [mp, ml] = put(w, e.data.bytes);
       result = json(w, w.verify_member(mp, ml));
       w.wv_free(mp, ml);
+    } else if (op === "index") {
+      const [ip, il] = put(w, e.data.bytes);
+      result = json(w, w.load_index(ip, il));
+      w.wv_free(ip, il);
+    } else if (op === "locate") {
+      const [op_p, op_l] = put(w, new TextEncoder().encode(e.data.outpoint));
+      result = json(w, w.locate(op_p, op_l));
+      w.wv_free(op_p, op_l);
+    } else if (op === "segment") {
+      const [op_p, op_l] = put(w, new TextEncoder().encode(e.data.outpoint));
+      const [sp, sl] = put(w, e.data.bytes);
+      result = json(w, w.verify_segment(op_p, op_l, e.data.seg, sp, sl));
+      w.wv_free(op_p, op_l);
+      w.wv_free(sp, sl);
     } else throw new Error("unknown op " + op);
     result.ms = Math.round(performance.now() - t0);
     if (log.length) console.debug(log.splice(0).join(""));

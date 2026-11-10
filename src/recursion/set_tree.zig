@@ -1078,13 +1078,14 @@ fn recKey(r: []const u8) [36]u8 {
 }
 
 /// A set's segments at `logs`, each with its records, leaves and root.
-pub fn passSegments(a: std.mem.Allocator, file: []const u8, logs: Logs) !struct { ends: []const usize, roots: [][8]u32 } {
+pub fn passSegments(a: std.mem.Allocator, file: []const u8, logs: Logs) !struct { ends: []const usize, roots: [][8]u32, lasts: [][36]u8 } {
     const ends = try SS.cut(a, file, logs);
     const roots = try a.alloc([8]u32, ends.len);
+    const lasts = try a.alloc([36]u8, ends.len);
     const half: usize = @as(usize, 1) << @intCast(logs[SS.C.rec] - 1);
     var at: usize = 4;
     var last: ?[36]u8 = null;
-    for (ends, roots) |end, *root| {
+    for (ends, roots, lasts) |end, *root, *lk| {
         var scratch = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer scratch.deinit();
         const sa = scratch.allocator();
@@ -1094,9 +1095,10 @@ pub fn passSegments(a: std.mem.Allocator, file: []const u8, logs: Logs) !struct 
         const leaves = try SS.leafHashes(sa, st, recs);
         root.* = (try SS.treeNodes(sa, leaves, half))[1];
         last = recKey(recs[recs.len - 1].head);
+        lk.* = last.?;
         at = end;
     }
-    return .{ .ends = ends, .roots = roots };
+    return .{ .ends = ends, .roots = roots, .lasts = lasts };
 }
 
 /// The membership proof of `key` in the set `file` (proved at `logs`).
@@ -1113,51 +1115,124 @@ pub fn proveMembers(a: std.mem.Allocator, file: []const u8, logs: Logs, keys: []
     return out;
 }
 
-/// A set's segment index: each segment's end offset and Merkle root (`passSegments`), cached by
-/// `serve-member` so a query parses one or two segments instead of the whole set.
+/// A set's segment index (WEB-MEMBER): `HALF`, and per segment its end offset in the set file, its
+/// Merkle root and its last record's key. `serve-member` caches it; the website fetches it and then
+/// one segment by byte range (`memberInSegment`). Untrusted: a wrong entry only makes a proof fail
+/// `verifyMember` (the roots must fold to the verified root; a segment's leaves bind the previous last key).
 pub const SegIndex = struct {
-    ends: []const usize,
+    half: u32,
+    ends: []const u64,
     roots: []const [8]u32,
+    lasts: []const [36]u8,
 
-    const MAGIC = "SBSEGIX1";
+    const MAGIC = "SBSEGIX2";
+    const ENTRY = 8 + 32 + 36;
 
     pub fn encode(ix: SegIndex, a: std.mem.Allocator) ![]u8 {
-        const out = try a.alloc(u8, MAGIC.len + 8 + ix.ends.len * 40);
+        const out = try a.alloc(u8, MAGIC.len + 12 + ix.ends.len * ENTRY);
         @memcpy(out[0..MAGIC.len], MAGIC);
         std.mem.writeInt(u64, out[MAGIC.len..][0..8], ix.ends.len, .little);
-        var at: usize = MAGIC.len + 8;
-        for (ix.ends, ix.roots) |e, r| {
+        std.mem.writeInt(u32, out[MAGIC.len + 8 ..][0..4], ix.half, .little);
+        var at: usize = MAGIC.len + 12;
+        for (ix.ends, ix.roots, ix.lasts) |e, r, l| {
             std.mem.writeInt(u64, out[at..][0..8], e, .little);
             for (r, 0..) |w, i| std.mem.writeInt(u32, out[at + 8 + 4 * i ..][0..4], w, .little);
-            at += 40;
+            @memcpy(out[at + 40 ..][0..36], &l);
+            at += ENTRY;
         }
         return out;
     }
 
     pub fn decode(a: std.mem.Allocator, b: []const u8) !SegIndex {
-        if (b.len < MAGIC.len + 8 or !std.mem.eql(u8, b[0..MAGIC.len], MAGIC)) return error.BadIndex;
-        const n = std.mem.readInt(u64, b[MAGIC.len..][0..8], .little);
-        if (b.len != MAGIC.len + 8 + n * 40) return error.BadIndex;
-        const ends = try a.alloc(usize, n);
+        if (b.len < MAGIC.len + 12 or !std.mem.eql(u8, b[0..MAGIC.len], MAGIC)) return error.BadIndex;
+        const n: usize = std.math.cast(usize, std.mem.readInt(u64, b[MAGIC.len..][0..8], .little)) orelse return error.BadIndex;
+        if (n == 0 or n > (b.len - MAGIC.len - 12) / ENTRY or b.len != MAGIC.len + 12 + n * ENTRY) return error.BadIndex;
+        const half = std.mem.readInt(u32, b[MAGIC.len + 8 ..][0..4], .little);
+        if (half == 0 or half > 1 << 24 or !std.math.isPowerOfTwo(half)) return error.BadIndex;
+        const ends = try a.alloc(u64, n);
         const roots = try a.alloc([8]u32, n);
-        var at: usize = MAGIC.len + 8;
-        for (ends, roots) |*e, *r| {
-            e.* = @intCast(std.mem.readInt(u64, b[at..][0..8], .little));
+        const lasts = try a.alloc([36]u8, n);
+        var at: usize = MAGIC.len + 12;
+        var prev: u64 = 4;
+        for (ends, roots, lasts) |*e, *r, *l| {
+            e.* = std.mem.readInt(u64, b[at..][0..8], .little);
+            if (e.* <= prev) return error.BadIndex;
+            prev = e.*;
             for (r, 0..) |*w, i| w.* = std.mem.readInt(u32, b[at + 8 + 4 * i ..][0..4], .little);
-            at += 40;
+            l.* = b[at + 40 ..][0..36].*;
+            at += ENTRY;
         }
-        return .{ .ends = ends, .roots = roots };
+        return .{ .half = half, .ends = ends, .roots = roots, .lasts = lasts };
     }
 
     /// The set root these segment roots fold to (the pass's root when the index is the pass's).
     pub fn root(ix: SegIndex) [8]u32 {
         return foldRoots(ix.roots);
     }
+
+    /// The segment that holds `key` or the record above it: the first whose last key is not below
+    /// `key` (the last segment when `key` is above every record).
+    pub fn find(ix: SegIndex, key: [36]u8) usize {
+        var lo: usize = 0;
+        var hi: usize = ix.lasts.len - 1;
+        while (lo < hi) {
+            const mid = (lo + hi) / 2;
+            if (std.mem.order(u8, &ix.lasts[mid], &key) == .lt) lo = mid + 1 else hi = mid;
+        }
+        return lo;
+    }
+
+    /// Segment `si`'s byte range in the set file, `[start, end)`.
+    pub fn range(ix: SegIndex, si: usize) struct { start: u64, end: u64 } {
+        return .{ .start = if (si == 0) 4 else ix.ends[si - 1], .end = ix.ends[si] };
+    }
 };
 
-/// The membership proof of `key` from a segment index of `file` (`passSegments`' ends and roots).
-pub fn proveMemberIx(a: std.mem.Allocator, file: []const u8, logs: Logs, ix: SegIndex, key: [36]u8) !Member {
-    return memberIn(a, file, logs, ix.ends, ix.roots, key);
+/// The membership proof of `key` from a segment index of `file`.
+pub fn proveMemberIx(a: std.mem.Allocator, file: []const u8, ix: SegIndex, key: [36]u8) !Member {
+    const si = ix.find(key);
+    const r = ix.range(si);
+    return memberInSegment(a, file[@intCast(r.start)..@intCast(r.end)], ix, si, key);
+}
+
+/// The membership proof of `key` from segment `si`'s bytes alone (`ix.range(si)` of the set file):
+/// its leaves (the first one's previous key is segment `si − 1`'s last), its tree, the path up the set
+/// tree from `ix.roots`. The caller checks it with `verifyMember` against a verified root.
+pub fn memberInSegment(a: std.mem.Allocator, seg: []const u8, ix: SegIndex, si: usize, key: [36]u8) !Member {
+    if (si >= ix.ends.len) return error.BadSegment;
+    var scratch = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer scratch.deinit();
+    const sa = scratch.allocator();
+    const recs = try SS.parse(sa, seg);
+    if (recs.len == 0) return error.BadSegment;
+    const is_last_seg = si + 1 == ix.ends.len;
+    var ri: usize = 0;
+    while (ri < recs.len and std.mem.order(u8, &recKey(recs[ri].head), &key) == .lt) ri += 1;
+    var after = false;
+    if (ri == recs.len) {
+        if (!is_last_seg) return error.BadSegment;
+        ri -= 1;
+        after = true;
+    }
+    var st: SS.State = .{ .b2 = undefined, .sha = undefined };
+    st.last = if (si > 0) ix.lasts[si - 1] else null;
+    const leaves = try SS.leafHashes(sa, st, recs);
+    const nodes = try SS.treeNodes(sa, leaves, ix.half);
+    var path: std.ArrayList(Step) = .empty;
+    const other = ri ^ 1;
+    try path.append(a, .{ .sib = if (other < leaves.len) leaves[other].digest else @splat(0), .left = (ri & 1) == 1 });
+    var j = ix.half + ri / 2;
+    while (j > 1) : (j /= 2) try path.append(a, .{ .sib = nodes[j ^ 1], .left = (j & 1) == 1 });
+    try treePath(a, ix.roots, si, &path);
+    const r = recs[ri];
+    return .{
+        .key = key,
+        .present = std.mem.eql(u8, &recKey(r.head), &key),
+        .after_last = after,
+        .prev = leaves[ri].msg[0..36].*,
+        .record = try a.dupe(u8, seg[r.start..][0 .. SS.HEAD + r.ser.len]),
+        .path = path.items,
+    };
 }
 
 fn memberIn(a: std.mem.Allocator, file: []const u8, logs: Logs, ends: []const usize, roots: []const [8]u32, key: [36]u8) !Member {

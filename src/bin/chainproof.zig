@@ -114,6 +114,7 @@ fn usage() noreturn {
         \\  chainproof set-cut <set.bin> [--logs l0,...,l11]
         \\  chainproof set-member <set.bin> <work-dir> <out.sbmember> <txid>:<vout>...
         \\  chainproof serve-member <set.bin> <work-dir> <port> [--bind <ip>]
+        \\  chainproof set-index <set.bin> <work-dir> <out.segindex>
         \\  chainproof verify-member <work-dir> <dir>:<to>[:<from>:<prev-set.bin>] <file.sbmember>... [--unpinned] [--witness-script <hex>]
         \\  chainproof verify-epoch <vk> <file.sbchain> <dir> <to> [--from <a> <prev-set.bin>] [--min-work <hex> | --min-work 0] [--test-strength] [--jobs <n>]
         \\  chainproof prove-epoch-wide|prove-epoch-tree <headers.bin> <dir> <to> <file.sbchain> [--from <a> <prev-set.bin>] [--test-strength]
@@ -383,6 +384,8 @@ pub fn main() !void {
     }
     if (std.mem.eql(u8, cmd, "set-member") and args.len >= 6)
         return setMember(gpa, a, args[2], args[3], args[4], args[5..]);
+    if (std.mem.eql(u8, cmd, "set-index") and args.len == 5)
+        return setIndex(gpa, a, args[2], args[3], args[4]);
     if (std.mem.eql(u8, cmd, "serve-member") and (args.len == 5 or (args.len == 7 and std.mem.eql(u8, args[5], "--bind"))))
         return serveMember(gpa, a, args[2], args[3], try std.fmt.parseInt(u16, args[4], 10), if (args.len == 7) args[6] else "127.0.0.1");
     if (std.mem.eql(u8, cmd, "verify-member") and args.len >= 5) {
@@ -2122,6 +2125,41 @@ fn setMember(gpa: std.mem.Allocator, a: std.mem.Allocator, set_path: []const u8,
     std.debug.print("{d} proofs written to {s} ({d} bytes)\n", .{ ms.len, out, bytes.len });
 }
 
+/// The segment index of the set `file` at `path` (`passSegments` on a miss, ~5 min for mainnet, then
+/// written there); its roots must fold to the pass's `root`.
+fn loadSegIndex(a: std.mem.Allocator, file: []const u8, logs: ST.Logs, path: []const u8, root: [8]u32) !ST.SegIndex {
+    var timer = try std.time.Timer.start();
+    const ix: ST.SegIndex = if (fileExists(path)) try ST.SegIndex.decode(a, try S.readFile(a, path)) else blk: {
+        std.debug.print("building the segment index (once)…\n", .{});
+        const ps = try ST.passSegments(a, file, logs);
+        const half: u32 = @as(u32, 1) << @intCast(logs[SSG.C.rec] - 1);
+        const ends = try a.alloc(u64, ps.ends.len);
+        for (ends, ps.ends) |*e, x| e.* = x;
+        const ix: ST.SegIndex = .{ .half = half, .ends = ends, .roots = ps.roots, .lasts = ps.lasts };
+        try S.writeFileAtomic(path, try ix.encode(a));
+        break :blk ix;
+    };
+    if (!std.mem.eql(u32, &ix.root(), &root)) return error.IndexRootMismatch;
+    if (ix.ends[ix.ends.len - 1] != file.len) return error.IndexSizeMismatch;
+    std.debug.print("segment index {s}: {d} segments, HALF {d}, root {x} = the pass's root ({d:.1}s)\n", .{ path, ix.ends.len, ix.half, wordBytes(root), secs(timer.lap()) });
+    return ix;
+}
+
+/// `set-index <set.bin> <work-dir> <out>`: the set's segment index (WEB-MEMBER) for the website, which
+/// fetches it and then one segment of `<set.bin>` by byte range; checked against the pass's root.
+fn setIndex(gpa: std.mem.Allocator, a: std.mem.Allocator, set_path: []const u8, work: []const u8, out: []const u8) !void {
+    const seg0 = try ST.decodeSeg(a, try S.readFile(a, try std.fmt.allocPrint(a, "{s}/seg/0.sbseg", .{work})));
+    const fd = try std.fs.cwd().openFile(set_path, .{});
+    defer fd.close();
+    const size = try fd.getEndPos();
+    if (size == 0) return error.EmptySet;
+    const file = try std.posix.mmap(null, size, std.posix.PROT.READ, .{ .TYPE = .PRIVATE }, fd.handle, 0);
+    defer std.posix.munmap(file);
+    var p = try ST.decodePass(gpa, a, try S.readFile(a, try std.fmt.allocPrint(a, "{s}/pass.bin", .{work})));
+    defer p.root.proof.deinit();
+    _ = try loadSegIndex(a, file, seg0.logs, out, (try ST.factsOf(&p)).root);
+}
+
 /// The most outpoints one `serve-member` query may ask for.
 const max_query = 16;
 
@@ -2141,17 +2179,7 @@ fn serveMember(gpa: std.mem.Allocator, a: std.mem.Allocator, set_path: []const u
     var p = try ST.decodePass(gpa, a, try S.readFile(a, try std.fmt.allocPrint(a, "{s}/pass.bin", .{work})));
     defer p.root.proof.deinit();
     const facts = try ST.factsOf(&p);
-    const ix_path = try std.fmt.allocPrint(a, "{s}/segindex.bin", .{work});
-    var timer = try std.time.Timer.start();
-    const ix: ST.SegIndex = if (fileExists(ix_path)) try ST.SegIndex.decode(a, try S.readFile(a, ix_path)) else blk: {
-        std.debug.print("building the segment index of {s} (once)…\n", .{set_path});
-        const ps = try ST.passSegments(a, file, seg0.logs);
-        const ix: ST.SegIndex = .{ .ends = ps.ends, .roots = ps.roots };
-        try S.writeFileAtomic(ix_path, try ix.encode(a));
-        break :blk ix;
-    };
-    if (!std.mem.eql(u32, &ix.root(), &facts.root)) return error.IndexRootMismatch;
-    std.debug.print("segment index: {d} segments, root {x} = the pass's root ({d:.1}s)\n", .{ ix.ends.len, wordBytes(facts.root), secs(timer.lap()) });
+    const ix = try loadSegIndex(a, file, seg0.logs, try std.fmt.allocPrint(a, "{s}/segindex.bin", .{work}), facts.root);
 
     const addr = try std.net.Address.parseIp(bind, port);
     var server = try addr.listen(.{ .reuse_address = true });
@@ -2160,11 +2188,11 @@ fn serveMember(gpa: std.mem.Allocator, a: std.mem.Allocator, set_path: []const u
     while (true) {
         const conn = server.accept() catch continue;
         defer conn.stream.close();
-        handleMember(gpa, conn, file, seg0.logs, ix, facts) catch |e| std.debug.print("request failed: {s}\n", .{@errorName(e)});
+        handleMember(gpa, conn, file, ix, facts) catch |e| std.debug.print("request failed: {s}\n", .{@errorName(e)});
     }
 }
 
-fn handleMember(gpa: std.mem.Allocator, conn: std.net.Server.Connection, file: []const u8, logs: ST.Logs, ix: ST.SegIndex, facts: ST.Facts) !void {
+fn handleMember(gpa: std.mem.Allocator, conn: std.net.Server.Connection, file: []const u8, ix: ST.SegIndex, facts: ST.Facts) !void {
     var rbuf: [8192]u8 = undefined;
     var wbuf: [8192]u8 = undefined;
     var cr = conn.stream.reader(&rbuf);
@@ -2195,7 +2223,7 @@ fn handleMember(gpa: std.mem.Allocator, conn: std.net.Server.Connection, file: [
     var timer = try std.time.Timer.start();
     const ms = try a.alloc(ST.Member, keys.items.len);
     for (ms, keys.items) |*m, k| {
-        m.* = try ST.proveMemberIx(a, file, logs, ix, k);
+        m.* = try ST.proveMemberIx(a, file, ix, k);
         try ST.verifyMember(m, facts.root, facts.last);
     }
     const bytes = try ST.encodeMembers(a, ms);

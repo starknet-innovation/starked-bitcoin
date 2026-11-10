@@ -1,13 +1,15 @@
-// WEB-MEMBER page logic. Config (config.json, optional): {"member": "<base URL of serve-member>"};
-// default: the same origin's /member.
+// WEB-MEMBER page logic. Config (config.json): {"set": "<URL of the set file>", "index": "<URL of its
+// segment index>"} for lookups by byte range from object storage (default), or {"member": "<base URL of
+// chainproof serve-member>"} for a proof server.
 const $ = (id) => document.getElementById(id);
 const worker = new Worker("worker.js");
 const pending = {};
 worker.onmessage = (e) => { const r = pending[e.data.op]; delete pending[e.data.op]; r && r(e.data); };
 const call = (msg, transfer) => new Promise((res) => { pending[msg.op] = res; worker.postMessage(msg, transfer); });
 
-let memberBase = "";
-fetch("config.json").then((r) => (r.ok ? r.json() : {})).then((c) => { memberBase = c.member || ""; }).catch(() => {});
+let config = {};
+const configReady = fetch("config.json").then((r) => (r.ok ? r.json() : {})).then((c) => { config = c; }).catch(() => {});
+let indexLoaded = null; // a promise, once per verified seal
 
 const SAT = 100_000_000n;
 const btc = (sat) => {
@@ -56,6 +58,7 @@ $("seal-btn").onclick = async () => {
       ["Merkle root", r.merkle_root, true],
       ["hash_serialized", r.hash_serialized, true],
     ]);
+    indexLoaded = null;
     $("op-btn").disabled = false;
     $("file").disabled = false;
   } catch (err) {
@@ -83,28 +86,80 @@ function showCoins(r) {
   }
 }
 
-async function checkMember(bytes) {
+function report(results) {
   const st = $("op-status");
-  setStatus(st, "run", "Checking the path against the seal's root…");
+  const bad = results.find((r) => !r.ok);
+  if (bad) {
+    const why = bad.error === "NotBracketed" ? "NotBracketed (no proof of absence for this outpoint)" : bad.error;
+    setStatus(st, "bad", `REJECTED: ${why}`); $("op-out").replaceChildren(); return;
+  }
+  const coins = results.flatMap((r) => r.coins);
+  const n = coins.filter((c) => c.present).length;
+  setStatus(st, "ok", `${coins.length} proof(s) verified: ${n} unspent, ${coins.length - n} absent`);
+  showCoins({ coins });
+}
+
+async function checkMember(bytes) {
+  setStatus($("op-status"), "run", "Checking the path against the seal's root…");
   const m = await call({ op: "member", bytes }, [bytes]);
   if (m.error) throw new Error(m.error);
-  const r = m.result;
-  if (!r.ok) { setStatus(st, "bad", `REJECTED: ${r.error}`); $("op-out").replaceChildren(); return; }
-  const n = r.coins.filter((c) => c.present).length;
-  setStatus(st, "ok", `${r.coins.length} proof(s) verified: ${n} unspent, ${r.coins.length - n} absent`);
-  showCoins(r);
+  report([m.result]);
+}
+
+async function wasmCall(msg, transfer) {
+  const m = await call(msg, transfer);
+  if (m.error) throw new Error(m.error);
+  return m.result;
+}
+
+// Lookups by byte range: the segment index once (its roots must fold to the seal's root), then one
+// segment (~2 MB) per outpoint; the proof is built and checked in the worker.
+async function checkByRange(ops) {
+  const st = $("op-status");
+  if (!indexLoaded) {
+    indexLoaded = (async () => {
+      setStatus(st, "run", "Downloading the segment index (0.5 MB)…");
+      const bytes = await fetchBytes(config.index);
+      const r = await wasmCall({ op: "index", bytes }, [bytes]);
+      if (!r.ok) throw new Error(`segment index rejected: ${r.error}`);
+      return r;
+    })();
+    indexLoaded.catch(() => { indexLoaded = null; });
+  }
+  await indexLoaded;
+  const results = [];
+  for (const op of ops) {
+    const loc = await wasmCall({ op: "locate", outpoint: op });
+    if (!loc.ok) { results.push(loc); break; }
+    setStatus(st, "run", `Downloading segment ${loc.seg.toLocaleString("en-US")} (${((loc.end - loc.start) / 1e6).toFixed(1)} MB)…`);
+    const r = await fetch(config.set, { headers: { Range: `bytes=${loc.start}-${loc.end - 1}` } });
+    if (r.status !== 206) throw new Error(`${config.set}: expected 206 Partial Content, got HTTP ${r.status}`);
+    const bytes = await r.arrayBuffer();
+    if (bytes.byteLength !== loc.end - loc.start) throw new Error("segment: wrong length");
+    setStatus(st, "run", "Hashing the segment and checking the path against the seal's root…");
+    results.push(await wasmCall({ op: "segment", outpoint: op, seg: loc.seg, bytes }, [bytes]));
+  }
+  report(results);
 }
 
 $("op-btn").onclick = async () => {
   const st = $("op-status");
-  const ops = $("op").value.split(/[\s,]+/).filter(Boolean);
-  if (!ops.length || !ops.every((o) => /^[0-9a-fA-F]{64}:\d+$/.test(o))) {
+  const ops = $("op").value.split(/[\s,]+/).filter(Boolean).map((o) => o.toLowerCase());
+  if (!ops.length || !ops.every((o) => /^[0-9a-f]{64}:\d+$/.test(o))) {
     setStatus(st, "bad", "Use txid:vout (64 hex characters, a colon, the output index)."); return;
   }
+  if (ops.length > 16) { setStatus(st, "bad", "At most 16 outpoints at a time."); return; }
   $("op-btn").disabled = true;
   try {
-    setStatus(st, "run", "Fetching the Merkle path…");
-    await checkMember(await fetchBytes(`${memberBase}/member?op=${ops.join(",").toLowerCase()}`));
+    await configReady;
+    if (config.member) {
+      setStatus(st, "run", "Fetching the Merkle path…");
+      await checkMember(await fetchBytes(`${config.member}/member?op=${ops.join(",")}`));
+    } else {
+      config.set ||= "data/set.bin";
+      config.index ||= "data/set.segindex";
+      await checkByRange(ops);
+    }
   } catch (err) {
     setStatus(st, "bad", String(err.message || err));
   } finally {

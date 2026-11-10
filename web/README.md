@@ -1,67 +1,113 @@
 # WEB-MEMBER: the coin-set website
 
-Status: current · Updated: 2026-11-09 · Owner files: `web/`, `src/bin/webverify.zig`, `src/bin/chainproof.zig` (`serve-member`), `src/recursion/set_tree.zig` (`SegIndex`)
+Status: current · Updated: 2026-11-10 · Owner files: `web/`, `.github/workflows/pages.yml`, `src/bin/webverify.zig`, `src/bin/chainproof.zig` (`set-index`, `serve-member`), `src/recursion/set_tree.zig` (`SegIndex`, `memberInSegment`)
 
-This file answers: what the website does, how to build and test it, and how to deploy it.
+This file answers: what the website does, how it is hosted, how to build and test it, and how to deploy it.
 
 ## What it does
 
 1. **Verifies the seal in the browser.** `webverify.wasm` is the SEAL-T verifier (`chain_seal.verify`,
    `store.rootExpect`, the assumeUTXO anchor) compiled to WebAssembly, with every pinned VK embedded
    (header, join, both trees, set, SEAL-T). The page downloads the compact header-chain file (986 KB) and
-   the seal (631 KB) and checks them, which takes about 0.4 s. A seal of another kind or under another VK
-   is rejected.
-2. **Checks a coin.** It fetches an `.sbmember` file (the same bytes `chainproof set-member` writes) from
-   `serve-member`, or the visitor picks a local file. `verify_member` checks each path against the Merkle
-   root and the last key of the seal the page just verified. The server is not trusted: a wrong path
-   fails.
+   the seal (631 KB) from `web/proofs/` and checks them in about 0.4 s. A seal of another kind or under
+   another VK is rejected.
+2. **Checks a coin by byte range (default).** The set file (14.2 GB) sits unchanged in object storage.
+   - The page downloads the set's segment index once (533 KB, `chainproof set-index`). It holds `HALF` and,
+     for each of the 7,014 segments, its end offset, Merkle root and last key.
+   - `load_index` rejects an index whose roots don't fold to the verified seal's root.
+   - Per outpoint, `locate` picks the segment and the page fetches only that range (about 2 MB) with an
+     HTTP `Range` request.
+   - `verify_segment` (`set_tree.memberInSegment`) hashes the segment's leaves (the first leaf's previous
+     key is the previous segment's last key), builds the path, and checks it with the same `verifyMember`
+     as the native verifier, against the seal's root and last key.
+   - Storage is not trusted: a wrong index entry or segment byte fails (tests below).
+3. **Or checks an `.sbmember` file** (from `chainproof set-member` or `serve-member`) that the visitor
+   picks, with `verify_member`.
 
-Not covered: the site states the set after block 972,500 only. TIP-ITER moves it forward.
+What it costs a visitor: 4.7 MB once (page, wasm, proofs), 0.5 MB for the index on the first lookup, then
+about 2 MB per coin.
+
+Not covered:
+- The site states the set after block 972,500 only; TIP-ITER moves it forward.
+- The outpoint `000…000:0` has no proof of absence: the set's first leaf uses 36 zero bytes as its
+  previous key, so the bracket `prev < key` fails (`NotBracketed`). That outpoint is the coinbase input
+  marker, never an output; the native `verify-member` behaves the same.
+
+## Hosting
+
+| Part | Where | Size |
+|---|---|---|
+| Page, `webverify.wasm`, `web/proofs/` | GitHub Pages, built by `.github/workflows/pages.yml` on pushes to `main` | 4.8 MB |
+| `set-972500.bin` and `set-972500.segindex` | Object storage with public read, CORS, and HTTP Range support (e.g. Cloudflare R2: no egress fees, about $0.21/month for 14.2 GB) | 14.2 GB + 533 KB |
+
+`config.json` tells the page where the set lives: `{"set": "<URL of the set file>", "index": "<URL of
+the index>"}`. In CI it is written from the repository variables `SET_URL` and `INDEX_URL`. A local
+`web/config.json` overrides that, and `{"member": "<URL>"}` selects a `serve-member` server instead.
+
+### Setting up the bucket (owner; not done yet)
+
+1. Create a bucket and give it a public URL (an R2 custom domain; r2.dev is rate-limited).
+2. Upload from the node, where the files are:
+   - `/data/replay/out972/set-972500.bin` (sha256 starts `2b878bfd96084e4e`);
+   - `/data/replay/setgpu/set-972500.segindex`.
+
+   Use `rclone copy` or `aws s3 cp --endpoint-url …`: both do multipart uploads.
+3. CORS: allowed origin `https://starknet-innovation.github.io`, methods `GET` and `HEAD`, allowed header
+   `Range`, exposed headers `Content-Range` and `Content-Length`.
+4. Repository settings: set Pages' source to "GitHub Actions", and add the variables `SET_URL` and
+   `INDEX_URL`. Then run the `pages` workflow, or push to `main`.
 
 ## Build and test
 
 ```
-web/build.sh                                  # wasm + page + proof files → zig-out/web/site
-python3 -m http.server -d zig-out/web/site 8000
-node web/test/verify.mjs zig-out/web/webverify.wasm data/store/mainnet-to-972502.compact.sbchain data/seal972/outT/seal-972500.bin [file.sbmember]
-node web/test/browser.mjs http://127.0.0.1:8000/ [<url of an .sbmember>]   # headless Chrome, macOS path
+web/build.sh                                  # wasm + page + proofs → zig-out/web/site (checks web/proofs/SHA256SUMS)
+node web/test/serve.mjs zig-out/web/site 8000 /data/set.bin=<set file> /data/set.segindex=<index>   # static + Range + CORS
+node web/test/verify.mjs zig-out/web/webverify.wasm web/proofs/chain-972502.sbchain web/proofs/sealt-972500.bin [file.sbmember | --range <index> <set file> <txid:vout>...]
+node web/test/browser.mjs http://127.0.0.1:8000/ [<url of an .sbmember> | --ops <txid:vout,...>]     # headless Chrome (macOS path)
 ```
 
-Expected (2026-11-09):
-- `verify.mjs`: `"ok":true`, 164,539,066 coins, 2,010,133,549,560,777 sat, root `f74e9573…`, tip
-  972,501 `…0107ead0…4663` (equal to the node's `getblockhash 972501`), in about 0.47 s.
-- With `bridge-972500.sbmember`: 66 coins, 13,689,057,287 sat, in 5 ms.
-- Tampers (checksum recomputed): body offsets 200 and 5000 give `WrongDigest`; 300000 and 600000 give
-  `CircuitProofRejected`. Without the checksum fix: `ChecksumMismatch`. The D-051 seal gives
-  `WrongSealKind`.
-- `browser.mjs`: "Verified in 0.4 s", then "66 proof(s) verified".
+Locally, without the 14 GB file: a sparse file of the set's size, holding only the segments under test.
+`data/web/set-972500-sparse.bin` takes 10 MB on disk.
+
+Expected (2026-11-09/10):
+- `verify.mjs`: `"ok":true`, 164,539,066 coins, 2,010,133,549,560,777 sat, root `f74e9573…`, tip 972,501
+  `…0107ead0…4663` (equal to the node's `getblockhash 972501`), in about 0.47 s.
+  - Tampers (checksum recomputed): body offsets 200 and 5000 give `WrongDigest`; 300000 and 600000 give
+    `CircuitProofRejected`. Without the checksum fix: `ChecksumMismatch`. The D-051 seal gives
+    `WrongSealKind`.
+  - `bridge-972500.sbmember`: 66 coins, 13,689,057,287 sat, in 5 ms.
+- `--range` on mainnet (index from the node, segments 3000, 3001, 5027, 6177, 7013), about 10 ms per coin:
+  - two bridge coins: present;
+  - `fff…f:7`: absent, after the last record;
+  - a segment's last key: present;
+  - the key just above it: absent, bracketed by the next segment's first record.
+
+  Tampers: a flipped root in the index gives `IndexRootMismatch`. A flipped last key (segment 5026) or a
+  flipped byte in segment 5027 gives `NotInRoot`.
+- `browser.mjs --ops` with those five: "Verified in 0.5 s", then "5 proof(s) verified: 3 unspent, 2
+  absent". `000…0:0` gives `NotBracketed`.
 
 `zig build web -Dtarget=wasm32-wasi -Doptimize=ReleaseFast` builds only the wasm (3.1 MB). WASI is there
 only for the C library the dependencies link: the module reads no files, and `worker.js` stubs WASI. The
 prover's C kernels are not compiled for wasm (`build.zig`).
 
-## Serve membership proofs
+## The segment index
 
-```
-chainproof serve-member <set.bin> <work-dir> <port> [--bind <ip>]     # default bind 127.0.0.1
-```
+`chainproof set-index <set.bin> <work-dir> <out>`: `passSegments` over the set, then a check that the
+roots fold to the pass's root and that the last end is the file's size. On the node for
+`set-972500.bin`: 7,014 segments, `HALF` 16,384, 276 s, 8.4 GB peak RSS, 533,084 bytes. Format
+`SBSEGIX2`: count (u64), `HALF` (u32), then per segment its end (u64), root (8 × u32) and last key (36
+bytes), little-endian.
 
-- `GET /member?op=<txid>:<vout>[,…]` (at most 16) returns `application/octet-stream`, an `.sbmember`
-  file. `GET /health` returns `ok`. CORS is `*`.
-- The first start builds `<work-dir>/segindex.bin`: each segment's end offset and root. This took about
-  5 minutes for mainnet, measured with `set-member`. Every start checks that the index folds to the
-  pass's root.
-- Each query parses one or two segments; it took 0 ms on the test set. The set file is memory-mapped.
-- Tested 2026-11-09 on the test chain's set after block 15 (`data/test-chain/e15`): one present coin, an
-  absent coin below the first key and one above the last. All three were accepted by `verify-member`.
+## Optional: a proof server
 
-**Mainnet (not yet running):** on the node, `chainproof serve-member out972/set-972500.bin
-setgpu/passes/s972500 8090` from `/data/replay`. Then either set `web/config.json` to
-`{"member": "<public URL>"}` behind a TLS reverse proxy, or tunnel it for a private demo
-(`ssh -L 8090:127.0.0.1:8090 …` and `{"member": "http://127.0.0.1:8090"}`). Exposing the node publicly is
-the owner's call.
+`chainproof serve-member <set.bin> <work-dir> <port> [--bind <ip>]` (default bind 127.0.0.1):
+- `GET /member?op=<txid>:<vout>[,…]` (at most 16) returns an `.sbmember` file; `GET /health` returns `ok`.
+  CORS is `*`.
+- It caches the index as `<work-dir>/segindex.bin`.
+- Tested on the test chain's set (`data/test-chain/e15`): a present coin, one below the first key and
+  one above the last, all accepted by `verify-member`.
+- Not needed with object storage. It suits a private demo over an SSH tunnel (`{"member":
+  "http://127.0.0.1:8090"}`).
 
-## Deploy
-
-The site is static (`zig-out/web/site`, about 4.8 MB): any static host. Serve `.wasm` as
-`application/wasm`. Public launch is gated on external review (roadmap WEB-MEMBER).
+Public launch is gated on external review (roadmap WEB-MEMBER).

@@ -21,6 +21,31 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-11-10 (session 37) — WEB-MEMBER without a server: coins looked up by byte range, Pages workflow
+Who: Claude (agent, Opus 5.5), owner: "go ahead with option 2" (object storage plus GitHub Pages, no proof server)
+Roadmap: WEB-MEMBER still in progress (code done on `web-member`; bucket and Pages setup are the owner's)
+Done:
+- `set_tree.SegIndex` v2 (`SBSEGIX2`: `HALF`, ends as u64, roots, last keys; `find`, `range`) and `memberInSegment` (a proof from one segment's bytes). `passSegments` now also returns last keys.
+- `chainproof set-index`; `serve-member` uses the same `loadSegIndex`.
+- wasm: `load_index` (roots must fold to the seal root), `locate`, `verify_segment` (built proof → `verifyMember`).
+- Page: lookups by HTTP `Range` (`config.json`: `set`, `index`), and the server mode kept (`member`).
+- `web/proofs/` (the seal and compact chain files, `SHA256SUMS`); `.github/workflows/pages.yml`; `web/test/serve.mjs` (Range + CORS); `web/README.md` rewritten (hosting, bucket setup).
+Evidence:
+- Node `set-index` on `set-972500.bin`: "7014 segments, HALF 16384, root f74e9573… = the pass's root (276.1s)", 8,390,772 KB max RSS, 533,084 bytes.
+- `verify.mjs --range` (sparse local copy holding segments 0, 3000, 3001, 5027, 6177, 7013 from the node):
+  - bridge coins `0f4e48…:0` and `3c5556…:1`: present (1.20243798 and 1.57088346 BTC);
+  - `fff…f:7`: absent;
+  - segment 3000's last key: present; the key above it: absent;
+  - about 10 ms each; `000…0:0`: `NotBracketed`.
+- Tampers: index root flipped gives `IndexRootMismatch`; the last key of segment 5026 flipped or a byte of segment 5027 flipped gives `NotInRoot`.
+- `browser.mjs --ops` (headless Chrome): "Verified in 0.5 s", "5 proof(s) verified: 3 unspent, 2 absent".
+- `serve-member` with the v2 index on the test chain: 3 proofs, `verify-member` "VERIFIED 3 proofs".
+Problems / lessons:
+- Set-file offsets exceed 4 GB: the index's ends are u64 (wasm32's `usize` is 32 bits).
+- zsh doesn't word-split `$VAR`: an unquoted command in a variable ran nothing; use a function or an array.
+- UNVERIFIED: the Pages workflow has not run (needs Pages enabled and the merge to main).
+Next: owner: create the bucket, upload the set file and index from the node, set CORS and the `SET_URL`/`INDEX_URL` variables, enable Pages; merge `web-member`; then external review. Otherwise TIP-ITER.
+
 ## 2026-11-09 (session 36) — WEB-MEMBER built: the seal verified in the browser, coins checked against it
 Who: Claude (agent, Opus 5.5), owner: "push, then ship 2"
 Roadmap: WEB-MEMBER in progress (built and tested locally on branch `web-member`; node server and public host open)

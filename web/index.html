@@ -51,8 +51,8 @@
   <h1>Bitcoin's coin set, proven in one proof</h1>
   <p class="lede">One STARK proof covers Bitcoin's header chain from genesis, every block from 935,001 to
   972,500, and the full coin set after block 972,500. This page checks that proof in your browser, then
-  checks any coin against the set it proves. No server is trusted: it only supplies data, and your
-  browser recomputes everything.</p>
+  checks any coin against the set it proves. Nothing is trusted but the code: the files come from plain
+  storage, and your browser recomputes everything.</p>
 
   <section id="seal">
     <div class="step">Step 1</div>
@@ -68,15 +68,16 @@
   <section id="member">
     <div class="step">Step 2</div>
     <h2>Check a coin</h2>
-    <p class="hint">Enter an outpoint as <code>txid:vout</code>. The server returns its Merkle path (about
-    1 KB). Your browser checks the path against the root of the seal from step 1. A coin that is absent
-    gets a proof of absence: the two neighbouring coins in the sorted set.</p>
+    <p class="hint">Enter an outpoint as <code>txid:vout</code>. Your browser downloads the set's segment
+    index once (0.5 MB), then the one segment of the coin set that holds this outpoint (about 2 MB of the
+    14 GB file). It hashes that segment and checks the coin's Merkle path against the root of the seal from
+    step 1. A coin that is absent gets a proof of absence: the two neighbouring coins in the sorted set.</p>
     <div class="row">
       <input type="text" id="op" placeholder="txid:vout" spellcheck="false" autocomplete="off">
       <button id="op-btn" disabled>Check</button>
     </div>
     <details>
-      <summary>Or check a proof file (<code>.sbmember</code>) without the server</summary>
+      <summary>Or check a proof file (<code>.sbmember</code>, from <code>chainproof set-member</code>)</summary>
       <div class="row"><input type="file" id="file" accept=".sbmember" disabled></div>
     </details>
     <div id="op-status" class="status"></div>

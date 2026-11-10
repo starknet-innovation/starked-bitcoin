@@ -1,0 +1,46 @@
+# WEB-MEMBER: builds the site (webverify.wasm + page + the seal's proof files) and publishes it to
+# GitHub Pages. The coin set itself is not here: config.json points at the set file and its segment
+# index in object storage (repository variables SET_URL and INDEX_URL; see web/README.md).
+name: pages
+on:
+  push:
+    branches: [main]
+    paths: ["web/**", "src/**", "vk/**", "build.zig", "build.zig.zon", "third_party/**", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build the site (and verify the seal with the built wasm)
+        env:
+          SET_URL: ${{ vars.SET_URL }}
+          INDEX_URL: ${{ vars.INDEX_URL }}
+        run: web/build.sh
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: zig-out/web/site
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

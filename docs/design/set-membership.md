@@ -43,6 +43,8 @@ under the epoch's challenge once, then every proof in the files (single-proof fi
 read too) against its root and last key, rejects an outpoint given twice, and prints each coin (amount,
 height, scriptPubKey) and the total of the unspent ones.
 
+**For the website** (WEB-MEMBER, [web/README.md](../../web/README.md)): `chainproof set-index <set.bin> <work-dir> <out>` writes the set's segment index (each segment's end, root, last key; checked against the pass root). With it, `set_tree.memberInSegment` builds a coin's proof from that one segment's bytes, so a browser fetches ~2 MB of the set file by HTTP range instead of asking a server.
+
 **With the chain** (the way to hand coins to someone else): `chainproof verify-chain <vk> <file.sbchain>
 <out-dir> --set-proofs --members <file.sbmember>... [--witness-script <hex>] <epochs>...` verifies the
 chain proof and the set-pass proofs (`<dir>/pass-<to>`), then the proofs against the final set's root:

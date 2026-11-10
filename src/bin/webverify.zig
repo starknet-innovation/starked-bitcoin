@@ -61,6 +61,7 @@ fn wordBytes(w: [8]u32) [32]u8 {
 
 export fn verify_seal(chain: [*]const u8, chain_len: usize, seal: [*]const u8, seal_len: usize) [*]const u8 {
     sealed = null;
+    index = null;
     return verifySeal(chain[0..chain_len], seal[0..seal_len]) catch |e| fail(e);
 }
 
@@ -130,16 +131,91 @@ fn verifyMember(bytes: []const u8) ![*]const u8 {
     try w.writeAll("{\"ok\":true,\"coins\":[");
     for (ms, 0..) |*m, i| {
         try ST.verifyMember(m, s.root, s.last);
-        var txid = m.key[0..32].*;
-        std.mem.reverse(u8, &txid);
         if (i > 0) try w.writeAll(",");
-        try w.print("{{\"outpoint\":\"{x}:{d}\",\"present\":{}", .{ &txid, std.mem.readInt(u32, m.key[32..36], .big), m.present });
-        if (m.present) {
-            const o = try ST.recordOutput(m.record);
-            try w.print(",\"amount\":{d},\"height\":{d},\"coinbase\":{},\"script\":\"{x}\"", .{ o.amount, std.mem.readInt(u32, m.record[36..40], .little), m.record[40] == 1, o.script });
-        }
-        try w.print(",\"path\":{d}}}", .{m.path.len});
+        try writeCoin(w, m);
     }
+    try w.writeAll("]}");
+    return result.items.ptr;
+}
+
+fn writeCoin(w: anytype, m: *const ST.Member) !void {
+    var txid = m.key[0..32].*;
+    std.mem.reverse(u8, &txid);
+    try w.print("{{\"outpoint\":\"{x}:{d}\",\"present\":{}", .{ &txid, std.mem.readInt(u32, m.key[32..36], .big), m.present });
+    if (m.present) {
+        const o = try ST.recordOutput(m.record);
+        try w.print(",\"amount\":{d},\"height\":{d},\"coinbase\":{},\"script\":\"{x}\"", .{ o.amount, std.mem.readInt(u32, m.record[36..40], .little), m.record[40] == 1, o.script });
+    }
+    try w.print(",\"path\":{d}}}", .{m.path.len});
+}
+
+// ---- Lookups by byte range (no proof server): the set file sits in object storage; the page fetches
+// the segment index once, then one segment per coin, and builds and checks the proof here.
+
+var index_arena = std.heap.ArenaAllocator.init(gpa);
+var index: ?ST.SegIndex = null;
+
+/// `load_index(bytes)`: a set's segment index (`chainproof set-index`); its roots must fold to the
+/// verified seal's Merkle root. Answers `{"ok":true,"segments":n,"half":h}`.
+export fn load_index(bytes: [*]const u8, len: usize) [*]const u8 {
+    return loadIndex(bytes[0..len]) catch |e| fail(e);
+}
+
+fn loadIndex(bytes: []const u8) ![*]const u8 {
+    const s = sealed orelse return error.SealNotVerified;
+    index = null;
+    _ = index_arena.reset(.free_all);
+    const ix = try ST.SegIndex.decode(index_arena.allocator(), bytes);
+    if (!std.mem.eql(u32, &ix.root(), &s.root)) return error.IndexRootMismatch;
+    index = ix;
+    result.clearRetainingCapacity();
+    try result.writer(gpa).print("{{\"ok\":true,\"segments\":{d},\"half\":{d}}}", .{ ix.ends.len, ix.half });
+    return result.items.ptr;
+}
+
+/// An outpoint `<txid>:<vout>` (display order) as a set key.
+fn parseOutpoint(op: []const u8) ![36]u8 {
+    const c = std.mem.indexOfScalar(u8, op, ':') orelse return error.BadOutpoint;
+    if (c != 64) return error.BadOutpoint;
+    var k: [36]u8 = undefined;
+    _ = try std.fmt.hexToBytes(k[0..32], op[0..64]);
+    std.mem.reverse(u8, k[0..32]);
+    std.mem.writeInt(u32, k[32..36], try std.fmt.parseInt(u32, op[c + 1 ..], 10), .big);
+    return k;
+}
+
+/// `locate(op)`: the segment to fetch for outpoint `op`, `{"ok":true,"seg":i,"start":a,"end":b}` (bytes
+/// `[a, b)` of the set file).
+export fn locate(op: [*]const u8, len: usize) [*]const u8 {
+    return locateOp(op[0..len]) catch |e| fail(e);
+}
+
+fn locateOp(op: []const u8) ![*]const u8 {
+    const ix = index orelse return error.IndexNotLoaded;
+    const si = ix.find(try parseOutpoint(op));
+    const r = ix.range(si);
+    result.clearRetainingCapacity();
+    try result.writer(gpa).print("{{\"ok\":true,\"seg\":{d},\"start\":{d},\"end\":{d}}}", .{ si, r.start, r.end });
+    return result.items.ptr;
+}
+
+/// `verify_segment(op, si, segment)`: the proof for `op` built from segment `si`'s bytes, checked by
+/// `verifyMember` against the verified seal's root and last key; answers as `verify_member`.
+export fn verify_segment(op: [*]const u8, op_len: usize, si: usize, seg: [*]const u8, seg_len: usize) [*]const u8 {
+    return verifySegment(op[0..op_len], si, seg[0..seg_len]) catch |e| fail(e);
+}
+
+fn verifySegment(op: []const u8, si: usize, seg: []const u8) ![*]const u8 {
+    const s = sealed orelse return error.SealNotVerified;
+    const ix = index orelse return error.IndexNotLoaded;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const m = try ST.memberInSegment(arena.allocator(), seg, ix, si, try parseOutpoint(op));
+    try ST.verifyMember(&m, s.root, s.last);
+    result.clearRetainingCapacity();
+    const w = result.writer(gpa);
+    try w.writeAll("{\"ok\":true,\"coins\":[");
+    try writeCoin(w, &m);
     try w.writeAll("]}");
     return result.items.ptr;
 }
