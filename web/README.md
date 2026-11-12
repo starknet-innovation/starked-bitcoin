@@ -1,6 +1,6 @@
 # WEB-MEMBER: the coin-set website
 
-Status: current · Updated: 2026-11-10 · Owner files: `web/`, `.github/workflows/pages.yml`, `src/bin/webverify.zig`, `src/bin/chainproof.zig` (`set-index`, `serve-member`), `src/recursion/set_tree.zig` (`SegIndex`, `memberInSegment`)
+Status: current · Updated: 2026-11-12 · Owner files: `web/`, `.github/workflows/pages.yml`, `src/bin/webverify.zig`, `src/bin/chainproof.zig` (`set-index`, `serve-member`), `src/recursion/set_tree.zig` (`SegIndex`, `memberInSegment`)
 
 This file answers: what the website does, how it is hosted, how to build and test it, and how to deploy it.
 
@@ -44,7 +44,19 @@ Not covered:
 the index>"}`. In CI it is written from the repository variables `SET_URL` and `INDEX_URL`. A local
 `web/config.json` overrides that, and `{"member": "<URL>"}` selects a `serve-member` server instead.
 
-### Setting up the bucket (owner; not done yet)
+### Live deployment (2026-11-12)
+
+- Site: https://starknet-innovation.github.io/starked-bitcoin/ (Pages source "GitHub Actions").
+- Bucket: Cloudflare R2 `starked-bitcoin`, public at `https://pub-94aee70efd7b44649d45a2c33f0ab6b1.r2.dev`
+  (r2.dev: rate-limited; move to a custom domain before launch and update the two variables).
+- CORS allows only `https://starknet-innovation.github.io` (GET, HEAD, header `Range`).
+- Uploaded from the node with rclone (bucket-scoped key, `no_check_bucket = true`; key deleted after).
+  The public copy of `set-972500.bin` hashes to `2b878bfd96084e4e…`, equal to the node's file.
+- Live check (headless Chrome, `browser.mjs --ops` with the five outpoints below): seal verified in 0.5 s,
+  "5 proof(s) verified: 3 unspent, 2 absent".
+- A rebuild needs `gh workflow run pages --ref main` (a re-run of an old deploy fails: its artifact expires).
+
+### Setting up the bucket
 
 1. Create a bucket and give it a public URL (an R2 custom domain; r2.dev is rate-limited).
 2. Upload from the node, where the files are:

@@ -7,6 +7,14 @@ correction in a new one.
 Template (copy it to the top):
 
 ```
+## 2026-11-12 · session 38 · WEB-MEMBER deployed
+
+- Pages: enabled by the owner (source "GitHub Actions"). Re-running the old failed deploy failed again ("No artifacts named github-pages": the build artifact had expired); a fresh `gh workflow run pages --ref main` deployed.
+- R2 bucket `starked-bitcoin` (owner), public at `pub-94aee70efd7b44649d45a2c33f0ab6b1.r2.dev`; CORS limited to `https://starknet-innovation.github.io`.
+- Upload from the node with rclone 1.60 (apt), bucket-scoped key in `~/.r2.env` (written by the owner, deleted after). A bucket-scoped key needs `no_check_bucket` (else 403 on bucket creation). 14.2 GB in about 2.5 min (after a full MD5 pass).
+- Evidence: `curl <public>/set-972500.bin | sha256sum` on the node → `2b878bfd96084e4e…` (equal to the node's file); the index's sha256 `e27b8b97…` equal on both. Preflight from the Pages origin → 204 with `Access-Control-Allow-Headers: range`; `Range: bytes=0-15` → 206 `Content-Range: bytes 0-15/533084`; another origin → 403.
+- Live: `node web/test/browser.mjs https://starknet-innovation.github.io/starked-bitcoin/ --ops <5 outpoints>` → seal "Verified in 0.5 s", then "5 proof(s) verified: 3 unspent, 2 absent".
+
 ## YYYY-MM-DD — <one-line summary>
 Who: <person or agent (model)>
 Roadmap: <IDs touched and their new status>

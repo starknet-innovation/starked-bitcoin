@@ -4,10 +4,10 @@ Rewritten at the end of every session; see [README.md](README.md#ending-a-sessio
 If `HEAD at last update` doesn't match `git log -1`, this file is stale:
 follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work).
 
-- **Updated:** 2026-11-10 (session 37: WEB-MEMBER by byte range, Pages workflow, on branch `web-member`)
-- **HEAD at last update:** this session's commit on `web-member` (after 98e8a71; not pushed)
+- **Updated:** 2026-11-12 (session 38: WEB-MEMBER deployed: Pages + R2, live lookups verified)
+- **HEAD at last update:** this session's docs commit on `main` (after 30541b7)
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
-- **Current item:** WEB-MEMBER (owner: "ship 2"): built and tested locally ([web/README.md](../../web/README.md)), with no proof server: GitHub Pages plus the set file in object storage; waiting on the owner for the bucket and the Pages settings. TIP-ITER not started.
+- **Current item:** WEB-MEMBER is live as an unannounced preview at https://starknet-innovation.github.io/starked-bitcoin/ (set file and index on Cloudflare R2, r2.dev URL; [web/README.md](../../web/README.md) "Live deployment"). Open: custom domain for the bucket, external review before announcing. TIP-ITER not started.
   SEAL-T (D-052, accepted) is proved on mainnet and the test chain, pinned, and composed in Lean
   (`sealT_soundW`) with the header tree's MMR shape now proven (`Circuit/HeaderShape.lean`).
 
@@ -25,7 +25,7 @@ including the seal's composed statement (`seal_soundW`); trusted items in [verif
 
 ## Next step (concrete)
 
-0. WEB-MEMBER: the owner sets up the bucket, uploads `/data/replay/out972/set-972500.bin` and `/data/replay/setgpu/set-972500.segindex` from the node, sets CORS, the `SET_URL`/`INDEX_URL` variables and Pages ([web/README.md](../../web/README.md) "Setting up the bucket"); then re-run the `pages` workflow (build passes; deploy waits for Pages to be enabled). Upstream: fix stwo-zig `composition_aot_build.zig` (host codegen imports the target `stwo_core`), then move CI back to x86.
+0. WEB-MEMBER: move the bucket to a custom domain (owner) and update `SET_URL`/`INDEX_URL`; external review before announcing. Upstream: fix stwo-zig `composition_aot_build.zig` (host codegen imports the target `stwo_core`), then move CI back to x86.
 1. TIP-ITER ([roadmap.md](roadmap.md), "Now"): design the repeatable extension of the seal past 972,500:
    the header chain from `data/store/mainnet-to-972502.sbchain` (PROOF-STORE `--from`), new block proofs
    and an epoch from 972,501, rejoin (`prove-chain`), the next set pass, `prove-seal --paths 32`; estimate
