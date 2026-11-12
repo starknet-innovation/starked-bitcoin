@@ -1186,7 +1186,28 @@ pub const SegIndex = struct {
     pub fn range(ix: SegIndex, si: usize) struct { start: u64, end: u64 } {
         return .{ .start = if (si == 0) 4 else ix.ends[si - 1], .end = ix.ends[si] };
     }
+
+    /// The segment holding byte `off` of the set file (the last segment when `off` is past the end).
+    pub fn segmentAt(ix: SegIndex, off: u64) usize {
+        var lo: usize = 0;
+        var hi: usize = ix.ends.len - 1;
+        while (lo < hi) {
+            const mid = (lo + hi) / 2;
+            if (ix.ends[mid] <= off) lo = mid + 1 else hi = mid;
+        }
+        return lo;
+    }
 };
+
+/// The key of record `r mod n` of a segment's `n` records (for picking a coin at random; the caller
+/// still proves it with `memberInSegment`).
+pub fn keyInSegment(seg: []const u8, r: u64) ![36]u8 {
+    var scratch = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer scratch.deinit();
+    const recs = try SS.parse(scratch.allocator(), seg);
+    if (recs.len == 0) return error.BadSegment;
+    return recKey(recs[@intCast(r % recs.len)].head);
+}
 
 /// The membership proof of `key` from a segment index of `file`.
 pub fn proveMemberIx(a: std.mem.Allocator, file: []const u8, ix: SegIndex, key: [36]u8) !Member {

@@ -60,6 +60,7 @@ $("seal-btn").onclick = async () => {
     ]);
     indexLoaded = null;
     $("op-btn").disabled = false;
+    $("pick-btn").disabled = false;
     $("file").disabled = false;
   } catch (err) {
     setStatus(st, "bad", String(err.message || err));
@@ -114,8 +115,9 @@ async function wasmCall(msg, transfer) {
 
 // Lookups by byte range: the segment index once (its roots must fold to the seal's root), then one
 // segment (~2 MB) per outpoint; the proof is built and checked in the worker.
-async function checkByRange(ops) {
-  const st = $("op-status");
+function ensureIndex(st) {
+  config.set ||= "data/set.bin";
+  config.index ||= "data/set.segindex";
   if (!indexLoaded) {
     indexLoaded = (async () => {
       setStatus(st, "run", "Downloading the segment index (0.5 MB)…");
@@ -126,16 +128,31 @@ async function checkByRange(ops) {
     })();
     indexLoaded.catch(() => { indexLoaded = null; });
   }
-  await indexLoaded;
+  return indexLoaded;
+}
+
+// The last segment downloaded, kept so that checking a randomly picked coin does not fetch it again.
+// Untrusted like any download: the worker hashes it against the seal's root on every check.
+let segCache = null;
+async function fetchSegment(st, loc) {
+  if (segCache && segCache.seg === loc.seg) return segCache.bytes.slice(0);
+  setStatus(st, "run", `Downloading segment ${loc.seg.toLocaleString("en-US")} (${((loc.end - loc.start) / 1e6).toFixed(1)} MB)…`);
+  const r = await fetch(config.set, { headers: { Range: `bytes=${loc.start}-${loc.end - 1}` } });
+  if (r.status !== 206) throw new Error(`${config.set}: expected 206 Partial Content, got HTTP ${r.status}`);
+  const bytes = await r.arrayBuffer();
+  if (bytes.byteLength !== loc.end - loc.start) throw new Error("segment: wrong length");
+  segCache = { seg: loc.seg, bytes: bytes.slice(0) };
+  return bytes;
+}
+
+async function checkByRange(ops) {
+  const st = $("op-status");
+  await ensureIndex(st);
   const results = [];
   for (const op of ops) {
     const loc = await wasmCall({ op: "locate", outpoint: op });
     if (!loc.ok) { results.push(loc); break; }
-    setStatus(st, "run", `Downloading segment ${loc.seg.toLocaleString("en-US")} (${((loc.end - loc.start) / 1e6).toFixed(1)} MB)…`);
-    const r = await fetch(config.set, { headers: { Range: `bytes=${loc.start}-${loc.end - 1}` } });
-    if (r.status !== 206) throw new Error(`${config.set}: expected 206 Partial Content, got HTTP ${r.status}`);
-    const bytes = await r.arrayBuffer();
-    if (bytes.byteLength !== loc.end - loc.start) throw new Error("segment: wrong length");
+    const bytes = await fetchSegment(st, loc);
     setStatus(st, "run", "Hashing the segment and checking the path against the seal's root…");
     results.push(await wasmCall({ op: "segment", outpoint: op, seg: loc.seg, bytes }, [bytes]));
   }
@@ -156,14 +173,36 @@ $("op-btn").onclick = async () => {
       setStatus(st, "run", "Fetching the Merkle path…");
       await checkMember(await fetchBytes(`${config.member}/member?op=${ops.join(",")}`));
     } else {
-      config.set ||= "data/set.bin";
-      config.index ||= "data/set.segindex";
       await checkByRange(ops);
     }
   } catch (err) {
     setStatus(st, "bad", String(err.message || err));
   } finally {
     $("op-btn").disabled = false;
+  }
+};
+// A random coin of the set: a random byte of the set file picks a segment (segments are picked in
+// proportion to their size), then a random record of that segment. Only fills the box; Check proves it.
+const rand32 = () => crypto.getRandomValues(new Uint32Array(1))[0];
+$("pick-btn").onclick = async () => {
+  const st = $("op-status");
+  $("pick-btn").disabled = true;
+  try {
+    await configReady;
+    if (config.member) throw new Error("Random picks need the set file (byte-range mode).");
+    await ensureIndex(st);
+    const loc = await wasmCall({ op: "pickseg", r: rand32() });
+    if (!loc.ok) throw new Error(loc.error);
+    const bytes = await fetchSegment(st, loc);
+    const p = await wasmCall({ op: "pickin", bytes, r: rand32() }, [bytes]);
+    if (!p.ok) throw new Error(p.error);
+    $("op").value = p.outpoint;
+    $("op-out").replaceChildren();
+    setStatus(st, "", "");
+  } catch (err) {
+    setStatus(st, "bad", String(err.message || err));
+  } finally {
+    $("pick-btn").disabled = $("op-btn").disabled;
   }
 };
 $("op").addEventListener("keydown", (e) => { if (e.key === "Enter" && !$("op-btn").disabled) $("op-btn").click(); });

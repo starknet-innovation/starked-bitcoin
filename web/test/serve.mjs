@@ -1,5 +1,5 @@
 // Static server with HTTP Range and CORS, like the object store the site uses (tests only):
-// node web/test/serve.mjs <dir> <port> [<url-path>=<file>...]
+// node web/test/serve.mjs <dir> <port> [<url-path>=<file or http(s) URL>...] (a URL is proxied, Range included)
 import { createServer } from "node:http";
 import { createReadStream, statSync } from "node:fs";
 import { join, extname, normalize } from "node:path";
@@ -9,6 +9,14 @@ const types = { ".html": "text/html", ".js": "text/javascript", ".wasm": "applic
 createServer((req, res) => {
   const path = decodeURIComponent(new URL(req.url, "http://x").pathname);
   const file = mapped[path] ?? join(dir, normalize(path === "/" ? "/index.html" : path));
+  if (/^https?:/.test(file)) {
+    const h = { "access-control-allow-origin": "*", "access-control-expose-headers": "content-range" };
+    if (req.method === "OPTIONS") { res.writeHead(204, { ...h, "access-control-allow-headers": "range" }); return res.end(); }
+    return fetch(file, { headers: req.headers.range ? { range: req.headers.range } : {} }).then(async (r) => {
+      res.writeHead(r.status, { ...h, "content-type": "application/octet-stream", ...(r.headers.get("content-range") ? { "content-range": r.headers.get("content-range") } : {}) });
+      res.end(Buffer.from(await r.arrayBuffer()));
+    }, () => { res.writeHead(502); res.end(); });
+  }
   let st;
   try { st = statSync(file); } catch { res.writeHead(404); return res.end(); }
   const h = { "access-control-allow-origin": "*", "access-control-expose-headers": "content-range", "accept-ranges": "bytes",

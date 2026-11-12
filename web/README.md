@@ -21,7 +21,13 @@ This file answers: what the website does, how it is hosted, how to build and tes
      key is the previous segment's last key), builds the path, and checks it with the same `verifyMember`
      as the native verifier, against the seal's root and last key.
    - Storage is not trusted: a wrong index entry or segment byte fails (tests below).
-3. **Or checks an `.sbmember` file** (from `chainproof set-member` or `serve-member`) that the visitor
+3. **Picks a random coin** ("Pick a random UTXO in the snapshot"): `pick_segment` maps a random 32-bit
+   number to a byte of the set file, so a segment is picked in proportion to its size, and
+   `pick_in_segment` (`set_tree.keyInSegment`) takes a random record of it. The button only fills the box;
+   Check proves the coin as any other. The segment stays cached in the page, so Check does not download it
+   again (it is still hashed against the seal's root). Coins are close to equally likely, not exactly:
+   a coin in a segment with fewer, larger records is slightly favoured.
+4. **Or checks an `.sbmember` file** (from `chainproof set-member` or `serve-member`) that the visitor
    picks, with `verify_member`.
 
 What it costs a visitor: 4.7 MB once (page, wasm, proofs), 0.5 MB for the index on the first lookup, then
@@ -75,8 +81,12 @@ the index>"}`. In CI it is written from the repository variables `SET_URL` and `
 web/build.sh                                  # wasm + page + proofs → zig-out/web/site (checks web/proofs/SHA256SUMS)
 node web/test/serve.mjs zig-out/web/site 8000 /data/set.bin=<set file> /data/set.segindex=<index>   # static + Range + CORS
 node web/test/verify.mjs zig-out/web/webverify.wasm web/proofs/chain-972502.sbchain web/proofs/sealt-972500.bin [file.sbmember | --range <index> <set file> <txid:vout>...]
-node web/test/browser.mjs http://127.0.0.1:8000/ [<url of an .sbmember> | --ops <txid:vout,...>]     # headless Chrome (macOS path)
+node web/test/browser.mjs http://127.0.0.1:8000/ [<url of an .sbmember> | --ops <txid:vout,...> | --pick <n>]   # headless Chrome (macOS path)
 ```
+
+`serve.mjs` also proxies a mapped URL (`/data/set.bin=https://…/set-972500.bin`), which tests a local build
+against the bucket despite its CORS policy. On 2026-11-12, `--pick 8` that way: 8 random coins, all present
+and verified, one segment download each, Check about 0.2 s.
 
 Locally, without the 14 GB file: a sparse file of the set's size, holding only the segments under test.
 `data/web/set-972500-sparse.bin` takes 10 MB on disk.

@@ -1,5 +1,6 @@
 // Runs webverify.wasm off the main thread. Messages in: {op:"seal", chain, seal}, {op:"member", bytes},
-// {op:"index", bytes}, {op:"locate", outpoint}, {op:"segment", outpoint, seg, bytes}; out: {op, result}
+// {op:"index", bytes}, {op:"locate", outpoint}, {op:"segment", outpoint, seg, bytes},
+// {op:"pickseg", r}, {op:"pickin", bytes, r}; out: {op, result}
 // with the wasm's JSON result, or {op, error}.
 let wasm = null;
 const log = [];
@@ -74,6 +75,12 @@ onmessage = async (e) => {
       const [op_p, op_l] = put(w, new TextEncoder().encode(e.data.outpoint));
       result = json(w, w.locate(op_p, op_l));
       w.wv_free(op_p, op_l);
+    } else if (op === "pickseg") {
+      result = json(w, w.pick_segment(e.data.r >>> 0));
+    } else if (op === "pickin") {
+      const [sp, sl] = put(w, e.data.bytes);
+      result = json(w, w.pick_in_segment(sp, sl, e.data.r >>> 0));
+      w.wv_free(sp, sl);
     } else if (op === "segment") {
       const [op_p, op_l] = put(w, new TextEncoder().encode(e.data.outpoint));
       const [sp, sl] = put(w, e.data.bytes);

@@ -199,6 +199,37 @@ fn locateOp(op: []const u8) ![*]const u8 {
     return result.items.ptr;
 }
 
+/// `pick_segment(r)`: the segment holding byte `r / 2^32` of the way through the set file (a uniform
+/// `r` picks segments in proportion to their size), as `locate`.
+export fn pick_segment(r: u32) [*]const u8 {
+    return pickSegment(r) catch |e| fail(e);
+}
+
+fn pickSegment(r: u32) ![*]const u8 {
+    const ix = index orelse return error.IndexNotLoaded;
+    const total = ix.ends[ix.ends.len - 1];
+    const si = ix.segmentAt(4 + @as(u64, @intCast((@as(u128, total - 4) * r) >> 32)));
+    const rg = ix.range(si);
+    result.clearRetainingCapacity();
+    try result.writer(gpa).print("{{\"ok\":true,\"seg\":{d},\"start\":{d},\"end\":{d}}}", .{ si, rg.start, rg.end });
+    return result.items.ptr;
+}
+
+/// `pick_in_segment(segment, r)`: the outpoint of record `r mod n` of the segment's `n` records,
+/// `{"ok":true,"outpoint":"<txid>:<vout>"}`. Not a proof: the page then checks it as any outpoint.
+export fn pick_in_segment(seg: [*]const u8, seg_len: usize, r: u32) [*]const u8 {
+    return pickInSegment(seg[0..seg_len], r) catch |e| fail(e);
+}
+
+fn pickInSegment(seg: []const u8, r: u32) ![*]const u8 {
+    const k = try ST.keyInSegment(seg, r);
+    var txid = k[0..32].*;
+    std.mem.reverse(u8, &txid);
+    result.clearRetainingCapacity();
+    try result.writer(gpa).print("{{\"ok\":true,\"outpoint\":\"{x}:{d}\"}}", .{ &txid, std.mem.readInt(u32, k[32..36], .big) });
+    return result.items.ptr;
+}
+
 /// `verify_segment(op, si, segment)`: the proof for `op` built from segment `si`'s bytes, checked by
 /// `verifyMember` against the verified seal's root and last key; answers as `verify_member`.
 export fn verify_segment(op: [*]const u8, op_len: usize, si: usize, seg: [*]const u8, seg_len: usize) [*]const u8 {

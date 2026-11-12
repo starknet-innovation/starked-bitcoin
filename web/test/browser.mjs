@@ -1,6 +1,7 @@
-// Headless Chrome check of the built site: node web/test/browser.mjs <url> [<member-file-url> | --ops <txid:vout,...>]
+// Headless Chrome check of the built site: node web/test/browser.mjs <url> [<member-file-url> | --ops <txid:vout,...> | --pick <n>]
 // Waits for step 1's status, then checks a .sbmember file fetched from <member-file-url>, or looks up
-// outpoints through the page's own form (byte-range lookups).
+// outpoints through the page's own form (byte-range lookups), or presses "Pick a random UTXO" n times and
+// checks each pick (it must be present, and its segment must be downloaded once, not again by Check).
 import { spawn } from "node:child_process";
 const [url, memberUrl] = process.argv.slice(2);
 const chrome = spawn("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -29,6 +30,26 @@ if (memberUrl === "--ops") {
   console.log("lookup:", m);
   console.log(await ev("[...document.querySelectorAll('#op-out .coin')].map(c => c.innerText.split('\\n').filter((_, i) => i % 2).slice(0, 3).join(' | ')).join('\\n')"));
   if (!/status ok/.test(m)) st = "lookup failed";
+} else if (memberUrl === "--pick") {
+  const n = +process.argv[4] || 5;
+  const segs = "performance.getEntriesByType('resource').filter(e => /set(-972500)?\\.bin/.test(e.name)).length";
+  let fails = 0;
+  for (let k = 0; k < n; k++) {
+    const before = await ev(segs), prev = await ev("document.getElementById('op').value");
+    await ev("document.getElementById('pick-btn').click()");
+    let op = prev;
+    for (let i = 0; i < 200; i++) { await sleep(200); op = await ev("document.getElementById('pick-btn').disabled ? '' : document.getElementById('op').value"); if (op && op !== prev) break; if (/bad/.test(await ev("document.getElementById('op-status').className"))) break; }
+    const t0 = Date.now();
+    await ev("document.getElementById('op-btn').click()");
+    let m = "";
+    for (let i = 0; i < 200; i++) { await sleep(200); m = await ev("document.getElementById('op-status').className + ' ' + document.getElementById('op-status').textContent"); if (/status (ok|bad)/.test(m)) break; }
+    const coin = await ev("[...document.querySelectorAll('#op-out .coin')].map(c => c.innerText.split('\\n').filter((_, i) => i % 2).slice(1, 3).join(' | ')).join('')");
+    const fetched = (await ev(segs)) - before;
+    const good = /1 unspent/.test(m) && fetched === 1;
+    if (!good) fails++;
+    console.log(`pick ${k + 1}: ${op} | ${coin} | segment downloads ${fetched} | check ${Date.now() - t0} ms | ${good ? "OK" : "FAIL: " + m}`);
+  }
+  if (fails) st = "pick failed";
 } else if (memberUrl) {
   await ev(`fetch(${JSON.stringify(memberUrl)}).then(r => r.arrayBuffer()).then(checkMember)`);
   console.log("member:", await ev("document.getElementById('op-status').textContent"));

@@ -28,6 +28,7 @@
   button { font: inherit; font-weight: 600; background: var(--fg); color: var(--bg); border: 0; border-radius: 7px;
     padding: 9px 16px; cursor: pointer; }
   button:disabled { opacity: .45; cursor: default; }
+  button.secondary { background: transparent; color: var(--fg); border: 1px solid var(--line); font-weight: 500; }
   input[type=text] { font: 14px ui-monospace, SFMono-Regular, Menlo, monospace; width: 100%; padding: 10px 12px;
     border: 1px solid var(--line); border-radius: 7px; background: var(--bg); color: var(--fg); }
   .row { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
@@ -76,6 +77,7 @@
       <input type="text" id="op" placeholder="txid:vout" spellcheck="false" autocomplete="off">
       <button id="op-btn" disabled>Check</button>
     </div>
+    <div class="row"><button id="pick-btn" class="secondary" disabled>Pick a random UTXO in the snapshot</button></div>
     <details>
       <summary>Or check a proof file (<code>.sbmember</code>, from <code>chainproof set-member</code>)</summary>
       <div class="row"><input type="file" id="file" accept=".sbmember" disabled></div>
