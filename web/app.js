@@ -36,18 +36,33 @@ async function fetchBytes(url) {
   return r.arrayBuffer();
 }
 
+// The hero's live pill mirrors step 1.
+function hero(cls, text) { $("hero-dot").className = "dot " + cls; $("hero-state").textContent = text; }
+
 $("seal-btn").onclick = async () => {
   const st = $("seal-status");
   $("seal-btn").disabled = true;
   try {
-    setStatus(st, "run", "Downloading the proof files…");
+    setStatus(st, "run", "Downloading the proof (1.6 MB)…");
+    hero("run", "Checking the proof in your browser…");
     const [chain, seal] = await Promise.all([fetchBytes("data/chain.sbchain"), fetchBytes("data/seal.bin")]);
     setStatus(st, "run", "Verifying in your browser…");
     const m = await call({ op: "seal", chain, seal }, [chain, seal]);
     if (m.error) throw new Error(m.error);
     const r = m.result;
-    if (!r.ok) { setStatus(st, "bad", `REJECTED: ${r.error}`); return; }
-    setStatus(st, "ok", `Verified in ${(r.ms / 1000).toFixed(1)} s`);
+    if (!r.ok) { setStatus(st, "bad", `REJECTED: ${r.error}`); hero("bad", "The proof was rejected"); return; }
+    const secs = (r.ms / 1000).toFixed(1);
+    setStatus(st, "ok", `Verified in ${secs} s`);
+    hero("ok", `Your browser verified the proof in ${secs} s`);
+    const tiles = $("seal-tiles");
+    tiles.replaceChildren(...[
+      [num(r.tip_height), "latest block in the chain"],
+      [num(r.coins), "unspent coins"],
+      [`${num(Number(BigInt(r.amount) / SAT))} BTC`, "in those coins"],
+    ].map(([v, k]) => { const d = document.createElement("div"); const b = document.createElement("b"); b.textContent = v;
+      const s = document.createElement("span"); s.textContent = k; d.append(b, s); return d; }));
+    tiles.hidden = false;
+    $("seal-details").hidden = false;
     rows($("seal-out"), [
       ["Header chain", `genesis to height ${num(r.tip_height)} (${num(r.headers)} headers)`],
       ["Tip hash", r.tip_hash, true],
@@ -64,10 +79,36 @@ $("seal-btn").onclick = async () => {
     $("file").disabled = false;
   } catch (err) {
     setStatus(st, "bad", String(err.message || err));
+    hero("bad", "The proof could not be checked");
   } finally {
     $("seal-btn").disabled = false;
   }
 };
+
+// Sections rise in once; the tagline's words light up one by one as it scrolls into view.
+const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const io = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); } }), { threshold: 0.12 });
+document.querySelectorAll(".reveal").forEach((el) => io.observe(el));
+{
+  const t = $("tagline");
+  const words = t.textContent.split(" ");
+  t.replaceChildren(...words.flatMap((w, i) => { const s = document.createElement("span"); s.className = "w"; s.textContent = w; return i ? [" ", s] : [s]; }));
+  const spans = [...t.querySelectorAll(".w")];
+  if (reduce) spans.forEach((s) => s.classList.add("on"));
+  else {
+    let ticking = false;
+    const update = () => {
+      ticking = false;
+      // Progress from the tagline's top entering at 85% of the viewport to its bottom reaching 45%.
+      const r = t.getBoundingClientRect();
+      const p = Math.min(1, Math.max(0, (innerHeight * 0.85 - r.top) / (r.height + innerHeight * 0.4)));
+      const n = Math.round(p * spans.length);
+      spans.forEach((s, i) => s.classList.toggle("on", i < n));
+    };
+    addEventListener("scroll", () => { if (!ticking) { ticking = true; requestAnimationFrame(update); } }, { passive: true });
+    update();
+  }
+}
 
 function showCoins(r) {
   const out = $("op-out");
