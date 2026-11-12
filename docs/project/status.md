@@ -4,10 +4,10 @@ Rewritten at the end of every session; see [README.md](README.md#ending-a-sessio
 If `HEAD at last update` doesn't match `git log -1`, this file is stale:
 follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work).
 
-- **Updated:** 2026-11-12 (session 38: WEB-MEMBER deployed: Pages + R2, live lookups verified)
-- **HEAD at last update:** this session's docs commit on `main` (after 30541b7)
+- **Updated:** 2026-11-12 (session 38b: NODE-BOOT step 1, `verify-snapshot`; Core's own snapshot at 972,500 verified against the seal)
+- **HEAD at last update:** this session's docs commit on `main` (after 02385cc)
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
-- **Current item:** WEB-MEMBER is live as an unannounced preview at https://starknet-innovation.github.io/starked-bitcoin/ (set file and index on Cloudflare R2, r2.dev URL; [web/README.md](../../web/README.md) "Live deployment"). Open: custom domain for the bucket, external review before announcing. TIP-ITER not started.
+- **Current item:** WEB-MEMBER is live as an unannounced preview at https://starknet-innovation.github.io/starked-bitcoin/ (set file and index on Cloudflare R2, r2.dev URL; [web/README.md](../../web/README.md) "Live deployment"). Open: custom domain for the bucket, external review before announcing. TIP-ITER not started. NODE-BOOT step 1 done: `chainproof verify-snapshot` ([node-boot.md](../guides/node-boot.md)); Core's `dumptxoutset` at 972,500 VERIFIED against the seal on the node.
   SEAL-T (D-052, accepted) is proved on mainnet and the test chain, pinned, and composed in Lean
   (`sealT_soundW`) with the header tree's MMR shape now proven (`Circuit/HeaderShape.lean`).
 
@@ -30,12 +30,13 @@ including the seal's composed statement (`seal_soundW`); trusted items in [verif
    the header chain from `data/store/mainnet-to-972502.sbchain` (PROOF-STORE `--from`), new block proofs
    and an epoch from 972,501, rejoin (`prove-chain`), the next set pass, `prove-seal --paths 32`; estimate
    compute first (block proofs: [gpu-route] figures in [gpu-cuda.md](../design/gpu-cuda.md)).
-2. Then NODE-BOOT; STARKNET-PATH is backlog.
+2. NODE-BOOT step 2 (owner decision first): a Core patch that loads a seal-attested snapshot (`validation.cpp` `PopulateAndValidateSnapshot` checks the hash against `chainparams` `m_assumeutxo_data`); keep background validation or skip it. STARKNET-PATH is backlog.
 3. Backlog: SET-VK-SETUP, profile `verify-seal`/`verify-chain` on the node.
 
 ## In flight
 
-- Nothing uncommitted after this session's commit. No pod is running.
+- Nothing uncommitted after this session's commit except `AGENTS.md` (not the agent's change). No pod is running.
+- On the node: `/data/bitcoin/utxo-972500.dat` (Core snapshot, 9.4 GB), `~/snap/` (arm64 `chainproof`, seal inputs, `dump.sh`, `dump.log`); keep for NODE-BOOT step 2, delete after.
 - Mainnet seal inputs and outputs on the Mac under `data/seal972/` (gitignored `data/`): `out/` (D-051
   seal), `outT/` (SEAL-T seal, `sealvk.bin`, copies of the chain file and join VK), `outTamper/` (tamper
   scratch, deletable), the join and tree VKs, the four passes. On the node: the D-051 seal only.

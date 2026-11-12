@@ -103,6 +103,7 @@ docs/              Documentation (see below)
 | Look up a term (pst, nBits, LogUp…) | [docs/reference/glossary.md](docs/reference/glossary.md) |
 | Set up a machine | [docs/guides/setup.md](docs/guides/setup.md) |
 | Add or change an AIR, end to end | [docs/guides/adding-an-air.md](docs/guides/adding-an-air.md) |
+| Check a Core UTXO snapshot against the seal | [docs/guides/node-boot.md](docs/guides/node-boot.md) |
 | Understand per-component trace sizes (two profiles, D-045): the design, the Lean/prover interface, the prover's needs | [docs/design/component-sizes.md](docs/design/component-sizes.md), [component-sizes-interface.md](docs/design/component-sizes-interface.md), [component-sizes-prover-needs.md](docs/design/component-sizes-prover-needs.md) |
 | See every mainnet block's trace size and GPU class (the chain survey) | [docs/design/chain-survey.md](docs/design/chain-survey.md) |
 | Read past experiment results | [docs/reports/](docs/reports/) |
@@ -116,7 +117,7 @@ docs/
   design/     Why and what: goals, architecture, consensus-rule plans. Changes rarely.
   airs/       One file per AIR: layout, versions (newest first), statement proven, tests, benchmarks.
   reference/  Precise facts about the code: IR, Lean, Zig, test data, verification ledger, glossary.
-  guides/     Step-by-step procedures: setup, adding an AIR.
+  guides/     Step-by-step procedures: setup, adding an AIR, checking a snapshot.
   reports/    Dated, immutable write-ups of experiments and benchmarks (YYYY-MM-DD-<topic>.md).
   project/    Project management: process, status, roadmap, log, decisions.
 ```
