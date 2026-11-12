@@ -107,6 +107,8 @@ fn usage() noreturn {
         \\  chainproof prove-chain <vk> <file.sbchain> <out-dir> [--max-m M] <dir>:<to>[:<from>:<prev-set.bin>][#<prev-hex|->,<fin-hex>]...
         \\  chainproof verify-chain <vk> <file.sbchain> <out-dir> [--min-work <hex> | --min-work 0] [--unpinned] [--set-proofs [--members <f.sbmember>... [--witness-script <hex>]]] <dir>:<to>[:<from>:<prev-set.bin>]...
         \\  chainproof prove-seal <vk> <file.sbchain> <out-dir> [--unpinned] <dir>:<to>[:<from>:<prev-set.bin>]...
+        \\  chainproof verify-snapshot <utxo.dat> <headers.bin> <vk> <file.sbchain> <out-dir> [--min-work <hex> | --min-work 0] [--unpinned] <dir>:<to>[:<from>:<prev-set.bin>]...
+        \\  chainproof set-to-snapshot <set.bin> <headers.bin> <height> <out.dat> [--network <hex>]
         \\  chainproof verify-seal <vk> <file.sbchain> <out-dir> [--min-work <hex> | --min-work 0] [--unpinned] <dir>:<to>[:<from>:<prev-set.bin>]...
         \\  chainproof prove-set <set.bin> <dir>:<to>[:<from>:<prev-set.bin>] <work-dir> [--test-strength] [--logs l0,...,l11]
         \\  chainproof set-challenge <dir>:<to>[:<from>:<prev-set.bin>] <out.bin>
@@ -342,7 +344,33 @@ pub fn main() !void {
         }
         if (specs.items.len < 2) usage();
         if (std.mem.eql(u8, cmd, "prove-seal")) return proveSeal(gpa, a, args[2], args[3], args[4], unpinned, paths, specs.items);
-        return verifySeal(gpa, a, args[2], args[3], args[4], min_work, unpinned, paths, specs.items);
+        _ = try verifySeal(gpa, a, args[2], args[3], args[4], min_work, unpinned, paths, specs.items);
+        return;
+    }
+    if (std.mem.eql(u8, cmd, "set-to-snapshot") and (args.len == 6 or (args.len == 8 and std.mem.eql(u8, args[6], "--network")))) {
+        var net = SNAP.mainnet_magic;
+        if (args.len == 8) _ = std.fmt.hexToBytes(&net, args[7]) catch usage();
+        return setToSnapshot(gpa, a, args[2], args[3], std.fmt.parseInt(u32, args[4], 10) catch usage(), args[5], net);
+    }
+    if (std.mem.eql(u8, cmd, "verify-snapshot") and args.len >= 9) {
+        var min_work: u256 = core_min_work;
+        var unpinned = false;
+        var specs: std.ArrayList(ChainSpec) = .empty;
+        var i: usize = 7;
+        while (i < args.len) {
+            if (std.mem.eql(u8, args[i], "--min-work") and i + 1 < args.len) {
+                min_work = try std.fmt.parseInt(u256, args[i + 1], 16);
+                i += 2;
+            } else if (std.mem.eql(u8, args[i], "--unpinned")) {
+                unpinned = true;
+                i += 1;
+            } else {
+                try specs.append(a, parseChainSpec(args[i]) catch usage());
+                i += 1;
+            }
+        }
+        if (specs.items.len < 2) usage();
+        return verifySnapshot(gpa, a, args[2], args[3], args[4], args[5], args[6], min_work, unpinned, specs.items);
     }
     if (std.mem.eql(u8, cmd, "setup-seal-vk") and args.len == 6) return setupSealVk(gpa, a, args[2], args[3], args[4], args[5], null);
     if (std.mem.eql(u8, cmd, "setup-seal-vk") and args.len == 9 and std.mem.eql(u8, args[6], "--paths")) {
@@ -2003,7 +2031,10 @@ fn pathIn(a: std.mem.Allocator, steps: []const HT.Step) !CS.PathIn {
 /// `verify-seal <vk> <file.sbchain> <out-dir> <epoch>...`: the header chain proof, then `<out>/seal-<to>.bin`
 /// against the pinned seal VK (`<out>/sealvk.bin`), with the heads opened against the chain's `T` and the
 /// set facts from the passes' public final states; the chain's start set against Core's assumeUTXO anchor.
-fn verifySeal(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8, chain_path: []const u8, out: []const u8, min_work: u256, unpinned: bool, paths: ?usize, specs: []const ChainSpec) !void {
+/// What a verified seal proves about the set after its last block, for `verify-snapshot`.
+const SealFacts = struct { to: u32, count: u64, amount: u128, hash: [32]u8, max_height: u32, tip: ?CS.TOpen, t: ?HT.Words, n_headers: usize };
+
+fn verifySeal(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8, chain_path: []const u8, out: []const u8, min_work: u256, unpinned: bool, paths: ?usize, specs: []const ChainSpec) !SealFacts {
     _ = paths; // the seal VK says whether the header chain is in-circuit
     var timer = try std.time.Timer.start();
     const vk = try loadVk(a, vk_path);
@@ -2076,6 +2107,91 @@ fn verifySeal(gpa: std.mem.Allocator, a: std.mem.Allocator, vk_path: []const u8,
     };
     std.debug.print("VERIFIED blocks {d}..{d} as one sealed proof: the coin set after block {d} is {d} coins\n", .{ v.open.a, v.open.b, to, v.open.count });
     std.debug.print("  total amount     {d} sat\n  highest coin at  {d}\n  Merkle root      {x}\n  hash_serialized  {x}  (Core's HASH_SERIALIZED of this set)\n", .{ v.open.amount, v.open.max_height, wordBytes(v.open.mroot), v.hash });
+    return .{ .to = to, .count = v.open.count, .amount = v.open.amount, .hash = v.hash, .max_height = v.open.max_height, .tip = v.open.t, .t = t_words, .n_headers = n_headers };
+}
+
+const SNAP = sb.block.snapshot;
+
+fn sha256d(h: *const H.Header) [32]u8 {
+    var d: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(h, &d, .{});
+    std.crypto.hash.sha2.Sha256.hash(&d, &d, .{});
+    return d;
+}
+
+/// `verify-snapshot <utxo.dat> <headers.bin> <vk> <file.sbchain> <out-dir> <epoch>...` (NODE-BOOT): verifies
+/// the seal as `verify-seal` does, then checks that a Core UTXO snapshot (`dumptxoutset`) is the proven set
+/// after the seal's last block: its base block is that block of the proven header chain (with SEAL-T, the
+/// headers from it to the proven tip link by hash and end at the tip; otherwise its hash is in the
+/// verified `T`), and its coins, read and decompressed as Core's loader does, give the proven count, amount
+/// and `hash_serialized`. The headers file is untrusted: the headers used are checked against the proof.
+fn verifySnapshot(gpa: std.mem.Allocator, a: std.mem.Allocator, snap_path: []const u8, headers_path: []const u8, vk_path: []const u8, chain_path: []const u8, out: []const u8, min_work: u256, unpinned: bool, specs: []const ChainSpec) !void {
+    const meta = try SNAP.readMetaFile(snap_path);
+    var base_disp = meta.base;
+    std.mem.reverse(u8, &base_disp);
+    std.debug.print("snapshot {s}: base block {x}, {d} coins announced\n", .{ snap_path, base_disp, meta.count });
+    if (!std.mem.eql(u8, &meta.network, &SNAP.mainnet_magic)) {
+        if (!unpinned) {
+            std.debug.print("REJECTED: the snapshot is not for mainnet (network magic {x}; --unpinned for tests)\n", .{meta.network});
+            return error.WrongNetwork;
+        }
+        std.debug.print("network magic {x}: NOT mainnet, accepted by --unpinned (tests only)\n", .{meta.network});
+    }
+    const f = try verifySeal(gpa, a, vk_path, chain_path, out, min_work, unpinned, null, specs);
+    // The base block: block `to` of the proven chain.
+    const all = try loadHeaderFile(a, headers_path);
+    if (all.len <= f.to) return error.HeadersTooShort;
+    const base = sha256d(&all[f.to]);
+    if (f.tip) |t| {
+        if (all.len <= t.height) return error.HeadersTooShort;
+        var h: usize = t.height;
+        while (h > f.to) : (h -= 1) if (!std.mem.eql(u8, all[h][4..36], &sha256d(&all[h - 1]))) return error.HeadersNotLinked;
+        if (!std.meta.eql(HT.blockHash(&all[t.height]), t.tip)) {
+            std.debug.print("REJECTED: header {d} of {s} is not the proven tip\n", .{ t.height, headers_path });
+            return error.TipMismatch;
+        }
+        std.debug.print("block {d}: an ancestor of the proven tip (height {d}) by hash links\n", .{ f.to, t.height });
+    } else if (f.t) |tw| {
+        if (all.len < f.n_headers) return error.HeadersTooShort;
+        const hashes = try a.alloc(HT.Words, f.n_headers);
+        for (hashes, all[0..f.n_headers]) |*x, *hd| x.* = HT.blockHash(hd);
+        const steps = try HT.inclusionProof(a, hashes, f.to);
+        if (!try HT.verifyAt(a, hashes[f.to], steps, f.to, f.n_headers, tw)) return error.InclusionFailed;
+        std.debug.print("block {d}: included in the verified chain's T\n", .{f.to});
+    } else return error.NoHeaderBinding;
+    if (!std.mem.eql(u8, &base, &meta.base)) {
+        std.debug.print("REJECTED: the snapshot's base block is not block {d} of the proven chain\n", .{f.to});
+        return error.BaseMismatch;
+    }
+    var timer = try std.time.Timer.start();
+    const got = try SNAP.scan(gpa, snap_path, f.to);
+    std.debug.print("snapshot read: {d} coins, {d} sat, highest coin at {d}, hash_serialized {x} ({d:.1}s)\n", .{ got.count, got.amount, got.max_height, got.hash, secs(timer.lap()) });
+    var ok = true;
+    if (got.count != f.count) { std.debug.print("MISMATCH: coin count {d}, proven {d}\n", .{ got.count, f.count }); ok = false; }
+    if (got.amount != f.amount) { std.debug.print("MISMATCH: amount {d} sat, proven {d}\n", .{ got.amount, f.amount }); ok = false; }
+    if (got.max_height != f.max_height) { std.debug.print("MISMATCH: highest coin {d}, proven {d}\n", .{ got.max_height, f.max_height }); ok = false; }
+    if (!std.mem.eql(u8, &got.hash, &f.hash)) { std.debug.print("MISMATCH: hash_serialized {x}, proven {x}\n", .{ got.hash, f.hash }); ok = false; }
+    if (!ok) {
+        std.debug.print("REJECTED: the snapshot is not the proven set after block {d}\n", .{f.to});
+        return error.SnapshotMismatch;
+    }
+    std.debug.print("VERIFIED: {s} is the proven coin set after block {d} ({x}); load it with `bitcoin-cli loadtxoutset` on a node that accepts this base block\n", .{ snap_path, f.to, base_disp });
+}
+
+/// `set-to-snapshot <set.bin> <headers.bin> <height> <out.dat> [--network <hex>]`: writes a set file as a
+/// Core UTXO snapshot after block `height` (scripts stored raw, which Core's loader accepts), for tests
+/// of `verify-snapshot` on chains Core cannot dump (the test chain).
+fn setToSnapshot(gpa: std.mem.Allocator, a: std.mem.Allocator, set_path: []const u8, headers_path: []const u8, height: u32, out_path: []const u8, network: [4]u8) !void {
+    const all = try loadHeaderFile(a, headers_path);
+    if (all.len <= height) return error.HeadersTooShort;
+    var rd: sb.block.set_file.Reader = undefined;
+    try rd.init(gpa, set_path);
+    defer rd.deinit();
+    var coins: std.ArrayListUnmanaged(SNAP.TestCoin) = .empty;
+    while (try rd.next()) |c| try coins.append(a, .{ .txid = c.txid, .vout = c.vout, .height = c.height, .cb = c.cb, .ser = try a.dupe(u8, c.ser) });
+    const bytes = try SNAP.encode(a, network, sha256d(&all[height]), coins.items);
+    try std.fs.cwd().writeFile(.{ .sub_path = out_path, .data = bytes });
+    std.debug.print("wrote {s}: {d} coins after block {d}, {d} bytes\n", .{ out_path, coins.items.len, height, bytes.len });
 }
 
 /// An outpoint `<txid>:<vout>` (txid in display order, as Core prints it) as a set key: the txid's
