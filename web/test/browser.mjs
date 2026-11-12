@@ -3,9 +3,13 @@
 // outpoints through the page's own form (byte-range lookups), or presses "Pick a random UTXO" n times and
 // checks each pick (it must be present, and its segment must be downloaded once, not again by Check).
 import { spawn } from "node:child_process";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 const [url, memberUrl] = process.argv.slice(2);
+// A fresh profile per run: a profile left locked by an earlier run made every lookup come back undefined.
 const chrome = spawn("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-  ["--headless=new", "--disable-gpu", "--remote-debugging-port=9333", "--user-data-dir=" + process.env.TMPDIR + "/wm-chrome", "about:blank"], { stdio: "ignore" });
+  ["--headless=new", "--disable-gpu", "--remote-debugging-port=9333", "--user-data-dir=" + mkdtempSync(join(tmpdir(), "wm-chrome-")), "about:blank"], { stdio: "ignore" });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let ws;
 for (let i = 0; i < 50 && !ws; i++) {

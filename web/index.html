@@ -21,7 +21,8 @@
   h1 { font-size: 2rem; line-height: 1.2; margin: 0 0 12px; letter-spacing: -0.01em; }
   h2 { font-size: 1.15rem; margin: 0 0 4px; }
   p { margin: 0 0 12px; }
-  .lede { color: var(--muted); font-size: 1.05rem; margin-bottom: 32px; }
+  .lede { color: var(--muted); font-size: 1.05rem; margin-bottom: 12px; }
+  .repo { margin-bottom: 32px; overflow-wrap: anywhere; }
   section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 22px; margin-bottom: 20px; }
   .step { color: var(--accent); font-weight: 600; font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; }
   .hint { color: var(--muted); font-size: .92rem; }
@@ -54,6 +55,8 @@
   972,500, and the full coin set after block 972,500. This page checks that proof in your browser, then
   checks any coin against the set it proves. Nothing is trusted but the code: the files come from plain
   storage, and your browser recomputes everything.</p>
+  <p class="hint repo">Source code, proofs and docs:
+  <a href="https://github.com/starknet-innovation/starked-bitcoin">github.com/starknet-innovation/starked-bitcoin</a></p>
 
   <section id="seal">
     <div class="step">Step 1</div>
@@ -87,8 +90,9 @@
   </section>
 
   <footer>
-    <p>What the proof shows, and what it does not, is in the repository's
-    <code>docs/design/chain-seal.md</code>. This is a preview: the proof system and its Lean soundness
+    <p>What the proof shows, and what it does not, is in
+    <a href="https://github.com/starknet-innovation/starked-bitcoin/blob/main/docs/design/chain-seal.md"><code>docs/design/chain-seal.md</code></a>
+    in the <a href="https://github.com/starknet-innovation/starked-bitcoin">repository</a>. This is a preview: the proof system and its Lean soundness
     statement have not been externally reviewed.</p>
   </footer>
 </main>
