@@ -30,7 +30,7 @@ including the seal's composed statement (`seal_soundW`); trusted items in [verif
    the header chain from `data/store/mainnet-to-972502.sbchain` (PROOF-STORE `--from`), new block proofs
    and an epoch from 972,501, rejoin (`prove-chain`), the next set pass, `prove-seal --paths 32`; estimate
    compute first (block proofs: [gpu-route] figures in [gpu-cuda.md](../design/gpu-cuda.md)).
-2. NODE-BOOT step 2 (owner decision first): a Core patch that loads a seal-attested snapshot (`validation.cpp` `PopulateAndValidateSnapshot` checks the hash against `chainparams` `m_assumeutxo_data`); keep background validation or skip it. STARKNET-PATH is backlog.
+2. NODE-BOOT step 2: a Core patch that loads a seal-attested snapshot (`validation.cpp` `PopulateAndValidateSnapshot` checks the hash against `chainparams` `m_assumeutxo_data`) and skips background validation (D-053, owner 2026-11-13); release after external review. STARKNET-PATH is backlog.
 3. Backlog: SET-VK-SETUP, profile `verify-seal`/`verify-chain` on the node.
 
 ## In flight

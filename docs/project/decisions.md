@@ -553,3 +553,17 @@ Rejected: changing `chainSeal` in place (the D-051 VK and mainnet seal would no 
 re-proved); one range proof per epoch from the children's roots (the fold's topology depends on the
 positions and the count, so a fixed circuit would need the same guessed structure as paths).
 
+
+### D-053 — NODE-BOOT step 2: the patched node skips background validation
+Date: 2026-11-13 · By: owner ("skip, and push") · Status: accepted
+Decision: the Core patch of NODE-BOOT step 2 loads a snapshot whose `hash_serialized` and base block are
+attested by a verified seal (`chainproof verify-snapshot`) and does **not** run background validation of
+the blocks below the snapshot's base. The node is usable within minutes of loading the snapshot.
+Why: background validation re-downloads and re-validates the whole chain, which is the cost the seal
+exists to remove; keeping it would give the node no lasting saving over stock assumeUTXO.
+Consequence: the node trusts what the seal proves and nothing more. Signatures and scripts below the
+base are not checked (the proof's assumevalid-like gap, `docs/design/overview.md`), and soundness rests
+on the proof system and its Lean model. Release only after external review of the patch and of that
+trust statement.
+Rejected: keeping background validation (safer, but saves nothing at steady state over stock
+assumeUTXO with a hardcoded hash).
