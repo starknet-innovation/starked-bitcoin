@@ -66,6 +66,8 @@
   button:disabled { opacity: .4; cursor: default; transform: none; }
 
   /* numbers strip */
+  .powered { margin-top: 24px; color: var(--muted); font-size: 14px; line-height: 20px; }
+  .powered a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
   .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 48px; }
   .stat { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
   .stat b { display: block; font-size: 24px; line-height: 32px; font-weight: 600; font-variant-numeric: tabular-nums; }
@@ -174,6 +176,7 @@
       <div class="stat"><b>164.5 M</b><span>coins covered</span></div>
       <div class="stat"><b>2 MB</b><span>download per coin lookup</span></div>
     </div>
+    <p class="powered">Powered by <a href="https://github.com/starkware-libs/stwo">Stwo</a>, <a href="https://github.com/teddyjfpender/stwo-zig">in Zig</a></p>
   </header>
 
   <section id="how" class="block wrap reveal">
