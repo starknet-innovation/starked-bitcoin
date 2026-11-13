@@ -283,8 +283,8 @@
     <p class="lead">It works end to end. Three things stand between this and production.</p>
     <div class="ready">
       <div><span class="mark">$</span><p><b>Updating costs GPU time</b><span>Proving up to the newest block costs about $50 to $100 of GPU time, so the proof is refreshed now and then. That cost is tractable.</span></p></div>
-      <div><span class="mark">◎</span><p><b>Browsers yes, Starknet not yet</b><span>The checker runs in any browser but not inside a Starknet contract. That arrives once a chain can verify this kind of proof.</span></p></div>
-      <div><span class="mark">?</span><p><b>Not yet reviewed</b><span>No external review yet. Blocks are fully checked from 935,001 on, starting from Bitcoin Core's own snapshot of the coin set.</span></p></div>
+      <div><span class="mark">=</span><p><b>Same trust as a Core snapshot</b><span>The proof starts from Bitcoin Core's own coin set snapshot at block 935,000. Earlier blocks are not replayed, only their headers and proof of work are checked. Like Core's assumevalid, it does not check signatures and scripts. The other block rules are checked for every block from 935,001 on.</span></p></div>
+      <div><span class="mark">?</span><p><b>Not yet reviewed</b><span>No external review yet of the proof system or its circuits.</span></p></div>
     </div>
   </section>
 </main>
