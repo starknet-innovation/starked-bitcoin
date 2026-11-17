@@ -131,3 +131,4 @@ history module · browser/phone verifier.
 | LICENSE | Choose a license | **done (2026-10-12):** Apache-2.0 (owner) |
 | SIMP-LINT | Clean up unused-simp-argument warnings in the Lean files | Cosmetic |
 | LEAF-ONE-PROOF | Prove each segment once (borrowed native capture) | **done (2026-10-10)**: same circuits and VK; log-19 leaf peak RSS 12.8 GB, from 17.5 GB |
+| CONNECT-RULES | Prove the two `ConnectBlock` rules still missing outside scripts: BIP68 relative locktimes (`SequenceLocks`; time-based locks need the median time past of the coin's block's parent) and the full sigop cost (P2SH and witness sigops, 80,000 limit; only legacy sigops today, `Spec/BlockFlat.lean:149`) | Found 2026-11-17 answering Delving t/3070 (ajtowns's list). Deferred in `Spec/Block.lean:6` to M3b/M3c but absent from M3b's rules (`docs/design/utxo.md`). Until done the guarantee is weaker than assumevalid; the site and the Delving post say so |
