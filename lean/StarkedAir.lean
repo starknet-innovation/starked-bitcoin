@@ -59,6 +59,7 @@ import StarkedAir.Block.TxRanges
 import StarkedAir.Block.TxRows
 import StarkedAir.Block.ValueSound
 import StarkedAir.Block.TxChecks
+import StarkedAir.Block.FieldsLock
 import StarkedAir.Block.TxBytes
 import StarkedAir.Block.Msg
 import StarkedAir.Block.MsgSound

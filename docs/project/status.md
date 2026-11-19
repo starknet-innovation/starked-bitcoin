@@ -4,8 +4,9 @@ Rewritten at the end of every session; see [README.md](README.md#ending-a-sessio
 If `HEAD at last update` doesn't match `git log -1`, this file is stale:
 follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work).
 
-- **Updated:** 2026-11-19 (session 40: CONNECT-RULES step 1 done, D-054, D-055, TIERS-2 simulated, SNAP-HASH proposal)
-- **HEAD at last update:** this session's docs commit on `main` (after 6beafc1)
+- **Updated:** 2026-11-19 (session 41: CONNECT-RULES step 2 done on branch `connect-rules`; D-056 awaits the owner)
+- **HEAD at last update:** this session's commit on branch `connect-rules` (after b319bfb, which is `main` and pushed)
+- **Branches:** `main` = b319bfb (pushed): the AIRs of the published proofs. `connect-rules` (local): step 2, whose AIRs give other block VKs; merge it when the re-prove is made (or when the owner says).
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
 - **Current item:** WEB-MEMBER is live as an unannounced preview at https://starknet-innovation.github.io/starked-bitcoin/ (set file and index on Cloudflare R2, r2.dev URL; [web/README.md](../../web/README.md) "Live deployment"). Open: custom domain for the bucket, external review before announcing. TIP-ITER not started. NODE-BOOT step 1 done: `chainproof verify-snapshot` ([node-boot.md](../guides/node-boot.md)); Core's `dumptxoutset` at 972,500 VERIFIED against the seal on the node.
   SEAL-T (D-052, accepted) is proved on mainnet and the test chain, pinned, and composed in Lean
@@ -27,7 +28,7 @@ including the seal's composed statement (`seal_soundW`); trusted items in [verif
 
 **Owner's order (2026-11-19): A–D below come before items 0–3.**
 
-A. CONNECT-RULES ([connect-rules.md](../design/connect-rules.md)), step 2 of 5: height-based BIP68 in `block_coin`. The rule is `inputLockOk` in `lean/StarkedAir/Spec/ConnectRules.lean`; the pattern is the maturity check (`lean/StarkedAir/Block/Coin.lean:243`, `in_maturity` in `Block/CoinClaims.lean`, `src/block/coin.zig:521`). Add the input's sequence and its transaction's `version ≥ 2` bit to the `in(tx, start)` relation from `block_fields`, decompose bits 31 and 22 and the 16-bit lock, range-check `h − c − lock`; witness, Lean soundness, negative tests (`src/block/negative.zig`). First check in `verification.md`'s table whether `bad-txns-inputvalues-outofrange` is enforced (marked UNVERIFIED). Then step 3 (sigop cost), 4 (time-based, D-054), 5 (GPU kernels, VKs).
+A. CONNECT-RULES ([connect-rules.md](../design/connect-rules.md)), on branch `connect-rules`, step 3 of 5: the full sigop cost. Start with a survey mode that counts, per block, the rows `block_walk` gains from redeem scripts and from the last witness item of P2WSH spends (`src/bin/survey.zig`, next to `STARKED_SURVEY_NEEDS`), to confirm they fit the padding. Then: classify the spent script in `block_fpwalk` (P2SH, witness program version and length), add the accurate-count mode to the walker (`lean/StarkedAir/Block/Walk.lean`, `src/block/walk.zig`; spec `txSigOpCost` in `Spec/ConnectRules.lean`; `walk_eq_sigOps` is the proof pattern), and replace the block bound by `4·(legacy + P2SH) + witness ≤ 80,000`. Follow step 2's pattern: new statements beside the old ones (D-056), `Compat.lean` pins re-pinned with a note, `SITES` in `src/block/system.zig` kept equal to Lean's `hashRows`, golden hashes updated. Optional before step 3: add the CSV bit to `LeafOut` and `BlockAt` so the recursion hands it to `epoch_systems_coreL` (connect-rules.md, step 2, "Open in Lean").
 B. SNAP-HASH: [snapshot-hash.md](../design/snapshot-hash.md) is drafted. The Delving follow-up (`~/Workshop/prove-any-chain/delving-3070-reply3.md`: cost split, the SHA-256/Blake2s correction, the hash proposal) waits for the owner's review and posting. No circuit work before a reaction.
 C. TIERS-2 (D-055): after A's steps 2–4, rerun `scripts/tier_search.py` on new needs (`survey`, `STARKED_SURVEY_NEEDS=1`), add the profile in `src/block/system.zig` (`Profile`, `profileLogs`, `sizesAuto`), time one 2^23 block on a GPU in both profiles.
 D. Re-prove once, after A–C: blocks 935,001–972,500, trees, join, set passes, seal. A from-genesis run is approved in principle (owner), after A.
@@ -42,7 +43,7 @@ D. Re-prove once, after A–C: blocks 935,001–972,500, trees, join, set passes
 
 ## In flight
 
-- Nothing uncommitted after this session's commit except `AGENTS.md` (not the agent's change). No pod is running.
+- Nothing uncommitted after this session's commit except `AGENTS.md` (not the agent's change). No pod is running. The work tree is on branch `connect-rules`.
 - On the node: `/data/bitcoin/utxo-972500.dat` (Core snapshot, 9.4 GB), `~/snap/` (arm64 `chainproof`, seal inputs, `dump.sh`, `dump.log`); keep for NODE-BOOT step 2, delete after. Also in `~/snap/`: `survey`, `survey2`, `survey3`, `pack.py`, `needs.csv`, `bip68.csv`, `rules.csv`, `tlcheck.py`, `tlcheck.out` (sessions 39 and 40's measurements; can be deleted, `needs.csv` is the input of `scripts/tier_search.py`).
 - Mainnet seal inputs and outputs on the Mac under `data/seal972/` (gitignored `data/`): `out/` (D-051
   seal), `outT/` (SEAL-T seal, `sealvk.bin`, copies of the chain file and join VK), `outTamper/` (tamper
@@ -50,6 +51,8 @@ D. Re-prove once, after A–C: blocks 935,001–972,500, trees, join, set passes
 
 ## Needs owner
 
+- **D-056** ([decisions.md](decisions.md)): confirm, or reject, (1) the lock theorems added beside the existing ones under new names, and (2) the six `Compat.lean` pins re-pinned for the changed AIRs without an equality to the old bodies. Steps 3 and 4 need the same.
+- **Branch `connect-rules`:** step 2 changes every block VK (golden hashes in `src/block/system.zig`, `src/recursion/block_forest.zig`). It is not on `main` so that `main` keeps the AIRs of the published proofs. Say if it should be merged earlier.
 - **Delving follow-up** (t/3070): review and post `~/Workshop/prove-any-chain/delving-3070-reply3.md`. It corrects a statement of post 6 (SHA-256 is cheaper than Blake2s in these AIRs, not the reverse), gives the cost split promised to ajtowns and proposes the snapshot hash. Outward-facing.
 - **STWO-225-FU:** follow up on stwo-zig#225 upstream? Outward-facing.
 

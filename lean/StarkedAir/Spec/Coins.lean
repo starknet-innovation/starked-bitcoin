@@ -18,6 +18,11 @@ Two deviations, both stricter than Core (they can only reject more):
 creation indices) and its outputs. If the multiset run on those events succeeds, and the checks hold on
 the claimed coins, Core's connect succeeds from the untagged view, ends at the untagged view, and the fees
 are the claimed ones. With `run_of_balance`, a balanced epoch therefore connects in Core's sense.
+
+**With relative locks (BIP68, CONNECT-RULES step 2).** `connectTxL` is `connectTx` with one more check
+per input, `heightLockOk`: the height-based half of Core's `SequenceLocks`. `connectL_of_run` is
+`connect_of_run` for it, given `ClaimsLockOK` as well; `connectTxsL_connectTxs` says the stricter connect
+implies the plain one. The time-based half is not in this model yet (step 4).
 -/
 import StarkedAir.Spec.UtxoMultiset
 import StarkedAir.Spec.Block
@@ -190,5 +195,158 @@ theorem connect_of_run : ∀ (xs : List TxC) (g : ℕ) (m m' : View OutPoint Coi
           simp only [connectTx, hcb', Bool.false_eq_true, if_false, hsp]
           rw [if_neg (by simp; omega), hcore_add]; rfl
         simp [hc, ih, claimFee, hcb']
+
+/-! ### With height-based relative locks (BIP68) -/
+
+/-- **BIP68, height-based** (`SequenceLocks`, the height half): once CSV is active, an input of a
+transaction of version at least 2 whose sequence has bits 31 and 22 clear spends a coin at least
+`sequence mod 2^16` blocks old. Inputs with a time-based lock (bit 22 set) pass here. -/
+def heightLockOk (h version sequence coinHeight : ℕ) : Bool :=
+  !(decide (CSV_HEIGHT ≤ h) && decide (2 ≤ version) && decide (sequence / 2 ^ 31 % 2 = 0) &&
+      decide (sequence / 2 ^ 22 % 2 = 0)) ||
+    decide (coinHeight + sequence % 2 ^ 16 ≤ h)
+
+/-- `spendIns` with each input's height lock checked against the coin it finds (`version` is the
+transaction's; each input is its prevout and its sequence). -/
+def spendInsL (h version : ℕ) : CView → List (OutPoint × ℕ) → Option (CView × ℤ)
+  | v, [] => some (v, 0)
+  | v, p :: ps => match v p.1 with
+    | none => none
+    | some c => if (c.coinbase && decide (h < c.height + COINBASE_MATURITY)) ||
+          !heightLockOk h version p.2 c.height then none
+      else (spendInsL h version (Function.update v p.1 none) ps).map fun r => (r.1, r.2 + c.value)
+
+/-- **Core's connect of one transaction, with the height-based relative locks.** -/
+def connectTxL (v : CView) (x : TxC) : Option (CView × ℤ) :=
+  if x.cb then (addOuts v (created x)).map fun w => (w, 0)
+  else match spendInsL x.h x.t.version v (x.t.vin.map fun i => (i.prevout, i.sequence)) with
+    | none => none
+    | some (v1, vin) =>
+      if vin < outSum x.t || MAX_MONEY < vin then none
+      else (addOuts v1 (created x)).map fun w => (w, vin - outSum x.t)
+
+def connectTxsL : CView → List TxC → Option (CView × List ℤ)
+  | v, [] => some (v, [])
+  | v, x :: xs => match connectTxL v x with
+    | none => none
+    | some (w, fee) => (connectTxsL w xs).map fun r => (r.1, fee :: r.2)
+
+/-- The lock check on the claimed coins (the AIR's): each input's height lock against its claim's height. -/
+def ClaimsLockOK (x : TxC) : Prop :=
+  x.cb ∨ ∀ p ∈ x.t.vin.zip x.claims, heightLockOk x.h x.t.version p.1.sequence p.2.1.height = true
+
+/-- The stricter spend implies the plain one. -/
+theorem spendInsL_spendIns (h version : ℕ) : ∀ (ins : List (OutPoint × ℕ)) (v : CView) (r : CView × ℤ),
+    spendInsL h version v ins = some r → spendIns h v (ins.map Prod.fst) = some r
+  | [], v, r, hr => by simpa [spendInsL, spendIns] using hr
+  | p :: ps, v, r, hr => by
+    simp only [spendInsL] at hr
+    simp only [List.map_cons, spendIns]
+    cases hv : v p.1 with
+    | none => rw [hv] at hr; simp at hr
+    | some c =>
+      rw [hv] at hr
+      simp only at hr ⊢
+      split_ifs at hr with hc
+      have hm : ¬ (c.coinbase && decide (h < c.height + COINBASE_MATURITY)) = true := by
+        intro hm; exact hc (by rw [hm]; rfl)
+      rw [if_neg hm]
+      obtain ⟨r1, h1, rfl⟩ := Option.map_eq_some_iff.mp hr
+      rw [spendInsL_spendIns h version ps _ r1 h1]; rfl
+
+/-- **Connecting with the relative locks implies connecting without them**: the lock is one more reason
+to reject. -/
+theorem connectTxL_connectTx (v : CView) (x : TxC) (r : CView × ℤ) (h : connectTxL v x = some r) :
+    connectTx v x = some r := by
+  unfold connectTxL at h
+  unfold connectTx
+  split_ifs at h ⊢ with hcb
+  · exact h
+  · cases hs : spendInsL x.h x.t.version v (x.t.vin.map fun i => (i.prevout, i.sequence)) with
+    | none => rw [hs] at h; simp at h
+    | some r1 =>
+      rw [hs] at h
+      have := spendInsL_spendIns x.h x.t.version _ v r1 hs
+      rw [List.map_map] at this
+      rw [show (x.t.vin.map (·.prevout)) = x.t.vin.map (Prod.fst ∘ fun i : TxIn => (i.prevout, i.sequence)) from rfl,
+        this]
+      exact h
+
+theorem connectTxsL_connectTxs : ∀ (xs : List TxC) (v : CView) (r : CView × List ℤ),
+    connectTxsL v xs = some r → connectTxs v xs = some r
+  | [], v, r, h => by simpa [connectTxsL, connectTxs] using h
+  | x :: xs, v, r, h => by
+    simp only [connectTxsL] at h
+    simp only [connectTxs]
+    cases hx : connectTxL v x with
+    | none => rw [hx] at h; simp at h
+    | some wf =>
+      rw [hx] at h
+      rw [connectTxL_connectTx v x wf hx]
+      simp only at h ⊢
+      obtain ⟨r1, h1, rfl⟩ := Option.map_eq_some_iff.mp h
+      rw [connectTxsL_connectTxs xs _ r1 h1]; rfl
+
+/-- Tagged spends that succeed, with the claimed coins mature and their height locks met, are Core's
+spends with the locks checked. -/
+theorem spend_coreL (h version : ℕ) : ∀ (ins : List (TxIn × (Coin × ℕ))) (m m' : View OutPoint Coin),
+    (ins.map fun p => (p.1.prevout, p.2.1, p.2.2)).foldlM spendOne m = some m' →
+    (∀ p ∈ ins, ¬ (p.2.1.coinbase ∧ h < p.2.1.height + COINBASE_MATURITY)) →
+    (∀ p ∈ ins, heightLockOk h version p.1.sequence p.2.1.height = true) →
+    spendInsL h version (untag m) (ins.map fun p => (p.1.prevout, p.1.sequence)) =
+      some (untag m', (ins.map (·.2.1.value)).sum)
+  | [], m, m', hrun, _, _ => by simp at hrun; subst hrun; simp [spendInsL]
+  | p :: ps, m, m', hrun, hmat, hlk => by
+    simp only [List.map_cons, List.foldlM_cons] at hrun
+    obtain ⟨m1, h1, hrest⟩ := Option.bind_eq_some_iff.mp hrun
+    simp only [spendOne] at h1
+    split_ifs at h1 with hm
+    simp only [Option.some.injEq] at h1; subst h1
+    have hv : untag m p.1.prevout = some p.2.1 := by simp [untag, hm]
+    have hnm := hmat p (by simp)
+    have hl := hlk p (by simp)
+    simp only [List.map_cons, spendInsL, hv]
+    rw [if_neg (by simpa [hl] using hnm), ← untag_update_none,
+      spend_coreL h version ps _ m' hrest (fun q hq => hmat q (by simp [hq])) (fun q hq => hlk q (by simp [hq]))]
+    simp [List.sum_cons, add_comm]
+
+/-- **A successful multiset run on the events is Core's connect with the relative locks**, when the
+claims pass the lock check too. -/
+theorem connectL_of_run : ∀ (xs : List TxC) (g : ℕ) (m m' : View OutPoint Coin),
+    run g m (xs.map events) = some m' → (∀ x ∈ xs, ClaimsOK x) → (∀ x ∈ xs, ClaimsLockOK x) →
+    connectTxsL (untag m) xs = some (untag m', xs.map claimFee)
+  | [], g, m, m', h, _, _ => by simp [run] at h; subst h; rfl
+  | x :: xs, g, m, m', h, hok, hokL => by
+    simp only [List.map_cons, run] at h
+    obtain ⟨m1, h1, hrest⟩ := Option.bind_eq_some_iff.mp h
+    have ih := connectL_of_run xs (g + 1) m1 m' hrest (fun y hy => hok y (by simp [hy]))
+      (fun y hy => hokL y (by simp [hy]))
+    simp only [applyTx] at h1
+    obtain ⟨m0, h0, hadd⟩ := Option.bind_eq_some_iff.mp h1
+    have hcore_add := add_core g (created x) m0 m1 (by simpa [events] using hadd)
+    simp only [connectTxsL, List.map_cons]
+    by_cases hcb : x.cb = true
+    · have : m0 = m := by simpa [events, hcb] using h0.symm
+      subst this
+      simp [connectTxL, hcb, hcore_add, ih, claimFee]
+    · have hcb' : x.cb = false := by simpa using hcb
+      obtain ⟨hlen, hmat, hlo, hhi⟩ := (hok x (by simp)).resolve_left hcb
+      have hlock := (hokL x (by simp)).resolve_left hcb
+      have hz : (x.t.vin.zip x.claims).map (fun p => (p.1.prevout, p.1.sequence)) =
+          x.t.vin.map fun i => (i.prevout, i.sequence) := by
+        rw [show (fun p : TxIn × (Coin × ℕ) => (p.1.prevout, p.1.sequence)) =
+            (fun i : TxIn => (i.prevout, i.sequence)) ∘ Prod.fst from rfl,
+          ← List.map_map, List.map_fst_zip (by omega)]
+      have hzs : ((x.t.vin.zip x.claims).map (·.2.1.value)).sum = claimSum x := by
+        unfold claimSum
+        rw [show (fun p : TxIn × (Coin × ℕ) => p.2.1.value) = (fun c : Coin × ℕ => c.1.value) ∘ Prod.snd from rfl,
+          ← List.map_map, List.map_snd_zip (by omega)]
+      have hsp := spend_coreL x.h x.t.version (x.t.vin.zip x.claims) m m0 (by simpa [events, hcb'] using h0)
+        (fun p hp => hmat p.2 (List.of_mem_zip hp).2) hlock
+      rw [hz, hzs] at hsp
+      have hc : connectTxL (untag m) x = some (untag m1, claimSum x - outSum x.t) := by
+        simp only [connectTxL, hcb', Bool.false_eq_true, if_false, hsp]
+        rw [if_neg (by simp; omega), hcore_add]; rfl
+      simp [hc, ih, claimFee, hcb']
 
 end StarkedAir.Spec.Coins

@@ -364,7 +364,46 @@ def commitC : List Expr :=
 
 def chkC : List Expr := modeC ++ valueC ++ prevoutC ++ finalC ++ totalsC ++ commitC
 
-def constraints : List Expr := kindC ++ transC ++ tileC ++ compactC ++ segC ++ countC ++ zeroC ++ bitC ++ txC ++ pubC ++ chkC
+/-! ### Relative lock times (BIP68, CONNECT-RULES step 2)
+
+Columns from `190` on. A transaction head reads its 4 version bytes into `VBY`; `V2 = [version ≥ 2]` is
+carried down the transaction's rows. An input row splits its sequence's bytes 2 and 3 (`BY 2`, `BY 3`)
+into bit 22 (`T22`), bit 23 (`U23`) and bit 31 (`D31`), with the remainders in range slots 0–3 (unused on
+input rows otherwise). `LKH` (`LKT`) says the input carries a height (time) lock that is enforced: CSV
+active (`pub 5`), version at least 2, bit 31 clear, bit 22 clear (set). The input tuple carries the lock
+(the sequence's low 16 bits) and both bits to the coin component, which holds the spent coin's height. -/
+
+def VBY (j : ℕ) : ℕ := 190 + j
+/-- `b1 + b2 + b3 + b0·(b0 − 1)` over the version's bytes: zero exactly when the version is 0 or 1. -/
+def VE : ℕ := 194
+def VINV : ℕ := 195
+def V2 : ℕ := 196
+def T22 : ℕ := 197
+def U23 : ℕ := 198
+def D31 : ℕ := 199
+/-- `V2 · (1 − D31)`, stored (degree). -/
+def A1 : ℕ := 200
+def LKH : ℕ := 201
+def LKT : ℕ := 202
+def N_LOCK : ℕ := 203
+
+def lockC : List Expr :=
+  [ boolC (k V2), boolC (k T22), boolC (k U23), boolC (k D31),
+    .mul (k K_TXH) (.sub (k VE) (.add (.add (.add (k (VBY 1)) (k (VBY 2))) (k (VBY 3)))
+      (.mul (k (VBY 0)) (.sub (k (VBY 0)) one)))),
+    .mul (k K_TXH) (.sub (k V2) (.mul (k VE) (k VINV))),
+    .mul (k K_TXH) (.mul (oneMinus (k V2)) (k VE)),
+    .mul (oneMinus (k K_TXH)) (same V2),
+    .mul (k K_IN) (.sub (by4 2) (.add (rg 0) (.add (.mul (c 64) (k T22)) (.mul (c 128) (k U23))))),
+    .mul (k K_IN) (.sub (rg 1) (.mul (c 4) (rg 0))),
+    .mul (k K_IN) (.sub (by4 3) (.add (rg 2) (.mul (c 128) (k D31)))),
+    .mul (k K_IN) (.sub (rg 3) (.mul (c 2) (rg 2))),
+    .sub (k A1) (.mul (k V2) (oneMinus (k D31))),
+    .sub (k LKH) (.mul (.pub 5) (.mul (k A1) (oneMinus (k T22)))),
+    .sub (k LKT) (.mul (.pub 5) (.mul (k A1) (k T22))) ]
+
+def constraints : List Expr :=
+  kindC ++ transC ++ tileC ++ compactC ++ segC ++ countC ++ zeroC ++ bitC ++ txC ++ pubC ++ chkC ++ lockC
 
 /-- Byte reads: the CompactSize's bytes, and a segwit head's marker and flag. -/
 def lookups : List Lookup :=
@@ -377,7 +416,8 @@ def lookups : List Lookup :=
     ⟨REL_BYTE, .neg (.mul (k K_TXH) (k SEG)), [.add (k START) (cst 5), cst 1]⟩,
     ⟨REL_TX, .mul (k K_LOCK) (k TXM), [k TXI, k TXA, k SEG, k WST, k START]⟩ ]
 
-/-- M3a.5b: byte slots, the auxiliary read, range slots, and the tuples for the other components. -/
+/-- M3a.5b: byte slots, the auxiliary read, range slots, and the tuples for the other components; then
+the version bytes (indices 28–31). -/
 def chkLookups : List Lookup :=
   (List.range 8).map (fun j =>
     ⟨REL_BYTE, .neg (if j < 4 then .add (k K_OUT) (.add (k K_LOCK) (k K_IN)) else k K_OUT),
@@ -390,10 +430,12 @@ def chkLookups : List Lookup :=
     ⟨REL_COMMIT, k ISC, [k SSC, k VAL]⟩,
     -- M3b: output and input tokens for the coin events (`Block/Coin.lean`)
     ⟨24, k K_OUT, [k TXI, k START, k LEN, k SSC, k VAL, vlo, vhi]⟩,
-    ⟨25, k K_IN, [k TXI, k START]⟩ ]
+    ⟨25, k K_IN, [k TXI, k START, lo16, k LKH, k LKT]⟩ ] ++
+  -- BIP68: a transaction head's 4 version bytes
+  (List.range 4).map (fun j => ⟨REL_BYTE, .neg (k K_TXH), [.add (k START) (c j), k (VBY j)]⟩)
 
 def fields : Comp where
-  air := { name := "block_fields", nMain := N_MAIN', pre := preCols, constraints := constraints }
+  air := { name := "block_fields", nMain := N_LOCK, pre := preCols, constraints := constraints }
   lookups := lookups ++ chkLookups
 
 /-- Polynomial degree of an expression. -/

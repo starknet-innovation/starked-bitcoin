@@ -78,7 +78,7 @@ pub fn profileLogs(L: u32, profile: Profile) [N_COMP]u32 {
 }
 
 /// Lookup sites per row of the 15 hashed-system components (Lean `hashRows`, Link.lean).
-pub const SITES = [15]u64{ 1, 36, 4, 6, 11, 2, 5, 12, 3, 1, 6, 11, 4, 20, 94 };
+pub const SITES = [15]u64{ 1, 40, 4, 6, 11, 2, 5, 12, 3, 1, 6, 11, 4, 20, 97 };
 
 /// Lean's `SizeOk` (Link.lean): each hashed-system component has at most 2^24 rows and the lookup
 /// site count `Σ kᵢ·2^logsᵢ` is below P. The soundness theorems cover only such sizes: uniform up to
@@ -333,7 +333,7 @@ pub fn buildFull(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctx
     var coin_raw_reads = std.ArrayList(u32).empty;
     var coin_ranges = std.ArrayList(u32).empty;
     const lost = lostHeight(ctx.height);
-    const co = try coin.coinColumns(a, logs[C.coin], .{ .raw = raw, .undo = undo, .rows = rows, .height = ctx.height, .txids = txids, .recs = recs, .lost = lost, .chal = opts.chal }, &coin_raw_reads, &coin_ranges);
+    const co = try coin.coinColumns(a, logs[C.coin], .{ .raw = raw, .undo = undo, .rows = rows, .height = ctx.height, .txids = txids, .recs = recs, .lost = lost, .chal = opts.chal, .force = ctx.force }, &coin_raw_reads, &coin_ranges);
     var fp_raw_reads = std.ArrayList(u32).empty;
     var fp_undo_reads = std.ArrayList(u32).empty;
     const allsegs = try std.mem.concat(a, coin.Seg, &.{ osegs, usegs });
@@ -649,9 +649,22 @@ test "block system: block 0's STWZEVA-composed proof is byte-identical and verif
 }
 
 /// SHA-256 of the uniform-profile proof bytes (`system.proofBytes`) of each `checks.samples_small`
-/// block, proved by `proof_file.prove` at test strength (10 PoW bits, 3 queries, blowup 1), as
-/// m3a5 (2196ba3) produced them: per-component sizes (D-045) must not change a uniform proof.
+/// block, proved by `proof_file.prove` at test strength (10 PoW bits, 3 queries, blowup 1). They pin
+/// the block AIRs: a change here is a change of every block proof and VK.
+/// Since CONNECT-RULES step 2 (2026-11-19: `block_fields` and `block_coin` gained the height-based
+/// relative lock). The values of m3a5 (2196ba3), which D-045 kept unchanged and with which the proofs
+/// of blocks 935,001-972,500 were made, are in `golden_small_m3a5`.
 pub const golden_small = [_][]const u8{
+    "f0fe8978cd2f1e4e3cb778e84e7c82609fdea6ae7e468e27a682b171cbc0692a", // 0
+    "929943d4e54da39584e87934b37d93b7558350e173470639a4e6d31bf11ff9d1", // 170
+    "bc76c6ba4a03a187794a51fcefbbb801b43fede7b8d9a9efbd40657aad2f0de8", // 91722
+    "d8c0ace9c273663ab639b7e6edb05e2a25622a514cda094bb118681ce3afb362", // 91812
+    "8408bb2260a8759fcbf3fdb943b4d057835b19b4bf342862e8daacea4ccdf7ab", // 91842
+    "9a648d6c7857d385f6a46d53ce73fb4fc862316fcd103955d70438c41e418561", // 91880
+};
+
+/// The same hashes with the AIRs before CONNECT-RULES step 2 (m3a5, 2196ba3). Kept for reference only.
+pub const golden_small_m3a5 = [_][]const u8{
     "b03d4b8a1fc12a64fb44c0b2933dd941fedd220110d2d999185962e2794e24a0", // 0
     "0b9bb2796927f868ff476b77ea57778b8b89d5ce6b2e129abfa57f93ff4bc7d7", // 170
     "062de839b0e31810ca2971795336217e8a33486810375a0a07d56a48ce553c13", // 91722
@@ -660,12 +673,13 @@ pub const golden_small = [_][]const u8{
     "f7273a6d416ed97cabbfc32457f13974fc8862ad1e7f262d1040846c122fa8e3", // 91880
 };
 
-test "block system: uniform proofs of the small samples match the m3a5 golden hashes" {
+test "block system: uniform proofs of the small samples match the golden hashes" {
     const pf = @import("proof_file.zig");
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const a = arena.allocator();
     const airs = try parseAirs(a);
+    var bad = false;
     for (checks.samples_small, 0..) |s, i| {
         const b = try buildU(a, s.raw, s.undo, s.ctx);
         const proof_bytes = try system.proofBytes(a, try pf.prove(a, &airs, &b, pf.testFri()));
@@ -673,8 +687,9 @@ test "block system: uniform proofs of the small samples match the m3a5 golden ha
         std.crypto.hash.sha2.Sha256.hash(proof_bytes, &digest, .{});
         const hex = std.fmt.bytesToHex(digest, .lower);
         std.debug.print("golden height {d}: {s}\n", .{ s.ctx.height, hex });
-        try std.testing.expectEqualStrings(golden_small[i], &hex);
+        if (!std.mem.eql(u8, golden_small[i], &hex)) bad = true;
     }
+    try std.testing.expect(!bad);
 }
 
 test "block system: tiered profile (D-045): the small samples satisfy every component, prove and verify through a proof file" {

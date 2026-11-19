@@ -596,3 +596,22 @@ A second new profile adds one point.
 Cost: Zig only on the proof side (the Lean theorems hold for any size vector under `SizeOk`, D-045); a
 new set of block VKs and leaf circuits, the CUDA arena table, and a GPU timing to confirm that cells
 predict time.
+
+### D-056 — CONNECT-RULES step 2: additive Lean statements; six `Compat.lean` pins re-pinned
+Date: 2026-11-19 · By: agent (Claude); **to confirm by the owner** · Status: proposed (applied)
+Decision: (1) the height-based relative lock is added to Lean beside the existing statements, under new
+names (`connectTxL`, `ClaimsLockOK`, `block_factsL`, `epoch_coreL`, `epoch_systems_coreL`): none of the
+100 statements of the `Compat.lean` gate changes, and each still holds. The linking lemmas that state the
+input relation's tuple or the lookup counts follow the AIR (`int_sum`, `in_match_l`, `coin_row_tok`,
+`chk_use_mult`, `coin_r8`, `hashRows`: 216 → 223 sites per row). (2) Six pins of `Compat.lean` are re-pinned without a
+proven equality to the old body: `Block.Coin.constraints`, `Block.Coin.lookups`, `Block.Coin.N_MAIN`,
+`Block.Fields.constraints`, `Block.Fields.chkLookups`, `Block.Fields.fields`.
+Why: the D-045 gate allows a re-pin only with an equality to the old body. An AIR that gains a rule
+cannot meet that: its constraint and lookup lists are new. The owner approved the AIR change (D-054,
+connect-rules.md: "each of 2–4 changes the block AIRs"). `Compat.lean` now says what changed in the six
+(`repin_coin_constraints`, `repin_fields_constraints`: the old list followed by `lockC`, by `rfl`).
+Steps 3 and 4 will need the same for `block_walk`, `block_fpwalk` and `block_coin`.
+Rejected: changing `connectTx` and `ClaimsOK` in place (it breaks the gate's statements and makes
+`epoch_systems_core` need the CSV bit, which the recursion does not provide).
+To undo: revert the six hashes; the build then fails on the pins and nothing else.
+

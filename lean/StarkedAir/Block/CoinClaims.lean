@@ -6,6 +6,7 @@ transaction's rows (`in_nat`, `out_nat`, `tend_nat`), they give `ClaimsOK`'s amo
 -/
 import StarkedAir.Block.CoinEpochSound
 import StarkedAir.Block.ValueSound
+import StarkedAir.Block.FieldsLock
 import StarkedAir.Spec.CoinDecode
 
 namespace StarkedAir.Block
@@ -204,6 +205,139 @@ theorem in_maturity {j : ℕ} (hj : j < 2 ^ Ls 14) (hki : (inst 14).main Coin.KI
     push_cast; rw [e5']; ring
   simp only [Spec.Coins.COINBASE_MATURITY] at hlt
   omega
+
+/-- **An input's height-based relative lock is met** (BIP68, `SequenceLocks`' height half). For input `k`
+of transaction `t` (coin row `j`, a non-coinbase input) with claimed code `code` (below `2^30`): when
+CSV is active at the block's height, the transaction's version is at least 2 and bits 31 and 22 of the
+input's sequence are clear, the claimed coin's height plus the sequence's low 16 bits is at most the
+block's height. `pub 5` is the CSV bit. -/
+theorem in_lock (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
+    (hon : ∀ j < 2 ^ Ls 14, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
+    (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
+    {parts : List (List Spec.Block.Tok)} (hf : List.Forall₂ Spec.Block.IoTx S.b.txs parts)
+    (htg : Spec.Block.tagged 0 (Fields.toksFrom (inst 1).main (Rb inst pub) S.m 0) = Spec.Block.tagParts 0 parts)
+    {h : ℕ} (hp2 : pub 2 = (h : F)) (hh : h < 2 ^ 23)
+    (hp5 : pub 5 = if Spec.Block.CSV_HEIGHT ≤ h then 1 else 0)
+    {t k : ℕ} {tx : Spec.Block.Tx} {i : Spec.Block.TxIn} (htx : S.b.txs[t]? = some tx) (hi : tx.vin[k]? = some i)
+    {j : ℕ} (hjq : j = ((parts.take t).map List.length).sum + k) (hje : j < e)
+    (hki : (inst 14).main Coin.KI j = 1) {code : ℕ}
+    (hcode : (inst 14).main Coin.CLO j + 65536 * (inst 14).main Coin.CHI j = (code : F)) (hc : code < 2 ^ 30) :
+    Spec.Coins.heightLockOk h tx.version i.sequence (code / 2) = true := by
+  unfold Spec.Coins.heightLockOk
+  by_cases hen : (decide (Spec.Block.CSV_HEIGHT ≤ h) && decide (2 ≤ tx.version) &&
+      decide (i.sequence / 2 ^ 31 % 2 = 0) && decide (i.sequence / 2 ^ 22 % 2 = 0)) = true
+  swap
+  · rw [Bool.not_eq_true] at hen; rw [hen]; rfl
+  rw [hen]
+  simp only [Bool.and_eq_true, decide_eq_true_eq] at hen
+  obtain ⟨⟨⟨hcsv, hv⟩, h31⟩, h22⟩ := hen
+  simp only [Bool.not_true, Bool.false_or, decide_eq_true_eq]
+  have cs := coin_sat hL hsat hL24
+  have fs := fields_sat' hL hsat hL24
+  have hj2 : j < 2 ^ Ls 14 := by omega
+  obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
+  have hkc : (inst 14).main Coin.KI j + (inst 14).main Coin.CBI j = 1 := by
+    rcases Coin.kinds cs hj2 with g | g | g | g
+    · rw [g.2.1] at hki; exact absurd hki zero_ne_one
+    · rw [g.2.1, g.2.2.1]; simp
+    · rw [g.2.1] at hki; exact absurd hki zero_ne_one
+    · rw [g.2.1] at hki; exact absurd hki zero_ne_one
+  have hkl : k < tx.vin.length := (List.getElem?_eq_some_iff.mp hi).1
+  -- the row's transaction and input
+  obtain ⟨t0, q0, tx0, htx0, hT0, hjq0, hq0, -, hin0⟩ := coin_row_tx hL hsat hL24 S he hon hlen hst hf htg hje
+  obtain ⟨hpl, hpe⟩ := part_len hf htx
+  obtain ⟨hpl0, hpe0⟩ := part_len hf htx0
+  obtain ⟨rfl, rfl⟩ := decomp_unique parts hpl hpl0 (by omega) (by omega) (hjq.symm.trans hjq0)
+  rw [htx] at htx0; obtain rfl := Option.some.inj htx0
+  obtain ⟨-, i0, hi0, hintok⟩ := hin0 hkc
+  rw [hi] at hi0; obtain rfl := Option.some.inj hi0
+  set ρ := (ioRows inst S.m).getD j 0 with hρdef
+  have hρ : ρ ∈ ioRows inst S.m := by rw [hρdef, List.getD_eq_getElem _ _ (by omega)]; exact List.getElem_mem _
+  obtain ⟨hρm, -⟩ := mem_ioRows.mp hρ
+  have hρn : ρ < 2 ^ Ls 1 := by have := S.hmn; omega
+  obtain ⟨hkin, hTXI, hT⟩ := (coin_row_tok hL hsat hL24 S he hon hlen hst hje).2 hkc
+  -- the sequence: the input token's last four bytes
+  rw [Fields.tok_in fs (Rb inst pub) S.hcs S.hmn S.hpad S.hfit hρn hkin] at hintok
+  obtain ⟨-, -, -, -, -, hseq⟩ := hintok
+  -- the transaction's head and lock-time rows
+  have htl : t < S.b.txs.length := (List.getElem?_eq_some_iff.mp htx).1
+  obtain ⟨ρl, tx', hρl, hlk, hlocks, hget, hat⟩ := S.hsurj t htl
+  rw [htx] at hget; obtain rfl := Option.some.inj hget
+  have h25 : 2 ^ Ls 1 ≤ 2 ^ 25 := Nat.pow_le_pow_right (by norm_num) (by have := hL24.1 1 (by decide); omega)
+  obtain ⟨rh, hrh, ht, hnt, -, -, -, -, -, -, -, -, -, -, hlc⟩ :=
+    Fields.tx_rows' fs (Rb inst pub) S.hcs S.hmn S.hpad S.hfit h25 hat hρl
+  have hρln : ρl < 2 ^ Ls 1 := by have := S.hmn; omega
+  -- the row's lock count is the transaction's index, so the row is one of the transaction's
+  have hlρ : Fields.locks (inst 1).main ρ = t := by
+    have e1 := Fields.txi_count fs ρ hρn
+    have e2 : ((Fields.locks (inst 1).main ρ : ℕ) : F) = (t : F) := by rw [← e1, ← hTXI, hT0]
+    have l1 := Fields.locks_le (M := (inst 1).main) ρ
+    have l2 := S.hN25
+    exact natCast_inj_of_lt (Fields.lt_P (by omega)) (Fields.lt_P (by omega)) e2
+  obtain ⟨hr1, hr2⟩ := Fields.row_in_tx fs h25 hrh hρln ht hlk (hlc rh le_rfl (by omega)) hρn hkin
+    (by rw [hlρ, hlocks])
+  -- the version: the head token's four bytes
+  have hver : tx.version = Spec.Block.le (Fields.slice (Rb inst pub) ((inst 1).main Fields.START rh).val 4) := by
+    obtain ⟨rh', hrh', ht', hnt', htxT⟩ := hat
+    have hrr : rh' = rh := by
+      rcases Nat.lt_trichotomy rh' rh with a | a | a
+      · have := hnt' rh a (by omega); rw [ht] at this; exact absurd this one_ne_zero
+      · exact a
+      · have := hnt rh' a (by omega); rw [ht'] at this; exact absurd this one_ne_zero
+    subst hrr
+    rw [Fields.toksFrom_cons (by omega),
+      Fields.tok_txh fs (Rb inst pub) S.hcs S.hmn S.hpad S.hfit (by omega) ht] at htxT
+    exact Spec.Block.txT_version htxT
+  have hrgs : ∀ r < 2 ^ Ls 1, ∀ j < 13, ((inst 1).main (Fields.RG j) r).val < 256 :=
+    fun r hr j hj => fields_rg_lt hL hsat hL24 hr hj
+  -- the fields' bit and lock, received by the coin row
+  have hlkh := Fields.lkh_of fs (Rb inst pub) S.hcs S.hmn S.hpad S.hfit (hby_R hL hsat hL24 S) hrgs
+    (hvb_R hL hsat hL24) h25 (le_of_lt hr1) hρm ht (fun j a b => hnt j a (by omega)) hkin
+    (by rw [hp5, if_pos hcsv]) (by rw [← hver]; exact hv) hseq h31 h22
+  have hSQL : (inst 14).main Coin.SQL j = ((i.sequence % 65536 : ℕ) : F) := by
+    have := congrArg (fun l => l.getD 2 0) hT
+    simp only [cIn, fIn, List.getD_cons_succ, List.getD_cons_zero] at this
+    rw [this]
+    exact (Fields.seq_bits fs (Rb inst pub) S.hcs S.hmn S.hpad S.hfit (hby_R hL hsat hL24 S) hrgs h25 hρm hkin hseq).2.2
+  have hLKH : (inst 14).main Coin.LKH j = 1 := by
+    have := congrArg (fun l => l.getD 3 0) hT
+    simp only [cIn, fIn, List.getD_cons_succ, List.getD_cons_zero] at this
+    rw [this]; exact hlkh
+  -- the coin row's comparison
+  obtain ⟨e1, e2, -⟩ := Coin.in_spec cs hj2 hki
+  have ek : (Coin.k Coin.KI).eval (2 ^ Ls 14) Coin.preCols pub (inst 14).main j = 1 := by rw [Coin.ev_k hj2]; exact hki
+  have hb : ∀ i < 3, ((inst 14).main (Coin.HB i) j).val < 256 := by
+    intro i hi
+    interval_cases i
+    · exact coin_r8 hL hsat hL24 (k := 52) (by omega) (by omega) rfl hj2 ek
+    · exact coin_r8 hL hsat hL24 (k := 53) (by omega) (by omega) rfl hj2 ek
+    · exact coin_r8 hL hsat hL24 (k := 54) (by omega) (by omega) rfl hj2 ek
+  have hbn := Coin.b3N_lt hb
+  have hP := Coin.P_big
+  rw [Coin.b3V_eq] at e2
+  have cbc := Coin.bool_col cs (c := Coin.CBC) (by simp) hj2
+  have hsplit : code = 2 * Coin.b3N (inst 14).main Coin.HB j + (if (inst 14).main Coin.CBC j = 1 then 1 else 0) := by
+    apply Coin.lift _ (by omega) (by split_ifs <;> omega)
+    rw [← hcode, e1, e2]
+    rcases cbc with h0 | h1
+    · rw [h0]; simp
+    · rw [h1]; simp
+  have ek2 : (Expr.mul (Coin.k Coin.KI) (Coin.k Coin.LKH)).eval (2 ^ Ls 14) Coin.preCols pub (inst 14).main j = 1 := by
+    simp [Expr.eval, Coin.ev_k hj2, hki, hLKH]
+  have hlb : ∀ i < 3, ((inst 14).main (Coin.LB i) j).val < 256 := by
+    intro i hi
+    interval_cases i
+    · exact coin_r8 hL hsat hL24 (k := 94) (by omega) (by omega) rfl hj2 ek2
+    · exact coin_r8 hL hsat hL24 (k := 95) (by omega) (by omega) rfl hj2 ek2
+    · exact coin_r8 hL hsat hL24 (k := 96) (by omega) (by omega) rfl hj2 ek2
+  have hln := Coin.b3N_lt hlb
+  have hrow := Coin.lock_row cs hj2 hki hLKH
+  rw [Coin.b3V_eq, e2, hp2, hSQL] at hrow
+  have hsum : Coin.b3N (inst 14).main Coin.LB j + Coin.b3N (inst 14).main Coin.HB j + i.sequence % 65536 = h := by
+    apply Coin.lift _ (by omega) (by omega)
+    push_cast; rw [hrow]; ring
+  have hcd : code / 2 = Coin.b3N (inst 14).main Coin.HB j := by rw [hsplit]; split_ifs <;> omega
+  rw [hcd]; omega
 
 /-- **A transaction's coin rows.** For transaction `t ≥ 1`, its rows `pre t + q` (`q` below its token
 count) are in use, inputs first then outputs; with every transaction's inputs and outputs nonempty, the
@@ -596,12 +730,41 @@ theorem tx_claims_ok (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
   · rw [hclaim, ← hout']; exact_mod_cast hle
   · rw [hclaim, max_money_eq]; exact_mod_cast hmax
 
-/-- **One block's coin facts, for the epoch.** A block system at height `h` (lost-coinbase flag `lost`,
+/-- **A transaction's lock check** (`ClaimsLockOK`, BIP68's height half). For transaction `t ≥ 1` of a
+block whose claims are its input rows' undo records, each with a code below `2^30`: every input's
+height-based relative lock is met against its claim's height (`in_lock`). `pub 5` is the CSV bit. -/
+theorem tx_locks_ok (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
+    (hon : ∀ j < 2 ^ Ls 14, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
+    (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
+    {parts : List (List Spec.Block.Tok)} (hf : List.Forall₂ Spec.Block.IoTx S.b.txs parts)
+    (htg : Spec.Block.tagged 0 (Fields.toksFrom (inst 1).main (Rb inst pub) S.m 0) = Spec.Block.tagParts 0 parts)
+    (hne : ∀ (t' : ℕ) (tx' : Spec.Block.Tx), S.b.txs[t']? = some tx' → tx'.vin ≠ [] ∧ tx'.vout ≠ [])
+    {h : ℕ} (hp2 : pub 2 = (h : F)) (hh : h < 2 ^ 23)
+    (hp5 : pub 5 = if Spec.Block.CSV_HEIGHT ≤ h then 1 else 0) (N : ℕ → ℕ) (B : BlockC) (hBh : B.h = h)
+    {t : ℕ} {tx : Spec.Block.Tx} (htx : S.b.txs[t]? = some tx) (ht1 : 1 ≤ t)
+    (hcl : ∀ k < tx.vin.length, ClaimAt inst pub (Ls 13) (((parts.take t).map List.length).sum + k) (B.claim t k))
+    (hcv : ∀ k < tx.vin.length, (B.claim t k).code < 2 ^ 30) :
+    Spec.Coins.ClaimsLockOK (txcOf N B t tx) := by
+  obtain ⟨hrows, -, -, -, -⟩ := tx_rows hL hsat hL24 S he hon hlen hst hf htg hne htx ht1
+  have ht0 : t ≠ 0 := by omega
+  unfold Spec.Coins.ClaimsLockOK txcOf
+  right
+  simp only [if_neg ht0]
+  intro p hp
+  obtain ⟨k, hk, rfl⟩ := List.getElem_of_mem hp
+  have hkv : k < tx.vin.length := by simpa using hk
+  simp only [List.getElem_zip, List.getElem_map, List.getElem_zipIdx, Nat.zero_add, coinOfVal, hBh]
+  obtain ⟨hki, hcode, -⟩ := hcl k hkv
+  exact in_lock hL hsat hL24 S he hon hlen hst hf htg hp2 hh hp5 htx (List.getElem?_eq_getElem hkv) rfl
+    (hrows k (by omega)).1 hki hcode (hcv k hkv)
+
+/-- **One block's coin facts, for the epoch, with the relative locks.** A block system at height `h` (lost-coinbase flag `lost`,
 weights `αᵏ`) has a claim function such that, for the block `⟨h, txs, lost, claim⟩` and any positions
 `N`: its public partial sum is its events' sum at `(α, z)`; each spend's claim passes the circuit's order
 check; and each non-coinbase transaction whose claims are real coins and whose outputs are within
-`MAX_MONEY` passes `ClaimsOK`. -/
-theorem block_facts (S : Setup inst pub (Ls 1)) {h : ℕ} (hp2 : pub 2 = (h : F)) (hh : h < 2 ^ 23) {lost : Bool}
+`MAX_MONEY` passes `ClaimsOK`; and, when `pub 5` is the CSV bit of the height, each non-coinbase
+transaction whose claims' codes are below `2^30` passes `ClaimsLockOK` (BIP68's height half). -/
+theorem block_factsL (S : Setup inst pub (Ls 1)) {h : ℕ} (hp2 : pub 2 = (h : F)) (hh : h < 2 ^ 23) {lost : Bool}
     (hlost : pub Coin.PUB_LOST = if lost then 1 else 0) {α : QM}
     (hα : ∀ k < Coin.W, RunSum.pQ pub (Coin.PUB_ALPHA k) = α ^ k)
     (hne : ∀ (t' : ℕ) (tx' : Spec.Block.Tx), S.b.txs[t']? = some tx' → tx'.vin ≠ [] ∧ tx'.vout ≠ []) :
@@ -616,11 +779,16 @@ theorem block_facts (S : Setup inst pub (Ls 1)) {h : ℕ} (hp2 : pub 2 = (h : F)
         (∀ k < tx.vin.length, 8 ≤ (claim t k).ser.length ∧
           Spec.Block.le ((claim t k).ser.take 8) ≤ Fields.MAXHI * 2 ^ 24 + Fields.MAXLO ∧ (claim t k).code < 2 ^ 30) →
         Spec.Coins.outSum tx ≤ Spec.Block.MAX_MONEY →
-        Spec.Coins.ClaimsOK (txcOf N ⟨h, S.b.txs, lost, claim⟩ t tx)) := by
+        Spec.Coins.ClaimsOK (txcOf N ⟨h, S.b.txs, lost, claim⟩ t tx)) ∧
+      (pub 5 = (if Spec.Block.CSV_HEIGHT ≤ h then 1 else 0) →
+        ∀ (N : ℕ → ℕ) (t : ℕ) (tx : Spec.Block.Tx), S.b.txs[t]? = some tx → 1 ≤ t →
+          (∀ k < tx.vin.length, (claim t k).code < 2 ^ 30) →
+          Spec.Coins.ClaimsLockOK (txcOf N ⟨h, S.b.txs, lost, claim⟩ t tx)) := by
   obtain ⟨e, he, hon, hlen, hst⟩ := coin_align hL hsat hL24 S
   obtain ⟨parts, hf, htg⟩ := Spec.Block.io_toksBlock_tag S.htok
   obtain ⟨claim, hcl⟩ := block_claims hL hsat hL24 S he hon hlen hst hf htg hp2 hh
-  refine ⟨claim, fun N => ?_, fun N t tx htx ev hev => ?_, fun N t tx htx ht1 hcv hout => ?_⟩
+  refine ⟨claim, fun N => ?_, fun N t tx htx ev hev => ?_, fun N t tx htx ht1 hcv hout => ?_,
+    fun hp5 N t tx htx ht1 hcv => ?_⟩
   · have hs := block_event_sum hL hsat hL24 S he hon hlen hst hf htg hp2 hh hlost N claim
       (fun t tx htx ht1 k i hi => (hcl t tx htx ht1 k i hi).1)
     rw [hs]
@@ -644,6 +812,32 @@ theorem block_facts (S : Setup inst pub (Ls 1)) {h : ℕ} (hp2 : pub 2 = (h : F)
         obtain ⟨i, hi⟩ : ∃ i, tx.vin[k]? = some i := ⟨_, List.getElem?_eq_getElem hk⟩
         exact (hcl t tx htx ht1 k i hi).2.2.2)
       hcv hout
+  · exact tx_locks_ok hL hsat hL24 S he hon hlen hst hf htg hne hp2 hh hp5 N ⟨h, S.b.txs, lost, claim⟩ rfl htx ht1
+      (fun k hk => by
+        obtain ⟨i, hi⟩ : ∃ i, tx.vin[k]? = some i := ⟨_, List.getElem?_eq_getElem hk⟩
+        exact (hcl t tx htx ht1 k i hi).2.2.2)
+      hcv
+
+/-- **One block's coin facts, for the epoch** (`block_factsL` without the relative locks). -/
+theorem block_facts (S : Setup inst pub (Ls 1)) {h : ℕ} (hp2 : pub 2 = (h : F)) (hh : h < 2 ^ 23) {lost : Bool}
+    (hlost : pub Coin.PUB_LOST = if lost then 1 else 0) {α : QM}
+    (hα : ∀ k < Coin.W, RunSum.pQ pub (Coin.PUB_ALPHA k) = α ^ k)
+    (hne : ∀ (t' : ℕ) (tx' : Spec.Block.Tx), S.b.txs[t']? = some tx' → tx'.vin ≠ [] ∧ tx'.vout ≠ []) :
+    ∃ claim : ℕ → ℕ → Claim,
+      (∀ N : ℕ → ℕ, RunSum.pQ pub Coin.PUB_S =
+        blockSum N (efrac N (FpWalk.gQ pub) α (RunSum.pQ pub Coin.PUB_Z)) ⟨h, S.b.txs, lost, claim⟩) ∧
+      (∀ (N : ℕ → ℕ) (t : ℕ) (tx : Spec.Block.Tx), S.b.txs[t]? = some tx →
+        ∀ ev ∈ txIns N ⟨h, S.b.txs, lost, claim⟩ t tx, ∃ c : Claim, ev = (ev.1, (c.code, c.ser), N (c.code / 2) + c.ctx) ∧
+          (c.code < 2 ^ 26 → c.ctx < 2 ^ 25 → (c.code / 2 < h ∨ (c.code / 2 = h ∧ c.ctx < t))) ∧
+          c.code < 2 ^ 32 ∧ c.ctx < 2 ^ 24 ∧ c.ser.length < P) ∧
+      (∀ (N : ℕ → ℕ) (t : ℕ) (tx : Spec.Block.Tx), S.b.txs[t]? = some tx → 1 ≤ t →
+        (∀ k < tx.vin.length, 8 ≤ (claim t k).ser.length ∧
+          Spec.Block.le ((claim t k).ser.take 8) ≤ Fields.MAXHI * 2 ^ 24 + Fields.MAXLO ∧ (claim t k).code < 2 ^ 30) →
+        Spec.Coins.outSum tx ≤ Spec.Block.MAX_MONEY →
+        Spec.Coins.ClaimsOK (txcOf N ⟨h, S.b.txs, lost, claim⟩ t tx)) := by
+  obtain ⟨claim, h1, h2, h3, -⟩ := block_factsL hL hsat hL24 S hp2 hh hlost hα hne
+  exact ⟨claim, h1, h2, h3⟩
+
 
 end System
 

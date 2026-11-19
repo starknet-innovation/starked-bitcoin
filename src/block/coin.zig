@@ -7,6 +7,7 @@ const core = @import("stwo_core");
 const M31 = core.fields.m31.M31;
 const QM31 = core.fields.qm31.QM31;
 const fields = @import("fields.zig");
+const connect_rules = @import("connect_rules.zig");
 
 pub const fpwalk_json = @embedFile("air:block_fpwalk");
 pub const urec_json = @embedFile("air:block_urec");
@@ -22,6 +23,8 @@ pub const PUB_LOST = 158;
 pub const PUB_SUBL = 159;
 pub const PUB_SUBH = 160;
 pub const N_PUB = 161;
+/// Main columns (Lean `Coin.N_MAIN`).
+pub const N_MAIN = 170;
 /// The coin component's `CTX` column (Lean `Coin.CTX`).
 pub const CTX_COL = 80;
 
@@ -253,6 +256,8 @@ pub const CoinInput = struct {
     recs: []const Rec,
     lost: bool = false,
     chal: Challenge,
+    /// Tests only: build the witness of a block whose relative lock is not met (see `checks.Ctx.force`).
+    force: bool = false,
 };
 
 pub const CoinOut = struct {
@@ -362,8 +367,15 @@ pub fn coinColumns(a: std.mem.Allocator, log_size: u32, in: CoinInput, raw_reads
     const H3 = 158;
     const BR3 = 162;
     const H3C = 163;
+    // BIP68 (Lean: `Coin.lockC`): the lock, the enforced height and time lock bits, `height - HC - SQL`.
+    const SQL = 164;
+    const LKH = 165;
+    const LKT = 166;
+    const LB0 = 167;
     const n = @as(usize, 1) << @intCast(log_size);
-    const cols = try zeros(a, 164, n);
+    const cols = try zeros(a, N_MAIN, n);
+    const csv = in.height >= connect_rules.CSV_HEIGHT;
+    var v2 = false;
     // Amounts: per row the coin's value; the token order is the block's.
     const M24: u64 = 1 << 24;
     var in_sum: u64 = 0;
@@ -407,6 +419,7 @@ pub fn coinColumns(a: std.mem.Allocator, log_size: u32, in: CoinInput, raw_reads
             txi += 1;
             continue;
         }
+        if (tok.kind == fields.K_TXH) v2 = std.mem.readInt(u32, in.raw[tok.start..][0..4], .little) >= 2;
         if (tok.kind != fields.K_IN and tok.kind != fields.K_OUT) continue;
         if (r + 1 >= n) return error.CoinsDoNotFit;
         const is_out = tok.kind == fields.K_OUT;
@@ -417,6 +430,15 @@ pub fn coinColumns(a: std.mem.Allocator, log_size: u32, in: CoinInput, raw_reads
         cols[CBO][r] = if (is_cb) M31.one() else M31.zero();
         if (r > 0) try b3.put(cols, D0, r, tok.start - prev_start - 1, ranges, a);
         cols[J][r] = f(j);
+        // An input's lock, as the fields yield it (the coinbase's too: its tuple is the same relation's).
+        var lock: connect_rules.Lock = .none;
+        if (!is_out) {
+            const seq = std.mem.readInt(u32, in.raw[tok.start + tok.len - 4 ..][0..4], .little);
+            cols[SQL][r] = f(seq & 0xffff);
+            if (csv and v2) lock = connect_rules.inputLock(seq);
+            cols[LKH][r] = f(@intFromBool(lock == .height));
+            cols[LKT][r] = f(@intFromBool(lock == .time));
+        }
         var tuple: [W]M31 = [_]M31{M31.zero()} ** W;
         var m: i2 = 0;
         if (is_out) {
@@ -520,6 +542,14 @@ pub fn coinColumns(a: std.mem.Allocator, log_size: u32, in: CoinInput, raw_reads
             if (cbc == 1) {
                 if (in.height < hc + 100) return error.ImmatureCoinbaseSpend;
                 try b3.put(cols, MB0, r, in.height - hc - 100, ranges, a);
+            }
+            switch (lock) {
+                .height => |l| {
+                    if (in.height < hc + l and !in.force) return error.RelativeLockNotMet;
+                    // `force` (tests): the difference wrapped and truncated to three bytes.
+                    try b3.put(cols, LB0, r, (in.height -% hc -% l) & 0xffffff, ranges, a);
+                },
+                else => {},
             }
             const fh = horner(ch.gamma, in.undo[rc.start + UHDR .. rc.start + UHDR + rc.tl]);
             setQ(cols, FH, r, fh);

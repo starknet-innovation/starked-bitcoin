@@ -405,10 +405,14 @@ test "block VK round trip; expected keys fold as the nodes do" {
 }
 
 /// SHA-256 of the uniform block VK set up (`setup`) from the test-strength proofs of blocks 0 and 170
-/// (block sizes 2^11 and 2^12), as m3a5 (2196ba3) computed it: D-045 must not change a uniform key.
-pub const golden_vk_0_170 = "dc0661443658274e9d278072f5118a5c7a1d91d04616c2ce02650a3090c695f8";
+/// (block sizes 2^11 and 2^12). It pins the block AIRs and the leaf circuit.
+/// Since CONNECT-RULES step 2 (2026-11-19: the height-based relative lock). With the AIRs of m3a5
+/// (2196ba3), which D-045 kept unchanged and the proofs of blocks 935,001-972,500 use, it was
+/// `golden_vk_0_170_m3a5`.
+pub const golden_vk_0_170 = "95cda9e5681adc575cccee697e4639c038289923fea6f82021b44a26f93ef426";
+pub const golden_vk_0_170_m3a5 = "dc0661443658274e9d278072f5118a5c7a1d91d04616c2ce02650a3090c695f8";
 
-test "block VK golden: the uniform key of blocks 0 and 170 is m3a5's" {
+test "block VK golden: the uniform key of blocks 0 and 170" {
     const gpa = std.heap.page_allocator;
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();

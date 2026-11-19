@@ -77,14 +77,20 @@ session 39).
 | `CheckBlock`, `ContextualCheckBlock` (Merkle root and mutation, sizes, `CheckTransaction`, finality, BIP34, witness commitment, weight) | enforced (`Spec/Block.lean`, `block_sound`) |
 | Legacy sigops × 4 ≤ 80,000 (`bad-blk-sigops`, `CheckBlock`) | enforced |
 | **Full sigop cost** with P2SH and witness sigops (`bad-blk-sigops`, `ConnectBlock`) | **not enforced.** Specified and fuzzed (`Spec/ConnectRules.lean`); CONNECT-RULES |
-| **BIP68 sequence locks** (`bad-txns-nonfinal`, `SequenceLocks`) | **not enforced.** Specified and fuzzed; CONNECT-RULES |
+| BIP68 sequence locks, height-based (`bad-txns-nonfinal`, `SequenceLocks`) | enforced by the AIRs since CONNECT-RULES step 2 (`Block.in_lock`, `epoch_systems_coreL`); **not** by the proofs of 935,001–972,500, made with the earlier AIRs. In Lean the CSV bit is a hypothesis of `epoch_systems_coreL` (below) |
+| **BIP68 sequence locks, time-based** | **not enforced.** Specified and fuzzed; CONNECT-RULES step 4 |
 | Inputs exist and are unspent (`bad-txns-inputs-missingorspent`) | enforced over an epoch ([utxo.md](../design/utxo.md) rules 1, 2) |
 | Coinbase maturity (`bad-txns-premature-spend-of-coinbase`) | enforced (rule 3) |
 | Inputs ≥ outputs, accumulated fees in range (`bad-txns-in-belowout`, `bad-txns-accumulated-fee-outofrange`) | enforced (rule 4) |
-| Input values in range (`bad-txns-inputvalues-outofrange`) | UNVERIFIED: not audited rule by rule; to check in CONNECT-RULES step 2 |
+| Input values in range (`bad-txns-inputvalues-outofrange`) | enforced: a transaction's claimed inputs sum to at most `MAX_MONEY` (`tx_claims_ok`, `Spec.Coins.connectTx`), and each is a created output's value, in `[0, MAX_MONEY]` (`created_real`). Read in the code 2026-11-19 |
 | Coinbase ≤ subsidy + fees (`bad-cb-amount`) | enforced (rule 4) |
 | BIP30 (`bad-txns-BIP30`) | the two historical overwrites are modelled (rule 6); heights from 935,001 are past BIP34 |
 | **Scripts and signatures** (`CheckInputScripts`) | **not enforced** (Core skips them too under assumevalid) |
+
+**The CSV bit in Lean.** `epoch_systems_coreL` and the finality rule (`final_ok`) take `pub 5 =
+[419,328 ≤ height]` as a hypothesis. The block leaf circuit pins it from the height (`ctx_sound`), but
+the leaf's guarantee carried by the recursion (`LeafOut`, `BlockAt`) does not name it, so the composed
+statement does not discharge it. Not a gap in the circuits; a gap in what Lean composes.
 
 Also outside the proof: everything before the starting coin set (Core's snapshot after 935,000), except
 the headers, which are proven from genesis.

@@ -13,6 +13,8 @@ For every block, given its proof (M3a: `block_sound`, `commit_sound`, `hash_pub`
 2. **Undo records are those coins:** record `j` of the block's undo stream (D-038) is the spent coin's
    height, coinbase flag, amount and script (D-029).
 3. **Coinbase maturity:** a coinbase coin is spent at least 100 blocks after its creation.
+   Added 2026-11-19 (CONNECT-RULES step 2, [connect-rules.md](connect-rules.md)): **height-based relative
+   locks** (BIP68): an input whose height lock is enforced spends a coin at least `lock` blocks old.
 4. **Amounts:** a transaction's inputs sum to at least its outputs (the fee), and the block's
    coinbase claims at most the subsidy plus fees. Inputs' amounts come from the undo records.
 5. **Unspendable outputs never enter the set:** `OP_RETURN` scripts and scripts over 10,000 bytes
@@ -287,6 +289,12 @@ Layers (Lean):
      initial view succeeds and ends at exactly the final set; and no transaction spends an outpoint
      twice (`run_ins_nodup`), so each block passes Core's `CheckBlock` and `ContextualCheckBlock`
      (`epoch_block_valid`, with `block_sound`): D-031 closed.
+   - **`epoch_systems_coreL`** (2026-11-19, CONNECT-RULES step 2): the same with Core's connect checking
+     the height-based relative locks (`Spec.Coins.connectTxsL`), given that each block's `pub 5` is its
+     height's CSV bit. From `in_lock`, `tx_locks_ok`, `block_factsL` (`Block/CoinClaims.lean`),
+     `Block/FieldsLock.lean`, `epoch_core_run`, `epoch_coreL`, `epoch_blocksL`. `connectTxsL_connectTxs`:
+     it implies the plain connect. The recursion does not hand the CSV bit to it yet
+     ([connect-rules.md](connect-rules.md), step 2, "Open in Lean").
    Remaining hypotheses of `epoch_systems_core`: positions `N` (each height's first transaction's global
    index), an initial set of real coins created before the epoch, events well formed (`WFE`, their
    bytes in the separated set), distinct created outpoints (txid uniqueness, an assumption), and fewer

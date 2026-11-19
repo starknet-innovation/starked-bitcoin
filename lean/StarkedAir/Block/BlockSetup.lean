@@ -113,6 +113,20 @@ theorem hby_R (S : Setup inst pub (Ls 1)) : ∀ r < 2 ^ Ls 1, ∀ j < 8,
     exact natCast_inj_of_lt (Fields.lt_P (by omega)) (Fields.lt_P (by omega)) e
   rw [hpv, hb]; exact read_R hL hsat hL24 hr0
 
+/-- **The version bytes**, in terms of the block's bytes (BIP68). -/
+theorem hvb_R : ∀ r < 2 ^ Ls 1, (inst 1).main Fields.K_TXH r = 1 → ∀ j < 4,
+    ((inst 1).main Fields.START r).val + j < (Rb inst pub).length ∧
+    ((inst 1).main (Fields.VBY j) r).val = ((Rb inst pub).getD (((inst 1).main Fields.START r).val + j) 0).toNat := by
+  intro r hr ht j hj
+  have fs := hash_fields_sat' hL hsat
+  obtain ⟨r0, hr0, hp, hb⟩ := fields_ver_read hL hsat hL24 hr hj ht
+  have hst := Fields.start_lt fs hr
+  have hpv : ((inst 1).main Fields.START r).val + j = r0 := by
+    have e : ((((inst 1).main Fields.START r).val + j : ℕ) : F) = (r0 : F) := by
+      push_cast; rw [ZMod.natCast_zmod_val]; exact hp
+    exact natCast_inj_of_lt (Fields.lt_P (by omega)) (lt_trans hr0 (ZMod.val_lt _)) e
+  rw [hpv, hb]; exact read_R hL hsat hL24 hr0
+
 /-- **The fields' auxiliary read**, in terms of the block's bytes. -/
 theorem hbq_R : ∀ r < 2 ^ Ls 1, (inst 1).main Fields.GIN r + (inst 1).main Fields.MMB r = 1 →
     ((inst 1).main Fields.AQ r).val < (Rb inst pub).length ∧

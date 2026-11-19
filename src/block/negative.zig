@@ -242,18 +242,18 @@ test "block negative: sigop counting matches Core's on edge-case scripts; too ma
 
 /// A segwit block at `height`: a BIP34 coinbase with the witness nonce and the commitment (unless
 /// `commit` is false), and a segwit spend.
-fn segwitBlock(a: std.mem.Allocator, height: u32, opts: struct { commit: bool = true, decoy: bool = false, nonce_len: usize = 32, tamper: bool = false }) ![]u8 {
+fn segwitBlock(a: std.mem.Allocator, height: u32, opts: struct { commit: bool = true, decoy: bool = false, nonce_len: usize = 32, tamper: bool = false, version: u32 = 2, seq: u32 = 0xffffffff, cb_version: u32 = 1, cb_seq: u32 = 0xffffffff }) ![]u8 {
     const nonce = [_]u8{0x42} ** 32;
     var cbs = std.ArrayList(u8).empty;
     try cbs.appendSlice(a, &.{ 0x03, @intCast(height & 0xff), @intCast((height >> 8) & 0xff), @intCast(height >> 16), 0xaa, 0xbb });
     const sig = [_]u8{0x30} ** 71;
     const pk = [_]u8{0x02} ** 33;
     const stack1 = [_][]const u8{ &sig, &pk };
-    const tx1 = Tx{ .version = 2, .ins = &.{.{ .script = &.{} }}, .outs = &.{.{ .value = 1000, .script = &([_]u8{ 0x00, 0x14 } ++ [_]u8{0x11} ** 20) }}, .wit = &.{&stack1} };
+    const tx1 = Tx{ .version = opts.version, .ins = &.{.{ .script = &.{}, .seq = opts.seq }}, .outs = &.{.{ .value = 1000, .script = &([_]u8{ 0x00, 0x14 } ++ [_]u8{0x11} ** 20) }}, .wit = &.{&stack1} };
     const nonce_item = try a.alloc(u8, opts.nonce_len);
     @memset(nonce_item, 0x42);
     const cb_stack = [_][]const u8{nonce_item};
-    var cb = Tx{ .version = 1, .ins = &.{.{ .hash = [_]u8{0} ** 32, .n = 0xffffffff, .script = cbs.items }}, .outs = &.{.{}}, .wit = &.{&cb_stack} };
+    var cb = Tx{ .version = opts.cb_version, .ins = &.{.{ .hash = [_]u8{0} ** 32, .n = 0xffffffff, .script = cbs.items, .seq = opts.cb_seq }}, .outs = &.{.{}}, .wit = &.{&cb_stack} };
     var txs = [_]Tx{ cb, tx1 };
     const cscript = try commitmentScript(a, &txs, nonce);
     var outs = std.ArrayList(Out).empty;
@@ -313,4 +313,103 @@ test "block negative: a CSV-era block proves and verifies with its ancestry; a w
     var c = ctx;
     c.prev_mtp += 1;
     try std.testing.expectEqual(Verdict.rejected, try judge(a, raw, c));
+}
+
+test "block negative: BIP68 height-based relative locks (CONNECT-RULES step 2)" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const ctx = checks.Ctx{ .height = 500000, .prev_mtp = 1231715347, .anc = checks.ancOf("170") };
+    // The synthetic undo's coins are from height 499,999: a lock of 1 block is met, 2 is not.
+    const Case = struct { name: []const u8, version: u32 = 2, seq: u32, want: Verdict };
+    const cases = [_]Case{
+        .{ .name = "lock 0", .seq = 0, .want = .accepted },
+        .{ .name = "lock 1", .seq = 1, .want = .accepted },
+        .{ .name = "lock 2", .seq = 2, .want = .rejected },
+        .{ .name = "lock 65535", .seq = 0xffff, .want = .rejected },
+        .{ .name = "lock 1, the unused bits 16-21 and 23-30 set", .seq = 0x7fbf0001, .want = .accepted },
+        .{ .name = "lock 2, the unused bits 16-21 and 23-30 set", .seq = 0x7fbf0002, .want = .rejected },
+        .{ .name = "lock 2, disabled (bit 31)", .seq = 0x80000002, .want = .accepted },
+        .{ .name = "lock 2, version 1", .version = 1, .seq = 2, .want = .accepted },
+        .{ .name = "lock 2, version 0", .version = 0, .seq = 2, .want = .accepted },
+        .{ .name = "lock 2, version 256", .version = 256, .seq = 2, .want = .rejected },
+        .{ .name = "lock 2, version 0xffffffff (unsigned)", .version = 0xffffffff, .seq = 2, .want = .rejected },
+        // Time-based locks are not enforced before step 4 (docs/design/connect-rules.md).
+        .{ .name = "time lock 2 (bit 22)", .seq = 0x00400002, .want = .accepted },
+    };
+    for (cases) |c| {
+        std.debug.print("BIP68: {s}\n", .{c.name});
+        try std.testing.expectEqual(c.want, try judge(a, try segwitBlock(a, 500000, .{ .version = c.version, .seq = c.seq }), ctx));
+    }
+    // The coinbase's input is not checked (Core calls SequenceLocks for non-coinbase transactions only).
+    std.debug.print("BIP68: coinbase of version 2 with sequence 2\n", .{});
+    try std.testing.expectEqual(Verdict.accepted, try judge(a, try segwitBlock(a, 500000, .{ .cb_version = 2, .cb_seq = 2 }), ctx));
+    // Before CSV activation nothing is enforced.
+    std.debug.print("BIP68: lock 2 at height 1000 (before CSV)\n", .{});
+    const pre = try legacy(a, .{ .version = 2, .ins = &.{.{ .seq = 2 }}, .outs = &.{.{}} });
+    try std.testing.expectEqual(Verdict.accepted, try judge(a, pre, pre_ctx));
+}
+
+test "block negative: BIP68: a forged lock bit is caught by the fields' constraint; a cleared one unbalances the input tuple" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const airs = try bsys.parseAirs(a);
+    const one = M31.one();
+    const FIELDS = 1;
+    const TABLES = 5;
+    const COIN = 14;
+    const C_KI = 1;
+    const C_LKH = 165;
+    const C_LB0 = 167;
+    const F_KIN = 2;
+    // A lock of 1 block on a coin from the block before: met.
+    {
+        var ctx = checks.Ctx{ .height = 500000, .prev_mtp = 1231715347, .anc = checks.ancOf("170") };
+        ctx.force = false;
+        const b = try bsys.build(a, try segwitBlock(a, 500000, .{ .seq = 1 }), ctx);
+        try std.testing.expect(try bsys.firstViolation(a, &airs, &b) == null);
+        try std.testing.expect(try bsys.unbalanced(a, &airs, &b) == null);
+        const cm = b.mains[COIN];
+        const r = for (0..cm[C_KI].len) |q| {
+            if (cm[C_KI][q].eql(one)) break q;
+        } else unreachable;
+        try std.testing.expect(cm[C_LKH][r].eql(one));
+        // The coin row drops its lock bit: its constraints hold, but its input tuple is no longer the fields'.
+        cm[C_LKH][r] = M31.zero();
+        try std.testing.expect(try bsys.unbalanced(a, &airs, &b) != null);
+    }
+    // A lock of 2 blocks: not met. The forger clears the bit on both sides and withdraws the range uses.
+    {
+        const ctx = checks.Ctx{ .height = 500000, .prev_mtp = 1231715347, .anc = checks.ancOf("170"), .force = true };
+        const b = try bsys.build(a, try segwitBlock(a, 500000, .{ .seq = 2 }), ctx);
+        const v0 = (try bsys.firstViolation(a, &airs, &b)).?;
+        try std.testing.expectEqual(@as(usize, COIN), v0.comp);
+        const cm = b.mains[COIN];
+        const fm = b.mains[FIELDS];
+        const rg = b.mains[TABLES][0];
+        const r = for (0..cm[C_KI].len) |q| {
+            if (cm[C_KI][q].eql(one)) break q;
+        } else unreachable;
+        // The transaction's input row in the fields: the second input row (the first is the coinbase's).
+        var seen: usize = 0;
+        const fr = for (0..fm[F_KIN].len) |q| {
+            if (fm[F_KIN][q].eql(one)) {
+                seen += 1;
+                if (seen == 2) break q;
+            }
+        } else unreachable;
+        try std.testing.expect(fm[checks.LKH][fr].eql(one));
+        cm[C_LKH][r] = M31.zero();
+        for (0..3) |i| {
+            const v = cm[C_LB0 + i][r].toU32();
+            rg[v] = rg[v].sub(one);
+            cm[C_LB0 + i][r] = M31.zero();
+        }
+        fm[checks.LKH][fr] = M31.zero();
+        // Every lookup balances; only the fields' definition of the bit stands in the way.
+        try std.testing.expect(try bsys.unbalanced(a, &airs, &b) == null);
+        const v1 = (try bsys.firstViolation(a, &airs, &b)).?;
+        try std.testing.expectEqual(@as(usize, FIELDS), v1.comp);
+    }
 }

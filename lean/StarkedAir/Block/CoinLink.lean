@@ -198,15 +198,18 @@ theorem outt_sites {r : ℕ} :
 theorem int_sites {r : ℕ} :
     (r < 2 ^ Ls 1 → siteMult hashSys inst pub (1, r, 35) = (inst 1).main Fields.K_IN r) ∧
     (r < 2 ^ Ls 14 → siteMult hashSys inst pub (14, r, 1) = -((inst 14).main Coin.KI r + (inst 14).main Coin.CBI r)) ∧
-    (r < 2 ^ Ls 1 → siteVals hashSys inst pub (1, r, 35) = [(inst 1).main Fields.TXI r, (inst 1).main Fields.START r]) ∧
-    (r < 2 ^ Ls 14 → siteVals hashSys inst pub (14, r, 1) = [(inst 14).main Coin.TXI r, (inst 14).main Coin.START r]) := by
+    (r < 2 ^ Ls 1 → siteVals hashSys inst pub (1, r, 35) = [(inst 1).main Fields.TXI r, (inst 1).main Fields.START r,
+      Fields.lo16.eval (2 ^ Ls 1) Fields.preCols pub (inst 1).main r, (inst 1).main Fields.LKH r, (inst 1).main Fields.LKT r]) ∧
+    (r < 2 ^ Ls 14 → siteVals hashSys inst pub (14, r, 1) = [(inst 14).main Coin.TXI r, (inst 14).main Coin.START r,
+      (inst 14).main Coin.SQL r, (inst 14).main Coin.LKH r, (inst 14).main Coin.LKT r]) := by
   refine ⟨fun hr => ?_, fun hr => ?_, fun hr => ?_, fun hr => ?_⟩
   · simp only [siteMult, siteEval, siteLookup, hashSys, hL 1 (by decide)]
     simp [Fields.fields, Fields.lookups, Fields.chkLookups, Expr.eval, Fields.k, StarkedAir.Sha256.eval_col, wrap_zero hr]
   · simp only [siteMult, siteEval, siteLookup, hashSys, hL 14 (by decide)]
     simp [Coin.coin, Coin.lookups, Expr.eval, Coin.k, StarkedAir.Sha256.eval_col, wrap_zero hr]
   · simp [siteVals, siteEval, siteLookup, hashSys, hL 1 (by decide), Fields.fields, Fields.lookups,
-      Fields.chkLookups, Fields.k, StarkedAir.Sha256.eval_col, wrap_zero hr]
+      Fields.chkLookups, Fields.k, Fields.lo16, Fields.le2, Fields.by4, Fields.c, Expr.eval,
+      StarkedAir.Sha256.eval_col, StarkedAir.Sha256.eval_cst, wrap_zero hr]
   · simp [siteVals, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups, Coin.k,
       StarkedAir.Sha256.eval_col, wrap_zero hr]
 
@@ -228,12 +231,21 @@ theorem outt_sum (g : List F → ℕ) :
     (fun r hr => Coin.bool_col (coin_sat hL hsat hL24) (by simp) hr)
     _ _ (fun r hr => (outt_sites hL hsat hL24).2.2.1 hr) (fun r hr => (outt_sites hL hsat hL24).2.2.2 hr) g
 
-/-- **Input tokens are the coin input rows** (non-coinbase and coinbase), as multisets of `(tx, start)`. -/
+/-- The fields' input tuple and the coin input tuple of a row: transaction, start, the sequence's low 16
+bits, and the enforced height and time lock bits (BIP68). -/
+noncomputable def fIn (inst : ℕ → Inst) (pub : ℕ → F) (L r : ℕ) : List F :=
+  [(inst 1).main Fields.TXI r, (inst 1).main Fields.START r,
+      Fields.lo16.eval (2 ^ L) Fields.preCols pub (inst 1).main r, (inst 1).main Fields.LKH r, (inst 1).main Fields.LKT r]
+def cIn (inst : ℕ → Inst) (r : ℕ) : List F :=
+  [(inst 14).main Coin.TXI r, (inst 14).main Coin.START r,
+      (inst 14).main Coin.SQL r, (inst 14).main Coin.LKH r, (inst 14).main Coin.LKT r]
+
+/-- **Input tokens are the coin input rows** (non-coinbase and coinbase), as multisets of tuples. -/
 theorem int_sum (g : List F → ℕ) :
     ∑ r ∈ (Finset.range (2 ^ Ls 1)).filter (fun r => (inst 1).main Fields.K_IN r = 1),
-      g [(inst 1).main Fields.TXI r, (inst 1).main Fields.START r] =
+      g (fIn inst pub (Ls 1) r) =
     ∑ r ∈ (Finset.range (2 ^ Ls 14)).filter (fun r => (inst 14).main Coin.KI r + (inst 14).main Coin.CBI r = 1),
-      g [(inst 14).main Coin.TXI r, (inst 14).main Coin.START r] :=
+      g (cIn inst r) :=
   pair_sum hL hsat hL24 int_only (by decide) (by decide) (by decide) (by decide) (by decide) (by decide)
     _ _ (fun r hr => (int_sites hL hsat hL24).1 hr) (fun r hr => (int_sites hL hsat hL24).2.1 hr)
     (fun r hr => Fields.kind_bool (fields_sat' hL hsat hL24) (by simp [Fields.kinds]) hr)
@@ -243,7 +255,7 @@ theorem int_sum (g : List F → ℕ) :
 
 /-- **A coin range check is a byte.** If the coin component's lookup `k` is `r8 (col c) mexp` and `mexp`
 is 1 at row `r`, column `c` holds a byte there. -/
-theorem coin_r8 {k c : ℕ} {mexp : Expr} (hk : k < 94) (hk4 : k ≠ 4)
+theorem coin_r8 {k c : ℕ} {mexp : Expr} (hk : k < 97) (hk4 : k ≠ 4)
     (hlk : Coin.lookups.getD k ⟨0, .const 0, []⟩ = Coin.r8 (Coin.k c) mexp) {r : ℕ} (hr : r < 2 ^ Ls 14)
     (hm : mexp.eval (2 ^ Ls 14) Coin.preCols pub (inst 14).main r = 1) : ((inst 14).main c r).val < 256 := by
   have hlen : k < (hashSys.comp 14).lookups.length := by
@@ -380,33 +392,33 @@ theorem out_match_r {ρ : ℕ} (hρ : ρ < 2 ^ Ls 1) (hk : (inst 1).main Fields.
 
 theorem in_match_l {j : ℕ} (hj : j < 2 ^ Ls 14) (hki : (inst 14).main Coin.KI j + (inst 14).main Coin.CBI j = 1) :
     ∃ ρ < 2 ^ Ls 1, (inst 1).main Fields.K_IN ρ = 1 ∧ (inst 1).main Fields.TXI ρ = (inst 14).main Coin.TXI j ∧
-      (inst 1).main Fields.START ρ = (inst 14).main Coin.START j := by
+      (inst 1).main Fields.START ρ = (inst 14).main Coin.START j ∧ fIn inst pub (Ls 1) ρ = cIn inst j := by
   classical
-  have h := int_sum hL hsat hL24 (fun v => if v = [(inst 14).main Coin.TXI j, (inst 14).main Coin.START j] then 1 else 0)
+  have h := int_sum hL hsat hL24 (fun v => if v = cIn inst j then 1 else 0)
   have hpos : 0 < ∑ r ∈ (Finset.range (2 ^ Ls 14)).filter (fun r => (inst 14).main Coin.KI r + (inst 14).main Coin.CBI r = 1),
-      (if [(inst 14).main Coin.TXI r, (inst 14).main Coin.START r] =
-        [(inst 14).main Coin.TXI j, (inst 14).main Coin.START j] then 1 else 0) :=
+      (if cIn inst r = cIn inst j then 1 else 0) :=
     ind_sum_pos.mpr ⟨j, Finset.mem_filter.mpr ⟨Finset.mem_range.mpr hj, hki⟩, rfl⟩
   rw [← h] at hpos
   obtain ⟨ρ, hρ, he⟩ := ind_sum_pos.mp hpos
   obtain ⟨hρr, hk⟩ := Finset.mem_filter.mp hρ
-  simp only [List.cons.injEq, and_true] at he
-  exact ⟨ρ, Finset.mem_range.mp hρr, hk, he.1, he.2⟩
+  have h0 := congrArg (fun l => l.getD 0 0) he
+  have h1 := congrArg (fun l => l.getD 1 0) he
+  exact ⟨ρ, Finset.mem_range.mp hρr, hk, by simpa [fIn, cIn] using h0, by simpa [fIn, cIn] using h1, he⟩
 
 theorem in_match_r {ρ : ℕ} (hρ : ρ < 2 ^ Ls 1) (hk : (inst 1).main Fields.K_IN ρ = 1) :
     ∃ j < 2 ^ Ls 14, (inst 14).main Coin.KI j + (inst 14).main Coin.CBI j = 1 ∧
       (inst 14).main Coin.TXI j = (inst 1).main Fields.TXI ρ ∧ (inst 14).main Coin.START j = (inst 1).main Fields.START ρ := by
   classical
-  have h := int_sum hL hsat hL24 (fun v => if v = [(inst 1).main Fields.TXI ρ, (inst 1).main Fields.START ρ] then 1 else 0)
+  have h := int_sum hL hsat hL24 (fun v => if v = fIn inst pub (Ls 1) ρ then 1 else 0)
   have hpos : 0 < ∑ r ∈ (Finset.range (2 ^ Ls 1)).filter (fun r => (inst 1).main Fields.K_IN r = 1),
-      (if [(inst 1).main Fields.TXI r, (inst 1).main Fields.START r] =
-        [(inst 1).main Fields.TXI ρ, (inst 1).main Fields.START ρ] then 1 else 0) :=
+      (if fIn inst pub (Ls 1) r = fIn inst pub (Ls 1) ρ then 1 else 0) :=
     ind_sum_pos.mpr ⟨ρ, Finset.mem_filter.mpr ⟨Finset.mem_range.mpr hρ, hk⟩, rfl⟩
   rw [h] at hpos
   obtain ⟨j, hj, he⟩ := ind_sum_pos.mp hpos
   obtain ⟨hjr, hki⟩ := Finset.mem_filter.mp hj
-  simp only [List.cons.injEq, and_true] at he
-  exact ⟨j, Finset.mem_range.mp hjr, hki, he.1, he.2⟩
+  have h0 := congrArg (fun l => l.getD 0 0) he
+  have h1 := congrArg (fun l => l.getD 1 0) he
+  exact ⟨j, Finset.mem_range.mp hjr, hki, by simpa [fIn, cIn] using h0, by simpa [fIn, cIn] using h1⟩
 
 /-! ### The alignment -/
 
@@ -431,9 +443,9 @@ theorem coin_on_tok (S : Setup inst pub (Ls 1)) {j : ℕ} (hj : j < 2 ^ Ls 14) (
     have hst : (inst 1).main Fields.START ρ = (inst 14).main Coin.START j := by
       have := congrArg (fun l => l.getD 1 0) he; simpa [fOut, cOut] using this
     exact ⟨ρ, mem_ioRows.mpr ⟨fields_io_lt_m hL hsat hL24 S hρ (Or.inl hk), Or.inl hk⟩, hst⟩
-  · obtain ⟨ρ, hρ, hk, -, hst⟩ := in_match_l hL hsat hL24 hj (by rw [h.2.1, h.2.2.1]; simp)
+  · obtain ⟨ρ, hρ, hk, -, hst, -⟩ := in_match_l hL hsat hL24 hj (by rw [h.2.1, h.2.2.1]; simp)
     exact ⟨ρ, mem_ioRows.mpr ⟨fields_io_lt_m hL hsat hL24 S hρ (Or.inr hk), Or.inr hk⟩, hst⟩
-  · obtain ⟨ρ, hρ, hk, -, hst⟩ := in_match_l hL hsat hL24 hj (by rw [h.2.1, h.2.2.1]; simp)
+  · obtain ⟨ρ, hρ, hk, -, hst, -⟩ := in_match_l hL hsat hL24 hj (by rw [h.2.1, h.2.2.1]; simp)
     exact ⟨ρ, mem_ioRows.mpr ⟨fields_io_lt_m hL hsat hL24 S hρ (Or.inr hk), Or.inr hk⟩, hst⟩
   · rw [h.2.2.2] at hon; exact absurd hon zero_ne_one
 
@@ -541,7 +553,7 @@ theorem io_start_inj (S : Setup inst pub (Ls 1)) {ρ ρ' : ℕ} (h1 : ρ ∈ ioR
 
 /-- **Each coin row is its token.** For coin row `j < e` and the `j`-th token row `ρ`: an output row is an
 output token with the same tuple; an input or coinbase-input row is an input token with the same
-transaction. -/
+transaction and the same tuple (its lock and lock bits, BIP68). -/
 theorem coin_row_tok (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
     (hon : ∀ j < 2 ^ Ls 14, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
     (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
@@ -550,7 +562,8 @@ theorem coin_row_tok (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
         cOut inst j = fOut inst pub (Ls 1) ((ioRows inst S.m).getD j 0)) ∧
       ((inst 14).main Coin.KI j + (inst 14).main Coin.CBI j = 1 →
         (inst 1).main Fields.K_IN ((ioRows inst S.m).getD j 0) = 1 ∧
-          (inst 14).main Coin.TXI j = (inst 1).main Fields.TXI ((ioRows inst S.m).getD j 0)) := by
+          (inst 14).main Coin.TXI j = (inst 1).main Fields.TXI ((ioRows inst S.m).getD j 0) ∧
+          cIn inst j = fIn inst pub (Ls 1) ((ioRows inst S.m).getD j 0)) := by
   set ρ := (ioRows inst S.m).getD j 0 with hρdef
   have hρ : ρ ∈ ioRows inst S.m := by
     rw [hρdef, List.getD_eq_getElem _ _ (by omega)]; exact List.getElem_mem _
@@ -565,11 +578,11 @@ theorem coin_row_tok (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
     have := io_start_inj hL hsat hL24 S hρ'io hρ hs'
     subst this
     exact ⟨hk, hT.symm⟩
-  · obtain ⟨ρ', hρ', hk, hT, hS⟩ := in_match_l hL hsat hL24 hj2 hki
+  · obtain ⟨ρ', hρ', hk, hT, hS, hE⟩ := in_match_l hL hsat hL24 hj2 hki
     have hρ'io : ρ' ∈ ioRows inst S.m := mem_ioRows.mpr ⟨fields_io_lt_m hL hsat hL24 S hρ' (Or.inr hk), Or.inr hk⟩
     have := io_start_inj hL hsat hL24 S hρ'io hρ (by rw [hS]; exact hst j hj)
     subst this
-    exact ⟨hk, hT.symm⟩
+    exact ⟨hk, hT.symm, hE.symm⟩
 
 /-! ### Txids -/
 
@@ -1151,9 +1164,9 @@ theorem coin_row_tx (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
       have := congrArg (fun l => l.getD 0 0) hT
       simp only [cOut, fOut] at this
       simpa [htxi'] using this
-    · obtain ⟨-, hT⟩ := hrt.2 (by rw [h.2.1, h.2.2.1]; simp)
+    · obtain ⟨-, hT, -⟩ := hrt.2 (by rw [h.2.1, h.2.2.1]; simp)
       rw [hT, htxi]
-    · obtain ⟨-, hT⟩ := hrt.2 (by rw [h.2.1, h.2.2.1]; simp)
+    · obtain ⟨-, hT, -⟩ := hrt.2 (by rw [h.2.1, h.2.2.1]; simp)
       rw [hT, htxi]
     · exact absurd ((hon j hj2).mpr hj) (by rw [h.2.2.2]; exact zero_ne_one)
   refine ⟨t, q, tx, htx, hcoinTXI, hidx, by rw [hlilo] at hq; simp at hq; omega, fun hko => ?_, fun hki => ?_⟩

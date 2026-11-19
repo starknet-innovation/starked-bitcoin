@@ -31,7 +31,7 @@ theorem r8_lt {i r k : ℕ} (hs : ((i, r, k) : Site) ∈ sites hashSys inst) (hu
   omega
 
 /-- The fields site of check lookup `j` (`chkLookups` index `j`). -/
-theorem fields_chk_site {r j : ℕ} (hr : r < 2 ^ Ls 1) (hj : j < 26) :
+theorem fields_chk_site {r j : ℕ} (hr : r < 2 ^ Ls 1) (hj : j < 32) :
     ((1, r, 8 + j) : Site) ∈ sites hashSys inst ∧
     siteLookup hashSys ((1, r, 8 + j) : Site) = Fields.chkLookups.getD j ⟨0, .const 0, []⟩ := by
   refine ⟨site_mem hL (by decide) hr (by simp [hashSys, Fields.fields, Fields.lookups, Fields.chkLookups]; omega), ?_⟩
@@ -67,6 +67,23 @@ theorem fields_by_read {r j : ℕ} (hr : r < 2 ^ Ls 1) (hj : j < 8)
   obtain ⟨r0, hr0, hp, hb⟩ := hash_read hL hsat hL24 hs (by decide) (by rw [siteRel, hl]; exact g.1)
     (by simp only [siteMult, hl, siteEval, hL 1 (by decide)]; exact hm) hv
   exact ⟨r0, hr0, hp, hb⟩
+
+/-- **A transaction head's version bytes read the block** at `START + j` (BIP68). -/
+theorem fields_ver_read {r j : ℕ} (hr : r < 2 ^ Ls 1) (hj : j < 4) (ht : (inst 1).main Fields.K_TXH r = 1) :
+    ∃ r0, r0 < (pub 0).val ∧ (inst 1).main Fields.START r + (j : F) = (r0 : F) ∧
+      (inst 1).main (Fields.VBY j) r = (inst 0).main BYTE r0 := by
+  obtain ⟨hs, hl⟩ := fields_chk_site hL hsat hL24 hr (j := 28 + j) (by omega)
+  have g : Fields.chkLookups.getD (28 + j) ⟨0, .const 0, []⟩ = ⟨REL_BYTE, .neg (Fields.k Fields.K_TXH),
+      [.add (Fields.k Fields.START) (Fields.c j), Fields.k (Fields.VBY j)]⟩ := by
+    interval_cases j <;> rfl
+  rw [g] at hl
+  have hv : siteVals hashSys inst pub (1, r, 8 + (28 + j)) = [(inst 1).main Fields.START r + (j : F),
+      (inst 1).main (Fields.VBY j) r] := by
+    simp [siteVals, hl, siteEval, hL 1 (by decide), Expr.eval, Fields.k, Fields.c,
+      StarkedAir.Sha256.eval_col, StarkedAir.Sha256.eval_cst, wrap_zero hr]
+  exact hash_read hL hsat hL24 hs (by decide) (by simp [siteRel, hl])
+    (by simp [siteMult, hl, siteEval, hL 1 (by decide), Expr.eval, Fields.k, StarkedAir.Sha256.eval_col,
+      wrap_zero hr, ht]) hv
 
 /-- **The auxiliary read** (prevout or commitment-pattern byte) reads the block at `AQ`. -/
 theorem fields_bq_read {r : ℕ} (hr : r < 2 ^ Ls 1) (hm : (inst 1).main Fields.GIN r + (inst 1).main Fields.MMB r = 1) :

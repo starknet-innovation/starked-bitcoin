@@ -12,6 +12,7 @@ Everything is executable. `tools/specfuzz/core_connect_cases.cpp` compares each 
 Core's own code. Design: `docs/design/connect-rules.md`.
 -/
 import StarkedAir.Spec.Block
+import StarkedAir.Spec.Coins
 
 namespace StarkedAir.Spec.ConnectRules
 
@@ -196,6 +197,40 @@ def lockCtxOfTimes (times : List ℕ) (height : ℕ) : LockCtx :=
 def SeqLocksOK (c : LockCtx) (txs : List (Tx × List ℕ)) : Prop :=
   ∀ p ∈ txs, p.1.isCoinbase = false → seqLocksOk (decide (CSV_HEIGHT ≤ c.height)) c p.1 p.2 = true
 
+/-! ### The height half, which the block AIR enforces (step 2), and the time half (step 4) -/
+
+/-- The time half of one input's rule under `enforce` (CSV active and version at least 2): an input with
+bit 31 clear and bit 22 set waits `512 · lock` seconds past the median time past of the block before the
+coin's. Not enforced by the block AIR yet. -/
+def timeLockOk (enforce : Bool) (c : LockCtx) (sequence coinHeight : ℕ) : Bool :=
+  !(enforce && decide (sequence / 2 ^ 31 % 2 = 0) && decide (sequence / 2 ^ 22 % 2 = 1)) ||
+    decide (c.mtpAt (coinHeight - 1) + 512 * (sequence % 2 ^ 16) ≤ c.prevMtp)
+
+/-- **One input's rule is its height half and its time half.** `Coins.heightLockOk` is what
+`Coins.connectTx` checks and the block proof enforces (`Block.in_lock`); `timeLockOk` is the rest. -/
+theorem inputLock_split (c : LockCtx) (version sequence coinHeight : ℕ) :
+    (!(decide (CSV_HEIGHT ≤ c.height) && decide (2 ≤ version)) || inputLockOk c sequence coinHeight) =
+      (Coins.heightLockOk c.height version sequence coinHeight &&
+        timeLockOk (decide (CSV_HEIGHT ≤ c.height) && decide (2 ≤ version)) c sequence coinHeight) := by
+  unfold inputLockOk Coins.heightLockOk timeLockOk
+  rw [Bool.eq_iff_iff]
+  by_cases hc : CSV_HEIGHT ≤ c.height <;> by_cases hv : 2 ≤ version <;>
+    by_cases h1 : sequence / 2 ^ 31 % 2 = 1 <;> by_cases h2 : sequence / 2 ^ 22 % 2 = 1 <;>
+    simp [hc, hv, h1, h2, -Nat.reducePow] <;> omega
+
+/-- **`SequenceLocks` is every input passing both halves.** -/
+theorem seqLocksOk_split (c : LockCtx) (t : Tx) (heights : List ℕ) :
+    seqLocksOk (decide (CSV_HEIGHT ≤ c.height)) c t heights =
+      (t.vin.zip heights).all fun p => Coins.heightLockOk c.height t.version p.1.sequence p.2 &&
+        timeLockOk (decide (CSV_HEIGHT ≤ c.height) && decide (2 ≤ t.version)) c p.1.sequence p.2 := by
+  have h : ∀ p : TxIn × ℕ, (Coins.heightLockOk c.height t.version p.1.sequence p.2 &&
+      timeLockOk (decide (CSV_HEIGHT ≤ c.height) && decide (2 ≤ t.version)) c p.1.sequence p.2) =
+      (!(decide (CSV_HEIGHT ≤ c.height) && decide (2 ≤ t.version)) || inputLockOk c p.1.sequence p.2) :=
+    fun p => (inputLock_split c t.version p.1.sequence p.2).symm
+  simp only [h]
+  unfold seqLocksOk
+  cases (decide (CSV_HEIGHT ≤ c.height) && decide (2 ≤ t.version)) <;> simp
+
 /-! ### Examples -/
 
 -- 2-of-3 multisig: accurate 3, legacy 20.
@@ -207,5 +242,9 @@ def SeqLocksOK (c : LockCtx) (txs : List (Tx × List ℕ)) : Prop :=
 #guard countWitnessSigOps [] (0x51 :: 0x20 :: List.replicate 32 1) [[0xac]] = 0
 -- A height lock of 10 on a coin from height 100 opens at height 110.
 #guard inputLockOk ⟨109, 0, fun _ => 0⟩ 10 100 = false ∧ inputLockOk ⟨110, 0, fun _ => 0⟩ 10 100 = true
+-- The height half alone, as `Coins.connectTx` checks it: enforced from the CSV height, for version ≥ 2.
+#guard Coins.heightLockOk 500000 2 2 499999 = false ∧ Coins.heightLockOk 500000 2 1 499999 = true ∧
+  Coins.heightLockOk 500000 1 2 499999 = true ∧ Coins.heightLockOk 419327 2 2 419326 = true ∧
+  Coins.heightLockOk 500000 2 0x80000002 499999 = true ∧ Coins.heightLockOk 500000 2 0x00400002 499999 = true
 
 end StarkedAir.Spec.ConnectRules

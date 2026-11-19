@@ -21,6 +21,36 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-11-19 · session 41 · CONNECT-RULES step 2: height-based BIP68 enforced by the AIRs and proven; on branch `connect-rules`
+
+Who: Claude (agent, Fable 5.2); owner: "Push the two commits. go ahead with step 2"
+Roadmap: CONNECT-RULES in progress (step 1 of 5) → in progress (steps 1 and 2 of 5)
+Done:
+- `main` pushed to b319bfb (sessions 39 and 40's two commits).
+- Branch `connect-rules` (local, not pushed): this session's commit.
+- AIRs (Lean, exported to `airs/block_fields.json`, `airs/block_coin.json`): `Fields.lockC` (version bit, sequence bits 22 and 31, `LKH`/`LKT`), the input relation widened to `(tx, start, lock, LKH, LKT)`, `Coin.lockC` (`height − coin height − lock` as three bytes when `LKH`). `block_fields` 190 → 203 columns, 36 → 40 lookups; `block_coin` 164 → 170, 94 → 97; 216 → 223 lookup sites per row.
+- Witness: `src/block/checks.zig`, `src/block/coin.zig` (`RelativeLockNotMet`; `CoinInput.force` for tests). `SITES` in `src/block/system.zig` follows Lean's `hashRows`.
+- Lean, beside the existing statements (D-056): `Spec.Coins.heightLockOk`, `connectTxL`, `connectTxsL`, `ClaimsLockOK`, `connectL_of_run`, `connectTxsL_connectTxs`; `Spec.ConnectRules.seqLocksOk_split`; `Block/FieldsLock.lean` (new); `Block.in_lock`, `tx_locks_ok`, `block_factsL`; `epoch_core_run`, `epoch_coreL`, `epoch_blocksL`, `epoch_systems_coreL`.
+- `Compat.lean`: six pins re-pinned for the changed AIRs, with what changed (D-056, to confirm by the owner).
+- Golden hashes updated (`golden_small`, `golden_vk_0_170`); the m3a5 values kept beside them.
+- Audit: `bad-txns-inputvalues-outofrange` is enforced (`verification.md`).
+Evidence:
+- `zig build test -Doptimize=ReleaseFast -Dtest-filter="BIP68"`: 3/3 pass. Synthetic blocks at height 500,000 with coins from 499,999: locks 0 and 1 accepted; 2, 65,535 and 2 with the unused bits set rejected by `block_coin` constraint 114; bit 31, version 0 and 1, a time lock, the coinbase, and height 1,000 accepted; versions 256 and 0xffffffff rejected. A cleared lock bit on the coin row: lookups unbalanced. The bit cleared on both sides with the range uses withdrawn: lookups balance, `block_fields` rejects.
+- Real blocks with their undo data (first full run, before the golden update): 481,824 (no lock), 709,632 (20 enforced height locks, 2 nonzero) and 970,347 (104, 15 nonzero; 1 time lock, not enforced): "constraints hold, lookups balance".
+- Full suite, first run: 144 of 149 passed, 2 skipped, 3 failed: the two golden hashes (expected: the AIRs changed) and `SITES` (36 for `block_fields`, found 40: a real mismatch with Lean, fixed).
+- Full suite after the fixes: `zig build test -Doptimize=ReleaseFast --summary all`: "147/149 tests passed; 2 skipped" (36 min).
+- `lake build`: "Build completed successfully (8930 jobs)"; `grep -rnE "\bsorry\b|native_decide|bv_decide" lean/StarkedAir`: no match.
+- `#print axioms` of `in_lock`, `tx_locks_ok`, `block_factsL`, `epoch_coreL`, `epoch_systems_coreL`, `epoch_systems_core`, `block_facts`, `connectL_of_run`, `Fields.lkh_of`, `Fields.row_in_tx`: propext, Classical.choice, Quot.sound (`connectTxsL_connectTxs`, `seqLocksOk_split`, `txT_version`: propext, Quot.sound).
+- `scripts/check_air_drift.sh`: 92 of 92 "ok".
+- `chainproof verify-seal … data/seal972/outT …` with the binary built on the branch: "VERIFIED blocks 935001..972500 as one sealed proof" (the seal is checked against its pinned VK; block VKs are not remade).
+Problems / lessons:
+- The first Lean version changed `connectTx` and `ClaimsOK` in place. That made `epoch_systems_core` need the CSV bit, which `forest_epoch` does not provide, and broke the `Compat.lean` gate's rule. Redone additively (D-056).
+- The CSV bit is a hypothesis of `epoch_systems_coreL`: the recursion's `LeafOut`/`BlockAt` carry the BIP30 flag but not that bit, though the leaf circuit pins it (`ctx_sound`). Written in `verification.md` and `connect-rules.md`.
+- `zig build test` without `-Doptimize=ReleaseFast` ran 40 minutes without finishing; killed. Use the command of `status.md`.
+- `simp` rewrites `2 ^ 22` to a literal before trying hypotheses stated with `2 ^ 22`; pass `-Nat.reducePow`.
+- The block VKs change with this step, so the work is on a branch: `main` keeps the AIRs of the published proofs.
+Next: CONNECT-RULES step 3 (sigop cost), starting with the survey of the rows `block_walk` gains ([status.md](status.md)).
+
 ## 2026-11-19 · session 40 · CONNECT-RULES step 1: both rules specified, fuzzed against Core, checked on 37,500 blocks; TIERS-2 simulated; SNAP-HASH proposal
 
 Who: Claude (agent, Fable 5.2); owner: "1. I accept. 2. Yes let's try." (D-054, D-055)

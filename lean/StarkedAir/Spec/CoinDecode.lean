@@ -134,4 +134,17 @@ theorem epoch_connect (N : ℕ → ℕ) (blocks : List BlockC) (g0 : ℕ) (init 
   rw [allTxs_map N blocks hlost hval] at h
   exact Coins.connect_of_run _ g0 _ _ h hok
 
+/-- **The epoch connects as Core does, with the relative locks** (`epoch_connect` for `connectTxsL`),
+given each transaction's lock check (`ClaimsLockOK`) too. -/
+theorem epoch_connectL (N : ℕ → ℕ) (blocks : List BlockC) (g0 : ℕ) (init : List CEv) {m : View OutPoint Val}
+    (hlost : ∀ B ∈ blocks, B.lost = Coins.bip30Lost B.h)
+    (hval : ∀ B ∈ blocks, ∀ tx ∈ B.txs, ∀ o ∈ tx.vout, 0 ≤ o.value ∧ o.value < 2 ^ 64)
+    (hrun : run g0 (viewOf init) (allTxs N blocks) = some m) (hok : ∀ x ∈ allTxC N blocks, Coins.ClaimsOK x)
+    (hokL : ∀ x ∈ allTxC N blocks, Coins.ClaimsLockOK x) :
+    Coins.connectTxsL (Coins.untag (vmap coinOfVal (viewOf init))) (allTxC N blocks) =
+      some (Coins.untag (vmap coinOfVal m), (allTxC N blocks).map Coins.claimFee) := by
+  have h := run_map coinOfVal g0 _ _ _ hrun
+  rw [allTxs_map N blocks hlost hval] at h
+  exact Coins.connectL_of_run _ g0 _ _ h hok hokL
+
 end StarkedAir.Spec.CoinEpoch

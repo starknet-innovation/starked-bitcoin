@@ -61,6 +61,10 @@ theorem bool_col {c r : ℕ} (hc : c ∈ [KO, KI, CBI, CBC, ORD, U6A, BIG, ZS]) 
   · exact Or.inl h
   · exact Or.inr (sub_eq_zero.mp h)
 
+omit hsat in
+theorem mem_lock {c : Expr} (h : c ∈ lockC) : c ∈ constraints := by simp [constraints, h]
+
+
 /-- `on = KO + KI + CBI`. -/
 def onV (M : ℕ → ℕ → F) (r : ℕ) : F := M KO r + M KI r + M CBI r
 
@@ -785,6 +789,15 @@ theorem coinbase_nat {r : ℕ} (hr : r + 1 < n) (hon : onV M r = 1) (hoff : onV 
     apply lift _ (by omega) (by omega)
     simp only [Nat.cast_add, cast_val, ← b4V_eq, e2]; ring
   nlinarith [k1, k2]
+
+/-- **A height lock's row** (BIP68). On an input row whose height lock is enforced, `height − HC − SQL`
+is the three bytes `LB`. -/
+theorem lock_row {r : ℕ} (hr : r < n) (hki : M KI r = 1) (hl : M LKH r = 1) :
+    b3V M LB r = pub 2 - M HC r - M SQL r := by
+  have h := sat hsat (mem_lock (c := .mul (k KI) (.mul (k LKH) (.sub (.sub (.sub height (k HC)) (k SQL)) (b3 LB))))
+    (by simp [lockC])) hr
+  simp only [height, Expr.eval, ev_k hr, ev_b3 hr, hki, hl, one_mul] at h
+  linear_combination -h
 
 /-! ### The running sum -/
 

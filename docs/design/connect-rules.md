@@ -4,7 +4,10 @@ Status: current · Updated: 2026-11-19 · Owner files: `lean/StarkedAir/Spec/Con
 
 Answers: which `ConnectBlock` rules outside scripts the block proof does not enforce, what Core
 checks exactly, how to add them, and how far that is. The design is accepted (D-054). The rules are
-specified and checked natively (step 1 of 5, below); no AIR enforces them yet. Roadmap item CONNECT-RULES.
+specified and checked natively (step 1 of 5); the height-based half of BIP68 is enforced by the block
+AIRs and proven in Lean (step 2). The time-based half and the sigop cost are not enforced yet. No proof
+has been made with the new AIRs: the proofs of 935,001–972,500 use the AIRs before step 2. Roadmap item
+CONNECT-RULES.
 
 ## The gap
 
@@ -14,7 +17,8 @@ validation, and that Core enforces even under assumevalid:
 
 | Rule | Core (`consensus/tx_verify.cpp`, `validation.cpp ConnectBlock`) | 2026-11-19 |
 |---|---|---|
-| BIP68 | `SequenceLocks`: reject `bad-txns-nonfinal` | not checked |
+| BIP68, height-based locks | `SequenceLocks`: reject `bad-txns-nonfinal` | enforced by the AIRs of step 2 (no proof made with them yet) |
+| BIP68, time-based locks | same | not checked |
 | Sigop cost | `GetTransactionSigOpCost` summed ≤ 80,000: `bad-blk-sigops` | legacy sigops only (`Spec/BlockFlat.lean:149`) |
 
 Until both are proven the guarantee is weaker than assumevalid (said on the site and on Delving t/3070).
@@ -34,18 +38,23 @@ passing. `MTP(k)` is the median of the times of blocks `k − 10 … k` (fewer n
 Frequency in 935,001–972,500 ([report](../reports/2026-11-19-block-cost-split.md)): height locks on
 0.65 % of inputs, time locks on 6,988 inputs in 37,500 blocks.
 
-### Height-based: in `block_coin`
+### Height-based: decoded in `block_fields`, compared in `block_coin` (built, step 2)
 
 An input row of `block_coin` already holds the spent coin's code (`2·c + coinbase`, from undo record
-`J`) and checks coinbase maturity against `h` (public 2) with a range check. Add:
+`J`) and checks coinbase maturity against `h` (public 2) with a range check. As built:
 
-- the input's sequence (4 bytes) and its transaction's `version ≥ 2` bit, carried by the `in(tx,
-  start)` relation that `block_fields` yields (it reads both already, for finality);
-- bits 31 and 22 and the 16-bit lock decomposed and range-checked;
-- when active and bit 22 is clear: `h − c − lock` is a 24-bit value.
+- **`block_fields`** (`Fields.lockC`, 13 columns, 15 constraints, 4 byte reads): a transaction head
+  reads its 4 version bytes; `V2 = [version ≥ 2]` is carried down the transaction's rows. An input row
+  splits bytes 2 and 3 of its sequence into bit 22 (`T22`), bit 23 and bit 31 (`D31`), the remainders in
+  range slots that were free on input rows. `LKH = pub5 · V2 · (1 − D31) · (1 − T22)` says a height
+  lock is enforced; `LKT` (the same with `T22`) is the time lock, for step 4.
+- **The input relation** `in` grows from `(tx, start)` to `(tx, start, lock, LKH, LKT)`, with `lock` the
+  sequence's low 16 bits.
+- **`block_coin`** (`Coin.lockC`, 6 columns, 2 constraints, 3 range lookups): on a non-coinbase input
+  with `LKH = 1`, `h − c − lock` is three range-checked bytes. The coinbase's input is not checked.
 
-Cost: a few columns on rows that exist (the component is 0.4 % of the cells). Lean: `Spec.Coins`
-gains the rule; `in_maturity`'s proof is the pattern.
+Sizes: `block_fields` 190 → 203 main columns and 36 → 40 lookups; `block_coin` 164 → 170 and 94 → 97;
+the block system's lookup sites per row 216 → 223 (the bound for 2^23 rows is 255). Lean: next section.
 
 ### Time-based: a claim per input, resolved by one small proof per epoch
 
@@ -163,10 +172,53 @@ python3 pack.py | STARKED_SURVEY_RULES=1 ./survey > rules.csv      # on the node
 python3 check_time_locks.py                                         # scripts/, on the node: time locks against bitcoin-cli
 ```
 
+## Step 2 (done 2026-11-19): height-based BIP68 in the AIRs, proven
+
+- **Spec** (`Spec/Coins.lean`): `heightLockOk h version sequence coinHeight`, and `connectTxL`, Core's
+  connect of a transaction (`connectTx`) with that check on each input against the coin it finds.
+  `connectTxsL_connectTxs`: the stricter connect implies the plain one. `Spec/ConnectRules.lean`,
+  `seqLocksOk_split`: Core's `SequenceLocks` is every input passing `heightLockOk` and `timeLockOk`, so
+  what is left is exactly the time half.
+- **Soundness** (Lean, standard axioms):
+  - `Block.in_lock` (`Block/CoinClaims.lean`): for a non-coinbase input of a satisfied block system
+    whose `pub 5` is the CSV bit, `heightLockOk` holds against the claimed coin's height. It rests on
+    `Block/FieldsLock.lean` (`v2_head`, `seq_bits`, `lkh_of`, `row_in_tx`) and `Coin.lock_row`.
+  - `Block.epoch_systems_coreL` (`Block/CoinEpochCore.lean`): a balanced epoch connects as
+    `connectTxsL`, so each height lock is checked against the coin actually spent.
+  - The earlier theorems (`tx_claims_ok`, `block_facts`, `epoch_systems_core`, and all 100 statements
+    of the `Compat.lean` gate) keep their statements; the lock arrives in theorems with an `L` suffix
+    beside them (D-056). Six pins of the gate are re-pinned: the AIR definitions themselves changed.
+- **Open in Lean:** `epoch_systems_coreL` takes `pub 5 = [CSV_HEIGHT ≤ height]` per block as a
+  hypothesis. The block leaf circuit pins that bit from the height (`Circuit.BlockCtx.ctx_sound`), but
+  the leaf's guarantee carried through the recursion (`LeafOut`, `BlockAt`) names the BIP30 flag only,
+  not the CSV bit, so `forest_epoch` does not hand it to the epoch theorem. The finality rule's cutoff
+  has the same dependency (`final_ok`). To close: add the bit to `LeafOut` and `BlockAt`.
+- **Tests** (`src/block/negative.zig`, synthetic blocks at height 500,000, coins from 499,999):
+
+| Case | Verdict |
+|---|---|
+| lock 0; lock 1 | accepted |
+| lock 2; lock 65,535; lock 2 with the unused bits 16–21 and 23–30 set | rejected (`block_coin` constraint 114) |
+| lock 2 with bit 31 set; version 1; version 0 | accepted |
+| lock 2, version 256; version 0xffffffff | rejected |
+| time lock 2 (bit 22) | accepted: not enforced before step 4 |
+| coinbase of version 2 with sequence 2; lock 2 at height 1,000 (before CSV) | accepted |
+
+  Forgeries: a coin row that clears its lock bit leaves the input relation unbalanced; clearing the
+  bit on both sides and withdrawing the range uses balances every lookup and is rejected by the
+  fields' definition of the bit alone.
+- **Not done here:** the GPU prover has no kernel for `block_fields` or `block_coin` (their witness is
+  built on the CPU), so step 5 has nothing to add for this step beyond new VKs and a parity run.
+
+```sh
+zig build test -Doptimize=ReleaseFast -Dtest-filter="BIP68"     # ~20 s
+(cd lean && lake build StarkedAir.Block.CoinEpochCore)
+```
+
 ## Order of work
 
 1. **Spec first, no proving cost.** Done, above.
-2. Height-based BIP68 in `block_coin` (AIR, witness, Lean, negative tests).
+2. Height-based BIP68 (AIR, witness, Lean, negative tests). Done, above.
 3. Sigop cost (walker mode, classification, Lean, negative tests).
 4. Time-based BIP68 (the committed claim, the resolver, the balance; the epoch root and seal take one
    more child).

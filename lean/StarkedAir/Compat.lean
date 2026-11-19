@@ -1968,6 +1968,38 @@ theorem compat_Circuit_BlockRec_leafOut_vec : ∀ {ρ : ℕ → StarkedAir.Circu
               (StarkedAir.Circuit.BlockTree.leafVec p) :=
   @StarkedAir.Circuit.BlockRec.leafOut_vec
 
+/-!
+## Six pins re-pinned for CONNECT-RULES step 2 (D-054, D-056)
+
+The block AIRs gained the height-based relative lock (BIP68). The new bodies are not the old ones, so
+the rule above (re-pin only with a proven equality to the old body) cannot hold for them; they are
+re-pinned as a recorded exception. No `compat_*` statement changed, and every other pin is as on
+`2196ba3`. What changed in the six:
+
+- `Block.Coin.constraints`, `Block.Fields.constraints`: the old list followed by the new `lockC`
+  (`repin_coin_constraints`, `repin_fields_constraints`, by `rfl`; the old lists' parts are pinned and
+  unchanged);
+- `Block.Coin.lookups`: the input relation's tuple is `(tx, start, lock, LKH, LKT)` where it was
+  `(tx, start)`, and three range lookups follow the old 94;
+- `Block.Fields.chkLookups`: the same tuple, and four byte reads (the version) follow the old 28;
+- `Block.Coin.N_MAIN`: 170 where it was 164;
+- `Block.Fields.fields`: `N_LOCK = 203` main columns where it had `N_MAIN' = 190` (still pinned).
+-/
+
+theorem repin_coin_constraints : StarkedAir.Block.Coin.constraints =
+    StarkedAir.Block.Coin.localC ++ StarkedAir.Block.Coin.fracC ++ StarkedAir.Block.Coin.zeroC ++
+      StarkedAir.Block.Coin.accC ++ StarkedAir.Block.Coin.lastC ++ StarkedAir.Block.Coin.amountC ++
+      StarkedAir.Block.Coin.lockC := rfl
+
+theorem repin_fields_constraints : StarkedAir.Block.Fields.constraints =
+    StarkedAir.Block.Fields.kindC ++ StarkedAir.Block.Fields.transC ++ StarkedAir.Block.Fields.tileC ++
+      StarkedAir.Block.Fields.compactC ++ StarkedAir.Block.Fields.segC ++ StarkedAir.Block.Fields.countC ++
+      StarkedAir.Block.Fields.zeroC ++ StarkedAir.Block.Fields.bitC ++ StarkedAir.Block.Fields.txC ++
+      StarkedAir.Block.Fields.pubC ++ StarkedAir.Block.Fields.chkC ++ StarkedAir.Block.Fields.lockC := rfl
+
+theorem repin_lookup_counts : StarkedAir.Block.Coin.lookups.length = 97 ∧
+    StarkedAir.Block.Fields.chkLookups.length = 32 := ⟨StarkedAir.Block.Coin.lookups_len, rfl⟩
+
 open Lean in
 /-- Structural hash of a constant's type and value (constructors for inductives). -/
 def pinHash (env : Environment) (c : Name) : Option UInt64 :=
@@ -1981,7 +2013,8 @@ def pinHash (env : Environment) (c : Name) : Option UInt64 :=
   | some (.recInfo r) => some r.type.hash
   | _ => none
 
-/-- The pinned constants and their hashes on `2196ba3`, one `name hash` per line. -/
+/-- The pinned constants and their hashes on `2196ba3`, one `name hash` per line (six re-pinned for
+CONNECT-RULES step 2, listed above). -/
 def pinTable : String := "
 StarkedAir.Air 370992439935339461
 StarkedAir.Air.Satisfied 3555047645679353822
@@ -2186,7 +2219,7 @@ StarkedAir.Block.Coin.MLO 8020736631586362313
 StarkedAir.Block.Coin.MM 5580780264887204875
 StarkedAir.Block.Coin.MNB 12456454333311047599
 StarkedAir.Block.Coin.NB 8646764002683721668
-StarkedAir.Block.Coin.N_MAIN 6085311629211475663
+StarkedAir.Block.Coin.N_MAIN 16407894917998692034
 StarkedAir.Block.Coin.OB 721389358932291958
 StarkedAir.Block.Coin.ORD 5454922851969046533
 StarkedAir.Block.Coin.OUH 8076550275599354812
@@ -2231,7 +2264,7 @@ StarkedAir.Block.Coin.amountC 16455570758616584428
 StarkedAir.Block.Coin.b3 1543431860124293618
 StarkedAir.Block.Coin.b4 2327974905121133907
 StarkedAir.Block.Coin.coin 8326980354223559378
-StarkedAir.Block.Coin.constraints 11015623120550571891
+StarkedAir.Block.Coin.constraints 17822785761190454234
 StarkedAir.Block.Coin.first 15453146726949858975
 StarkedAir.Block.Coin.fracC 17833657597395715562
 StarkedAir.Block.Coin.height 3487460431781878574
@@ -2242,7 +2275,7 @@ StarkedAir.Block.Coin.kp 14591804336548626625
 StarkedAir.Block.Coin.lastC 4686876359968818310
 StarkedAir.Block.Coin.lastOn 11618261464159590984
 StarkedAir.Block.Coin.localC 11861545920249534897
-StarkedAir.Block.Coin.lookups 1993625935316010669
+StarkedAir.Block.Coin.lookups 7730868907412050053
 StarkedAir.Block.Coin.mE 16749810043131797124
 StarkedAir.Block.Coin.notFirst 1322236294483047389
 StarkedAir.Block.Coin.notLast 17856571357075250639
@@ -2499,14 +2532,14 @@ StarkedAir.Block.Fields.blockBytes 3362647105931116537
 StarkedAir.Block.Fields.by4 928109702473566966
 StarkedAir.Block.Fields.c 7398137197751755746
 StarkedAir.Block.Fields.chkC 1340301875353697891
-StarkedAir.Block.Fields.chkLookups 7211814688263250234
+StarkedAir.Block.Fields.chkLookups 1225048348381594160
 StarkedAir.Block.Fields.commitC 17939344127444849891
 StarkedAir.Block.Fields.compactC 5760949608222406565
-StarkedAir.Block.Fields.constraints 887555171356707603
+StarkedAir.Block.Fields.constraints 12674547589071361827
 StarkedAir.Block.Fields.countC 9761320507809890299
 StarkedAir.Block.Fields.e1 6315645682856458953
 StarkedAir.Block.Fields.e2 10075862923094640558
-StarkedAir.Block.Fields.fields 6499582317579388765
+StarkedAir.Block.Fields.fields 7350319305024557067
 StarkedAir.Block.Fields.finalC 3377919427884971299
 StarkedAir.Block.Fields.first 15453146726949858975
 StarkedAir.Block.Fields.hasC 13603305468679119935

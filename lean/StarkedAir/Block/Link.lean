@@ -71,12 +71,12 @@ theorem yield_table : ∀ i < 15, ∀ k < (hashSys.comp i).lookups.length, isUse
   exact this
 
 /-- The block system's lookup sites over all rows (per-component sizes, D-045): `Σᵢ kᵢ · 2^(Ls i)` with
-`kᵢ` the lookups per row — bytes 1, fields 36, messages 4, SHA 6, txid tree 11, tables 2, walker 5, context 12,
-witness tree 3, undo bytes 1, Blake2s words 6, Blake2s 11, fingerprints 4, undo records 20, coins 94 (216). -/
+`kᵢ` the lookups per row — bytes 1, fields 40, messages 4, SHA 6, txid tree 11, tables 2, walker 5, context 12,
+witness tree 3, undo bytes 1, Blake2s words 6, Blake2s 11, fingerprints 4, undo records 20, coins 97 (223). -/
 def hashRows (Ls : ℕ → ℕ) : ℕ :=
-  2 ^ Ls 0 + 36 * 2 ^ Ls 1 + 4 * 2 ^ Ls 2 + 6 * 2 ^ Ls 3 + 11 * 2 ^ Ls 4 + 2 * 2 ^ Ls 5 + 5 * 2 ^ Ls 6 +
+  2 ^ Ls 0 + 40 * 2 ^ Ls 1 + 4 * 2 ^ Ls 2 + 6 * 2 ^ Ls 3 + 11 * 2 ^ Ls 4 + 2 * 2 ^ Ls 5 + 5 * 2 ^ Ls 6 +
     12 * 2 ^ Ls 7 + 3 * 2 ^ Ls 8 + 2 ^ Ls 9 + 6 * 2 ^ Ls 10 + 11 * 2 ^ Ls 11 + 4 * 2 ^ Ls 12 + 20 * 2 ^ Ls 13 +
-    94 * 2 ^ Ls 14
+    97 * 2 ^ Ls 14
 
 /-- **The block system's size condition** (D-045): every component has at most `2^24` rows and the site
 count `Σᵢ kᵢ·2^(Ls i)` is below `P`. One shared size satisfies it up to `2^23` (`SizeOk.of_le23`); a size
@@ -158,11 +158,11 @@ theorem hash_sites_len : (sites hashSys inst).length = hashRows Ls := by
   ring
 
 omit hL hsat in
-/-- At constant sizes the site count is the old `216 · 2^L`. -/
-theorem hashRows_const (L : ℕ) : hashRows (fun _ => L) = 216 * 2 ^ L := by unfold hashRows; ring
+/-- At constant sizes the site count is `223 · 2^L`. -/
+theorem hashRows_const (L : ℕ) : hashRows (fun _ => L) = 223 * 2 ^ L := by unfold hashRows; ring
 
 omit hL hsat in
-/-- Sizes of at most `2^23` rows satisfy the size condition (`Σᵢ kᵢ·2^(Ls i) ≤ 216·2^23 < P`). -/
+/-- Sizes of at most `2^23` rows satisfy the size condition (`Σᵢ kᵢ·2^(Ls i) ≤ 223·2^23 < P`). -/
 theorem SizeOk.of_le23 (h23 : ∀ i < 15, Ls i ≤ 23) : SizeOk Ls := by
   refine ⟨fun i hi => le_trans (h23 i hi) (by norm_num), ?_⟩
   have h : ∀ i < 15, 2 ^ Ls i ≤ 2 ^ 23 := fun i hi => Nat.pow_le_pow_right (by norm_num) (h23 i hi)
@@ -278,7 +278,7 @@ theorem use_mult : ∀ s ∈ sites hashSys inst, isUse s.1 s.2.2 = true →
   interval_cases i
   · simp [isUse] at hu
   · -- fields
-    have hk34 : k < 36 := by simpa [hashSys, Fields.fields, Fields.lookups, Fields.chkLookups] using hk
+    have hk34 : k < 40 := by simpa [hashSys, Fields.fields, Fields.lookups, Fields.chkLookups] using hk
     have e : siteMult hashSys inst pub (1, r, k) =
         ((Fields.lookups ++ Fields.chkLookups).getD k ⟨0, .const 0, []⟩).mult.eval (2 ^ Ls 1) Fields.preCols pub
           (inst 1).main r := by
@@ -521,10 +521,11 @@ theorem use_mult : ∀ s ∈ sites hashSys inst, isUse s.1 s.2.2 = true →
         ((inst 14).main Coin.KO r + (inst 14).main Coin.KI r + (inst 14).main Coin.CBI r) = 0 ∨
         ((Coin.notFirst).eval (2 ^ Ls 14) Coin.preCols pub (inst 14).main r) *
         ((inst 14).main Coin.KO r + (inst 14).main Coin.KI r + (inst 14).main Coin.CBI r) = 1 := mul01 bNF bon
-    have hk64 : k < 94 := by rw [← Coin.lookups_len]; simpa [hashSys, Coin.coin] using hk
+    have bLKH := air_bool (air := Coin.coin.air) co (c := Coin.LKH) (by simp [Coin.coin, Coin.constraints, Coin.lockC, Coin.k]) hr
+    have hk64 : k < 97 := by rw [← Coin.lookups_len]; simpa [hashSys, Coin.coin] using hk
     have hm := Coin.mult_cases k hk64 hk4
     simp only [Coin.useMults, List.mem_cons, List.not_mem_nil, or_false] at hm
-    rcases hm with h | h | h | h | h | h | h | h | h | h | h <;> rw [h] <;>
+    rcases hm with h | h | h | h | h | h | h | h | h | h | h | h <;> rw [h] <;>
       simp only [Expr.eval, Coin.k, Coin.om, Coin.one, Coin.on, StarkedAir.Sha256.eval_col, StarkedAir.Sha256.eval_cst,
         wrap_zero hr, Nat.cast_one]
     · exact neg01 bKO
@@ -538,6 +539,7 @@ theorem use_mult : ∀ s ∈ sites hashSys inst, isUse s.1 s.2.2 = true →
     · exact neg01 bMC1
     · exact neg01 bon
     · exact neg01 bMLO
+    · exact neg01 (mul01 bKI bLKH)
 
 /-- **A use is matched by a yield.** A use site with multiplicity `−1` has a yield site (not a use) with
 nonzero multiplicity, the same relation and the same tuple. -/

@@ -159,4 +159,13 @@ theorem txT_vals {v : Bytes} {seg : Bool} {nIn : ℕ} {ts : List Tok} {t : Tx} {
     | .blk .. :: _, h, _ | .txh .. :: _, h, _ | .inp .. :: _, h, _ | .out .. :: _, h, _
     | .wcnt .. :: _, h, _ | .witem .. :: _, h, _ | .lock .. :: _, h, _ => simp at h
 
+/-- A parsed transaction's version is its head token's four bytes. -/
+theorem txT_version {v : Bytes} {seg : Bool} {nIn : ℕ} {ts : List Tok} {t : Tx} {rest : List Tok}
+    (h : txT (.txh v seg nIn :: ts) = some (t, rest)) : t.version = le v := by
+  simp only [txT] at h
+  repeat' split at h
+  all_goals first
+    | (obtain ⟨rfl, -⟩ := Prod.mk.inj (Option.some.inj h); rfl)
+    | simp at h
+
 end StarkedAir.Spec.Block

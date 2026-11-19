@@ -69,6 +69,18 @@ const REQ = 186;
 const MML = 187;
 const MMB = 188;
 const DW = 189;
+// BIP68 (Lean: `Fields.lockC`): the version bytes and `V2 = [version >= 2]`, the sequence's bits 22, 23
+// and 31, and the enforced height and time lock bits.
+const VBY0 = 190;
+const VE = 194;
+const VINV = 195;
+const V2 = 196;
+const T22 = 197;
+const U23 = 198;
+const D31 = 199;
+const A1 = 200;
+pub const LKH = 201;
+pub const LKT = 202;
 pub const N_RG = 13;
 
 pub const MAXLO: u64 = 475136;
@@ -191,6 +203,7 @@ pub fn fill(a: std.mem.Allocator, cols: [][]M31, raw: []const u8, rows: []const 
     }
 
     var txi: u32 = 0;
+    var v2 = false;
     var tlo: u64 = 0;
     var thi: u64 = 0;
     var w: u32 = 0;
@@ -220,6 +233,37 @@ pub fn fill(a: std.mem.Allocator, cols: [][]M31, raw: []const u8, rows: []const 
             cols[BY0 + j][i] = f(by[j]);
             try reads.append(a, base + @as(u32, @intCast(j)));
         }
+        // BIP68: the version on the head, the sequence's bits on an input.
+        if (r.kind == K_TXH) {
+            var vb: [4]u32 = undefined;
+            for (0..4) |j| {
+                vb[j] = raw[r.start + j];
+                cols[VBY0 + j][i] = f(vb[j]);
+                try reads.append(a, r.start + @as(u32, @intCast(j)));
+            }
+            const ve = vb[1] + vb[2] + vb[3] + vb[0] * (vb[0] -% 1);
+            cols[VE][i] = f(ve);
+            cols[VINV][i] = invOrZero(f(ve));
+            v2 = ve != 0;
+        }
+        var d31: u32 = 0;
+        var t22: u32 = 0;
+        if (r.kind == K_IN) {
+            rg[0] = by[2] & 63;
+            rg[1] = 4 * rg[0];
+            t22 = (by[2] >> 6) & 1;
+            cols[U23][i] = f(by[2] >> 7);
+            rg[2] = by[3] & 127;
+            rg[3] = 2 * rg[2];
+            d31 = by[3] >> 7;
+        }
+        const a1 = v2 and d31 == 0;
+        cols[V2][i] = f(@intFromBool(v2));
+        cols[T22][i] = f(t22);
+        cols[D31][i] = f(d31);
+        cols[A1][i] = f(@intFromBool(a1));
+        cols[LKH][i] = f(@intFromBool(ctx.csv() and a1 and t22 == 0));
+        cols[LKT][i] = f(@intFromBool(ctx.csv() and a1 and t22 == 1));
         const zt = txi == 0;
         cols[ZT][i] = f(@intFromBool(zt));
         cols[INVT][i] = invOrZero(f(txi));

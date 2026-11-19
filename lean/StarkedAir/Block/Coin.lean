@@ -18,6 +18,7 @@ public.
 * Rows are a prefix with strictly increasing token starts (range-checked), so they are the block's tokens
   in order. The output index counts the outputs after a transaction's inputs, and the record index `J`
   counts the non-coinbase inputs before the row.
+* BIP68: an input whose height lock is enforced (`LKH`, from the fields) has `height − HC − SQL ≥ 0`.
 * Outputs: the txid is SHA's digest of message `1 + 2·tx`, and the code comes from `pub 2` and `tx = 0`.
   The output's bytes are offered as the segment `(0, start)`, whose fingerprint comes back.
 * Inputs: the txid and index limbs come from the 36 prevout bytes; the code and amount from undo
@@ -128,7 +129,14 @@ def Q3 (i : ℕ) : ℕ := 155 + i
 def H3 (i : ℕ) : ℕ := 158 + i
 def BR3 : ℕ := 162
 def H3C : ℕ := 163
-def N_MAIN : ℕ := 164
+/-- BIP68 (CONNECT-RULES step 2), from the fields' input tuple: the sequence's low 16 bits (the lock), and
+whether a height lock (`LKH`) or a time lock (`LKT`) is enforced on this input. `LB`: `height − HC − SQL`
+as three bytes, for a height lock. -/
+def SQL : ℕ := 164
+def LKH : ℕ := 165
+def LKT : ℕ := 166
+def LB (i : ℕ) : ℕ := 167 + i
+def N_MAIN : ℕ := 170
 
 -- public inputs (after the block's 41 and the fingerprint's `γ` at 41–44)
 def PUB_Z : ℕ := 45
@@ -268,13 +276,18 @@ def zeroC : List Expr := (colQ FC).coords.map fun e => .mul (.sub one (.mul mE m
 def accC : List Expr := ((colQ ACC).sub (((base notFirst).mul (colQ ACC (-1))).add (colQ FC))).coords
 def lastC : List Expr := ((base isLast).mul ((colQ ACC).sub (pubQ PUB_S))).coords
 
-def constraints : List Expr := localC ++ fracC ++ zeroC ++ accC ++ lastC ++ amountC
+/-- A height-based relative lock (BIP68): the spent coin's height plus the lock is at most the block's. -/
+def lockC : List Expr :=
+  [ boolC (k LKH),
+    .mul (k KI) (.mul (k LKH) (.sub (.sub (.sub height (k HC)) (k SQL)) (b3 LB))) ]
+
+def constraints : List Expr := localC ++ fracC ++ zeroC ++ accC ++ lastC ++ amountC ++ lockC
 
 def r8 (e : Expr) (m : Expr) : Lookup := ⟨Tables.REL_R8, .neg m, [e]⟩
 
 def lookups : List Lookup :=
   [ ⟨REL_OUTT, .neg (k KO), [k TXI, k START, k LEN, k SSC, k SVAL, k VL, k VH]⟩,
-    ⟨REL_INT, .neg (.add (k KI) (k CBI)), [k TXI, k START]⟩,
+    ⟨REL_INT, .neg (.add (k KI) (k CBI)), [k TXI, k START, k SQL, k LKH, k LKT]⟩,
     ⟨Sha.REL_DIGEST, .neg (k KO), (.add (.mul (cst 2) (k TXI)) one) :: (List.range 16).map (fun i => k (TLB i))⟩,
     ⟨URec.REL_UREC, .neg (k KI), [k J, k CLO, k CHI, k VL, k VH, k CTX]⟩,
     ⟨FpWalk.REL_SEG, k KO, [cst 0, k START, k START, k LEN]⟩,
@@ -298,17 +311,18 @@ def lookups : List Lookup :=
   [r8 (k H1C) (k MC1), r8 (k H2C) (k MLO)] ++
   (List.range 3).map (fun i => r8 (k (Q3 i)) (k MC1)) ++
   (List.range 4).map (fun i => r8 (k (H3 i)) (k MC1)) ++
-  [r8 (k H3C) (k MC1)]
+  [r8 (k H3C) (k MC1)] ++
+  (List.range 3).map (fun i => r8 (k (LB i)) (.mul (k KI) (k LKH)))
 
 /-- The use multiplicities that occur (every lookup but the segment yield, index 4). -/
 def useMults : List Expr :=
   [ .neg (k KO), .neg (.add (k KI) (k CBI)), .neg (k KI), .neg (.add (k KO) (k KI)), .neg (.mul (k KO) (om (k ZS))),
-    .neg (.mul notFirst on), .neg (.mul (k KI) (k CBC)), .neg (k MNB), .neg (k MC1), .neg on, .neg (k MLO) ]
+    .neg (.mul notFirst on), .neg (.mul (k KI) (k CBC)), .neg (k MNB), .neg (k MC1), .neg on, .neg (k MLO), .neg (.mul (k KI) (k LKH)) ]
 
 set_option maxRecDepth 20000 in
-theorem mult_cases : ∀ j < 94, j ≠ 4 → (lookups.getD j ⟨0, .const 0, []⟩).mult ∈ useMults := by decide
+theorem mult_cases : ∀ j < 97, j ≠ 4 → (lookups.getD j ⟨0, .const 0, []⟩).mult ∈ useMults := by decide
 
-theorem lookups_len : lookups.length = 94 := by decide
+theorem lookups_len : lookups.length = 97 := by decide
 
 def coin : Comp where
   air := { name := "block_coin", nMain := N_MAIN, pre := preCols, constraints := constraints }

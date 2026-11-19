@@ -88,8 +88,8 @@ theorem chk_mult_rg {j : ℕ} (hj9 : 9 ≤ j) (hj : j < 22) : (chkLookups.getD j
   interval_cases j <;> rfl
 
 /-- **The check lookups' use multiplicities** are `−1` or `0`: byte slots, the auxiliary read, range
-slots and the context use (`chkLookups` entries other than the three yields 22, 23, 25). -/
-theorem chk_use_mult {r : ℕ} (hr : r < n) {j : ℕ} (hj : j < 26) (hy : j ≠ 22 ∧ j ≠ 23 ∧ j ≠ 25) :
+slots, the context use and the version bytes (`chkLookups` entries other than the yields 22, 23, 25, 26, 27). -/
+theorem chk_use_mult {r : ℕ} (hr : r < n) {j : ℕ} (hj : j < 32) (hy : j ≠ 22 ∧ j ≠ 23 ∧ j ≠ 25 ∧ j ≠ 26 ∧ j ≠ 27) :
     (chkLookups.getD j ⟨0, .const 0, []⟩).mult.eval n preCols pub M r = -1 ∨
     (chkLookups.getD j ⟨0, .const 0, []⟩).mult.eval n preCols pub M r = 0 := by
   have neg01 : ∀ {x : F}, x = 0 ∨ x = 1 → -x = -1 ∨ -x = 0 := fun h => by rcases h with h | h <;> simp [h]
@@ -110,6 +110,13 @@ theorem chk_use_mult {r : ℕ} (hr : r < n) {j : ℕ} (hj : j < 26) (hy : j ≠ 
     exact neg01 (gin_mmb hsat hr)
   by_cases h22 : j < 22
   · rw [chk_mult_rg (by omega) h22]; left; simp [Expr.eval, one, eval_cst]
+  by_cases h26 : 28 ≤ j
+  · have e : (chkLookups.getD j ⟨0, .const 0, []⟩).mult = .neg (k K_TXH) := by
+      have h32 : j < 32 := hj
+      interval_cases j <;> rfl
+    rw [e]
+    simp only [Expr.eval, ev_k hr]
+    exact neg01 (kind_bool hsat (c := K_TXH) (by simp [kinds, K_TXH]) hr)
   have h24 : j = 24 := by omega
   subst h24
   rw [show (chkLookups.getD 24 ⟨0, .const 0, []⟩).mult = .neg first from rfl]
