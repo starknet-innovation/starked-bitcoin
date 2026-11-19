@@ -32,6 +32,83 @@ pub fn arenaBytes(L: u32, profile: sys.Profile) ?u64 {
     };
 }
 
+const Bip68 = struct { inputs: u32 = 0, hl: u32 = 0, tl: u32 = 0, tl_heights: u32 = 0 };
+
+fn cs(raw: []const u8, p: *usize) !u64 {
+    if (p.* >= raw.len) return error.Truncated;
+    const b = raw[p.*];
+    p.* += 1;
+    const n: usize = switch (b) {
+        0xfd => 2,
+        0xfe => 4,
+        0xff => 8,
+        else => return b,
+    };
+    if (p.* + n > raw.len) return error.Truncated;
+    var v: u64 = 0;
+    for (0..n) |i| v |= @as(u64, raw[p.* + i]) << @intCast(8 * i);
+    p.* += n;
+    return v;
+}
+
+/// BIP68 counts of a raw block and its fetched undo stream (`0x01`, per non-coinbase input LE32 code,
+/// LE64 value, CompactSize length, script; the code is `2·height + coinbase`).
+fn bip68Counts(a: std.mem.Allocator, raw: []const u8, undo: []const u8) !Bip68 {
+    var out: Bip68 = .{};
+    var heights = std.AutoHashMap(u32, void).init(a);
+    var p: usize = 80;
+    var u: usize = 1;
+    const ntx = try cs(raw, &p);
+    for (0..ntx) |t| {
+        if (p + 4 > raw.len) return error.Truncated;
+        const version = std.mem.readInt(u32, raw[p..][0..4], .little);
+        p += 4;
+        var segwit = false;
+        if (p + 2 <= raw.len and raw[p] == 0 and raw[p + 1] != 0) {
+            segwit = true;
+            p += 2;
+        }
+        const nin = try cs(raw, &p);
+        for (0..nin) |_| {
+            p += 36;
+            const sl = try cs(raw, &p);
+            p += sl;
+            if (p + 4 > raw.len) return error.Truncated;
+            const seq = std.mem.readInt(u32, raw[p..][0..4], .little);
+            p += 4;
+            if (t == 0) continue;
+            if (u + 12 > undo.len) return error.UndoTruncated;
+            const code = std.mem.readInt(u32, undo[u..][0..4], .little);
+            u += 12;
+            const ul = try cs(undo, &u);
+            u += ul;
+            out.inputs += 1;
+            if (version < 2 or seq & 0x80000000 != 0 or seq & 0xffff == 0) continue;
+            if (seq & 0x00400000 != 0) {
+                out.tl += 1;
+                try heights.put(code >> 1, {});
+            } else out.hl += 1;
+        }
+        const nout = try cs(raw, &p);
+        for (0..nout) |_| {
+            p += 8;
+            const sl = try cs(raw, &p);
+            p += sl;
+        }
+        if (segwit) for (0..nin) |_| {
+            const items = try cs(raw, &p);
+            for (0..items) |_| {
+                const il = try cs(raw, &p);
+                p += il;
+            }
+        };
+        p += 4;
+    }
+    if (p != raw.len or u != undo.len) return error.LengthMismatch;
+    out.tl_heights = heights.count();
+    return out;
+}
+
 pub fn main() !void {
     const gpa = std.heap.c_allocator;
     var in_buf: [1 << 16]u8 = undefined;
@@ -42,6 +119,8 @@ pub fn main() !void {
     const w = &stdout.interface;
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
+    const needs_mode = std.posix.getenv("STARKED_SURVEY_NEEDS") != null;
+    const bip68_mode = std.posix.getenv("STARKED_SURVEY_BIP68") != null;
     while (true) {
         _ = arena.reset(.retain_capacity);
         const a = arena.allocator();
@@ -60,6 +139,28 @@ pub fn main() !void {
             try w.flush();
             continue;
         };
+        // STARKED_SURVEY_BIP68=1: print `height,inputs,height_locks,time_locks,time_lock_coin_heights`
+        // (non-coinbase inputs; BIP68 locks with a nonzero value in transactions of version >= 2;
+        // distinct creation heights among the time-locked inputs' coins), for CONNECT-RULES.
+        if (bip68_mode) {
+            const c = bip68Counts(a, raw, undo) catch |e| {
+                try w.print("{d},error,{s}\n", .{ height, @errorName(e) });
+                try w.flush();
+                continue;
+            };
+            try w.print("{d},{d},{d},{d},{d}\n", .{ height, c.inputs, c.hl, c.tl, c.tl_heights });
+            try w.flush();
+            continue;
+        }
+        // STARKED_SURVEY_NEEDS=1: print `height,<need of each component, in `sys.names` order>` instead
+        // (the rows each component needs, before any rounding), for the cost split per component.
+        if (needs_mode) {
+            try w.print("{d}", .{height});
+            for (sh.needs) |x| try w.print(",{d}", .{x});
+            try w.writeAll("\n");
+            try w.flush();
+            continue;
+        }
         const rep = sys.sizeReport(sh.needs);
         try w.print("{d},{d},{s},{d},{d},{d},{d},{s},{s},{d},", .{
             height,                                                     rep.sized.L,

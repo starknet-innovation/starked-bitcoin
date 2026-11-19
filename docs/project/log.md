@@ -21,6 +21,24 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-11-19 · session 39 · Delving feedback: two unproven rules found; cost split measured; CONNECT-RULES designed
+
+Who: Claude (agent, Opus 5.5 then Fable 5.2); owner: posted on Delving (t/3070) and replied; "skip, and push" (D-053); order "I'm ok with the order, I'm mostly interested in 1 to 3", "go ahead"
+Roadmap: CONNECT-RULES backlog → Now (designed); COST-SPLIT done; SNAP-HASH added (Now); TIERS-2 added (backlog)
+Done:
+- D-053 (owner): NODE-BOOT step 2 skips background validation.
+- Site: "Powered by Stwo, in Zig"; the status item names what is not checked (signatures, scripts, BIP68, full sigop cost) (7061c65, a3e06f5, 6beafc1).
+- Found while answering ajtowns: BIP68 and the full sigop cost are not proven (`Spec/Block.lean:6` deferred them; M3b never took them). Said so on Delving and on the site.
+- `survey`: `STARKED_SURVEY_NEEDS=1` (rows per component) and `STARKED_SURVEY_BIP68=1` (lock counts).
+- [reports/2026-11-19-block-cost-split.md](../reports/2026-11-19-block-cost-split.md), [design/connect-rules.md](../design/connect-rules.md).
+Evidence:
+- Node, all 37,500 blocks, 0 errors in both runs: SHA-256 of block bytes 82.7 % of exact cells (55.3 % as proven), commitment 13.5 % (24.3 %), coin set 1.4 % (4.1 %); proven cells 2.6× exact.
+- BIP68 in 279,962,123 inputs: 1,816,618 height locks; 6,988 time locks in 4,510 blocks.
+Problems / lessons:
+- A public claim ("every rule except signatures and scripts") was wrong because a Lean file's header deferred two rules to a milestone that did not list them. `verification.md` should list what is NOT enforced, rule by rule against `ConnectBlock`, not only what is.
+- The owner's drafts and the Delving replies are in `~/Workshop/prove-any-chain/delving-3070-reply*.md` (outside the repo).
+Next: owner on the two points of connect-rules.md § Needs the owner; then CONNECT-RULES step 1 (Lean spec, fuzz against Core, native check over the 37,500 blocks); SNAP-HASH write-up.
+
 ## 2026-11-12 · session 38b · NODE-BOOT step 1: verify-snapshot
 
 Who: Claude (agent, Opus 5.5); owner: "yes" (start verify-snapshot), chose the rollback dump on the node

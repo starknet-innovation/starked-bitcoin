@@ -106,6 +106,8 @@ docs/              Documentation (see below)
 | Check a Core UTXO snapshot against the seal | [docs/guides/node-boot.md](docs/guides/node-boot.md) |
 | Understand per-component trace sizes (two profiles, D-045): the design, the Lean/prover interface, the prover's needs | [docs/design/component-sizes.md](docs/design/component-sizes.md), [component-sizes-interface.md](docs/design/component-sizes-interface.md), [component-sizes-prover-needs.md](docs/design/component-sizes-prover-needs.md) |
 | See every mainnet block's trace size and GPU class (the chain survey) | [docs/design/chain-survey.md](docs/design/chain-survey.md) |
+| See which `ConnectBlock` rules are not proven yet (BIP68, full sigop cost) and the plan to add them | [docs/design/connect-rules.md](docs/design/connect-rules.md) |
+| See where a block proof's cost goes, per component | [docs/reports/2026-11-19-block-cost-split.md](docs/reports/2026-11-19-block-cost-split.md) |
 | Read past experiment results | [docs/reports/](docs/reports/) |
 | Read the away-session report (2026-10-09/10) and the replies to the stwo-zig briefs (lift extract, resident CUDA for generic AIRs) | [2026-10-10-away-session.md](docs/reports/2026-10-10-away-session.md), [2026-10-14-lift-extract-reply.md](docs/reports/2026-10-14-lift-extract-reply.md), [2026-10-15-lift-extract-reply.md](docs/reports/2026-10-15-lift-extract-reply.md), [2026-10-15-cuda-generic-air-reply.md](docs/reports/2026-10-15-cuda-generic-air-reply.md) |
 | **Pick up work, log progress, see the roadmap and decisions** | **[docs/project/README.md](docs/project/README.md)** |
