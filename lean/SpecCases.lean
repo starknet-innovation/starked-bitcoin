@@ -5,6 +5,7 @@ Run: `lake env lean --run SpecCases.lean < cases.tsv` (see `tools/specfuzz/run.s
 -/
 import StarkedAir.Spec.Bitcoin
 import StarkedAir.Spec.Block
+import StarkedAir.Spec.ConnectRules
 
 open StarkedAir.Spec.Bitcoin StarkedAir.Spec.Sha256
 
@@ -83,6 +84,19 @@ def answer (kind : String) (args : List String) : Option String := do
     pure <| match parseTx b with
       | none => "deserialize"
       | some t => s!"{hexOfBytes (StarkedAir.Spec.Block.txid t)} {hexOfBytes (StarkedAir.Spec.Block.wtxid t)}"
+  | "sigacc", [s] => let b ← bytesOfHexAny s; pure (toString (StarkedAir.Spec.ConnectRules.sigOpsAccurate b))
+  | "sigcost", [strict, t, spks] =>
+    let t ← parseTx (← bytesOfHexAny t)
+    let spks ← (spks.splitOn ",").mapM bytesOfHexAny
+    pure (toString (StarkedAir.Spec.ConnectRules.txSigOpCost (strict == "1") t spks))
+  | "seqlock", [enforce, times, t, heights] =>
+    let times ← (times.splitOn ",").mapM String.toNat?
+    let t ← parseTx (← bytesOfHexAny t)
+    let hs ← (heights.splitOn ",").mapM String.toNat?
+    let c := StarkedAir.Spec.ConnectRules.lockCtxOfTimes times (times.length - 1)
+    let p := StarkedAir.Spec.ConnectRules.seqLockPair (enforce == "1") c t hs
+    let ok := StarkedAir.Spec.ConnectRules.seqLocksOk (enforce == "1") c t hs
+    pure s!"{p.1} {p.2} {if ok then 1 else 0}"
   | _, _ => none
 
 partial def loop (stdin : IO.FS.Stream) : IO Unit := do

@@ -1,6 +1,6 @@
 #!/bin/sh
-# Differential fuzzing of the Lean header and block specs against Bitcoin Core (core_cases.cpp,
-# core_block_cases.cpp).
+# Differential fuzzing of the Lean header, block and connect-rule specs against Bitcoin Core
+# (core_cases.cpp, core_block_cases.cpp, core_connect_cases.cpp).
 # Usage: tools/specfuzz/run.sh <core src dir> <seed> <cases per kind>
 # <core src dir>: a checkout of bitcoin/bitcoin's src/ (e.g. a sparse clone in data/core-src/src).
 set -e
@@ -15,7 +15,14 @@ mkdir -p "$OUT"
     consensus/tx_check.cpp primitives/transaction.cpp script/script.cpp uint256.cpp util/strencodings.cpp \
     crypto/hex_base.cpp crypto/sha256.cpp hash.cpp support/cleanse.cpp crypto/ripemd160.cpp crypto/hmac_sha512.cpp \
     crypto/sha512.cpp -o "$OUT/core_block_cases" )
-{ "$OUT/core_cases" "$SEED" "$N"; "$OUT/core_block_cases" "$SEED" "$N"; } > "$OUT/core-$SEED.tsv"
+# Sigop cost and sequence locks: Core's tx_verify.cpp, interpreter.cpp and coins.cpp, with stubs for what
+# those functions never call (core_stubs.cpp).
+( cd "$CORE" && c++ -std=c++20 -O2 -I. -I"$OUT" "$ROOT/tools/specfuzz/core_connect_cases.cpp" \
+    "$ROOT/tools/specfuzz/core_stubs.cpp" consensus/tx_verify.cpp script/interpreter.cpp coins.cpp chain.cpp \
+    consensus/tx_check.cpp primitives/transaction.cpp script/script.cpp uint256.cpp util/strencodings.cpp \
+    crypto/hex_base.cpp crypto/sha256.cpp hash.cpp support/cleanse.cpp crypto/ripemd160.cpp crypto/hmac_sha512.cpp \
+    crypto/sha512.cpp crypto/sha1.cpp crypto/chacha20.cpp arith_uint256.cpp -o "$OUT/core_connect_cases" )
+{ "$OUT/core_cases" "$SEED" "$N"; "$OUT/core_block_cases" "$SEED" "$N"; "$OUT/core_connect_cases" "$SEED" "$N"; } > "$OUT/core-$SEED.tsv"
 ( cd "$ROOT/lean" && lake env lean --run SpecCases.lean < "$OUT/core-$SEED.tsv" > "$OUT/lean-$SEED.tsv" 2>/dev/null )
 echo "Core commit: $(git -C "$CORE" rev-parse HEAD 2>/dev/null || echo unknown)"
 python3 "$ROOT/tools/specfuzz/compare.py" "$OUT/core-$SEED.tsv" "$OUT/lean-$SEED.tsv"

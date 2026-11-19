@@ -41,6 +41,7 @@ them.
 | `Gadgets/RetargetSound.lean` | Copies (`copy_facts`), evaluation helpers, `rt_core`, `rt_span`, `rt_p0`, `rt_dhead` |
 | `Gadgets/RetargetDiv.lean` | `rt_divq`, `rt_rem`, `rt_cap`, `retarget_sound` (v3b) |
 | `Spec/Compose.lean` | `catHs`, `Link`, `pstOf_cat`, `prevTimes_cat`, **`segment_compose`**: two valid segments joined by `Link` form one valid segment (aggregation soundness at the spec level) |
+| `Spec/ConnectRules.lean` | CONNECT-RULES spec: `opsD`, `pushOnly`, `lastPush`, `sigOpsAccurate` (`GetSigOpCount(true)`), `isP2SH`, `witnessProgram`, `p2shSigOps`, `countWitnessSigOps`, `txSigOpCost` (`GetTransactionSigOpCost`), `SigOpCostOK`; `LockCtx`, `inputLockOk`, `seqLocksOk` (BIP68, per input), `seqLockPair` (Core's formulation) and **`seqLockPair_eval`** (the two agree). Fuzzed against Core (`tools/specfuzz/core_connect_cases.cpp`); not yet enforced by an AIR |
 | `Spec/Chain.lean` | `SegIn`, `SegOut`, `pstOf`, `prevTimes`, `SegmentValid`: the whole-segment statement over Bitcoin objects |
 | `Gadgets/TopSound.lean` | `pubWindow`, `decodeIn`, `decodeOut`, `out_time`, `pst_eq`, `win_eq`, `work_eq`, **`header_chain_sound`** |
 | `Gadgets/Version.lean` | Minimum-version constraints (rows 254–255) and the final `constraints` / `air` (`header_chain_v6`) |

@@ -21,6 +21,30 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-11-19 · session 40 · CONNECT-RULES step 1: both rules specified, fuzzed against Core, checked on 37,500 blocks; TIERS-2 simulated; SNAP-HASH proposal
+
+Who: Claude (agent, Fable 5.2); owner: "1. I accept. 2. Yes let's try." (D-054, D-055)
+Roadmap: CONNECT-RULES designed → in progress (step 1 of 5 done); SNAP-HASH not started → proposal drafted; TIERS-2 backlog → decided (D-055), simulated
+Done:
+- D-054 (owner): time-based BIP68 claims are committed, the block commitment changes. D-055 (owner): try a tighter size profile.
+- `lean/StarkedAir/Spec/ConnectRules.lean`: `txSigOpCost`/`SigOpCostOK` and `seqLocksOk`/`SeqLocksOK`, executable; `seqLockPair_eval` proves Core's maximum-then-compare equals the per-input rule.
+- `tools/specfuzz/core_connect_cases.cpp`, `core_stubs.cpp`, `mutate_connect.sh`; `run.sh` and `SpecCases.lean` answer three new case kinds.
+- `src/block/connect_rules.zig` (native reference) and `survey` mode `STARKED_SURVEY_RULES=1`; `scripts/check_time_locks.py`.
+- `scripts/tier_search.py` and report result 4: one tighter profile proves 40 % fewer cells.
+- [design/snapshot-hash.md](../design/snapshot-hash.md): the SNAP-HASH proposal. `verification.md`: Core's block-connection checks with the unenforced ones marked.
+Evidence:
+- `sh tools/specfuzz/run.sh data/core-src/src 2026 20000` (Core c067aa71): `sigacc`, `sigcost`, `seqlock` 20,000 cases each, 0 mismatches (as the eleven earlier kinds; `nextany` informational).
+- `tools/specfuzz/mutate_connect.sh 5 5000`: 16 wrong specs (lock off by one, wrong time base, 511 s unit, wrong bits and masks, version 1, P2SH and witness variants, flags), each caught by the fuzzer alone: 27 to 1,610 mismatching cases of 5,000; the unmutated spec 0.
+- `STARKED_CONNECT_CASES=…/connect-2026.tsv zig build test -Dtest-filter="Core does"`: exit 0 on the 60,000 cases; exit 1 with one answer altered.
+- Node, `STARKED_SURVEY_RULES=1` over 935,001–972,500: 37,500 blocks, 0 errors; sigop cost at most 79,599 (block 961,121; its legacy part alone is 75,068); 5,120,340 height locks, 0 not met; 6,988 time locks, 0 not met against `getblockheader` `mediantime`, the tightest met with 0 s to spare (block 937,433).
+- `lake build`: "Build completed successfully (8929 jobs)"; `#print axioms` of `seqLockPair_eval`: propext, Classical.choice, Quot.sound. `zig build`: passes.
+Problems / lessons:
+- The first mutation run showed the fuzzer blind to lock boundaries (off by one, 511 s unit) and later to lock values above 2^15: random chains almost never land on a boundary. The generator now builds chains with a fixed time step and puts half the inputs at their boundary. A fuzzer with 0 mismatches says little until wrong specs are shown to fail it.
+- A failed `lake build` leaves the old `.olean`, so a mutation caught by a `#guard` looked like "0 mismatches". The script now removes the examples and reports a failed build.
+- **A public statement was wrong, from my draft** (Delving t/3070, post 6): "Blake2s is cheap to prove, SHA-256 much more costly". In these AIRs SHA-256 takes 72 × 188 = 13,536 cells per 64-byte block and Blake2s 88 × 406 = 35,728. Blake2s is used because it is native in the recursion circuits (D-007, D-030). Corrected in the follow-up draft (`~/Workshop/prove-any-chain/delving-3070-reply3.md`); the owner decides whether to post it.
+- Earlier figure corrected: "1,816,618 height locks" (session 39) counted nonzero lock values only; with zero values there are 5,120,340.
+Next: CONNECT-RULES step 2, height-based BIP68 in `block_coin` (AIR, witness, Lean soundness, negative tests); owner reviews and posts the Delving follow-up.
+
 ## 2026-11-19 · session 39 · Delving feedback: two unproven rules found; cost split measured; CONNECT-RULES designed
 
 Who: Claude (agent, Opus 5.5 then Fable 5.2); owner: posted on Delving (t/3070) and replied; "skip, and push" (D-053); order "I'm ok with the order, I'm mostly interested in 1 to 3", "go ahead"

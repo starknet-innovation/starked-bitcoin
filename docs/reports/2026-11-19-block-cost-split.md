@@ -53,9 +53,9 @@ Total: 5.37·10^13 exact cells, 1.39·10^14 proven. `sha` is padded 1.5× (it se
 components together 5.3× (their tiers are L, L−2 or L−5, whatever they need): `walk` sits at L but
 needs about L−3; `b2s` at L−2 but needs about L−4.
 
-*Est.:* tiers closer to the needs (the others padded 2× instead of 5.3×) would cut the proven cells
-by about a third. Not measured as time. A new profile changes the block VKs and needs the Lean size
-side conditions (D-045), so the moment to decide is before the next full re-prove (backlog TIERS-2).
+Tiers closer to the needs cut the proven cells by 40 % (result 4, simulated). Not measured as time. A new
+profile changes the block VKs; the Lean theorems already hold for any size vector under `SizeOk`
+(D-045). Decided: try it before the next full re-prove (D-055).
 
 ## Result 3: BIP68 in these blocks
 
@@ -69,3 +69,44 @@ clear and a nonzero 16-bit value (a zero value is always satisfied).
 
 The time-based locks refer to 5,626 coin creation heights (distinct per block, summed). So proving the
 median time past of old blocks is needed about 0.15 times per block.
+
+## Result 4: a tighter profile would prove 40 % fewer cells (TIERS-2, D-055)
+
+Simulated on the same per-block needs (no proving): a candidate profile is a vector of offsets below
+L; a block takes the first profile it fits, then `tiered`, then `uniform`. Offsets found by a
+coordinate search on the total proven cells.
+
+Slack below L (log2) of the components that matter, over the 35,907 blocks with L ≥ 22:
+
+| Component | Minimum | 1st percentile | Median | `tiered` offset |
+|---|---|---|---|---|
+| `msg` | 0 | 0 | 1 | 0 |
+| `bytes` | 0 | 1 | 2 | 0 |
+| `walk` | 2 | 3 | 4 | 0 |
+| `b2s`, `b2msg` | 1 | 3 | 4 | 2 |
+| `undo` | 2 | 3 | 4 | 2 |
+| `fpwalk` | 2 | 3 | 3 | 2 |
+| `fields` | 6 | 6 | 7 | 5 |
+| `coin` | 7 | 8 | 8 | 5 |
+| `urec` | 7 | 8 | 10 | 5 |
+| `merkle`, `wmerkle` | 9 | 10 | 10 | 5 |
+
+| Profiles tried, in order | Proven cells | Against exact | Against current |
+|---|---|---|---|
+| current: `tiered`, `uniform` | 1.39·10^14 | 2.59× | |
+| `walk` at L−2 only | 1.25·10^14 | 2.32× | −10 % |
+| one tight profile (below), `tiered`, `uniform` | 8.39·10^13 | 1.56× | −40 % |
+| two new profiles, `tiered`, `uniform` | 8.25·10^13 | 1.54× | −41 % |
+
+The tight profile: `sha` L; `msg`, `bytes` L−1; `fpwalk` L−3; `walk`, `b2s`, `b2msg`, `undo` L−4;
+`fields` L−7; `coin` L−8; `urec` L−9; `merkle`, `wmerkle` L−10; `ctx`, `tables`, `anc` unchanged. 32,475
+blocks (87 %) fit it; 5,015 fall back to `tiered`, 10 to `uniform`.
+
+- One profile gets nearly all of the gain; each profile is a set of block VKs and leaf circuits.
+- Not final: CONNECT-RULES adds rows to `walk` (redeem and witness scripts) and columns to `coin`, so
+  the offsets are searched again on the new needs.
+- Cells, not time: to confirm with a GPU timing of one 2^23 block in both profiles.
+
+```sh
+python3 scripts/tier_search.py needs.csv   # ~1 min
+```

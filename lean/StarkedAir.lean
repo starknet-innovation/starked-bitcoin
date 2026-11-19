@@ -143,6 +143,7 @@ import StarkedAir.Block.ExtSum
 import StarkedAir.Block.FpWalk
 import StarkedAir.Block.URec
 import StarkedAir.Spec.Coins
+import StarkedAir.Spec.ConnectRules
 import StarkedAir.Circuit.Composition
 import StarkedAir.Circuit.CompositionLogUp
 import StarkedAir.Circuit.CompositionSound

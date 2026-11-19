@@ -1,9 +1,10 @@
 # CONNECT-RULES: BIP68 relative locktimes and the full sigop cost (design)
 
-Status: draft · Updated: 2026-11-19 · Owner files: `lean/StarkedAir/Block/Coin.lean`, `lean/StarkedAir/Block/Walk.lean`, `src/block/coin.zig`, `src/block/walk.zig`, `src/block/anc.zig`
+Status: current · Updated: 2026-11-19 · Owner files: `lean/StarkedAir/Spec/ConnectRules.lean`, `src/block/connect_rules.zig`, `tools/specfuzz/core_connect_cases.cpp`, `lean/StarkedAir/Block/Coin.lean`, `lean/StarkedAir/Block/Walk.lean`, `src/block/coin.zig`, `src/block/walk.zig`, `src/block/anc.zig`
 
 Answers: which `ConnectBlock` rules outside scripts the block proof does not enforce, what Core
-checks exactly, and how to add them. Nothing here is built. Roadmap item CONNECT-RULES.
+checks exactly, how to add them, and how far that is. The design is accepted (D-054). The rules are
+specified and checked natively (step 1 of 5, below); no AIR enforces them yet. Roadmap item CONNECT-RULES.
 
 ## The gap
 
@@ -120,12 +121,51 @@ confirm with a survey mode before building.
 This is the larger half of the work: the walker's second mode and its Lean proof (`walk_eq_sigOps`
 is the pattern), and the classification.
 
+## Step 1 (done 2026-11-19): the spec, fuzzed against Core, and a native check
+
+- **Lean** (`Spec/ConnectRules.lean`, executable): `txSigOpCost` and `SigOpCostOK`
+  (`GetTransactionSigOpCost` and the block bound), `seqLocksOk` and `SeqLocksOK` (the per-input rule
+  above). `seqLockPair` transcribes Core's maximum-then-compare; `seqLockPair_eval` proves the two
+  agree, so the AIR may check inputs one by one.
+- **`strict`**: the P2SH and witness parts apply under `SCRIPT_VERIFY_P2SH | SCRIPT_VERIFY_WITNESS`,
+  which Core sets for every mainnet block but the BIP16 exception at height 170,060
+  (`script_flag_exceptions`). The spec takes it as a parameter; a run from genesis needs it false there.
+- **Fuzzing** (`tools/specfuzz/core_connect_cases.cpp`): Core's own `GetSigOpCount(true)`,
+  `GetTransactionSigOpCost` through a `CCoinsViewCache`, and `CalculateSequenceLocks` with
+  `EvaluateSequenceLocks` over a `CBlockIndex` chain, linked from `data/core-src` at `c067aa71` with
+  stubs for what those functions never call (`core_stubs.cpp`).
+- **Result:** 20,000 cases of each of the three kinds (seed 2026), 0 mismatches.
+- **Mutation test** of the fuzzer (`tools/specfuzz/mutate_connect.sh 5 5000`): 16 deliberately wrong
+  specs (a lock off by one, the wrong time base, a 511 s unit, wrong bits and masks, version 1, P2SH
+  and witness variants, the flags), each applied to both formulations with the `#guard`s removed. All
+  16 disagree with Core on 27 to 1,610 of 5,000 cases. The first run missed three (lock boundaries,
+  lock values above 2^15), which the generator now produces on purpose.
+- **Native reference** (`src/block/connect_rules.zig`), answering the same cases as Core
+  (`STARKED_CONNECT_CASES`), run over blocks 935,001–972,500 on the node
+  (`survey`, `STARKED_SURVEY_RULES=1`):
+
+| Check | Result |
+|---|---|
+| Blocks, parse errors | 37,500, 0 |
+| Sigop cost over 80,000 | 0 blocks; highest 79,599 (block 961,121: legacy 18,767, P2SH 213, witness 3,679) |
+| Sigops in all | legacy 22,345,192; P2SH 2,737,002; witness 232,767,938 |
+| Height-based locks (version ≥ 2, bit 31 clear, any value) | 5,120,340 inputs, 0 not met |
+| Time-based locks | 6,988 inputs, 0 not met against the node's `mediantime`; the tightest is met with 0 s to spare (block 937,433, coin height 933,116, lock 5,063) |
+
+The legacy bound, the only one the proof enforces as of 2026-11-19, would not catch block 961,121 going over: its legacy part
+alone is 75,068.
+
+```sh
+sh tools/specfuzz/run.sh data/core-src/src <seed> <cases>          # all kinds, Lean against Core
+tools/specfuzz/mutate_connect.sh <seed> <cases>                    # ~30 min: wrong specs must fail
+STARKED_CONNECT_CASES=$PWD/data/specfuzz/core-<seed>.tsv zig build test -Dtest-filter="Core does"
+python3 pack.py | STARKED_SURVEY_RULES=1 ./survey > rules.csv      # on the node, ~45 min
+python3 check_time_locks.py                                         # scripts/, on the node: time locks against bitcoin-cli
+```
+
 ## Order of work
 
-1. **Spec first, no proving cost.** `Spec`: `seqLocksOk` and `sigOpCost` in Lean, executable;
-   differential fuzzing against Core (`tools/specfuzz`: `CalculateSequenceLocks`,
-   `EvaluateSequenceLocks`, `GetTransactionSigOpCost`); the Zig replay checks both natively on all
-   37,500 blocks (they must all pass, as Core accepted them).
+1. **Spec first, no proving cost.** Done, above.
 2. Height-based BIP68 in `block_coin` (AIR, witness, Lean, negative tests).
 3. Sigop cost (walker mode, classification, Lean, negative tests).
 4. Time-based BIP68 (the committed claim, the resolver, the balance; the epoch root and seal take one
@@ -135,9 +175,10 @@ is the pattern), and the classification.
 Each of 2–4 changes the block AIRs, hence every block VK. Nothing is re-proven until all are in,
 together with the snapshot hash of step 3 if the owner wants it in the same run.
 
-## Needs the owner
+## Decided (owner, 2026-11-19)
 
-- **The commitment change** (option A): accepted cost is redoing the set passes (about $75 each at
+- **The commitment change** (option A) is accepted: D-054. The set passes are redone (about $75 each at
   the 972,500 set's size).
-- **Finer size tiers before the re-prove** (TIERS-2): about a third fewer cells (*est.*), more Lean
-  side conditions.
+- **A tighter size profile before the re-prove** (TIERS-2): D-055. Simulated at 40 % fewer cells
+  ([report](../reports/2026-11-19-block-cost-split.md), result 4). Its offsets are searched again once
+  steps 2–4 fix the new needs of `walk` and `coin`.

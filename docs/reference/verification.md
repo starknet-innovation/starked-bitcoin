@@ -65,6 +65,30 @@ Bitcoin Core `master`, fetched 2026-10-07:
 Result: `SegmentValid` covers every mainnet header-validity rule except
 `time-too-new`.
 
+## Block rules against `ConnectBlock`: what is not enforced (2026-11-19)
+
+The header audit above lists what is covered. This table lists Core's block-connection checks
+(`validation.cpp` `ConnectBlock`, `consensus/tx_verify.cpp`) with the ones the block proof does **not**
+enforce marked. Keep it current: a rule missing here was claimed as proven in public once (log,
+session 39).
+
+| Core check (reject reason) | Block proof |
+|---|---|
+| `CheckBlock`, `ContextualCheckBlock` (Merkle root and mutation, sizes, `CheckTransaction`, finality, BIP34, witness commitment, weight) | enforced (`Spec/Block.lean`, `block_sound`) |
+| Legacy sigops × 4 ≤ 80,000 (`bad-blk-sigops`, `CheckBlock`) | enforced |
+| **Full sigop cost** with P2SH and witness sigops (`bad-blk-sigops`, `ConnectBlock`) | **not enforced.** Specified and fuzzed (`Spec/ConnectRules.lean`); CONNECT-RULES |
+| **BIP68 sequence locks** (`bad-txns-nonfinal`, `SequenceLocks`) | **not enforced.** Specified and fuzzed; CONNECT-RULES |
+| Inputs exist and are unspent (`bad-txns-inputs-missingorspent`) | enforced over an epoch ([utxo.md](../design/utxo.md) rules 1, 2) |
+| Coinbase maturity (`bad-txns-premature-spend-of-coinbase`) | enforced (rule 3) |
+| Inputs ≥ outputs, accumulated fees in range (`bad-txns-in-belowout`, `bad-txns-accumulated-fee-outofrange`) | enforced (rule 4) |
+| Input values in range (`bad-txns-inputvalues-outofrange`) | UNVERIFIED: not audited rule by rule; to check in CONNECT-RULES step 2 |
+| Coinbase ≤ subsidy + fees (`bad-cb-amount`) | enforced (rule 4) |
+| BIP30 (`bad-txns-BIP30`) | the two historical overwrites are modelled (rule 6); heights from 935,001 are past BIP34 |
+| **Scripts and signatures** (`CheckInputScripts`) | **not enforced** (Core skips them too under assumevalid) |
+
+Also outside the proof: everything before the starting coin set (Core's snapshot after 935,000), except
+the headers, which are proven from genesis.
+
 ## Not yet constrained (header chain)
 
 - Wall-clock time: `time ≤ now + 2h` is out of scope by design.
@@ -90,7 +114,7 @@ height decomposition, retarget clamp, PoW one-hot). See the
 | The Zig interpreter matches Lean `Expr.eval` | Differential test against `probe_oracle` (`src/air/interp.zig`). Since 2026-10-10 every exported AIR also re-serializes byte-identically after parsing, so the digest the verifiers mix is SHA-256 of Lean's exact text (`ir.zig` test). |
 | The JSON exporter is a faithful printer | **Mostly proven (2026-10-07):** the node array it prints is `Air.toDag`, and `dag_correct` (`Dag.lean`) proves that it evaluates, in any commutative ring, to each constraint (`Expr.evalR`; `eval_eq_evalR` links this to `Expr.eval`). What remains trusted is the 7-case `nodeJson` string printer and the Zig JSON parser. Drift check in [status.md](../project/status.md). |
 | Committed `airs/*.json` equals the current Lean definitions | Drift check (regenerate and `cmp`) |
-| The specs in `Spec/*.lean` match Bitcoin Core | `#guard`s on real mainnet values, and Zig tests on mainnet headers. Not proven against Core's C++. **Differentially fuzzed against Core's own code (2026-10-10, `tools/specfuzz`, Core c067aa71):** `SetCompact` (validity and value), `GetCompact`, `CalculateNextWorkRequired` (mainnet domain: previous target ≤ powLimit), `GetBlockProof`, `CheckProofOfWorkImpl` (incl. hashes at target ± 2), `GetMedianTimePast`: 600,000 cases, 0 mismatches. Outside the mainnet domain the retarget diverges only where Core's 256-bit arithmetic wraps (checked case by case); the chain never reaches it, since the previous nBits passed `powOk`. Mainnet constants checked against `chainparams.cpp`. **Block spec too (2026-10-10, `core_block_cases.cpp`):** `CScript::GetSigOpCount(false)`, `ComputeMerkleRoot` with the mutation flag, `CheckTransaction` on Core-serialized transactions (every reason except vin-empty and oversize occurs) and txid/wtxid: 100,000 cases, 0 mismatches (with 150,000 more header cases). Not fuzzed against Core: the version rule, `CheckBlock`/`ContextualCheckBlock` as wholes (they need `ChainstateManager`/`validation.cpp`). |
+| The specs in `Spec/*.lean` match Bitcoin Core | `#guard`s on real mainnet values, and Zig tests on mainnet headers. Not proven against Core's C++. **Differentially fuzzed against Core's own code (2026-10-10, `tools/specfuzz`, Core c067aa71):** `SetCompact` (validity and value), `GetCompact`, `CalculateNextWorkRequired` (mainnet domain: previous target ≤ powLimit), `GetBlockProof`, `CheckProofOfWorkImpl` (incl. hashes at target ± 2), `GetMedianTimePast`: 600,000 cases, 0 mismatches. Outside the mainnet domain the retarget diverges only where Core's 256-bit arithmetic wraps (checked case by case); the chain never reaches it, since the previous nBits passed `powOk`. Mainnet constants checked against `chainparams.cpp`. **Block spec too (2026-10-10, `core_block_cases.cpp`):** `CScript::GetSigOpCount(false)`, `ComputeMerkleRoot` with the mutation flag, `CheckTransaction` on Core-serialized transactions (every reason except vin-empty and oversize occurs) and txid/wtxid: 100,000 cases, 0 mismatches (with 150,000 more header cases). **Connect rules (2026-11-19, `core_connect_cases.cpp`):** `GetSigOpCount(true)`, `GetTransactionSigOpCost` through a `CCoinsViewCache` (legacy, P2SH and witness parts, with and without the script flags), `CalculateSequenceLocks` and `EvaluateSequenceLocks` over a `CBlockIndex` chain: 60,000 cases, 0 mismatches; the fuzzer itself is mutation-tested (`mutate_connect.sh`). Not fuzzed against Core: the version rule, `CheckBlock`/`ContextualCheckBlock` as wholes (they need `ChainstateManager`/`validation.cpp`). |
 | Lean kernel, Mathlib, toolchain | Pinned versions |
 | LogUp soundness: fractions summing to zero for random `(z, α)` ⇒ the relations balance (Schwartz–Zippel over QM31) | **Proven (2026-10-10, `LogUpSZ.lean`):** outside a set of at most `(N²·L + 2N)·|K|` challenge pairs (`N` distinct tuples, length `< L`), denominators are nonzero and a zero sum gives `BalancedExt` (`logup_sz`, `balancedExt_of_poly`), for relations of one arity and ids below `P`. With `N ≤ 2^26`, `L ≤ 32` over QM31 (`|K| ≈ 2^124`) that is below `2^-66` per proof. Still trusted: that the committed batch fractions are the entries' fractions (Stwo's encoding; tested) and that Fiat–Shamir gives `(α, z)` as if uniform (random-oracle model). The arity and id side conditions are discharged by `decide` for the header-tree, block-fields and block-hash systems (`LogUpSZSystems.lean`); public entries must have their relation's arity (one entry, checked by the verifier's construction). |
 | Our LogUp code (`component.zig`, `system.zig`, the plain verifier's LogUp) implements the formula of `logup_sum` | Tested: honest system proofs verify natively and in-circuit; out-of-range values, forged sums and tampered samples are rejected. **In-circuit side proven (2026-10-11):** the plain verifier's LogUp terms are `logup_sum`'s batch constraints at the OODS point (`partTerms_eq`, `row_batch`, `comp_frac_sum` in `Circuit/EndToEnd.lean`). The prover side (`component.zig`, `system.zig`) is not proven; a wrong prover only produces proofs that fail to verify. |

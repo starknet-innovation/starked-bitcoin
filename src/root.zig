@@ -17,6 +17,7 @@ pub const block = struct {
     pub const merkle = @import("block/merkle.zig");
     pub const checks = @import("block/checks.zig");
     pub const walk = @import("block/walk.zig");
+    pub const connect_rules = @import("block/connect_rules.zig");
     pub const ctx = @import("block/ctx.zig");
     pub const wmerkle = @import("block/wmerkle.zig");
     pub const anc = @import("block/anc.zig");

@@ -121,6 +121,7 @@ pub fn main() !void {
     defer arena.deinit();
     const needs_mode = std.posix.getenv("STARKED_SURVEY_NEEDS") != null;
     const bip68_mode = std.posix.getenv("STARKED_SURVEY_BIP68") != null;
+    const rules_mode = std.posix.getenv("STARKED_SURVEY_RULES") != null;
     while (true) {
         _ = arena.reset(.retain_capacity);
         const a = arena.allocator();
@@ -139,6 +140,20 @@ pub fn main() !void {
             try w.flush();
             continue;
         };
+        // STARKED_SURVEY_RULES=1: the native check of CONNECT-RULES (`block/connect_rules.zig`). Prints
+        // `height,sigop_cost,legacy,p2sh,witness,inputs,height_locks,height_failed,time_locks`, then one
+        // line `tl,height,coin_height,lock` per time-based lock, which needs median times past to check.
+        if (rules_mode) {
+            const c = sb.block.connect_rules.blockRules(a, raw, undo, height, true) catch |e| {
+                try w.print("{d},error,{s}\n", .{ height, @errorName(e) });
+                try w.flush();
+                continue;
+            };
+            try w.print("{d},{d},{d},{d},{d},{d},{d},{d},{d}\n", .{ height, sb.block.connect_rules.cost(c.sigops), c.sigops.legacy, c.sigops.p2sh, c.sigops.witness, c.inputs, c.height_locks, c.height_failed, c.time_locks.len });
+            for (c.time_locks) |l| try w.print("tl,{d},{d},{d}\n", .{ height, l.coin_height, l.lock });
+            try w.flush();
+            continue;
+        }
         // STARKED_SURVEY_BIP68=1: print `height,inputs,height_locks,time_locks,time_lock_coin_heights`
         // (non-coinbase inputs; BIP68 locks with a nonzero value in transactions of version >= 2;
         // distinct creation heights among the time-locked inputs' coins), for CONNECT-RULES.

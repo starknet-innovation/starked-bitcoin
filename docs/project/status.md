@@ -4,7 +4,7 @@ Rewritten at the end of every session; see [README.md](README.md#ending-a-sessio
 If `HEAD at last update` doesn't match `git log -1`, this file is stale:
 follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work).
 
-- **Updated:** 2026-11-19 (session 39: Delving feedback, D-053, cost split measured, CONNECT-RULES designed)
+- **Updated:** 2026-11-19 (session 40: CONNECT-RULES step 1 done, D-054, D-055, TIERS-2 simulated, SNAP-HASH proposal)
 - **HEAD at last update:** this session's docs commit on `main` (after 6beafc1)
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
 - **Current item:** WEB-MEMBER is live as an unannounced preview at https://starknet-innovation.github.io/starked-bitcoin/ (set file and index on Cloudflare R2, r2.dev URL; [web/README.md](../../web/README.md) "Live deployment"). Open: custom domain for the bucket, external review before announcing. TIP-ITER not started. NODE-BOOT step 1 done: `chainproof verify-snapshot` ([node-boot.md](../guides/node-boot.md)); Core's `dumptxoutset` at 972,500 VERIFIED against the seal on the node.
@@ -25,11 +25,12 @@ including the seal's composed statement (`seal_soundW`); trusted items in [verif
 
 ## Next step (concrete)
 
-**Owner's order (2026-11-19): A, B, C below come before items 0–3.**
+**Owner's order (2026-11-19): A–D below come before items 0–3.**
 
-A. CONNECT-RULES ([connect-rules.md](../design/connect-rules.md)): BIP68 and the full sigop cost are not proven. Waiting for the owner on two points (the commitment change for time-based locks; finer size tiers, TIERS-2). First work item, no proving cost: `Spec/Coins.lean` gains `seqLocksOk`, a new `sigOpCost` spec next to `legacySigOps` (`Spec/Block.lean`), `tools/specfuzz` cases against Core's `CalculateSequenceLocks` and `GetTransactionSigOpCost`, and a native check of both over the node's 37,500 blocks.
-B. SNAP-HASH: write the canonical snapshot hash proposal (leaf encoding, tree shape, hash function) from [set-membership.md](../design/set-membership.md); the owner posts it on Delving (t/3070).
-C. Re-prove once, after A and B: blocks 935,001–972,500, trees, join, set passes, seal. A from-genesis run is approved in principle (owner), after A.
+A. CONNECT-RULES ([connect-rules.md](../design/connect-rules.md)), step 2 of 5: height-based BIP68 in `block_coin`. The rule is `inputLockOk` in `lean/StarkedAir/Spec/ConnectRules.lean`; the pattern is the maturity check (`lean/StarkedAir/Block/Coin.lean:243`, `in_maturity` in `Block/CoinClaims.lean`, `src/block/coin.zig:521`). Add the input's sequence and its transaction's `version ≥ 2` bit to the `in(tx, start)` relation from `block_fields`, decompose bits 31 and 22 and the 16-bit lock, range-check `h − c − lock`; witness, Lean soundness, negative tests (`src/block/negative.zig`). First check in `verification.md`'s table whether `bad-txns-inputvalues-outofrange` is enforced (marked UNVERIFIED). Then step 3 (sigop cost), 4 (time-based, D-054), 5 (GPU kernels, VKs).
+B. SNAP-HASH: [snapshot-hash.md](../design/snapshot-hash.md) is drafted. The Delving follow-up (`~/Workshop/prove-any-chain/delving-3070-reply3.md`: cost split, the SHA-256/Blake2s correction, the hash proposal) waits for the owner's review and posting. No circuit work before a reaction.
+C. TIERS-2 (D-055): after A's steps 2–4, rerun `scripts/tier_search.py` on new needs (`survey`, `STARKED_SURVEY_NEEDS=1`), add the profile in `src/block/system.zig` (`Profile`, `profileLogs`, `sizesAuto`), time one 2^23 block on a GPU in both profiles.
+D. Re-prove once, after A–C: blocks 935,001–972,500, trees, join, set passes, seal. A from-genesis run is approved in principle (owner), after A.
 
 0. WEB-MEMBER: move the bucket to a custom domain (owner) and update `SET_URL`/`INDEX_URL`; external review before announcing. Upstream: fix stwo-zig `composition_aot_build.zig` (host codegen imports the target `stwo_core`), then move CI back to x86.
 1. TIP-ITER ([roadmap.md](roadmap.md), "Now"): design the repeatable extension of the seal past 972,500:
@@ -42,13 +43,14 @@ C. Re-prove once, after A and B: blocks 935,001–972,500, trees, join, set pass
 ## In flight
 
 - Nothing uncommitted after this session's commit except `AGENTS.md` (not the agent's change). No pod is running.
-- On the node: `/data/bitcoin/utxo-972500.dat` (Core snapshot, 9.4 GB), `~/snap/` (arm64 `chainproof`, seal inputs, `dump.sh`, `dump.log`); keep for NODE-BOOT step 2, delete after. Also in `~/snap/`: `survey`, `survey2`, `pack.py`, `needs.csv`, `bip68.csv` (session 39's measurements; can be deleted).
+- On the node: `/data/bitcoin/utxo-972500.dat` (Core snapshot, 9.4 GB), `~/snap/` (arm64 `chainproof`, seal inputs, `dump.sh`, `dump.log`); keep for NODE-BOOT step 2, delete after. Also in `~/snap/`: `survey`, `survey2`, `survey3`, `pack.py`, `needs.csv`, `bip68.csv`, `rules.csv`, `tlcheck.py`, `tlcheck.out` (sessions 39 and 40's measurements; can be deleted, `needs.csv` is the input of `scripts/tier_search.py`).
 - Mainnet seal inputs and outputs on the Mac under `data/seal972/` (gitignored `data/`): `out/` (D-051
   seal), `outT/` (SEAL-T seal, `sealvk.bin`, copies of the chain file and join VK), `outTamper/` (tamper
   scratch, deletable), the join and tree VKs, the four passes. On the node: the D-051 seal only.
 
 ## Needs owner
 
+- **Delving follow-up** (t/3070): review and post `~/Workshop/prove-any-chain/delving-3070-reply3.md`. It corrects a statement of post 6 (SHA-256 is cheaper than Blake2s in these AIRs, not the reverse), gives the cost split promised to ajtowns and proposes the snapshot hash. Outward-facing.
 - **STWO-225-FU:** follow up on stwo-zig#225 upstream? Outward-facing.
 
 ## Verify the current state

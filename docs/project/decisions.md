@@ -567,3 +567,32 @@ on the proof system and its Lean model. Release only after external review of th
 trust statement.
 Rejected: keeping background validation (safer, but saves nothing at steady state over stock
 assumeUTXO with a hardcoded hash).
+
+
+### D-054 — Time-based BIP68: the claimed median time is committed; the block commitment changes
+Date: 2026-11-19 · By: owner ("I accept") · Status: accepted
+Decision: for each time-locked input the undo stream carries the claimed median time past of the block
+before the spent coin's, so the claim is under the block commitment `C_h` and fixed before the epoch
+challenge; one resolver proof per epoch checks the claims against the header chain
+([connect-rules.md](../design/connect-rules.md), option A).
+Consequence: `C_h` changes for every block, hence the epoch challenges, hence the set passes are redone
+(about $75 each at the 972,500 set's size, 2026-11-03 bill). They are redone anyway by SNAP-HASH and by a
+run from genesis; all changes land in one re-prove.
+Why: a claim that is a free trace value could be chosen after the challenge is known; `LogUpSZ` covers
+only tuples fixed before it (the reason for D-041).
+Rejected: (B) a claims digest folded by the tree (no commitment change, one more digest in every leaf and
+node circuit); (C) per-height MTP in the header tree (re-proves the frozen chain VK, D-036); (D) leaving
+time-based locks unproven.
+
+### D-055 — TIERS-2: try a tighter size profile before the next full re-prove
+Date: 2026-11-19 · By: owner ("Yes let's try") · Status: accepted
+Decision: add a third size profile, closer to what the components need, and use it for the next full
+re-prove if it holds up. The offsets are fixed after CONNECT-RULES, which grows `walk` and `coin`.
+Measured on blocks 935,001–972,500 with the current AIRs
+([report](../reports/2026-11-19-block-cost-split.md), result 4): one profile (`msg`, `bytes` at L−1;
+`walk`, `b2s`, `b2msg`, `undo` at L−4; `fpwalk` at L−3; `fields` L−7; `coin` L−8; `urec` L−9; the Merkle
+components L−10) fits 87 % of the blocks and, with `tiered` as the fallback, proves 40 % fewer cells.
+A second new profile adds one point.
+Cost: Zig only on the proof side (the Lean theorems hold for any size vector under `SizeOk`, D-045); a
+new set of block VKs and leaf circuits, the CUDA arena table, and a GPU timing to confirm that cells
+predict time.
