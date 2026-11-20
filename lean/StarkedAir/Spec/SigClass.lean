@@ -211,4 +211,18 @@ theorem ser_w (o : TxOut) {k : ℕ} (hk : k + 2 < 253) : isW k o.scriptPubKey = 
     · rw [List.getElem?_eq_getElem (by omega), ← h2, List.getD_eq_getElem _ _ (by omega)]
     · rw [List.getElem?_eq_getElem (by omega), ← h3, List.getD_eq_getElem _ _ (by omega)]
 
+theorem serTxOut_len_ge (o : TxOut) : 9 ≤ (serTxOut o).length := by
+  unfold serTxOut serVarBytes serCompact
+  simp only [List.length_append, leBytes_length]
+  split_ifs <;> simp <;> omega
+
+theorem serTxOut_len_small (o : TxOut) (h : o.scriptPubKey.length < 253) :
+    (serTxOut o).length = 9 + o.scriptPubKey.length := by
+  unfold serTxOut serVarBytes serCompact
+  rw [if_pos h]; simp [leBytes_length]; omega
+
+theorem u8_toNat_iff (x : UInt8) {v : ℕ} (hv : v < 256) : x.toNat = v ↔ x = UInt8.ofNat v :=
+  ⟨fun e => UInt8.toNat_inj.mp (by simp [e, UInt8.toNat_ofNat', Nat.mod_eq_of_lt hv]),
+    by rintro rfl; simp [UInt8.toNat_ofNat', Nat.mod_eq_of_lt hv]⟩
+
 end StarkedAir.Spec.ConnectRules
