@@ -51,6 +51,22 @@ theorem sum_filter_split {α : Type} (P P₁ P₂ : α → Prop) [DecidablePred 
       · have : ¬ P a := fun hp => by rcases ha.mp hp with x | x <;> contradiction
         simp [List.filter_cons, this, h1, h2, ih]
 
+/-- A strictly increasing map of `[0, n)` into itself is the identity. -/
+theorem strict_mono_id {n : ℕ} (f : ℕ → ℕ) (hm : ∀ a b, a < b → b < n → f a < f b) (hb : ∀ a < n, f a < n) :
+    ∀ a < n, f a = a := by
+  have lo : ∀ a, a < n → a ≤ f a := by
+    intro a
+    induction a with
+    | zero => intro _; omega
+    | succ a ih => intro h; have := ih (by omega); have := hm a (a + 1) (by omega) h; omega
+  have hi : ∀ d a, a + d + 1 = n → f a ≤ a := by
+    intro d
+    induction d with
+    | zero => intro a h; have := hb a (by omega); omega
+    | succ d ih => intro a h; have := ih (a + 1) (by omega); have := hm a (a + 1) (by omega) (by omega); omega
+  intro a ha
+  have := lo a ha; have := hi (n - a - 1) a (by omega); omega
+
 /-- The witness of the input of transaction `t` that has `v` inputs left (itself included). -/
 def gW (b : Spec.Block.Blk) (t v : ℕ) : List Spec.Block.Bytes :=
   (b.txs[t]?.map fun tx => (tx.vin.map (·.witness)).getD (tx.vin.length - v) []).getD []
@@ -481,6 +497,105 @@ theorem cost_rows (hL8 : 8 ≤ Ls 7) (S : Setup inst pub (Ls 1)) :
       obtain ⟨a, b, c⟩ := Fields.nongin fs (Finset.mem_range.mp hρ) h
       simp [rowCost, Fields.aN, a, b, c]
   exact ⟨D, by rw [← hgin, ← hrows]; omega⟩
+
+/-- **The inputs' rows.** For transaction `t ≥ 1`, the fields row of coin row `pre t + k` (`k` below the
+input count) is input row `k` of the transaction: it carries input `k`, has `nIn − k` inputs left, the
+transaction's index and segwit flag, and the coin row's tuple. -/
+theorem in_rows (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
+    (hon : ∀ j < 2 ^ Ls 14, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
+    (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
+    {parts : List (List Spec.Block.Tok)} (hf : List.Forall₂ Spec.Block.IoTx S.b.txs parts)
+    (htg : Spec.Block.tagged 0 (Fields.toksFrom (inst 1).main (Rb inst pub) S.m 0) = Spec.Block.tagParts 0 parts)
+    {t : ℕ} {tx : Spec.Block.Tx} (htx : S.b.txs[t]? = some tx) (ht1 : 1 ≤ t) :
+    ∀ k < tx.vin.length, ∃ inp, tx.vin[k]? = some inp ∧
+      ((parts.take t).map List.length).sum + k < e ∧
+      (inst 14).main Coin.KI (((parts.take t).map List.length).sum + k) = 1 ∧
+      (ioRows inst S.m).getD (((parts.take t).map List.length).sum + k) 0 < S.m ∧
+      (inst 1).main Fields.K_IN ((ioRows inst S.m).getD (((parts.take t).map List.length).sum + k) 0) = 1 ∧
+      (inst 1).main Fields.TXI ((ioRows inst S.m).getD (((parts.take t).map List.length).sum + k) 0) = (t : F) ∧
+      cIn inst (((parts.take t).map List.length).sum + k) =
+        fIn inst pub (Ls 1) ((ioRows inst S.m).getD (((parts.take t).map List.length).sum + k) 0) ∧
+      Fields.InRow (inst 1).main (Rb inst pub) ((ioRows inst S.m).getD (((parts.take t).map List.length).sum + k) 0) inp ∧
+      ((inst 1).main Fields.INL ((ioRows inst S.m).getD (((parts.take t).map List.length).sum + k) 0)).val + k =
+        tx.vin.length ∧
+      ((inst 1).main Fields.SEG ((ioRows inst S.m).getD (((parts.take t).map List.length).sum + k) 0) = 1 ↔
+        tx.hasWitness = true) := by
+  classical
+  have fs := hash_fields_sat' hL hsat
+  have cs := coin_sat hL hsat hL24
+  have hP : 2 ^ Ls 1 < P := rows_lt_P hL24 (by decide)
+  have hmn := S.hmn
+  set j0 := ((parts.take t).map List.length).sum with hj0
+  set io := ioRows inst S.m with hio
+  have hne : ∀ (t' : ℕ) (tx' : Spec.Block.Tx), S.b.txs[t']? = some tx' → tx'.vin ≠ [] ∧ tx'.vout ≠ [] := by
+    intro t' tx' h
+    have := txs_basic hL hsat hL24 S tx' (List.mem_of_getElem? h)
+    exact ⟨this.1, this.2.1⟩
+  obtain ⟨hrows, -, -, -, -⟩ := tx_rows hL hsat hL24 S he hon hlen hst hf htg hne htx ht1
+  obtain ⟨hpl, hpe⟩ := part_len hf htx
+  -- the transaction's lock-time row and head
+  have htN : t < S.b.txs.length := (List.getElem?_eq_some_iff.mp htx).1
+  obtain ⟨ρl, tx', hρl, hl, hlk, hget, hat⟩ := S.hsurj t htN
+  rw [htx, Option.some.injEq] at hget
+  subst hget
+  obtain ⟨rh, hrh, ht, hnt, htxT⟩ := hat
+  have htxil : (inst 1).main Fields.TXI ρl = (t : F) := by
+    rw [Fields.txi_count fs ρl (by omega), hlk]
+  -- each of its input rows
+  have stepA : ∀ k < tx.vin.length, ∃ i inp, i < tx.vin.length ∧ io.getD (j0 + k) 0 = rh + 1 + i ∧
+      tx.vin[i]? = some inp ∧ j0 + k < e ∧ (inst 14).main Coin.KI (j0 + k) = 1 ∧ io.getD (j0 + k) 0 < S.m ∧
+      (inst 1).main Fields.K_IN (io.getD (j0 + k) 0) = 1 ∧ (inst 1).main Fields.TXI (io.getD (j0 + k) 0) = (t : F) ∧
+      cIn inst (j0 + k) = fIn inst pub (Ls 1) (io.getD (j0 + k) 0) ∧
+      Fields.InRow (inst 1).main (Rb inst pub) (io.getD (j0 + k) 0) inp ∧
+      ((inst 1).main Fields.INL (io.getD (j0 + k) 0)).val + i = tx.vin.length ∧
+      ((inst 1).main Fields.SEG (io.getD (j0 + k) 0) = 1 ↔ tx.hasWitness = true) := by
+    intro k hk
+    obtain ⟨hje, hki, -⟩ := hrows k (by omega)
+    have hki1 : (inst 14).main Coin.KI (j0 + k) = 1 := hki.mpr hk
+    have hkc : (inst 14).main Coin.KI (j0 + k) + (inst 14).main Coin.CBI (j0 + k) = 1 := by
+      rcases Coin.kinds cs (show j0 + k < 2 ^ Ls 14 by omega) with g | g | g | g
+      · rw [g.2.1] at hki1; exact absurd hki1 zero_ne_one
+      · rw [g.2.1, g.2.2.1]; simp
+      · rw [g.2.1] at hki1; exact absurd hki1 zero_ne_one
+      · rw [g.2.1] at hki1; exact absurd hki1 zero_ne_one
+    obtain ⟨hkin, hTXI, hT⟩ := (coin_row_tok hL hsat hL24 S he hon hlen hst hje).2 hkc
+    obtain ⟨t0, q0, tx0, htx0, hT0, hjq0, hq0, -, -⟩ := coin_row_tx hL hsat hL24 S he hon hlen hst hf htg hje
+    obtain ⟨hpl0, hpe0⟩ := part_len hf htx0
+    obtain ⟨rfl, -⟩ := decomp_unique parts hpl hpl0 (by omega) (by omega) (show j0 + k = _ from hjq0)
+    have hρ : io.getD (j0 + k) 0 ∈ io := by
+      rw [List.getD_eq_getElem _ _ (by omega)]; exact List.getElem_mem _
+    obtain ⟨hρm, -⟩ := mem_ioRows.mp hρ
+    have htxi : (inst 1).main Fields.TXI (io.getD (j0 + k) 0) = (t : F) := by rw [← hTXI, hT0]
+    obtain ⟨rh', ρ', tx'', i, inp, hpos, hρ'm, ht', hl', hlt, hat', nolock, notxh, hiv, hinp, hrow, hinl, hseg⟩ :=
+      Fields.in_tx fs (Rb inst pub) S.hcs S.hmn S.hpad S.hfit S.hnp hρm hkin
+    -- its lock-time row is the transaction's
+    have hlk' : locks (inst 1).main ρ' = locks (inst 1).main (io.getD (j0 + k) 0) :=
+      Fields.locks_const (fun j a b => by rw [nolock j (by omega) b]; exact zero_ne_one) (by omega)
+    obtain rfl : ρ' = ρl := Fields.lock_unique fs hP (by omega) (by omega) hl' hl (by
+      rw [htxil, Fields.txi_count fs ρ' (by omega), hlk', ← Fields.txi_count fs _ (by omega), htxi])
+    obtain rfl : rh' = rh := by
+      rcases lt_trichotomy rh' rh with h | h | h
+      · have := notxh rh h (by omega); rw [ht] at this; exact absurd this one_ne_zero
+      · exact h
+      · have := hnt rh' h (by omega); rw [ht'] at this; exact absurd this one_ne_zero
+    have htx'' := S.hidx ρ' (by omega) hl tx'' hat'
+    rw [hlk, htx, Option.some.injEq] at htx''
+    subst htx''
+    exact ⟨i, inp, hiv, hpos, hinp, hje, hki1, hρm, hkin, htxi, hT, hrow, hinl, hseg⟩
+  choose! fi finp hfi using stepA
+  -- the rows are in order, so input row `k` is the `k`-th
+  have hsort : io.Pairwise (· < ·) := ioRows_sorted S.m
+  have hid := strict_mono_id (n := tx.vin.length) fi (fun a b hab hb => by
+      have ha : a < tx.vin.length := by omega
+      obtain ⟨-, pa, -, ja, -⟩ := hfi a ha
+      obtain ⟨-, pb, -, jb, -⟩ := hfi b hb
+      have := List.pairwise_iff_getElem.mp hsort (j0 + a) (j0 + b) (by omega) (by omega) (by omega)
+      rw [← List.getD_eq_getElem _ 0, ← List.getD_eq_getElem _ 0, pa, pb] at this
+      omega) (fun a ha => (hfi a ha).1)
+  intro k hk
+  obtain ⟨-, hpos, hinp, hje, hki1, hρm, hkin, htxi, hT, hrow, hinl, hseg⟩ := hfi k hk
+  rw [hid k hk] at hinp hinl
+  exact ⟨finp k hk, hinp, hje, hki1, hρm, hkin, htxi, hT, hrow, hinl, hseg⟩
 
 end System
 
