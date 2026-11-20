@@ -445,6 +445,124 @@ theorem in_tx (hnp : ∀ r < m, M K_PAD r = 0) {c : ℕ} (hc : c < m) (hk : M K_
   refine ⟨rh', ρ, tx, i, inp, rfl, hρm, ht, hl, hcl, hat, nolock, notxh, hiv, hinp, hrow, hval, ?_⟩
   rw [(tx_const hsat hmn hρm notxh _ (by omega) (by omega)).1]; exact hseg
 
+/-- **A witness stack's input.** A stack's count row lies in a segwit transaction; with `v` stacks left
+(`WINL`, this one included), its items are the witness of input `nIn − v`. -/
+theorem wcnt_tx (hnp : ∀ r < m, M K_PAD r = 0) {c : ℕ} (hc : c < m) (hw : M K_WCNT c = 1) :
+    ∃ rh ρ tx, ρ < m ∧ M K_LOCK ρ = 1 ∧ rh ≤ c ∧ c < ρ ∧ TxAt M R m ρ tx ∧
+      (∀ j, rh ≤ j → j < ρ → M K_LOCK j = 0) ∧ 1 ≤ (M WINL c).val ∧ (M WINL c).val ≤ tx.vin.length ∧
+      stackItems M R m c = (tx.vin.map (·.witness)).getD (tx.vin.length - (M WINL c).val) [] := by
+  have hcn : c < n := by omega
+  have ku : ∀ b < 9, K_WCNT ≠ b → M b c = 0 := fun b hb hne =>
+    kind_unique hsat hcn (a := K_WCNT) (b := b) (by simp [K_WCNT]) hb hne hw
+  have ne1 : ∀ {b : ℕ}, b < 9 → K_WCNT ≠ b → M b c = 1 → False := fun hb hne h => by
+    rw [ku _ hb hne] at h; exact zero_ne_one h
+  have hc1 : 1 ≤ c := by
+    rcases Nat.eq_zero_or_pos c with rfl | h
+    · exact (ne1 (by simp [K_BLK]) (by simp [K_WCNT, K_BLK]) (first_blk hsat (by omega))).elim
+    · exact h
+  obtain ⟨rh, ρ, tx, hle, hcρ, hρm, ht, hl, htx, notxh, nolock⟩ := row_tx hsat R hcs hmn hpad hfit hnp hc1 hc
+  have hrc : rh < c := by
+    rcases Nat.eq_or_lt_of_le hle with e | e
+    · exact (ne1 (by simp [K_TXH]) (by simp [K_WCNT, K_TXH]) (e ▸ ht)).elim
+    · exact e
+  have hcl : c < ρ := by
+    rcases Nat.eq_or_lt_of_le hcρ with e | e
+    · exact (ne1 (by simp [K_LOCK]) (by simp [K_WCNT, K_LOCK]) (e ▸ hl)).elim
+    · exact e
+  have hat : TxAt M R m ρ tx := ⟨rh, by omega, ht, notxh, htx⟩
+  obtain ⟨rh', hrh', ht', hnt', hvl, -, hins, hno, -, houts, hwr, -, -, hle2⟩ :=
+    tx_rows hsat R hcs hmn hpad hfit hat hρm
+  obtain rfl : rh' = rh := by
+    rcases lt_trichotomy rh' rh with h | h | h
+    · have := hnt' rh h (by omega); rw [ht] at this; exact absurd this one_ne_zero
+    · exact h
+    · have := notxh rh' h (by omega); rw [ht'] at this; exact absurd this one_ne_zero
+  -- the row is in the witness section
+  have hcw : rh' + 2 + tx.vin.length + tx.vout.length ≤ c := by
+    by_contra hcon
+    rcases Nat.lt_or_ge c (rh' + 1 + tx.vin.length) with a | a
+    · obtain ⟨inp, -, hrow⟩ := hins (c - (rh' + 1)) (by omega)
+      have := hrow.kind
+      rw [show rh' + 1 + (c - (rh' + 1)) = c by omega] at this
+      exact ne1 (by simp [K_IN]) (by simp [K_WCNT, K_IN]) this
+    rcases Nat.lt_or_ge c (rh' + 2 + tx.vin.length) with b | b
+    · have : c = rh' + 1 + tx.vin.length := by omega
+      exact ne1 (by simp [K_NOUT]) (by simp [K_WCNT, K_NOUT]) (this ▸ hno)
+    · obtain ⟨out, -, hrow⟩ := houts (c - (rh' + 2 + tx.vin.length)) (by omega)
+      have := hrow.kind
+      rw [show rh' + 2 + tx.vin.length + (c - (rh' + 2 + tx.vin.length)) = c by omega] at this
+      exact ne1 (by simp [K_OUT]) (by simp [K_WCNT, K_OUT]) this
+  -- the transaction's tokens
+  have htx' := htx
+  rw [toksFrom_cons (show rh' < m by omega), tok_txh hsat R hcs hmn hpad hfit (by omega) ht] at htx'
+  obtain ⟨pin, k', pout, pw, l, hsplit, hpl, hpo, hvl', hol, h1n, -, -, -, -, -, hnseg, hsegT⟩ :=
+    Spec.Block.txT_vals htx'
+  have hlen := congrArg List.length hsplit
+  simp only [toksFrom_length, List.length_append, List.length_cons] at hlen
+  set rw0 := rh' + 2 + tx.vin.length + tx.vout.length with hrw0
+  have hρ : ρ = rw0 + pw.length := by omega
+  have hsegt : decide (M SEG rh' = 1) = true := by
+    by_contra hs
+    rw [Bool.not_eq_true] at hs
+    have := (hnseg hs).1
+    rw [this] at hρ; simp at hρ; omega
+  obtain ⟨-, ws, hws', hmap⟩ := hsegT hsegt
+  have hd : toksFrom M R m rw0 = pw ++ .lock l :: toksFrom M R m (ρ + 1) := by
+    rw [show rw0 = rh' + 1 + (pin.length + 1 + pout.length) by omega, ← toksFrom_drop (by omega), hsplit]
+    rw [show pin.length + 1 + pout.length = (pin ++ [Spec.Block.Tok.nout k'] ++ pout).length by simp; omega]
+    rw [show pin ++ Spec.Block.Tok.nout k' :: (pout ++ (pw ++ .lock l :: toksFrom M R m (ρ + 1))) =
+      (pin ++ [Spec.Block.Tok.nout k'] ++ pout) ++ (pw ++ .lock l :: toksFrom M R m (ρ + 1)) by simp, List.drop_left]
+  have hlk : toksFrom M R m ρ = .lock l :: toksFrom M R m (ρ + 1) := by
+    have e := toksFrom_drop (M := M) (R := R) (m := m) (r := rw0) (j := pw.length) (by omega)
+    rw [hd, List.drop_left, ← hρ] at e; exact e.symm
+  have hws : Spec.Block.witsT (M VAL rh').val (toksFrom M R m rw0) = some (ws, toksFrom M R m ρ) := by
+    rw [hd, hlk]; exact hws'
+  have hnin : 1 ≤ (M VAL rh').val := h1n
+  -- the section starts with a stack
+  have hw0 : M K_WCNT rw0 = 1 := by
+    rcases hwr rw0 le_rfl (by omega) with g | g
+    · exact g
+    · exfalso
+      obtain ⟨n', hn'⟩ : ∃ n', (M VAL rh').val = n' + 1 := ⟨(M VAL rh').val - 1, by omega⟩
+      rw [toksFrom_cons (show rw0 < m by omega), tok_witem hsat R hcs hmn hpad hfit (by omega) g, hn'] at hws
+      simp [Spec.Block.witsT] at hws
+  -- with every input's stack left
+  have hwinl : (M WINL rw0).val = (M VAL rh').val := by
+    have hb : rw0 - 1 + 1 < n := by omega
+    have hbn : rw0 - 1 < n := by omega
+    have hkb : M K_NOUT (rw0 - 1) + M K_OUT (rw0 - 1) = 1 ∧ M K_WCNT (rw0 - 1) + M K_WITEM (rw0 - 1) = 0 := by
+      rcases Nat.eq_zero_or_pos tx.vout.length with z | z
+      · have e : rw0 - 1 = rh' + 1 + tx.vin.length := by omega
+        rw [e]
+        have ka := kinds_at hsat (show rh' + 1 + tx.vin.length < n by omega) (a := K_NOUT) (by simp [K_NOUT]) hno
+        rw [hno, ka K_OUT (by simp [K_OUT]), ka K_WCNT (by simp [K_WCNT]), ka K_WITEM (by simp [K_WITEM])]
+        simp [K_NOUT, K_OUT, K_WCNT, K_WITEM]
+      · obtain ⟨out, -, hrow⟩ := houts (tx.vout.length - 1) (by omega)
+        have hko := hrow.kind
+        rw [show rh' + 2 + tx.vin.length + (tx.vout.length - 1) = rw0 - 1 by omega] at hko
+        have ka := kinds_at hsat hbn (a := K_OUT) (by simp [K_OUT]) hko
+        rw [hko, ka K_NOUT (by simp [K_NOUT]), ka K_WCNT (by simp [K_WCNT]), ka K_WITEM (by simp [K_WITEM])]
+        simp [K_NOUT, K_OUT, K_WCNT, K_WITEM]
+    have t := (trans_all hsat hb).2.2.2.2.1
+    rw [show rw0 - 1 + 1 = rw0 by omega, hw0, esc_eq hsat hbn, hkb.2, eoc_eq hsat hbn, hkb.1] at t
+    have heoc : M EOC (rw0 - 1) = 1 := by
+      rw [eoc_eq hsat hbn, hkb.1, one_mul]
+      rcases (z1_spec hsat hbn).1 with z | z
+      · rw [z] at t; simp at t
+      · exact z
+    have := (counters hsat hb).2.2.2.2.1 heoc
+    rw [show rw0 - 1 + 1 = rw0 by omega] at this
+    rw [this, (tx_const hsat hmn hρm notxh rw0 (by omega) (by omega)).2,
+      ((row_sets hsat (show rh' < n by omega)).2.1 ht).2.1]
+  obtain ⟨r'', hr'', hr''m, hrest, hall⟩ := wits_rows hsat R hcs hmn hpad hfit ((M VAL rh').val - 1) rw0 (by omega) hw0
+    (by rw [hwinl]; omega) ws (toksFrom M R m ρ) (by rw [show (M VAL rh').val - 1 + 1 = (M VAL rh').val by omega]; exact hws)
+  have hrr : r'' = ρ := by
+    have := congrArg List.length hrest
+    simp only [toksFrom_length] at this; omega
+  obtain ⟨a, b, e⟩ := hall c hcw (by omega) hw
+  rw [show (M VAL rh').val - 1 + 1 = (M VAL rh').val by omega, ← hvl] at b e
+  exact ⟨rh', ρ, tx, hρm, hl, hle, hcl, hat, nolock, a, b, by rw [hmap]; exact e⟩
+
 end Wits
 
 end StarkedAir.Block.Fields
