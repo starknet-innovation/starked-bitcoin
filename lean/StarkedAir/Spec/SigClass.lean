@@ -225,4 +225,72 @@ theorem u8_toNat_iff (x : UInt8) {v : ℕ} (hv : v < 256) : x.toNat = v ↔ x = 
   ⟨fun e => UInt8.toNat_inj.mp (by simp [e, UInt8.toNat_ofNat', Nat.mod_eq_of_lt hv]),
     by rintro rfl; simp [UInt8.toNat_ofNat', Nat.mod_eq_of_lt hv]⟩
 
+/-! ### The count as two flags -/
+
+theorem isW_excl {s : Bytes} (h : isW 20 s = true) : isW 32 s = false := by
+  rw [Bool.eq_false_iff]; intro h'
+  have a := ((isW_iff 20 s).mp h).1
+  have b := ((isW_iff 32 s).mp h').1
+  omega
+
+theorem p2sh_not_w {s : Bytes} (h : isP2SH s = true) (k : ℕ) (hk : k ≠ 21) : isW k s = false := by
+  rw [Bool.eq_false_iff]; intro h'
+  have a := ((isW_iff k s).mp h').1
+  simp only [isP2SH, Bool.and_eq_true, beq_iff_eq] at h
+  omega
+
+/-- The 20-byte program flags of an input: the spent script's, and the redeem script's under P2SH. -/
+def w20Of (sig spent : Bytes) : ℕ :=
+  (if isW 20 spent then 1 else 0) + (if isP2SH spent && pushOnly sig && isW 20 (lastPush sig) then 1 else 0)
+
+/-- The 32-byte program flags of an input. -/
+def n32Of (sig spent : Bytes) : ℕ :=
+  (if isW 32 spent then 1 else 0) + (if isP2SH spent && pushOnly sig && isW 32 (lastPush sig) then 1 else 0)
+
+theorem w20Of_le (sig spent : Bytes) : w20Of sig spent ≤ 1 := by
+  unfold w20Of
+  by_cases a : isW 20 spent = true
+  · have hp : isP2SH spent = false := by
+      by_contra hc; rw [Bool.not_eq_false] at hc
+      rw [p2sh_not_w hc 20 (by norm_num)] at a; exact absurd a (by simp)
+    simp [a, hp]
+  · simp only [a, Bool.false_eq_true, if_false, zero_add]; split_ifs <;> omega
+
+theorem n32Of_le (sig spent : Bytes) : n32Of sig spent ≤ 1 := by
+  unfold n32Of
+  by_cases a : isW 32 spent = true
+  · have hp : isP2SH spent = false := by
+      by_contra hc; rw [Bool.not_eq_false] at hc
+      rw [p2sh_not_w hc 32 (by norm_num)] at a; exact absurd a (by simp)
+    simp [a, hp]
+  · simp only [a, Bool.false_eq_true, if_false, zero_add]; split_ifs <;> omega
+
+/-- **`CountWitnessSigOps` as two flags**: one for a 20-byte program, and the witness script's count
+for a 32-byte program. -/
+theorem count_split (sig spent : Bytes) (wit : List Bytes) :
+    countWitnessSigOps sig spent wit = w20Of sig spent + n32Of sig spent * lastAcc wit := by
+  rw [countWitness_eq]
+  unfold w20Of n32Of
+  by_cases a : isW 20 spent = true
+  · have hp : isP2SH spent = false := by
+      by_contra hc; rw [Bool.not_eq_false] at hc
+      rw [p2sh_not_w hc 20 (by norm_num)] at a; exact absurd a (by simp)
+    simp [a, hp, isW_excl a]
+  by_cases b : isW 32 spent = true
+  · have hp : isP2SH spent = false := by
+      by_contra hc; rw [Bool.not_eq_false] at hc
+      rw [p2sh_not_w hc 32 (by norm_num)] at b; exact absurd b (by simp)
+    simp [a, b, hp]
+  by_cases c : (isP2SH spent && pushOnly sig) = true
+  · by_cases d : isW 20 (lastPush sig) = true
+    · simp [a, b, c, d, isW_excl d]
+    · by_cases e : isW 32 (lastPush sig) = true
+      · simp [a, b, c, d, e]
+      · simp [a, b, c, d, e]
+  · simp [a, b, c]
+
+theorem lastPush_nil : lastPush [] = [] := by simp [lastPush, opsD]
+
+theorem acc_nil : sigOpsAccurate [] = 0 := by simp [sigOpsAccurate, ops, accGo]
+
 end StarkedAir.Spec.ConnectRules
