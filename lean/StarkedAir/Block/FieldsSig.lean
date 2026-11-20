@@ -340,6 +340,63 @@ theorem req_bools {r : ℕ} (hr : r < n) :
     rw [this]
     exact hb (hb ki (hb ws (z1_spec hsat hr).1)) (om zv)
 
+omit R in
+/-- A row that is no non-coinbase input has no redeem request and adds nothing to the two flags. -/
+theorem nongin {r : ℕ} (hr : r < n) (h : M GIN r ≠ 1) :
+    M ARQ r = 0 ∧ M GIN r * M CW20 r + M RW20 r = 0 ∧ M N32 r = 0 := by
+  obtain ⟨dNZI, dAR0, -, -, -, -, -, dN32, -⟩ := sig_defs hsat hr
+  have hgin := chk_defn hsat (a := GIN) (e := .mul (k K_IN) (oneMinus (k ZT))) (by simp [chkC, prevoutC]) hr
+  simp only [Expr.eval, oneMinus, one, ev_k hr, eval_cst, Nat.cast_one] at hgin
+  have zt := chk_bool hsat (e := ZT) (by simp [chkC, prevoutC]) hr
+  have kin := kind_bool hsat (c := K_IN) (by simp [kinds, K_IN]) hr
+  have g0 : M GIN r = 0 := by
+    rcases kin with a | a <;> rcases zt with b | b <;> rw [hgin, a, b] at h ⊢ <;> simp at h ⊢
+  obtain ⟨a, b, c'⟩ := no_redeem hsat hr (by rw [dAR0, dNZI, g0]; ring)
+  exact ⟨a, by rw [g0, b]; ring, by rw [dN32, g0, c']; ring⟩
+
+omit R in
+/-- A row's addition to the 20-byte program count is a natural of at most 2. -/
+theorem w20_term {r : ℕ} (hr : r < n) : M GIN r * M CW20 r + M RW20 r =
+    (((M GIN r * M CW20 r + M RW20 r).val : ℕ) : F) ∧ (M GIN r * M CW20 r + M RW20 r).val ≤ 2 := by
+  have hgin := chk_defn hsat (a := GIN) (e := .mul (k K_IN) (oneMinus (k ZT))) (by simp [chkC, prevoutC]) hr
+  simp only [Expr.eval, oneMinus, one, ev_k hr, eval_cst, Nat.cast_one] at hgin
+  have zt := chk_bool hsat (e := ZT) (by simp [chkC, prevoutC]) hr
+  have kin := kind_bool hsat (c := K_IN) (by simp [kinds, K_IN]) hr
+  have cw := bool_of hsat (mem_sig (c := boolC (k CW20)) (by simp [sigC])) hr
+  have rw := bool_of hsat (mem_sig (c := boolC (k RW20)) (by simp [sigC])) hr
+  have x01 : M GIN r * M CW20 r = 0 ∨ M GIN r * M CW20 r = 1 := by
+    rw [hgin]
+    rcases zt with a | a <;> rcases kin with b | b <;> rcases cw with d | d <;> simp [a, b, d]
+  refine ⟨(ZMod.natCast_zmod_val _).symm, ?_⟩
+  rcases x01 with x | x <;> rcases rw with e | e <;> rw [x, e]
+  · simp
+  · simp [ZMod.val_one]
+  · simp [ZMod.val_one]
+  · rw [show (1 : F) + 1 = ((2 : ℕ) : F) by norm_num, ZMod.val_natCast_of_lt (by unfold P; norm_num)]
+
+omit R in
+/-- **The 20-byte program count** is the sum of the rows' additions. -/
+theorem w20_sum : ∀ r < n, M W20S r = ∑ j ∈ Finset.range (r + 1), (M GIN j * M CW20 j + M RW20 j) := by
+  intro r
+  induction r with
+  | zero =>
+    intro h0
+    have c1 := sat hsat (mem_sig (c := .mul first (k W20S)) (by simp [sigC])) h0
+    simp only [Expr.eval, ev_first h0, if_true, one_mul, ev_k h0] at c1
+    have hk : M K_IN 0 = 0 :=
+      (kinds_at hsat h0 (a := K_BLK) (by simp [K_BLK]) (first_blk hsat h0) K_IN (by simp [K_IN])).trans
+        (by simp [K_BLK, K_IN])
+    have hgin := chk_defn hsat (a := GIN) (e := .mul (k K_IN) (oneMinus (k ZT))) (by simp [chkC, prevoutC]) h0
+    simp only [Expr.eval, oneMinus, one, ev_k h0, eval_cst, Nat.cast_one] at hgin
+    have := (nongin hsat h0 (by rw [hgin, hk]; simp)).2.1
+    rw [c1]; simp [this]
+  | succ r ih =>
+    intro hr
+    have c1 := sat hsat (mem_sig (c := .mul notFirst (.sub (.sub (.sub (k W20S) (kp W20S)) (.mul (k GIN) (k CW20)))
+      (k RW20))) (by simp [sigC])) hr
+    simp only [Expr.eval, ev_notFirst hr, one_mul, ev_k hr, ev_kp hr] at c1
+    rw [Finset.sum_range_succ, ← ih (by omega)]; linear_combination c1
+
 end Sig
 
 end StarkedAir.Block.Fields

@@ -55,6 +55,14 @@ theorem sum_filter_split {α : Type} (P P₁ P₂ : α → Prop) [DecidablePred 
 def gW (b : Spec.Block.Blk) (t v : ℕ) : List Spec.Block.Bytes :=
   (b.txs[t]?.map fun tx => (tx.vin.map (·.witness)).getD (tx.vin.length - v) []).getD []
 
+/-- A fields row's cost: its requested redeem script (weight 4), its 20-byte program flags, and, if it
+requests its witness stack, the accurate count of the stack's last item. -/
+noncomputable def rowCost (inst : ℕ → Inst) (pub : ℕ → F) (b : Spec.Block.Blk) (ρ : ℕ) : ℕ :=
+  Fields.aN (inst 1).main (Rb inst pub) ρ +
+    ((inst 1).main Fields.GIN ρ * (inst 1).main Fields.CW20 ρ + (inst 1).main Fields.RW20 ρ).val +
+    (if (inst 1).main Fields.N32 ρ * (inst 1).main Fields.SEG ρ = 1 then
+      lastAcc (gW b ((inst 1).main Fields.TXI ρ).val ((inst 1).main Fields.INL ρ).val) else 0)
+
 section System
 
 variable {inst : ℕ → Inst} {pub : ℕ → F} {Ls : ℕ → ℕ}
@@ -375,6 +383,104 @@ theorem wq_total (S : Setup inst pub (Ls 1)) :
     by_cases hws : (inst 1).main Fields.WS c = 1
     · rw [if_pos ⟨rfl, hws⟩, if_pos hws, key c hcm k1]
     · rw [if_neg (fun h => hws h.2), if_neg hws]
+
+/-- **The context's check, by rows.** With `s` the block's legacy sigops: `4·s` plus the costs of the
+non-coinbase input rows, plus a slack, is 80,000. -/
+theorem cost_rows (hL8 : 8 ≤ Ls 7) (S : Setup inst pub (Ls 1)) :
+    ∃ D : ℕ, 4 * (S.b.txs.map Spec.Block.legacySigOps).sum +
+      ∑ ρ ∈ (Finset.range (2 ^ Ls 1)).filter (fun ρ => (inst 1).main Fields.GIN ρ = 1), rowCost inst pub S.b ρ +
+      D = 80000 := by
+  classical
+  obtain ⟨A, w, D, hsum, eA, ew⟩ := sigops_nat hL hsat hL24 hL8 S
+  have fs := hash_fields_sat' hL hsat
+  have ws : ∀ r < 2 ^ Ls 6, ∀ c ∈ Walk.constraints, c.eval (2 ^ Ls 6) Walk.preCols pub (inst 6).main r = 0 := by
+    have := hsat.1 6 (by decide); rw [hL 6 (by decide)] at this; exact this
+  obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
+  have hlen := len_R hL hsat hL24 (inst := inst) (pub := pub)
+  have hP : P = 2147483647 := rfl
+  have hmn := S.hmn
+  -- the walker's total
+  obtain ⟨hA1, hA2⟩ := Walk.total_acc_nat ws (walk_opc hL hsat hL24) (fun r hr ho => by
+      obtain ⟨-, -, -, -, -, -, a7, a8, a9⟩ := walk_opc_all hL hsat hL24 r hr ho
+      exact ⟨a7, a8, a9⟩) (walk_r8 hL hsat hL24) (Rb inst pub) (walk_read hL hsat hL24) (by omega)
+    (walk_rem hL hsat hL24 S) (by positivity) rb6
+  have hAA := natCast_inj_of_lt (by omega) (by omega) (eA.symm.trans hA1)
+  -- as the fields' requests
+  set g : List F → ℕ := fun v => (if v.getD 2 0 = 1 then 4 else 1) *
+    sigOpsAccurate (slice (Rb inst pub) (v.getD 0 0).val (v.getD 1 0).val) with hg
+  have step1 : ∑ f ∈ (Finset.range (2 ^ Ls 6)).filter (fun f => (inst 6).main Walk.FS f = 1),
+      ((inst 6).main Walk.AC f + 3 * (inst 6).main Walk.W4 f).val *
+        sigOpsAccurate (slice (Rb inst pub) ((inst 6).main Walk.POS f).val ((inst 6).main Walk.REM f).val) =
+      ∑ f ∈ (Finset.range (2 ^ Ls 6)).filter (fun f => (inst 6).main Walk.FS f * (inst 6).main Walk.AC f = 1),
+        g [(inst 6).main Walk.POS f, (inst 6).main Walk.REM f, (inst 6).main Walk.W4 f] := by
+    rw [Finset.sum_filter, Finset.sum_filter]
+    refine Finset.sum_congr rfl (fun f hf => ?_)
+    have hfr := Finset.mem_range.mp hf
+    have c := Walk.sat ws (Walk.mem_acc (c := .mul (Walk.k Walk.W4) (Walk.om (Walk.k Walk.AC))) (by simp [Walk.accC])) hfr
+    simp only [Expr.eval, Walk.ev_k hfr, Walk.om, Walk.one, StarkedAir.Sha256.eval_cst, Nat.cast_one] at c
+    simp only [hg, List.getD_cons_zero, List.getD_cons_succ]
+    rcases Walk.bool ws (c := Walk.FS) (by simp [Walk.bools]) hfr with a | a
+    · simp [a]
+    rcases Walk.acc_bool ws (c := Walk.AC) (by simp [Walk.accC]) hfr with b | b
+    · have d : (inst 6).main Walk.W4 f = 0 := by rw [b] at c; simpa using c
+      simp [a, b, d]
+    rcases Walk.acc_bool ws (c := Walk.W4) (by simp [Walk.accC]) hfr with d | d
+    · simp [a, b, d, ZMod.val_one]
+    · have h4 : ((1 : F) + 3).val = 4 := by
+        rw [show (1 : F) + 3 = ((4 : ℕ) : F) by norm_num, ZMod.val_natCast_of_lt (by unfold P; norm_num)]
+      simp [a, b, d, h4]
+  have step2 := aspan_sum hL hsat hL24 g
+  have step3 : ∑ r ∈ (Finset.range (2 ^ Ls 1)).filter (fun r => (inst 1).main Fields.ARQ r = 1),
+      g [(inst 1).main Fields.SRS r, (inst 1).main Fields.SRL r, 1] =
+      ∑ r ∈ Finset.range (2 ^ Ls 1), Fields.aN (inst 1).main (Rb inst pub) r := by
+    rw [Finset.sum_filter]
+    refine Finset.sum_congr rfl (fun r _ => ?_)
+    simp [hg, Fields.aN]
+  have step4 : ∑ r ∈ (Finset.range (2 ^ Ls 1)).filter
+        (fun r => (inst 1).main Fields.WQ r * (1 - (inst 1).main Fields.ZV r) = 1),
+      g [(inst 1).main Fields.SSC r, (inst 1).main Fields.VAL r, 0] =
+      ∑ r ∈ Finset.range S.m, Fields.qN (inst 1).main (Rb inst pub) r := by
+    rw [Finset.sum_filter, ← Finset.sum_range_add_sum_Ico _ (show S.m ≤ 2 ^ Ls 1 by omega)]
+    have hz : ∑ r ∈ Finset.Ico S.m (2 ^ Ls 1), (if (inst 1).main Fields.WQ r * (1 - (inst 1).main Fields.ZV r) = 1
+        then g [(inst 1).main Fields.SSC r, (inst 1).main Fields.VAL r, 0] else 0) = 0 := by
+      apply Finset.sum_eq_zero
+      intro r hr
+      obtain ⟨h1, h2⟩ := Finset.mem_Ico.mp hr
+      have hk := Fields.kinds_at fs h2 (a := Fields.K_PAD) (by simp [Fields.K_PAD]) (S.hpad r h2 h1) Fields.K_WITEM
+        (by simp [Fields.K_WITEM])
+      rw [if_neg]
+      rw [Fields.wq_eq fs h2, hk]; simp [Fields.K_WITEM, Fields.K_PAD]
+    rw [hz, add_zero]
+    refine Finset.sum_congr rfl (fun r _ => ?_)
+    simp [hg, Fields.qN]
+  -- the 20-byte program count
+  have hn1 : 2 ^ Ls 1 - 1 < 2 ^ Ls 1 := Nat.sub_lt (by positivity) (by norm_num)
+  have hw1 : (inst 1).main Fields.W20S (2 ^ Ls 1 - 1) = ((∑ j ∈ Finset.range (2 ^ Ls 1),
+      ((inst 1).main Fields.GIN j * (inst 1).main Fields.CW20 j + (inst 1).main Fields.RW20 j).val : ℕ) : F) := by
+    rw [Fields.w20_sum fs _ hn1, show 2 ^ Ls 1 - 1 + 1 = 2 ^ Ls 1 by omega]
+    push_cast
+    exact Finset.sum_congr rfl (fun j hj => (Fields.w20_term fs (Finset.mem_range.mp hj)).1)
+  have hw2 : ∑ j ∈ Finset.range (2 ^ Ls 1),
+      ((inst 1).main Fields.GIN j * (inst 1).main Fields.CW20 j + (inst 1).main Fields.RW20 j).val ≤ 2 * 2 ^ Ls 1 := by
+    calc _ ≤ ∑ j ∈ Finset.range (2 ^ Ls 1), 2 :=
+          Finset.sum_le_sum (fun j hj => (Fields.w20_term fs (Finset.mem_range.mp hj)).2)
+      _ = 2 * 2 ^ Ls 1 := by simp [mul_comm]
+  have hww := natCast_inj_of_lt (by omega) (by omega) (ew.symm.trans hw1)
+  -- all together, row by row
+  have hrows : A + w = ∑ ρ ∈ Finset.range (2 ^ Ls 1), rowCost inst pub S.b ρ := by
+    rw [hAA, step1, step2, step3, step4, wq_total hL hsat hL24 S, hww, Finset.sum_filter]
+    simp only [rowCost, Finset.sum_add_distrib]
+    ring
+  have hgin : ∑ ρ ∈ Finset.range (2 ^ Ls 1), rowCost inst pub S.b ρ =
+      ∑ ρ ∈ (Finset.range (2 ^ Ls 1)).filter (fun ρ => (inst 1).main Fields.GIN ρ = 1), rowCost inst pub S.b ρ := by
+    rw [Finset.sum_filter]
+    refine Finset.sum_congr rfl (fun ρ hρ => ?_)
+    by_cases h : (inst 1).main Fields.GIN ρ = 1
+    · rw [if_pos h]
+    · rw [if_neg h]
+      obtain ⟨a, b, c⟩ := Fields.nongin fs (Finset.mem_range.mp hρ) h
+      simp [rowCost, Fields.aN, a, b, c]
+  exact ⟨D, by rw [← hgin, ← hrows]; omega⟩
 
 end System
 
