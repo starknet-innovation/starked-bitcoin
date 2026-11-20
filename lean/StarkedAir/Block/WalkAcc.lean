@@ -831,6 +831,116 @@ theorem span_out {f L : ℕ} (hf : f < n) (hfs : M FS f = 1) (hrem : (M REM f).v
     refine ⟨?_, fun h => absurd rfl h⟩
     rw [hdt0] at crl; simpa using crl
 
+omit hopc hopc2 hr8 hread hR in
+/-- **A sum over the rows is a sum over the spans** (any commutative monoid): `g` zero on inactive rows
+and summing to `h f` over the span from each first row `f`. -/
+theorem span_sum {β : Type} [AddCommMonoid β] (g h : ℕ → β)
+    (hin : ∀ j < n, M ACT j = 0 → g j = 0)
+    (hseg : ∀ f < n, M FS f = 1 → ∑ j ∈ Finset.range (M REM f).val, g (f + j) = h f)
+    (hrem : ∀ r < n, M FS r = 1 → 1 ≤ (M REM r).val ∧ (M REM r).val ≤ 2 ^ 25) (hn : 0 < n) :
+    ∑ j ∈ Finset.range n, g j = ∑ f ∈ (Finset.range n).filter (fun f => M FS f = 1), h f := by
+  have claim : ∀ d f, n - f = d → f ≤ n → (M ACT f = 0 ∨ M FS f = 1) →
+      ∑ j ∈ Finset.Ico f n, g j = ∑ j ∈ Finset.Ico f n, (if M FS j = 1 then h j else 0) := by
+    intro d
+    induction d using Nat.strong_induction_on with
+    | _ d ih =>
+      intro f hd hfn hc
+      rcases Nat.eq_or_lt_of_le hfn with rfl | hfn'
+      · simp
+      rcases hc with h0 | hfs
+      · have z := inactive hsat hfn' h0
+        rw [Finset.sum_eq_zero (fun j hj => hin j (Finset.mem_Ico.mp hj).2
+            (z j (Finset.mem_Ico.mp hj).1 (Finset.mem_Ico.mp hj).2).1),
+          Finset.sum_eq_zero (fun j hj => by
+            rw [if_neg (by rw [(z j (Finset.mem_Ico.mp hj).1 (Finset.mem_Ico.mp hj).2).2.2]; exact zero_ne_one)])]
+      · obtain ⟨-, hfa, -⟩ := kinds hsat hfn'
+        have ha : M ACT f = 1 := by rw [hfs] at hfa; linear_combination -hfa
+        obtain ⟨hL1, hL⟩ := hrem f hfn' hfs
+        have seg := hseg f hfn' hfs
+        set L := (M REM f).val
+        obtain ⟨cont', zrl, -, hfl⟩ := seg_rows hsat L f hfn' ha rfl hL1 hL
+        have nxt : M ACT (f + L) = 0 ∨ M FS (f + L) = 1 := by
+          have hi : f + L - 1 + 1 < n := by omega
+          have c := sat hsat (mem_step (c := .mul (k GC) (kp ZR)) (by simp [stepC])) hi
+          simp only [Expr.eval, ev_k hi, ev_kp hi, zrl, mul_one] at c
+          rw [show f + L - 1 + 1 = f + L by omega] at c
+          have gc := (defs hsat (show f + L < n by omega)).2.2.2.2.2.2.2.2.2.2.2.2.2.2.2.2.2.2
+          rw [c] at gc
+          rcases bool hsat (c := ACT) (by simp [bools]) (show f + L < n by omega) with a0 | a1
+          · exact Or.inl a0
+          · rw [a1, one_mul] at gc
+            exact Or.inr (by linear_combination gc)
+        have ih' := ih (n - (f + L)) (by omega) (f + L) rfl (by omega) nxt
+        rw [← Finset.sum_Ico_consecutive _ (show f ≤ f + L by omega) (show f + L ≤ n by omega),
+          ← Finset.sum_Ico_consecutive (fun j => if M FS j = 1 then h j else 0) (show f ≤ f + L by omega)
+            (show f + L ≤ n by omega), ih']
+        congr 1
+        rw [Finset.sum_Ico_eq_sum_range, Finset.sum_Ico_eq_sum_range, show f + L - f = L by omega, seg]
+        rw [Finset.sum_eq_single 0]
+        · simp [hfs]
+        · intro j hj hj0
+          have hjL := Finset.mem_range.mp hj
+          have gcj := cont' j (by omega) hjL
+          have := (defs hsat (show f + j < n by omega)).2.2.2.2.2.2.2.2.2.2.2.2.2.2.2.2.2.2
+          rw [gcj] at this
+          rw [if_neg]
+          intro hfs'
+          rw [hfs', sub_self, mul_zero] at this; exact one_ne_zero this
+        · intro h0; exact absurd (Finset.mem_range.mpr (by omega)) h0
+  have hc := claim n 0 (by simp) (by omega) (by
+    have c := sat hsat (mem_script (c := .mul first (.mul (k ACT) (om (k FS)))) (by simp [scriptC])) hn
+    simp only [Expr.eval, ev_first hn, if_true, one_mul, ev_k hn, om, one, eval_cst, Nat.cast_one] at c
+    rcases mul_eq_zero.mp c with h | h
+    · exact Or.inl h
+    · exact Or.inr (by linear_combination -h))
+  rw [Finset.range_eq_Ico, hc, Finset.sum_filter]
+
+/-- **The walker's accurate total as a natural**: at most 80 per row, and the sum over the spans of
+the weight (0, 1 or 4) times the accurate count. -/
+theorem total_acc_nat (hrem : ∀ r < n, M FS r = 1 → 1 ≤ (M REM r).val ∧ (M REM r).val ≤ 2 ^ 25) (hn : 0 < n)
+    (hn24 : n ≤ 2 ^ 24) :
+    M SUMA (n - 1) = ((∑ f ∈ (Finset.range n).filter (fun f => M FS f = 1), (M AC f + 3 * M W4 f).val *
+      Spec.ConnectRules.sigOpsAccurate (Fields.slice R (M POS f).val (M REM f).val) : ℕ) : F) ∧
+    ∑ f ∈ (Finset.range n).filter (fun f => M FS f = 1), (M AC f + 3 * M W4 f).val *
+      Spec.ConnectRules.sigOpsAccurate (Fields.slice R (M POS f).val (M REM f).val) ≤ 80 * n := by
+  refine ⟨?_, ?_⟩
+  · rw [total_acc hsat hopc hopc2 hr8 R hread hR hrem hn]
+    push_cast
+    exact Finset.sum_congr rfl (fun f _ => by rw [ZMod.natCast_zmod_val])
+  · -- at most 80 per byte of each span, and the spans are disjoint rows
+    have hw : ∀ f < n, (M AC f + 3 * M W4 f).val ≤ 4 := by
+      intro f hf
+      rcases acc_bool hsat (c := AC) (by simp [accC]) hf with a | a <;>
+        rcases acc_bool hsat (c := W4) (by simp [accC]) hf with b | b <;> rw [a, b]
+      · simp
+      · rw [show (0 : F) + 3 * 1 = ((3 : ℕ) : F) by norm_num, ZMod.val_natCast_of_lt (by unfold P; norm_num)]
+        norm_num
+      · simp [ZMod.val_one]
+      · rw [show (1 : F) + 3 * 1 = ((4 : ℕ) : F) by norm_num, ZMod.val_natCast_of_lt (by unfold P; norm_num)]
+    have hspan := span_sum hsat (fun j => if M ACT j = 1 then 80 else 0) (fun f => 80 * (M REM f).val)
+      (fun j _ h0 => by simp [h0]) (fun f hf hfs => by
+        obtain ⟨-, hfa, -⟩ := kinds hsat hf
+        have ha : M ACT f = 1 := by rw [hfs] at hfa; linear_combination -hfa
+        obtain ⟨hL1, hL⟩ := hrem f hf hfs
+        have hrows := span_rows hsat R hread hR hf ha rfl hL1 hL
+        rw [Finset.sum_congr rfl (fun j hj => by rw [if_pos (hrows j (Finset.mem_range.mp hj)).2.1])]
+        simp [mul_comm]) hrem hn
+    calc ∑ f ∈ (Finset.range n).filter (fun f => M FS f = 1), (M AC f + 3 * M W4 f).val *
+          Spec.ConnectRules.sigOpsAccurate (Fields.slice R (M POS f).val (M REM f).val)
+        ≤ ∑ f ∈ (Finset.range n).filter (fun f => M FS f = 1), 80 * (M REM f).val := by
+          apply Finset.sum_le_sum
+          intro f hf
+          have hfn := Finset.mem_range.mp (Finset.mem_filter.mp hf).1
+          have h1 := hw f hfn
+          have h2 := Spec.ConnectRules.acc_le (Fields.slice R (M POS f).val (M REM f).val)
+          have h3 : (Fields.slice R (M POS f).val (M REM f).val).length ≤ (M REM f).val := List.length_take_le _ _
+          calc (M AC f + 3 * M W4 f).val * Spec.ConnectRules.sigOpsAccurate (Fields.slice R (M POS f).val (M REM f).val)
+              ≤ 4 * (20 * (M REM f).val) := Nat.mul_le_mul h1 (le_trans h2 (Nat.mul_le_mul_left _ h3))
+            _ = 80 * (M REM f).val := by ring
+      _ = ∑ j ∈ Finset.range n, (if M ACT j = 1 then 80 else 0) := hspan.symm
+      _ ≤ ∑ j ∈ Finset.range n, 80 := Finset.sum_le_sum (fun j _ => by split_ifs <;> omega)
+      _ = 80 * n := by simp [mul_comm]
+
 end Acc
 
 end StarkedAir.Block.Walk

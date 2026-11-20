@@ -412,4 +412,22 @@ theorem hi_run_le : ∀ (l : Bytes) (s : WS) (st : Unit), (runG fH s st l).1 ≤
 theorem last_ws (s : Bytes) : (opsD s).2 = true ↔ (runG fL .op 0 s).2.1 = .op :=
   (runG_opsD gL (fun _ v => v) (fun _ _ _ => rfl) s 0).2.1
 
+/-- The accurate count is at most 20 per byte. -/
+theorem acc_run_le : ∀ (l : Bytes) (s : WS) (pv : ℕ), pv ≤ 20 → (runG fA s pv l).1 ≤ 20 * l.length
+  | [], _, _, _ => by simp [runG]
+  | x :: l, s, pv, hpv => by
+    simp only [runG, List.length_cons]
+    have h1 : (fA s pv x).2 ≤ 20 ∧ (fA s pv x).1 ≤ 20 := by
+      cases s with
+      | op =>
+        simp only [fA, fGH, gA, accW, dvW, ite_self]
+        constructor <;> split_ifs <;> omega
+      | len k i acc => simp only [fA, fGH, ite_self]; omega
+      | data d => simp only [fA, fGH]; omega
+    have := acc_run_le l (wstep s x).1 (fA s pv x).1 h1.2
+    omega
+
+theorem acc_le (s : Bytes) : sigOpsAccurate s ≤ 20 * s.length := by
+  rw [← acc_run]; exact acc_run_le s .op 20 le_rfl
+
 end StarkedAir.Spec.ConnectRules

@@ -246,6 +246,88 @@ theorem aspan_sum (g : List F → ℕ) :
   rw [f1, f2, f3] at hsum
   exact hsum.symm
 
+/-- **A non-empty script's walk.** A fields row that yields its script is matched by a walker script
+span with the same tuple, so `SPO` is `pushOnly` of the script and, for a push-only script, `SRL` is
+its last push's length and `SRS + SRL` the script's end. -/
+theorem sig_out (S : Setup inst pub (Ls 1)) {ρ : ℕ} (hρ : ρ < 2 ^ Ls 1) (hs : Fields.smult (inst 1).main ρ = 1) :
+    (((inst 1).main Fields.SPO ρ = 1 ∧
+        pushOnly (slice (Rb inst pub) ((inst 1).main Fields.SSC ρ).val ((inst 1).main Fields.VAL ρ).val) = true) ∨
+      ((inst 1).main Fields.SPO ρ = 0 ∧
+        pushOnly (slice (Rb inst pub) ((inst 1).main Fields.SSC ρ).val ((inst 1).main Fields.VAL ρ).val) = false)) ∧
+    (pushOnly (slice (Rb inst pub) ((inst 1).main Fields.SSC ρ).val ((inst 1).main Fields.VAL ρ).val) = true →
+      (inst 1).main Fields.SRL ρ = (((lastPush (slice (Rb inst pub) ((inst 1).main Fields.SSC ρ).val
+        ((inst 1).main Fields.VAL ρ).val)).length : ℕ) : F) ∧
+      ((lastPush (slice (Rb inst pub) ((inst 1).main Fields.SSC ρ).val ((inst 1).main Fields.VAL ρ).val)).length ≠ 0 →
+        (inst 1).main Fields.SRS ρ + (((lastPush (slice (Rb inst pub) ((inst 1).main Fields.SSC ρ).val
+          ((inst 1).main Fields.VAL ρ).val)).length : ℕ) : F) =
+          (inst 1).main Fields.SSC ρ + (inst 1).main Fields.VAL ρ)) := by
+  classical
+  have ws : ∀ r < 2 ^ Ls 6, ∀ c ∈ Walk.constraints, c.eval (2 ^ Ls 6) Walk.preCols pub (inst 6).main r = 0 := by
+    have := hsat.1 6 (by decide); rw [hL 6 (by decide)] at this; exact this
+  obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
+  have hlen := len_R hL hsat hL24 (inst := inst) (pub := pub)
+  -- a walker script span with the same tuple
+  have h := script_sum hL hsat hL24 (fun v => if v = [(inst 1).main Fields.SSC ρ, (inst 1).main Fields.VAL ρ,
+    (inst 1).main Fields.SPO ρ, (inst 1).main Fields.SRS ρ, (inst 1).main Fields.SRL ρ] then 1 else 0)
+  have hpos : 0 < ∑ r ∈ (Finset.range (2 ^ Ls 1)).filter (fun r => Fields.smult (inst 1).main r = 1),
+      (if [(inst 1).main Fields.SSC r, (inst 1).main Fields.VAL r, (inst 1).main Fields.SPO r,
+        (inst 1).main Fields.SRS r, (inst 1).main Fields.SRL r] = [(inst 1).main Fields.SSC ρ,
+        (inst 1).main Fields.VAL ρ, (inst 1).main Fields.SPO ρ, (inst 1).main Fields.SRS ρ,
+        (inst 1).main Fields.SRL ρ] then 1 else 0) :=
+    ind_sum_pos.mpr ⟨ρ, Finset.mem_filter.mpr ⟨Finset.mem_range.mpr hρ, hs⟩, rfl⟩
+  rw [h] at hpos
+  obtain ⟨f, hf, he⟩ := ind_sum_pos.mp hpos
+  obtain ⟨hfr, hwsm⟩ := Finset.mem_filter.mp hf
+  have hfr' := Finset.mem_range.mp hfr
+  simp only [List.cons.injEq, and_true] at he
+  obtain ⟨e1, e2, e3, e4, e5⟩ := he
+  have hfs : (inst 6).main Walk.FS f = 1 := by
+    rcases Walk.bool ws (c := Walk.FS) (by simp [Walk.bools]) hfr' with a | a
+    · rw [wsm, a, zero_mul] at hwsm; exact absurd hwsm zero_ne_one
+    · exact a
+  obtain ⟨h1, h25⟩ := walk_rem hL hsat hL24 S f hfr' hfs
+  have so := Walk.span_out ws (walk_opc hL hsat hL24) (fun r hr ho => by
+      obtain ⟨-, -, -, -, -, -, a7, a8, a9⟩ := walk_opc_all hL hsat hL24 r hr ho
+      exact ⟨a7, a8, a9⟩) (walk_r8 hL hsat hL24) (Rb inst pub) (walk_read hL hsat hL24) (by omega) hfr' hfs rfl h1 h25
+  rw [e1, e2, e3, e4, e5, ZMod.natCast_zmod_val] at so
+  exact so
+
+/-- **The redeem script's first two bytes**, read when its length is 22 or 34. -/
+theorem rdf_read {ρ : ℕ} (hρ : ρ < 2 ^ Ls 1) (h : (inst 1).main Fields.RDF ρ = 1) :
+    ((inst 1).main Fields.RB0 ρ).val = ((Rb inst pub).getD ((inst 1).main Fields.SRS ρ).val 0).toNat ∧
+    ((inst 1).main Fields.RB1 ρ).val = ((Rb inst pub).getD (((inst 1).main Fields.SRS ρ).val + 1) 0).toNat := by
+  obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
+  have hlen := len_R hL hsat hL24 (inst := inst) (pub := pub)
+  have hs0 := site_mem hL (i := 1) (by decide) hρ (k := 40)
+    (by simp [hashSys, Fields.fields, Fields.lookups, Fields.chkLookups])
+  have hs1 := site_mem hL (i := 1) (by decide) hρ (k := 41)
+    (by simp [hashSys, Fields.fields, Fields.lookups, Fields.chkLookups])
+  obtain ⟨p0, b0⟩ := byte_read_R hL hsat hL24 hs0 (by decide) rfl
+    (p := (inst 1).main Fields.SRS ρ) (b := (inst 1).main Fields.RB0 ρ)
+    (by
+      simp only [siteMult, siteEval, siteLookup, hashSys, hL 1 (by decide)]
+      simp [Fields.fields, Fields.lookups, Fields.chkLookups, Expr.eval, Fields.k, StarkedAir.Sha256.eval_col,
+        wrap_zero hρ, h])
+    (by
+      simp [siteVals, siteEval, siteLookup, hashSys, hL 1 (by decide), Fields.fields, Fields.lookups,
+        Fields.chkLookups, Fields.k, StarkedAir.Sha256.eval_col, wrap_zero hρ])
+  obtain ⟨p1, b1⟩ := byte_read_R hL hsat hL24 hs1 (by decide) rfl
+    (p := (inst 1).main Fields.SRS ρ + 1) (b := (inst 1).main Fields.RB1 ρ)
+    (by
+      simp only [siteMult, siteEval, siteLookup, hashSys, hL 1 (by decide)]
+      simp [Fields.fields, Fields.lookups, Fields.chkLookups, Expr.eval, Fields.k, StarkedAir.Sha256.eval_col,
+        wrap_zero hρ, h])
+    (by
+      simp [siteVals, siteEval, siteLookup, hashSys, hL 1 (by decide), Fields.fields, Fields.lookups,
+        Fields.chkLookups, Fields.k, Fields.c, Expr.eval, StarkedAir.Sha256.eval_col, StarkedAir.Sha256.eval_cst,
+        wrap_zero hρ])
+  have hv : ((inst 1).main Fields.SRS ρ + 1).val = ((inst 1).main Fields.SRS ρ).val + 1 := by
+    have e : (inst 1).main Fields.SRS ρ + 1 = ((((inst 1).main Fields.SRS ρ).val + 1 : ℕ) : F) := by
+      push_cast; rw [ZMod.natCast_zmod_val]
+    rw [e]; exact ZMod.val_natCast_of_lt (Fields.lt_P (by change _ < (Rb inst pub).length at p0; omega))
+  rw [hv] at b1
+  exact ⟨b0, b1⟩
+
 end System
 
 end StarkedAir.Block
