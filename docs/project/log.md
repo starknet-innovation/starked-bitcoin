@@ -21,6 +21,28 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-11-20 · session 43 · CONNECT-RULES step 3: the full sigop cost proven in Lean (block and epoch statements)
+
+Who: Claude (agent, Fable 5.2); owner: "I'm ok but I want the lean proof asap" (D-057 confirmed)
+Roadmap: CONNECT-RULES in progress (step 3 of 5 done: built, tested, proven; steps 4 and 5 open)
+Done:
+- Spec: `Spec/SigWalk.lean` (the walker automaton with a decoration is a fold over `opsD`: accurate count, `IsPushOnly`, last push) and `Spec/SigClass.lean` (`CountWitnessSigOps` as two flags; classes read from a `serTxOut`); `decSer_script` in `Spec/CoinDecode.lean`.
+- Walker: `Block/WalkAcc.lean` (`seg_gen`, `total_acc`, `total_acc_nat`, `span_out`).
+- Records and coins: `Block/CoinClass.lean` (`claim_class`).
+- Fields: `Block/FieldsWits.lean` (`wq_sum`, `wcnt_tx`, `in_tx`), `Block/FieldsSig.lean` (`in_cost`).
+- System: `Block/SigCost.lean` (`aspan_sum`, `wreq_sum`, `cost_rows`, `in_rows`, `gin_sum`, `block_sigop_cost`).
+- Epoch: `Block/SigEpoch.lean` (`block_factsS`, `epoch_coreS`, `epoch_systems_coreS`), additive (D-056).
+- Docs: connect-rules.md (statement, hypotheses, limits), verification.md, roadmap, D-057 confirmed.
+Evidence:
+- `lake build`: 8938 jobs, no error; no `sorry`/`native_decide` in the eight new files (grep).
+- `#print axioms` of `block_sigop_cost`, `block_factsS`, `epoch_systems_coreS`, `Walk.total_acc`, `Walk.span_out`, `claim_class`, `Fields.in_cost`: `propext`, `Classical.choice`, `Quot.sound` only.
+- No AIR changed: `airs/*.json` untouched; `Compat.lean` untouched.
+Problems / lessons:
+- `tauto` on membership in a long `++` of constraint lists timed out when it had to pass a singleton list; give the `Or.inl (Or.inr _)` path by hand.
+- Two inputs of one transaction can carry identical tokens, so the input index must come from the row order: `k ↦ ioRows[pre t + k]` is strictly increasing into the transaction's input rows (`strict_mono_id`, `in_rows`).
+- The epoch theorems were generated from the lock-aware ones by text substitution, then compiled; cheaper than restating by hand.
+Next: step 4 (time-based BIP68); see status.md.
+
 ## 2026-11-20 · session 42 · CONNECT-RULES step 3: the full sigop cost enforced by the AIRs and tested; its Lean soundness open
 
 Who: Claude (agent, Fable 5.2); owner: "Create a new branch", "That works." (D-056), "Before the sigop cost, make a change on the stwo zig references"

@@ -215,11 +215,12 @@ zig build test -Doptimize=ReleaseFast -Dtest-filter="BIP68"     # ~20 s
 (cd lean && lake build StarkedAir.Block.CoinEpochCore)
 ```
 
-## Step 3 (2026-11-20): the full sigop cost in the AIRs; soundness proven for the legacy part only
+## Step 3 (2026-11-20): the full sigop cost in the AIRs, proven
 
-Status: the AIRs enforce `4·legacy + 4·P2SH + witness ≤ 80,000` and are tested against the native
-reference. In Lean, every earlier theorem holds on the new AIRs; **the soundness of the P2SH and
-witness parts is not proven yet** (see "Open in Lean").
+Status: the AIRs enforce `4·legacy + 4·P2SH + witness ≤ 80,000`, are tested against the native
+reference, and are **proven sound in Lean** (2026-11-20, `block_sigop_cost`, `epoch_systems_coreS`; see
+"Lean soundness" below for the statement and its hypotheses). Not in the published proofs (branch
+`connect-rules`).
 
 **Rows first (survey, 37,500 blocks, 0 errors).** `survey` with `STARKED_SURVEY_SIGOPS=1` on the node:
 
@@ -287,39 +288,44 @@ The native reference (`connect_rules.zig`) is the one fuzzed against Core in ste
   of at most two per row. `walk_rem`: every span, script or accurate, is 1 to 2^25 bytes long.
 - Sixteen pins of the `Compat.lean` gate re-pinned (D-056); no `compat_*` statement changed.
 
-**Lean soundness of step 3, in progress (2026-11-20).** Proven so far (standard axioms):
+**Lean soundness (2026-11-20, standard axioms, `lake build` 8938 jobs).**
 
-| Part | Theorem | File |
+Statement, block level (`Block.block_sigop_cost`, `Block/SigCost.lean`): for a satisfied, balanced block
+system whose context component has at least 2^8 rows, with `claim t k` the undo record the coin
+component uses for input `k` of transaction `t ≥ 1`: if every such claim is some output's `serTxOut`,
+then `SigOpCostOK true` holds for the block's transactions with the claims' scripts as the spent
+scripts (`Spec/ConnectRules.lean`: `GetTransactionSigOpCost` summed, at most 80,000).
+
+Statement, epoch level (`Block.epoch_systems_coreS`, `Block/SigEpoch.lean`): `epoch_systems_coreL`
+with one more hypothesis (each initial coin's value is a serialized output) and one more conclusion:
+for every block of a balanced epoch, `SigOpCostOK true` on
+`(blockTxC N B).map fun x => (x.t, x.claims.map (·.1.script))`, the scripts of the coins that the same
+theorem's `connectTxsL` finds in the view. In a balanced epoch every spent claim is an initial or a
+created coin, which is why the claims are serialized outputs there.
+
+| Part | Theorems | File |
 |---|---|---|
-| The walker automaton with a decoration equals a fold over Core's `GetOp` parse | `runG_opsD` | `Spec/SigWalk.lean` |
-| Its three instances: accurate count, `IsPushOnly`, last push | `acc_run`, `po_run`, `last_run`, `lastPush_suffix` | `Spec/SigWalk.lean` |
-| A span's rows carry any decoration | `seg_gen` | `Block/WalkAcc.lean` |
-| 1. `SUMA` = Σ over the spans of `(AC + 3·W4) · sigOpsAccurate(bytes)` | `seg_acc`, `total_acc` | `Block/WalkAcc.lean` |
-| 2. A script's `PO` is `pushOnly`; for a push-only script `RL` is its last push's length and `RS + RL` the span's end | `span_out` | `Block/WalkAcc.lean` |
-| 3. The records' class flags are `isP2SH` / `isW 20` / `isW 32` of the spent script, for a claim that is a real `serTxOut` | `URec.class_spec`, `urec_class_bytes`, `claim_class`; spec `ser_p2sh`, `ser_w`, `countWitness_eq`, `count_split` | `Block/CoinClass.lean`, `Spec/SigClass.lean` |
-| 4a. A marked witness stack's rows request `lastAcc` of its items; over all rows | `stack_q`, `wq_sum` | `Block/FieldsWits.lean` |
-| 4b. A stack row's `(TXI, WINL)` names its input's witness; an input row's place, inputs left and segwit flag | `wits_rows`, `row_tx`, `wcnt_tx`, `in_tx` | `Block/FieldsWits.lean` |
-| 4c. A non-coinbase input row: `aN = 4·p2shSigOps`, `GIN·CW20 + RW20 = w20Of`, `N32 = n32Of` | `in_cost` | `Block/FieldsSig.lean` |
-| 4d. Walker accurate spans = redeem requests + witness requests; marked stacks = requesting inputs | `aspan_sum`, `wreq_sum` | `Block/SigCost.lean` |
+| The walker automaton with a decoration equals a fold over Core's `GetOp` parse; its instances: accurate count, `IsPushOnly`, last push | `runG_opsD`, `acc_run`, `po_run`, `last_run`, `lastPush_suffix`, `acc_le` | `Spec/SigWalk.lean` |
+| `CountWitnessSigOps` as two flags; the classes read from a `serTxOut` | `countWitness_eq`, `count_split`, `ser_p2sh`, `ser_w` | `Spec/SigClass.lean` |
+| A span's rows carry any decoration; `SUMA` is the sum over the spans of weight × `sigOpsAccurate`; a script's `PO` is `pushOnly` and `(RS, RL)` its last push | `seg_gen`, `seg_acc`, `total_acc`, `total_acc_nat`, `span_out` | `Block/WalkAcc.lean` |
+| The records' class flags are `isP2SH`, `isW 20`, `isW 32` of the spent script | `URec.class_spec`, `urec_class_bytes`, `claim_class` | `Block/CoinClass.lean` |
+| Witness stacks: a marked stack requests its last item; a stack row names its input; an input row's place | `stack_q`, `wq_sum`, `wits_rows`, `row_tx`, `wcnt_tx`, `in_tx` | `Block/FieldsWits.lean` |
+| A non-coinbase input row's flags are `p2shSigOps` and the two flags of `CountWitnessSigOps` | `in_cost`, `w20_sum`, `nongin` | `Block/FieldsSig.lean` |
+| The relations (accurate spans, witness requests, script tuples), the context's check by rows, rows to `(t, k)`, the block statement | `aspan_sum`, `wreq_sum`, `sig_out`, `rdf_read`, `wq_total`, `cost_rows`, `in_rows`, `in_row_cost`, `gin_sum`, `block_sigop_cost` | `Block/SigCost.lean` |
+| The epoch | `block_factsS`, `epoch_core_runS`, `epoch_coreS`, `epoch_blocksS`, `txc_scripts`, `epoch_systems_coreS` | `Block/SigEpoch.lean` |
 
-**Still open, with the plan** (all in `Block/SigCost.lean` unless noted):
+All of it is additive (D-056): no earlier statement changed, `Compat.lean` is untouched.
 
-- `sig_out`: a fields row with `smult = 1` has the walker's `span_out` (via `script_sum` with an
-  indicator, as `in_match_r` does); `rdf_read`: `RDF = 1` reads `RB0`, `RB1` at `SRS`, `SRS + 1`
-  (`byte_read_R` at sites `(1, ρ, 40)`, `(1, ρ, 41)`).
-- The walker's total as a natural: generalize `Walk.total_gen` to any `AddCommMonoid` (`span_sum`), add
-  `sigOpsAccurate s ≤ 20·|s|` (a `runG fA` induction), so `Σ weight·acc ≤ 80·n < P` and it equals the `A`
-  of `sigops_nat`. Same for `W20S` as the sum of the rows' `GIN·CW20 + RW20`.
-- The row identity: `A + w = Σ over non-coinbase input rows of 4·p2shSigOps + countWitnessSigOps`, with
-  the witness of row `ρ` given by `g(TXI, INL)` (`wq_sum`, `wcnt_tx`, `S.hidx`, `wreq_sum`, `in_tx`,
-  `in_cost`, `count_split`; a non-segwit transaction's witnesses are empty).
-- From rows to `(t, k)`: the coin rows `pre t + k` and `ioRows` (`coin_row_tok`, `coin_row_tx`,
-  `sum_by_parts`); row `ioRows[pre t + k]` is `rh_t + 1 + k` because `k ↦ ioRows[pre t + k]` is an
-  increasing injection into the transaction's `nIn` input rows. Class bits through `claim_class`.
-- A fifth clause of `block_factsL`: `SigOpCostOK true` for claims that are real outputs' serializations;
-  then the epoch statement, `Compat.lean` if a pinned statement changes (D-056), docs.
+**What the statement does not cover.**
 
-Until 3–5 are done the full-cost rule is enforced by the AIRs and tested, not proven.
+- `strict` is `true` for every block: the P2SH and witness parts are counted at every height (D-057).
+  Core turns them off for block 170,060 only; counting more can only reject.
+- The two hypotheses of `epoch_systems_coreS` beyond `epoch_systems_coreL`'s: the context component has
+  at least 2^8 rows (true of every size profile in use), and the epoch's initial coins are serialized
+  outputs (true of a set built from Core's coins; not yet derived from the set proof in Lean).
+- Like the CSV bit of step 2, the new epoch theorem is not yet carried into the recursion's guarantee
+  (`LeafOut`, `BlockAt`, `forest_epoch`): the chain proof's composed Lean statement still ends in
+  `epoch_systems_core`.
 
 **Not done here:** the GPU walker kernel (`src/gpu/cuda/witness.zig`) builds the old 51 columns; the
 CPU path is the reference until step 5.
@@ -327,15 +333,14 @@ CPU path is the reference until step 5.
 ```sh
 python3 pack.py | STARKED_SURVEY_SIGOPS=1 ./survey > sigops.csv   # on the node, ~40 min
 zig build test -Doptimize=ReleaseFast -Dtest-filter="sigop cost"  # ~1 min
-(cd lean && lake build StarkedAir.Block.BlockSums)
+(cd lean && lake build StarkedAir.Block.SigEpoch)   # block_sigop_cost, epoch_systems_coreS
 ```
 
 ## Order of work
 
 1. **Spec first, no proving cost.** Done, above.
 2. Height-based BIP68 (AIR, witness, Lean, negative tests). Done, above.
-3. Sigop cost (walker mode, classification, negative tests): built and tested, above; its Lean
-   soundness is open.
+3. Sigop cost (walker mode, classification, negative tests): built, tested and proven, above.
 4. Time-based BIP68 (the committed claim, the resolver, the balance; the epoch root and seal take one
    more child).
 5. GPU witness kernels for the changed components (`gpu-cuda.md`), new VKs, one re-prove.

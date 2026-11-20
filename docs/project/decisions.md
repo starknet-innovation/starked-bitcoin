@@ -618,7 +618,7 @@ To undo: revert the six hashes; the build then fails on the pins and nothing els
 Confirmed by the owner, 2026-11-20 ("That works."): D-056 is accepted, and the work stays on the branch `connect-rules`.
 
 ### D-057 — CONNECT-RULES step 3: a block-only opcode table; the AIR before its Lean soundness; `strict` always on
-Date: 2026-11-20 · By: agent (Claude); **to confirm by the owner** · Status: proposed (applied on branch `connect-rules`)
+Date: 2026-11-20 · By: agent (Claude); **confirmed by the owner 2026-11-20** · Status: active (applied on branch `connect-rules`)
 Decision: (1) The accurate sigop count needs three more opcode columns. `block_tables` is shared with the
 set-pass system, so the block system uses a copy, `block_tablesb` (`Tables.tablesB`), and the set-pass AIRs,
 keys and Lean proofs do not change. (2) Step 3's AIRs, witness and tests are committed with the Lean proofs
@@ -632,5 +632,6 @@ proof is several sessions of work, and the AIR is needed to re-measure sizes (TI
 Rejected: a 17th component for the accurate walk (recursion and GPU plumbing); deriving the three opcode
 facts with range lookups in the walker (more columns on the largest of these components).
 To undo: (1) point `hashSys` component 5 back at `Tables.tables` after widening it; (3) add a public bit.
+Confirmed by the owner, 2026-11-20 ("I'm ok but I want the lean proof asap"): D-057 is accepted. The soundness proof of (2) landed the same day (`block_sigop_cost`, `epoch_systems_coreS`).
 Sixteen `Compat.lean` pins re-pinned under D-056.
 
