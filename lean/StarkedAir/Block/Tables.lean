@@ -42,4 +42,23 @@ def tables : Comp where
     [ ⟨REL_R8, col M8, [pre 0]⟩,
       ⟨REL_OPC, col MO, (List.range 7).map pre⟩ ]
 
+/-! ### The block system's tables (CONNECT-RULES step 3)
+
+The accurate sigop count needs three more opcode columns. The set-pass system keeps `tables` above, so
+its AIRs and keys do not change; the block system uses `tablesB`, the same tables with
+`opc(b, push_n, k1, k2, k4, sig, nzp, hi, ms, dv)`: `hi` above `OP_16`, `ms` a multisig opcode, `dv`
+what a multisig counts when this opcode precedes it (`OP_1 … OP_16`: 1 … 16; else 20). -/
+
+def hiN (b : ℕ) : ℕ := if 0x60 < b then 1 else 0
+def msN (b : ℕ) : ℕ := if b = 0xae ∨ b = 0xaf then 1 else 0
+def dvN (b : ℕ) : ℕ := if 0x51 ≤ b ∧ b ≤ 0x60 then b - 0x50 else 20
+
+def preColsB : List PreCol := preCols ++ [tab hiN, tab msN, tab dvN]
+
+def tablesB : Comp where
+  air := { name := "block_tablesb", nMain := 2, pre := preColsB, constraints := [] }
+  lookups :=
+    [ ⟨REL_R8, col M8, [pre 0]⟩,
+      ⟨REL_OPC, col MO, (List.range 10).map pre⟩ ]
+
 end StarkedAir.Block.Tables

@@ -1986,6 +1986,36 @@ re-pinned as a recorded exception. No `compat_*` statement changed, and every ot
 - `Block.Fields.fields`: `N_LOCK = 203` main columns where it had `N_MAIN' = 190` (still pinned).
 -/
 
+/-!
+## Sixteen pins re-pinned for CONNECT-RULES step 3 (D-056, confirmed by the owner 2026-11-20)
+
+The block AIRs gained the full sigop cost (P2SH and witness sigops). As for step 2, the new bodies are not
+the old ones and are re-pinned as a recorded exception. No `compat_*` statement changed. What changed:
+
+- `Block.Walk.constraints`: the old list followed by `accC` (`repin_walk_constraints`); in
+  `Block.Walk.scriptC` the two sum constraints add `OP · LG` (`LG = (1 − AC) · SG`) where they added
+  `OP · SG`, so accurate spans do not count in the legacy sum;
+- `Block.Walk.lookups`: the script tuple is `(start, len, PO, RS, RL)` with multiplicity `−FS·(1 − AC)`,
+  the opcode tuple has three more entries, the totals are `(SUMS, SUMA)`, and the accurate-span use follows;
+- `Block.URec.constraints`: the old list followed by `classC`;
+  `Block.URec.lookups`: the record tuple carries the class, and four byte reads follow;
+- `Block.Coin.lookups`: the record and input tuples carry the class; `Block.Coin.N_MAIN`: 173;
+- `Block.Fields.constraints`: the step 2 list followed by `sigC`; `Block.Fields.chkLookups`: the script,
+  totals and input tuples are wider, and six lookups follow the old 32; `Block.Fields.fields`: `N_SIG = 229`;
+- `Block.Ctx.constraints`: the sigop check is `2·ACC + PAR = 80000 − 4·SIGS − SIGA − W20T` where it was
+  `ACC = 20000 − SIGS`, and three constraints follow; `Block.Ctx.lookups`: the totals tuples are wider;
+- `Block.Walk.N_MAIN` 71, `Block.URec.N_MAIN` 39, `Block.Ctx.N_MAIN` 44;
+- `Block.hashSys`: component 5 is `Tables.tablesB` (the tables with three more opcode columns); the
+  set-pass system keeps `Tables.tables`, whose pin is unchanged.
+-/
+
+theorem repin_walk_constraints : StarkedAir.Block.Walk.constraints =
+    StarkedAir.Block.Walk.localC ++ StarkedAir.Block.Walk.stepC ++ StarkedAir.Block.Walk.scriptC ++
+      StarkedAir.Block.Walk.accC := rfl
+
+theorem repin_urec_lookup_count : StarkedAir.Block.URec.lookups.length = 24 ∧
+    StarkedAir.Block.Walk.lookups.length = 6 := ⟨rfl, rfl⟩
+
 theorem repin_coin_constraints : StarkedAir.Block.Coin.constraints =
     StarkedAir.Block.Coin.localC ++ StarkedAir.Block.Coin.fracC ++ StarkedAir.Block.Coin.zeroC ++
       StarkedAir.Block.Coin.accC ++ StarkedAir.Block.Coin.lastC ++ StarkedAir.Block.Coin.amountC ++
@@ -1995,10 +2025,11 @@ theorem repin_fields_constraints : StarkedAir.Block.Fields.constraints =
     StarkedAir.Block.Fields.kindC ++ StarkedAir.Block.Fields.transC ++ StarkedAir.Block.Fields.tileC ++
       StarkedAir.Block.Fields.compactC ++ StarkedAir.Block.Fields.segC ++ StarkedAir.Block.Fields.countC ++
       StarkedAir.Block.Fields.zeroC ++ StarkedAir.Block.Fields.bitC ++ StarkedAir.Block.Fields.txC ++
-      StarkedAir.Block.Fields.pubC ++ StarkedAir.Block.Fields.chkC ++ StarkedAir.Block.Fields.lockC := rfl
+      StarkedAir.Block.Fields.pubC ++ StarkedAir.Block.Fields.chkC ++ StarkedAir.Block.Fields.lockC ++
+      StarkedAir.Block.Fields.sigC := rfl
 
 theorem repin_lookup_counts : StarkedAir.Block.Coin.lookups.length = 97 ∧
-    StarkedAir.Block.Fields.chkLookups.length = 32 := ⟨StarkedAir.Block.Coin.lookups_len, rfl⟩
+    StarkedAir.Block.Fields.chkLookups.length = 38 := ⟨StarkedAir.Block.Coin.lookups_len, rfl⟩
 
 open Lean in
 /-- Structural hash of a constant's type and value (constructors for inductives). -/
@@ -2219,7 +2250,7 @@ StarkedAir.Block.Coin.MLO 8020736631586362313
 StarkedAir.Block.Coin.MM 5580780264887204875
 StarkedAir.Block.Coin.MNB 12456454333311047599
 StarkedAir.Block.Coin.NB 8646764002683721668
-StarkedAir.Block.Coin.N_MAIN 16407894917998692034
+StarkedAir.Block.Coin.N_MAIN 4860790409758013023
 StarkedAir.Block.Coin.OB 721389358932291958
 StarkedAir.Block.Coin.ORD 5454922851969046533
 StarkedAir.Block.Coin.OUH 8076550275599354812
@@ -2275,7 +2306,7 @@ StarkedAir.Block.Coin.kp 14591804336548626625
 StarkedAir.Block.Coin.lastC 4686876359968818310
 StarkedAir.Block.Coin.lastOn 11618261464159590984
 StarkedAir.Block.Coin.localC 11861545920249534897
-StarkedAir.Block.Coin.lookups 7730868907412050053
+StarkedAir.Block.Coin.lookups 14412682638368155798
 StarkedAir.Block.Coin.mE 16749810043131797124
 StarkedAir.Block.Coin.notFirst 1322236294483047389
 StarkedAir.Block.Coin.notLast 17856571357075250639
@@ -2313,7 +2344,7 @@ StarkedAir.Block.Ctx.MLO 11094188613630540670
 StarkedAir.Block.Ctx.MZ 3378581462597066800
 StarkedAir.Block.Ctx.NONCE_ID 3053612009897865308
 StarkedAir.Block.Ctx.NSEG 11024855835016570353
-StarkedAir.Block.Ctx.N_MAIN 6552061845898070580
+StarkedAir.Block.Ctx.N_MAIN 4626072301055770726
 StarkedAir.Block.Ctx.PACC 9619963949715690370
 StarkedAir.Block.Ctx.PUB_HASH 5130555358687355332
 StarkedAir.Block.Ctx.P_CAPM0 5130555358687355332
@@ -2378,13 +2409,13 @@ StarkedAir.Block.Ctx.W0 1015439597935339062
 StarkedAir.Block.Ctx.WT 11208987806306150437
 StarkedAir.Block.Ctx.ZERO_ID 15766393040424645665
 StarkedAir.Block.Ctx.bn 1211540856924898373
-StarkedAir.Block.Ctx.constraints 17620595603992092776
+StarkedAir.Block.Ctx.constraints 16141163716527549362
 StarkedAir.Block.Ctx.consts 7392833621229240773
 StarkedAir.Block.Ctx.ctx 17055706767271233458
 StarkedAir.Block.Ctx.k 4215733963973134624
 StarkedAir.Block.Ctx.kp 14591804336548626625
 StarkedAir.Block.Ctx.limbs 17801573404424114319
-StarkedAir.Block.Ctx.lookups 1726404177418135180
+StarkedAir.Block.Ctx.lookups 15757574446189597578
 StarkedAir.Block.Ctx.notFirst 7756826477428127892
 StarkedAir.Block.Ctx.om 1092795982528353786
 StarkedAir.Block.Ctx.one 1633976985673480194
@@ -2532,14 +2563,14 @@ StarkedAir.Block.Fields.blockBytes 3362647105931116537
 StarkedAir.Block.Fields.by4 928109702473566966
 StarkedAir.Block.Fields.c 7398137197751755746
 StarkedAir.Block.Fields.chkC 1340301875353697891
-StarkedAir.Block.Fields.chkLookups 1225048348381594160
+StarkedAir.Block.Fields.chkLookups 14898699080386344647
 StarkedAir.Block.Fields.commitC 17939344127444849891
 StarkedAir.Block.Fields.compactC 5760949608222406565
-StarkedAir.Block.Fields.constraints 12674547589071361827
+StarkedAir.Block.Fields.constraints 2731960414009897494
 StarkedAir.Block.Fields.countC 9761320507809890299
 StarkedAir.Block.Fields.e1 6315645682856458953
 StarkedAir.Block.Fields.e2 10075862923094640558
-StarkedAir.Block.Fields.fields 7350319305024557067
+StarkedAir.Block.Fields.fields 6166608762341907164
 StarkedAir.Block.Fields.finalC 3377919427884971299
 StarkedAir.Block.Fields.first 15453146726949858975
 StarkedAir.Block.Fields.hasC 13603305468679119935
@@ -2830,7 +2861,7 @@ StarkedAir.Block.Tables.tables 17386151214833498562
 StarkedAir.Block.URec.C 9008973590095614055
 StarkedAir.Block.URec.HDR 6851467553259871396
 StarkedAir.Block.URec.J 17101530479978464024
-StarkedAir.Block.URec.N_MAIN 15965332230801424257
+StarkedAir.Block.URec.N_MAIN 1789953865269236795
 StarkedAir.Block.URec.ON 12621482290909172116
 StarkedAir.Block.URec.REL_UREC 11605307065553852467
 StarkedAir.Block.URec.S 11239342436784068239
@@ -2838,7 +2869,7 @@ StarkedAir.Block.URec.T 13763848869307909864
 StarkedAir.Block.URec.TL 4752661515056156754
 StarkedAir.Block.URec.V 12480503310037593863
 StarkedAir.Block.URec.X 3974326331376613517
-StarkedAir.Block.URec.constraints 4614390995059804876
+StarkedAir.Block.URec.constraints 16463020587305566971
 StarkedAir.Block.URec.endE 1615782864753567404
 StarkedAir.Block.URec.first 15453146726949858975
 StarkedAir.Block.URec.isLast 10838763449130032985
@@ -2847,7 +2878,7 @@ StarkedAir.Block.URec.kn 10932140884916001105
 StarkedAir.Block.URec.kp 14591804336548626625
 StarkedAir.Block.URec.lastOn 18115899815943002436
 StarkedAir.Block.URec.limb 7512756407812944505
-StarkedAir.Block.URec.lookups 17719792941515026862
+StarkedAir.Block.URec.lookups 4129409799470264260
 StarkedAir.Block.URec.notFirst 14162281473066790946
 StarkedAir.Block.URec.notLast 17856571357075250639
 StarkedAir.Block.URec.om 15132569984123850130
@@ -2942,7 +2973,7 @@ StarkedAir.Block.Walk.NLK4 4725656910573684349
 StarkedAir.Block.Walk.NLN 7310214899571200254
 StarkedAir.Block.Walk.NOP 11094188613630540670
 StarkedAir.Block.Walk.NZP 4177543070365710692
-StarkedAir.Block.Walk.N_MAIN 16591784325937161225
+StarkedAir.Block.Walk.N_MAIN 4914398126782852037
 StarkedAir.Block.Walk.OP 9619963949715690370
 StarkedAir.Block.Walk.PN 6851467553259871396
 StarkedAir.Block.Walk.POS 11239342436784068239
@@ -2955,19 +2986,19 @@ StarkedAir.Block.Walk.ZA 2528803397246198985
 StarkedAir.Block.Walk.ZD 14140254281272384383
 StarkedAir.Block.Walk.ZR 17750663069614403632
 StarkedAir.Block.Walk.bools 14564466877597105042
-StarkedAir.Block.Walk.constraints 11119068869024587802
+StarkedAir.Block.Walk.constraints 17613618686900646504
 StarkedAir.Block.Walk.first 15453146726949858975
 StarkedAir.Block.Walk.isLast 772695947456970895
 StarkedAir.Block.Walk.isZero 11628486450963550751
 StarkedAir.Block.Walk.k 4215733963973134624
 StarkedAir.Block.Walk.kp 14591804336548626625
 StarkedAir.Block.Walk.localC 15257636934503895075
-StarkedAir.Block.Walk.lookups 11597809144117538848
+StarkedAir.Block.Walk.lookups 7502213539399718441
 StarkedAir.Block.Walk.notFirst 17680546512045641737
 StarkedAir.Block.Walk.om 7075645198861469997
 StarkedAir.Block.Walk.one 1633976985673480194
 StarkedAir.Block.Walk.preCols 2484850527752626642
-StarkedAir.Block.Walk.scriptC 13871278657413447844
+StarkedAir.Block.Walk.scriptC 8134979427740086270
 StarkedAir.Block.Walk.stepC 3935738588002480548
 StarkedAir.Block.Walk.walk 4745805336571270262
 StarkedAir.Block.blockSum 15472004464258823465
@@ -2979,7 +3010,7 @@ StarkedAir.Block.ctxLimb 3228652565816505189
 StarkedAir.Block.efrac 5129865901931290193
 StarkedAir.Block.encE 2957823032590111893
 StarkedAir.Block.epochPN 11377319080096614489
-StarkedAir.Block.hashSys 13770380171803703161
+StarkedAir.Block.hashSys 2606663622718724928
 StarkedAir.Block.hwords 7437227654724474065
 StarkedAir.Block.ioRows 16077129653267624513
 StarkedAir.Block.isLast 7175143457965580847

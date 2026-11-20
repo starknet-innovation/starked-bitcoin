@@ -112,6 +112,7 @@ def main (args : List String) : IO Unit := do
   | ["block_sha"] => IO.println StarkedAir.Block.Sha.sha.toJson
   | ["block_merkle"] => IO.println StarkedAir.Block.Merkle.merkle.toJson
   | ["block_tables"] => IO.println StarkedAir.Block.Tables.tables.toJson
+  | ["block_tablesb"] => IO.println StarkedAir.Block.Tables.tablesB.toJson
   | ["block_walk"] => IO.println StarkedAir.Block.Walk.walk.toJson
   | ["block_ctx"] => IO.println StarkedAir.Block.Ctx.ctx.toJson
   | ["block_wmerkle"] => IO.println StarkedAir.Block.WMerkle.wmerkle.toJson

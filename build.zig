@@ -147,6 +147,7 @@ pub fn build(b: *std.Build) void {
     lib.addAnonymousImport("air:block_fields", .{ .root_source_file = b.path("airs/block_fields.json") });
     lib.addAnonymousImport("air:block_merkle", .{ .root_source_file = b.path("airs/block_merkle.json") });
     lib.addAnonymousImport("air:block_tables", .{ .root_source_file = b.path("airs/block_tables.json") });
+    lib.addAnonymousImport("air:block_tablesb", .{ .root_source_file = b.path("airs/block_tablesb.json") });
     lib.addAnonymousImport("air:block_walk", .{ .root_source_file = b.path("airs/block_walk.json") });
     lib.addAnonymousImport("air:block_ctx", .{ .root_source_file = b.path("airs/block_ctx.json") });
     lib.addAnonymousImport("air:block_anc", .{ .root_source_file = b.path("airs/block_anc.json") });

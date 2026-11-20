@@ -199,9 +199,11 @@ theorem int_sites {r : ℕ} :
     (r < 2 ^ Ls 1 → siteMult hashSys inst pub (1, r, 35) = (inst 1).main Fields.K_IN r) ∧
     (r < 2 ^ Ls 14 → siteMult hashSys inst pub (14, r, 1) = -((inst 14).main Coin.KI r + (inst 14).main Coin.CBI r)) ∧
     (r < 2 ^ Ls 1 → siteVals hashSys inst pub (1, r, 35) = [(inst 1).main Fields.TXI r, (inst 1).main Fields.START r,
-      Fields.lo16.eval (2 ^ Ls 1) Fields.preCols pub (inst 1).main r, (inst 1).main Fields.LKH r, (inst 1).main Fields.LKT r]) ∧
+      Fields.lo16.eval (2 ^ Ls 1) Fields.preCols pub (inst 1).main r, (inst 1).main Fields.LKH r, (inst 1).main Fields.LKT r,
+      (inst 1).main Fields.CP r, (inst 1).main Fields.CW20 r, (inst 1).main Fields.CW32 r]) ∧
     (r < 2 ^ Ls 14 → siteVals hashSys inst pub (14, r, 1) = [(inst 14).main Coin.TXI r, (inst 14).main Coin.START r,
-      (inst 14).main Coin.SQL r, (inst 14).main Coin.LKH r, (inst 14).main Coin.LKT r]) := by
+      (inst 14).main Coin.SQL r, (inst 14).main Coin.LKH r, (inst 14).main Coin.LKT r,
+      (inst 14).main Coin.UP r, (inst 14).main Coin.U20 r, (inst 14).main Coin.U32 r]) := by
   refine ⟨fun hr => ?_, fun hr => ?_, fun hr => ?_, fun hr => ?_⟩
   · simp only [siteMult, siteEval, siteLookup, hashSys, hL 1 (by decide)]
     simp [Fields.fields, Fields.lookups, Fields.chkLookups, Expr.eval, Fields.k, StarkedAir.Sha256.eval_col, wrap_zero hr]
@@ -235,10 +237,12 @@ theorem outt_sum (g : List F → ℕ) :
 bits, and the enforced height and time lock bits (BIP68). -/
 noncomputable def fIn (inst : ℕ → Inst) (pub : ℕ → F) (L r : ℕ) : List F :=
   [(inst 1).main Fields.TXI r, (inst 1).main Fields.START r,
-      Fields.lo16.eval (2 ^ L) Fields.preCols pub (inst 1).main r, (inst 1).main Fields.LKH r, (inst 1).main Fields.LKT r]
+      Fields.lo16.eval (2 ^ L) Fields.preCols pub (inst 1).main r, (inst 1).main Fields.LKH r, (inst 1).main Fields.LKT r,
+      (inst 1).main Fields.CP r, (inst 1).main Fields.CW20 r, (inst 1).main Fields.CW32 r]
 def cIn (inst : ℕ → Inst) (r : ℕ) : List F :=
   [(inst 14).main Coin.TXI r, (inst 14).main Coin.START r,
-      (inst 14).main Coin.SQL r, (inst 14).main Coin.LKH r, (inst 14).main Coin.LKT r]
+      (inst 14).main Coin.SQL r, (inst 14).main Coin.LKH r, (inst 14).main Coin.LKT r,
+      (inst 14).main Coin.UP r, (inst 14).main Coin.U20 r, (inst 14).main Coin.U32 r]
 
 /-- **Input tokens are the coin input rows** (non-coinbase and coinbase), as multisets of tuples. -/
 theorem int_sum (g : List F → ℕ) :
@@ -808,16 +812,18 @@ theorem coin_urec {j : ℕ} (hj : j < 2 ^ Ls 14) (hki : (inst 14).main Coin.KI j
       (inst 13).main (URec.V 0) r' + 256 * (inst 13).main (URec.V 1) r' + 65536 * (inst 13).main (URec.V 2) r',
       (inst 13).main (URec.V 3) r' + 256 * (inst 13).main (URec.V 4) r' + 65536 * (inst 13).main (URec.V 5) r' +
         16777216 * (inst 13).main (URec.V 6) r',
-      (inst 13).main (URec.X 0) r' + 256 * (inst 13).main (URec.X 1) r' + 65536 * (inst 13).main (URec.X 2) r'] := by
+      (inst 13).main (URec.X 0) r' + 256 * (inst 13).main (URec.X 1) r' + 65536 * (inst 13).main (URec.X 2) r',
+      (inst 13).main URec.CP r', (inst 13).main URec.C20 r', (inst 13).main URec.C32 r'] := by
     simp [siteVals, siteEval, siteLookup, hashSys, hL 13 (by decide), URec.urec, URec.lookups, URec.k, URec.limb,
       Expr.eval, StarkedAir.Sha256.eval_col, StarkedAir.Sha256.eval_cst, wrap_zero hr']
   have e2 : siteVals hashSys inst pub (14, j, 3) = [(inst 14).main Coin.J j, (inst 14).main Coin.CLO j,
-      (inst 14).main Coin.CHI j, (inst 14).main Coin.VL j, (inst 14).main Coin.VH j, (inst 14).main Coin.CTX j] := by
+      (inst 14).main Coin.CHI j, (inst 14).main Coin.VL j, (inst 14).main Coin.VH j, (inst 14).main Coin.CTX j,
+      (inst 14).main Coin.UP j, (inst 14).main Coin.U20 j, (inst 14).main Coin.U32 j] := by
     simp [siteVals, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups, Coin.k,
       StarkedAir.Sha256.eval_col, wrap_zero hj]
   rw [e1, e2] at hsv
   simp only [List.cons.injEq, and_true] at hsv
-  obtain ⟨a, b, c, d, e, g⟩ := hsv
+  obtain ⟨a, b, c, d, e, g, -⟩ := hsv
   exact ⟨a.symm, b.symm, c.symm, d.symm, e.symm, g.symm⟩
 
 /-- A URec on row's `J` is its index. -/

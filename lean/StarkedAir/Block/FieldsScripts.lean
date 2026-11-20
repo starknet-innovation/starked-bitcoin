@@ -152,6 +152,33 @@ theorem script_val {r : ℕ} (hr : r < n) (h : smult M r ≠ 0) : 1 ≤ (M VAL r
   by_contra hc
   exact hv0 ((ZMod.val_eq_zero _).mp (by omega))
 
+/-- **A witness script to walk** (step 3: `WQ · (1 − ZV) ≠ 0`) is 1 to `MAXS` bytes long. -/
+theorem wq_val {r : ℕ} (hr : r < n) (h : M WQ r * (1 - M ZV r) ≠ 0) : 1 ≤ (M VAL r).val ∧ (M VAL r).val ≤ MAXS := by
+  obtain ⟨hzb, -, hz0⟩ := zv_spec hsat hr
+  have hz : M ZV r = 0 := by
+    rcases hzb with z | z
+    · exact z
+    · exfalso; apply h; rw [z, sub_self, mul_zero]
+  have hwq := defn hsat (mem_sig (c := .sub (k WQ) (.mul (k K_WITEM) (.mul (k WS) (k Z1)))) (by simp [sigC])) hr
+  simp only [Expr.eval, ev_k hr] at hwq
+  have hk : M K_WITEM r = 1 := by
+    rcases kind_bool hsat (c := K_WITEM) (by simp [kinds, K_WITEM]) hr with a | a
+    · exfalso; apply h; rw [hwq, a]; ring
+    · exact a
+  have hrm : r < m := by
+    by_contra hc
+    have hp := hpad r hr (by omega)
+    have ka := kinds_at hsat hr (a := K_PAD) (by simp [K_PAD]) hp
+    have := ka K_WITEM (by simp [K_WITEM])
+    simp [K_WITEM, K_PAD] at this
+    have hk' : M 6 r = 1 := hk
+    rw [this] at hk'; exact zero_ne_one hk'
+  have hle := (row_info hsat R hcs hmn hpad hfit hrm (a := K_WITEM) (by simp [K_WITEM]) hk (by simp [K_WITEM, K_LOCK])
+    (by simp [K_WITEM, K_PAD])).1
+  refine ⟨?_, hle⟩
+  by_contra hc
+  exact hz0 hz ((ZMod.val_eq_zero _).mp (by omega))
+
 end ScriptsTok
 
 end StarkedAir.Block.Fields

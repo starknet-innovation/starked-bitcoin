@@ -15,6 +15,7 @@ const bsha = @import("sha.zig");
 const merkle = @import("merkle.zig");
 const checks = @import("checks.zig");
 const walk = @import("walk.zig");
+const sigcost = @import("sigcost.zig");
 const ctxw = @import("ctx.zig");
 const wmerkle = @import("wmerkle.zig");
 const commit = @import("commit.zig");
@@ -22,7 +23,7 @@ const coin = @import("coin.zig");
 const ancw = @import("anc.zig");
 
 pub const N_COMP = 16;
-pub const jsons = [N_COMP][]const u8{ bytes.json, fields.json, msg.json, bsha.json, merkle.json, checks.tables_json, walk.json, ctxw.json, wmerkle.json, commit.undo_json, commit.msg_json, commit.b2s_json, coin.fpwalk_json, coin.urec_json, coin.coin_json, ancw.json };
+pub const jsons = [N_COMP][]const u8{ bytes.json, fields.json, msg.json, bsha.json, merkle.json, checks.tables_b_json, walk.json, ctxw.json, wmerkle.json, commit.undo_json, commit.msg_json, commit.b2s_json, coin.fpwalk_json, coin.urec_json, coin.coin_json, ancw.json };
 pub const names = [N_COMP][]const u8{ "bytes", "fields", "msg", "sha", "merkle", "tables", "walk", "ctx", "wmerkle", "undo", "b2msg", "b2s", "fpwalk", "urec", "coin", "anc" };
 /// Public inputs each component's AIR references (a prefix of the block's 159: the eight checks inputs,
 /// the undo length, the commitment's 16 limbs, the block hash's 16 limbs; then M3b's `γ`, `z`, `α`, the
@@ -78,7 +79,7 @@ pub fn profileLogs(L: u32, profile: Profile) [N_COMP]u32 {
 }
 
 /// Lookup sites per row of the 15 hashed-system components (Lean `hashRows`, Link.lean).
-pub const SITES = [15]u64{ 1, 40, 4, 6, 11, 2, 5, 12, 3, 1, 6, 11, 4, 20, 97 };
+pub const SITES = [15]u64{ 1, 46, 4, 6, 11, 2, 6, 12, 3, 1, 6, 11, 4, 24, 97 };
 
 /// Lean's `SizeOk` (Link.lean): each hashed-system component has at most 2^24 rows and the lookup
 /// site count `Σ kᵢ·2^logsᵢ` is below P. The soundness theorems cover only such sizes: uniform up to
@@ -104,6 +105,8 @@ pub const Built = struct {
     mains: [N_COMP][][]M31,
     ntx: u32,
     sigops: u32,
+    /// Step 3: the full cost `4·sigops + accurate + P2WPKH`.
+    sigop_cost: u64 = 0,
     weight: u64,
     commitment: bool,
     /// Block positions read by the other components (the byte table's multiplicities).
@@ -235,6 +238,7 @@ pub const Shape = struct {
     osegs: []coin.Seg,
     usegs: []coin.Seg,
     needs: [N_COMP]usize,
+    sig: sigcost.Out,
 };
 
 /// `fetched`: the fetched undo stream; `ctxs`: the spent coins' creating transaction indices (or null).
@@ -254,15 +258,13 @@ pub fn shape(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctxs: ?
 
     // Sizes: the checks and the walker need the fields' layout first; size by the largest need.
     const wnodes = try wmerkle.tree(a, ntx);
-    var scripts_len: usize = 0;
-    for (rows) |r| if ((r.kind == fields.K_IN or r.kind == fields.K_OUT) and r.val > 0) {
-        scripts_len += r.val;
-    };
     const comps_est = pl.compressions.len + 3 * (wnodes.len + 1);
     // M3b: undo records, fingerprint segments (outputs, then undo records' serTxOut), coin rows.
     const recs = try coin.records(a, undo);
     const osegs = try coin.outputSegs(a, rows);
     const usegs = try coin.undoSegs(a, recs);
+    // Step 3: the walker's spans (scripts, redeem scripts, witness scripts) and the inputs' classes.
+    const sigc = try sigcost.analyse(a, raw, rows, try sigcost.sersOf(a, undo, recs));
     var fp_rows: usize = 0;
     for (osegs) |sg| fp_rows += sg.len;
     for (usegs) |sg| fp_rows += sg.len;
@@ -278,7 +280,7 @@ pub fn shape(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctxs: ?
     needs[C.sha] = (comps_est + 1) * shaw.PERIOD;
     needs[C.merkle] = nodes.len + 2;
     needs[C.wmerkle] = wnodes.len + 2;
-    needs[C.walk] = scripts_len + 1;
+    needs[C.walk] = walk.rowsNeeded(sigc.spans);
     needs[C.undo] = undo.len + 1;
     needs[C.b2msg] = commit.rowsNeeded(undo.len);
     needs[C.b2s] = commit.rowsNeeded(undo.len);
@@ -287,7 +289,7 @@ pub fn shape(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctxs: ?
     needs[C.coin] = tok_rows + 1;
     needs[C.anc] = if (height >= checks.CSV_HEIGHT) ancw.MIN_ROWS_CSV else 256;
     for (&needs) |*n| n.* = @max(n.*, 256);
-    return .{ .rows = rows, .ntx = ntx, .txs = txs, .msgs = msgs, .pl = pl, .txids = txids, .undo = undo, .nodes = nodes, .root = root, .wnodes = wnodes, .recs = recs, .osegs = osegs, .usegs = usegs, .needs = needs };
+    return .{ .rows = rows, .ntx = ntx, .txs = txs, .msgs = msgs, .pl = pl, .txids = txids, .undo = undo, .nodes = nodes, .root = root, .wnodes = wnodes, .recs = recs, .osegs = osegs, .usegs = usegs, .needs = needs, .sig = sigc };
 }
 
 /// `fetched`: the fetched undo stream (`coin.undoStream`), with the creating transactions' indices in
@@ -318,11 +320,12 @@ pub fn buildFull(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctx
     if (!sizeOk(logs)) return error.SizesNotCovered;
 
     const fm = try fields.generate(a, logs[C.fields], raw, rows);
-    const chk = try checks.fill(a, fm, raw, rows, ctx);
-    const wp = try walk.plan(a, logs[C.walk], raw, chk.scripts);
-    const wk = walk.Out{ .cols = if (opts.skip_device_columns) &.{} else try walk.columns(a, logs[C.walk], raw, wp), .reads = wp.reads, .opcodes = wp.opcodes, .ranges = wp.ranges, .sigops = wp.sigops };
+    const chk = try checks.fill(a, fm, raw, rows, ctx, sh.sig.rows);
+    std.debug.assert(chk.w20 == sh.sig.w20);
+    const wp = try walk.plan(a, logs[C.walk], raw, sh.sig.spans);
+    const wk = walk.Out{ .cols = if (opts.skip_device_columns) &.{} else try walk.columns(a, logs[C.walk], raw, wp), .reads = wp.reads, .opcodes = wp.opcodes, .ranges = wp.ranges, .sigops = wp.sigops, .siga = wp.siga };
     const cid = wmerkle.commitId(wnodes);
-    const cx = try ctxw.generate(a, logs[C.ctx], .{ .raw = raw, .ctx = ctx, .tx0 = txs[0], .chk = chk, .sigops = wk.sigops, .cid = cid });
+    const cx = try ctxw.generate(a, logs[C.ctx], .{ .raw = raw, .ctx = ctx, .tx0 = txs[0], .chk = chk, .sigops = wk.sigops, .siga = wk.siga, .cid = cid });
     if (cx.hc) {
         const cdig = try wmerkle.extendPlan(a, &pl, wnodes, cx.nonce);
         const c = chk.commit.?;
@@ -405,6 +408,7 @@ pub fn buildFull(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctx
         .mains = .{ bm, fm, mm, sm, km, tm, wk.cols, cx.cols, wm, um, b2m, b2sm, fpm, urm, co.cols, am },
         .ntx = ntx,
         .sigops = wk.sigops,
+        .sigop_cost = 4 * @as(u64, wk.sigops) + wk.siga + chk.w20,
         .weight = 4 * @as(u64, raw.len) - 3 * @as(u64, chk.w),
         .commitment = cx.hc,
         .reads = reads.items,
@@ -607,8 +611,28 @@ test "block system: large samples satisfy every component (run with ReleaseFast)
             std.debug.print("height {d}: relation {d} unbalanced\n", .{ s.ctx.height, rel });
             return error.TestUnexpectedResult;
         }
-        std.debug.print("height {d}: {d} txs, sigops {d}, weight {d}, commitment {}, log {d}: constraints hold, lookups balance\n", .{ s.ctx.height, b.ntx, b.sigops, b.weight, b.commitment, b.log_size });
+        std.debug.print("height {d}: {d} txs, legacy sigops {d}, sigop cost {d}, weight {d}, commitment {}, log {d}: constraints hold, lookups balance\n", .{ s.ctx.height, b.ntx, b.sigops, b.sigop_cost, b.weight, b.commitment, b.log_size });
     }
+}
+
+test "sigop cost: what the walker, the fields and the undo records count is Core's cost (native reference) on every sample" {
+    const rules = @import("connect_rules.zig");
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    for ([_][]const checks.Sample{ &checks.samples_small, &checks.samples_large }) |set| for (set) |s| {
+        const sh = try shape(a, s.raw, s.undo, null, s.ctx.height, false);
+        const wp = try walk.plan(a, std.math.log2_int_ceil(usize, sh.needs[C.walk]), s.raw, sh.sig.spans);
+        const nat = try rules.blockRules(a, s.raw, s.undo, s.ctx.height, true);
+        try std.testing.expectEqual(nat.sigops.legacy, wp.sigops);
+        try std.testing.expectEqual(4 * @as(u64, nat.sigops.p2sh) + nat.sigops.witness, @as(u64, wp.siga) + sh.sig.w20);
+        var acc_bytes: u64 = 0;
+        for (sh.sig.spans) |sp| if (sp.mode != 0) {
+            acc_bytes += sp.len;
+        };
+        try std.testing.expectEqual(nat.redeem_bytes + nat.wscript_bytes, acc_bytes);
+        std.debug.print("height {d}: cost {d} (legacy {d}, P2SH {d}, witness {d}); accurate spans {d} bytes of {d} walked\n", .{ s.ctx.height, rules.cost(nat.sigops), nat.sigops.legacy, nat.sigops.p2sh, nat.sigops.witness, acc_bytes, sh.needs[C.walk] - 1 });
+    };
 }
 
 test "block system: the block hash is public (limbs of SHA256d(header)); a tampered limb is rejected" {
@@ -652,15 +676,15 @@ test "block system: block 0's STWZEVA-composed proof is byte-identical and verif
 /// block, proved by `proof_file.prove` at test strength (10 PoW bits, 3 queries, blowup 1). They pin
 /// the block AIRs: a change here is a change of every block proof and VK.
 /// Since CONNECT-RULES step 2 (2026-11-19: `block_fields` and `block_coin` gained the height-based
-/// relative lock). The values of m3a5 (2196ba3), which D-045 kept unchanged and with which the proofs
+/// relative lock) and step 3 (2026-11-20: the full sigop cost). The values of m3a5 (2196ba3), which D-045 kept unchanged and with which the proofs
 /// of blocks 935,001-972,500 were made, are in `golden_small_m3a5`.
 pub const golden_small = [_][]const u8{
-    "f0fe8978cd2f1e4e3cb778e84e7c82609fdea6ae7e468e27a682b171cbc0692a", // 0
-    "929943d4e54da39584e87934b37d93b7558350e173470639a4e6d31bf11ff9d1", // 170
-    "bc76c6ba4a03a187794a51fcefbbb801b43fede7b8d9a9efbd40657aad2f0de8", // 91722
-    "d8c0ace9c273663ab639b7e6edb05e2a25622a514cda094bb118681ce3afb362", // 91812
-    "8408bb2260a8759fcbf3fdb943b4d057835b19b4bf342862e8daacea4ccdf7ab", // 91842
-    "9a648d6c7857d385f6a46d53ce73fb4fc862316fcd103955d70438c41e418561", // 91880
+    "d979da466c67710ea8bf9e3cb4aa4a7ca455ecdd087f7f065d014899bb60f26c", // 0
+    "4e540e8199539bf32c64f984cda148bd9e14c0fd39a8ffcc446c4bacd5ff8ad4", // 170
+    "436f19d25ceb27effa30bfda213ac0b596531a46d18f2fed90d8e55b3ad27208", // 91722
+    "82a1c42cb4fc2e157bb19aaae2bee5a136a21fbfe3e82aafce192e2fe2aa7bfa", // 91812
+    "84e59db217dd3fea7693fc4cd8f8555f82a6120d7eecd715a825bd55822df0c2", // 91842
+    "c64ce662ca43aa2732a135c87946b3916933e2564b8986151a770e9202405925", // 91880
 };
 
 /// The same hashes with the AIRs before CONNECT-RULES step 2 (m3a5, 2196ba3). Kept for reference only.

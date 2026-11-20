@@ -10,7 +10,7 @@ const checks = @import("checks.zig");
 const msg = @import("msg.zig");
 
 pub const json = @embedFile("air:block_ctx");
-pub const N_MAIN = 41;
+pub const N_MAIN = 44;
 pub const ZERO_ID: u32 = 1 << 28;
 pub const NONCE_ID: u32 = (1 << 28) + 1;
 
@@ -29,6 +29,9 @@ const WT = 26;
 const NSEG = 27;
 const HASC = 28;
 const SIGS = 29;
+const SIGA = 41;
+const W20T = 42;
+const PAR = 43;
 const CPOS = 30;
 const CLEN = 31;
 const CLO = 32;
@@ -97,6 +100,8 @@ pub const In = struct {
     tx0: msg.TxRange,
     chk: checks.Out,
     sigops: u32,
+    /// Step 3: the weighted accurate count (walker). The P2WPKH count is `chk.w20`.
+    siga: u32 = 0,
     /// The commitment node's digest id (when the commitment is checked).
     cid: u32,
 };
@@ -133,15 +138,19 @@ pub fn generate(a: std.mem.Allocator, log_size: u32, in: In) !Out {
     const force = in.ctx.force;
     if (4 * raw.len > 4000000 + 3 * @as(usize, in.chk.w) and !force) return error.BlockTooHeavy;
     const weight_d: u32 = 4000000 +% 3 *% in.chk.w -% 4 *% @as(u32, @intCast(raw.len));
-    if (in.sigops > 20000 and !force) return error.TooManySigops;
-    const sig_d: u32 = 20000 -% in.sigops;
+    const cost: u64 = 4 * @as(u64, in.sigops) + in.siga + in.chk.w20;
+    if (cost > 80000 and !force) return error.TooManySigops;
+    // `80000 − cost = 2·(the two range bytes) + PAR`.
+    const sig_full: u32 = 80000 -% @as(u32, @truncate(cost));
+    const sig_d: u32 = sig_full >> 1;
+    const sig_par: u32 = sig_full & 1;
     const clen_d: u32 = if (hc) clen -% 38 else 0;
     var nonce: [32]u8 = [_]u8{0} ** 32;
     if (hc) @memcpy(&nonce, raw[in.tx0.w + 2 ..][0..32]);
     const consts = [_]struct { c: usize, v: u32 }{
         .{ .c = A0, .v = a0 },                      .{ .c = SEG0, .v = seg0 },               .{ .c = W0, .v = in.tx0.w },
         .{ .c = L0, .v = in.tx0.l },                .{ .c = WT, .v = in.chk.w },             .{ .c = NSEG, .v = in.chk.nseg },
-        .{ .c = HASC, .v = @intFromBool(in.chk.commit != null) }, .{ .c = SIGS, .v = in.sigops }, .{ .c = CPOS, .v = cpos },
+        .{ .c = HASC, .v = @intFromBool(in.chk.commit != null) }, .{ .c = SIGS, .v = in.sigops }, .{ .c = SIGA, .v = in.siga }, .{ .c = W20T, .v = in.chk.w20 }, .{ .c = PAR, .v = sig_par }, .{ .c = CPOS, .v = cpos },
         .{ .c = CLEN, .v = clen },                  .{ .c = CLO, .v = cutoff & 0xffff },     .{ .c = CHI, .v = cutoff >> 16 },
         .{ .c = TL16, .v = time & 0xffff },         .{ .c = TH16, .v = time >> 16 },         .{ .c = MLO, .v = mtp & 0xffff },
         .{ .c = MHI, .v = mtp >> 16 },              .{ .c = HC, .v = @intFromBool(hc) },     .{ .c = CID, .v = if (hc) in.cid else 0 },

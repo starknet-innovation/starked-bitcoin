@@ -215,11 +215,105 @@ zig build test -Doptimize=ReleaseFast -Dtest-filter="BIP68"     # ~20 s
 (cd lean && lake build StarkedAir.Block.CoinEpochCore)
 ```
 
+## Step 3 (2026-11-20): the full sigop cost in the AIRs; soundness proven for the legacy part only
+
+Status: the AIRs enforce `4·legacy + 4·P2SH + witness ≤ 80,000` and are tested against the native
+reference. In Lean, every earlier theorem holds on the new AIRs; **the soundness of the P2SH and
+witness parts is not proven yet** (see "Open in Lean").
+
+**Rows first (survey, 37,500 blocks, 0 errors).** `survey` with `STARKED_SURVEY_SIGOPS=1` on the node:
+
+| | Value |
+|---|---|
+| Rows `block_walk` needs today (script bytes) | 1.136·10^10 |
+| Redeem scripts to count accurately | 14,189,109 spans, 4.09·10^8 bytes (+3.6 %) |
+| Witness scripts to count accurately | 8,504,590 spans, 8.22·10^8 bytes (+7.2 %) |
+| Extra rows per block, against its need | median +9.7 %, 99th percentile +43.5 %, largest ×11.8 (block 950,125) |
+| Blocks whose walker still fits at L / L−2 / L−3 / L−4 | 37,500 / 37,493 / 37,242 / 35,776 (before: 37,500 / 37,500 / 37,319 / 36,316) |
+
+So the walker fits the current profile for every block; TIERS-2 picks its offset on the new needs.
+
+**As built.**
+
+- **`block_urec`** classifies the spent script from the record's `serTxOut`: it reads the script's
+  length byte (`S + 17`), then two bytes and, for P2SH, the last one. `CP`: `17 a9 14 … 87`; `C20`:
+  `16 00 14`; `C32`: `22 00 20`. The class travels in the record tuple to `block_coin`, and in the
+  input tuple to the input's row in `block_fields`.
+- **`block_walk`** has two kinds of spans. A *script* (`AC = 0`) is walked as before; it now also
+  outputs `PO` (it parses and no opcode is above `OP_16`: `IsPushOnly`) and `(RS, RL)`, the data of its
+  last operation, in the script tuple. An *accurate span* (`AC = 1`, tuple `aspan(start, len, W4)`)
+  is counted accurately: a multisig counts the previous opcode's value (`PV`: 1 … 16 after
+  `OP_1 … OP_16`, else 20), with weight 4 (`W4`, a redeem script) or 1 (a witness script). Two sums:
+  `SUMS` (legacy, scripts only) and `SUMA` (weighted accurate counts).
+- **`block_fields`**, per non-coinbase input: `AR0` = P2SH spent by a non-empty push-only scriptSig.
+  Then the last push is the redeem script: it is requested as an accurate span of weight 4 (if not
+  empty, and below 2^24 bytes), and if it is 22 or 34 bytes its first two bytes are read to see a
+  version 0 witness program (`RWA`, `RW32`). `W20S` counts the inputs whose program, native or
+  wrapped, is version 0 with 20 bytes. An input whose program is version 0 with 32 bytes (`N32`)
+  sends `wreq(tx, inputs left)` to its witness stack's row in a segwit transaction; the stack's last
+  item, if not empty, is requested as an accurate span of weight 1.
+- **`block_ctx`** checks `2·ACC + PAR = 80,000 − 4·SIGS − SIGA − W20T` with `ACC` two range bytes and
+  `PAR` a bit (the bound needs 17 bits).
+- **The opcode table** gains three columns (above `OP_16`, multisig, the value a following multisig
+  takes). The set-pass system shares `block_tables`, so the block system uses a copy,
+  `block_tablesb` (`Tables.tablesB`); the set-pass AIRs and keys do not change.
+- **`strict`** (the P2SH and witness flags) is always on in the AIR. Core turns it off for one block
+  (height 170,060); counting more there can only reject, and that block's cost stays far below the
+  limit. To state in Lean when the from-genesis run is prepared.
+- Columns: walk 51 → 71, fields 203 → 229, urec 21 → 39, coin 170 → 173, ctx 41 → 44. Lookups per
+  row: fields 40 → 46, walk 5 → 6, urec 20 → 24 (`hashRows`: 223 → 234 sites; `SizeOk` still covers
+  uniform 2^23).
+
+**Tests.**
+
+| Test | Result |
+|---|---|
+| Real blocks 400,000; 481,824; 709,632; 970,347 (`large samples`) | constraints hold, lookups balance |
+| The walker's, fields' and records' counts against the native reference, 11 samples | equal (e.g. block 709,632: cost 13,143 = 4·1,611 + 4·268 + 5,627) |
+| 22 synthetic inputs in one transaction (P2SH with multisigs, PUSHDATA1/2, two pushes, not push-only, truncated push, empty last push, `OP_RESERVED`; P2SH-P2WPKH, P2SH-P2WSH, 22 and 34 bytes that are not version 0 programs; P2WPKH with and without witness; P2WSH with one item, empty stack, empty last item; taproot) | AIRs hold; cost 9,480 as the native reference counts |
+| Cost exactly 80,000 through two redeem scripts, through one witness script, through both (legacy count 0) | accepted |
+| Cost 80,001 (one more P2WPKH input); 120,000 | rejected (`block_ctx` constraint 48) |
+| Forgeries: the record, the coin row or the fields deny the P2SH class; the fields drop a P2WPKH class; the walker denies push-only; a witness stack ignores its request; the walker counts a redeem script with weight 1 | each rejected (a constraint, or an unbalanced lookup) |
+
+The native reference (`connect_rules.zig`) is the one fuzzed against Core in step 1.
+
+**Lean, done** (standard axioms, `lake build` 8930 jobs):
+
+- Every earlier theorem holds on the new AIRs, including `sigops_ok` (legacy sigops × 4 ≤ 80,000),
+  now derived from the new check: `Block.sigops_nat` gives `4·legacy + A + w + D = 80,000` over the
+  naturals, with `A` the walker's `SUMA` and `w` the fields' `W20S`.
+- `Walk.total`: the legacy sum is over the scripts only. `Walk.pv_le`, `row_cost`, `sums_nat`: each row
+  adds at most 80 to `4·SUMS + SUMA`, so the check cannot wrap. `Fields.w20_nat`: `W20S` is a natural
+  of at most two per row. `walk_rem`: every span, script or accurate, is 1 to 2^25 bytes long.
+- Sixteen pins of the `Compat.lean` gate re-pinned (D-056); no `compat_*` statement changed.
+
+**Open in Lean** (what a proof of `SigOpCostOK` still needs):
+
+1. `SUMA` equals the sum, over the accurate spans, of weight × `sigOpsAccurate` (the walker's second
+   automaton; `walk_eq_sigOps` and `segment` are the pattern).
+2. A script's `(PO, RS, RL)` are `lastPush` of its bytes.
+3. The records' class bits are `isP2SH` and `witnessProgram` of the spent script.
+4. The fields' flags (`AR0`, `RWA`, `RW32`, `N32`) and the two request relations: the accurate spans
+   are exactly Core's redeem and witness scripts, each once.
+5. The sum over the block: `A + w = 4·P2SH + witness`, hence `SigOpCostOK`, and the epoch statement.
+
+Until then the full-cost rule is enforced by the AIRs and tested, not proven.
+
+**Not done here:** the GPU walker kernel (`src/gpu/cuda/witness.zig`) builds the old 51 columns; the
+CPU path is the reference until step 5.
+
+```sh
+python3 pack.py | STARKED_SURVEY_SIGOPS=1 ./survey > sigops.csv   # on the node, ~40 min
+zig build test -Doptimize=ReleaseFast -Dtest-filter="sigop cost"  # ~1 min
+(cd lean && lake build StarkedAir.Block.BlockSums)
+```
+
 ## Order of work
 
 1. **Spec first, no proving cost.** Done, above.
 2. Height-based BIP68 (AIR, witness, Lean, negative tests). Done, above.
-3. Sigop cost (walker mode, classification, Lean, negative tests).
+3. Sigop cost (walker mode, classification, negative tests): built and tested, above; its Lean
+   soundness is open.
 4. Time-based BIP68 (the committed claim, the resolver, the balance; the epoch root and seal take one
    more child).
 5. GPU witness kernels for the changed components (`gpu-cuda.md`), new VKs, one re-prove.

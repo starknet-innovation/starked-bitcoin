@@ -136,7 +136,12 @@ def SQL : ℕ := 164
 def LKH : ℕ := 165
 def LKT : ℕ := 166
 def LB (i : ℕ) : ℕ := 167 + i
-def N_MAIN : ℕ := 170
+/-- CONNECT-RULES step 3: the spent script's class (P2SH, version 0 program of 20 or 32 bytes), from the
+undo record to the fields' input row. -/
+def UP : ℕ := 170
+def U20 : ℕ := 171
+def U32 : ℕ := 172
+def N_MAIN : ℕ := 173
 
 -- public inputs (after the block's 41 and the fingerprint's `γ` at 41–44)
 def PUB_Z : ℕ := 45
@@ -287,9 +292,9 @@ def r8 (e : Expr) (m : Expr) : Lookup := ⟨Tables.REL_R8, .neg m, [e]⟩
 
 def lookups : List Lookup :=
   [ ⟨REL_OUTT, .neg (k KO), [k TXI, k START, k LEN, k SSC, k SVAL, k VL, k VH]⟩,
-    ⟨REL_INT, .neg (.add (k KI) (k CBI)), [k TXI, k START, k SQL, k LKH, k LKT]⟩,
+    ⟨REL_INT, .neg (.add (k KI) (k CBI)), [k TXI, k START, k SQL, k LKH, k LKT, k UP, k U20, k U32]⟩,
     ⟨Sha.REL_DIGEST, .neg (k KO), (.add (.mul (cst 2) (k TXI)) one) :: (List.range 16).map (fun i => k (TLB i))⟩,
-    ⟨URec.REL_UREC, .neg (k KI), [k J, k CLO, k CHI, k VL, k VH, k CTX]⟩,
+    ⟨URec.REL_UREC, .neg (k KI), [k J, k CLO, k CHI, k VL, k VH, k CTX, k UP, k U20, k U32]⟩,
     ⟨FpWalk.REL_SEG, k KO, [cst 0, k START, k START, k LEN]⟩,
     ⟨FpWalk.REL_FP, .neg (.add (k KO) (k KI)),
       [k KI, k SIDC, k SLEN, k FH, k (FH + 1), k (FH + 2), k (FH + 3)]⟩,

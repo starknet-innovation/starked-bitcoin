@@ -21,6 +21,30 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-11-20 · session 42 · CONNECT-RULES step 3: the full sigop cost enforced by the AIRs and tested; its Lean soundness open
+
+Who: Claude (agent, Fable 5.2); owner: "Create a new branch", "That works." (D-056), "Before the sigop cost, make a change on the stwo zig references"
+Roadmap: CONNECT-RULES in progress (step 3 of 5 built and tested; Lean soundness of the P2SH and witness parts open)
+Done:
+- Survey of the walker's extra rows over blocks 935,001–972,500 (`STARKED_SURVEY_SIGOPS=1`): +10.8 % in all, every block still fits at L.
+- AIRs (Lean, exported): `block_walk` (accurate spans, `PO`/`RS`/`RL`, `SUMA`), `block_urec` (spent class), `block_coin` (class pass-through), `block_fields` (`sigC`, six lookups), `block_ctx` (80,000 bound with a parity bit), `block_tablesb` (new: the block system's opcode table; the set pass keeps `block_tables`).
+- Zig witness: `src/block/sigcost.zig` (new), `walk.zig`, `checks.zig`, `coin.zig`, `ctx.zig`, `system.zig` (`SITES`, goldens), `block_forest.zig` (VK golden), `testdata/stwzeva/pubfree.bin` regenerated.
+- Lean repaired: every earlier theorem holds. New: `Walk.pv_le`, `row_cost`, `sums_nat`, `Fields.rdf_bool`, `arq_val`, `wq_val`, `w20_nat`, `URec.zsum_bool`, `pc_bool`, `Block.sigops_nat`; `sigops_ok` derived from the new check. Sixteen `Compat.lean` pins re-pinned (D-056).
+- D-057 (agent, to confirm): block-only table copy; AIR before its soundness; `strict` always on.
+Evidence:
+- `zig build test -Doptimize=ReleaseFast --summary all`: 148/154 passed, 2 skipped, 4 failed (two goldens, the committed code-generation bundle and the kernels built from it); after updating the goldens and `STWZEVA_WRITE_BUNDLE=1`, the 15 tests under the filters `golden`, `stwzeva`, `sigop cost`, `SizeOk matches`, `STWZEVA-composed` pass. The full suite was not rerun after that.
+- Real blocks 400,000; 481,824; 709,632; 970,347: constraints hold, lookups balance. Counts equal the native reference on 11 samples.
+- `lake build`: 8930 jobs. `#print axioms` of `sigops_nat`, `sigops_ok`, `Walk.sums_nat`, `Walk.total`, `walk_rem`: propext, Classical.choice, Quot.sound.
+- `scripts/check_air_drift.sh` on the seven changed or new AIRs: ok (fields re-exported once more after the check found it stale).
+- `chainproof verify-seal … data/seal972/outT …` with this branch's binary: VERIFIED.
+Problems / lessons:
+- `block_tables` is shared with the set pass: caught when reading `set_seg.zig`, before any set VK changed.
+- `Export.lean` imports the whole tree, so no export while a proof is broken; a minimal export script (scratchpad) bridged it. The tests ran for a while against a fields JSON two constraints behind the Lean source; the drift check caught it.
+- `first | exact ⟨…, by ring⟩` does not backtrack on a failing `ring`; give the witness per case.
+- A `pgrep -f "zig build test"` wait loop matches itself; wait on the PID.
+- The 80,000 bound needs 17 bits and the ctx range value has 16: solved with a parity bit instead of moving the row schedule.
+Next: the Lean soundness of step 3 (status.md, item A).
+
 ## 2026-11-20 · stwo-zig moved to starknet-innovation/stwo-zig: references updated
 
 Who: Claude (agent, Fable 5.2); owner: "the repo changed place: It is now hosted here https://github.com/starknet-innovation/stwo-zig make sure this is recorded everywhere needed"

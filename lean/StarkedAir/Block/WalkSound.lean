@@ -127,6 +127,10 @@ theorem mem_step {c : Expr} (h : c ∈ stepC) : c ∈ constraints := by
   simp only [constraints, List.mem_append]; tauto
 
 omit hsat in
+theorem mem_acc {c : Expr} (h : c ∈ accC) : c ∈ constraints := by
+  simp only [constraints, List.mem_append]; exact Or.inr h
+
+omit hsat in
 theorem mem_script {c : Expr} (h : c ∈ scriptC) : c ∈ constraints := by
   simp only [constraints, List.mem_append]; tauto
 
@@ -644,25 +648,39 @@ theorem seg_rows : ∀ L r, r < n → M ACT r = 1 → (M REM r).val = L → 1 �
       · rw [show r + j = r + 1 + (j - 1) by omega]; exact c1 (j - 1) (by omega) (by omega)
 
 omit hopc hr8 hread hR in
-theorem sums_eq : ∀ r < n, M SUMS r = ∑ j ∈ Finset.range (r + 1), M OP j * M SG j := by
+theorem sums_eq : ∀ r < n, M SUMS r = ∑ j ∈ Finset.range (r + 1), M OP j * M LG j := by
   intro r
   induction r with
   | zero =>
     intro h0
-    have c := sat hsat (mem_script (c := .mul first (.sub (k SUMS) (.mul (k OP) (k SG)))) (by simp [scriptC])) h0
+    have c := sat hsat (mem_script (c := .mul first (.sub (k SUMS) (.mul (k OP) (k LG)))) (by simp [scriptC])) h0
     simp only [Expr.eval, ev_first h0, if_true, one_mul, ev_k h0, sub_eq_zero] at c
     simp [c]
   | succ r ih =>
     intro hr
-    have c := sat hsat (mem_script (c := .mul notFirst (.sub (.sub (k SUMS) (kp SUMS)) (.mul (k OP) (k SG))))
+    have c := sat hsat (mem_script (c := .mul notFirst (.sub (.sub (k SUMS) (kp SUMS)) (.mul (k OP) (k LG))))
       (by simp [scriptC])) hr
     simp only [Expr.eval, ev_notFirst hr, one_mul, ev_k hr, ev_kp hr] at c
     rw [Finset.sum_range_succ, ← ih (by omega)]; linear_combination c
 
 omit hopc hr8 hread hR in
+/-- The legacy weight of a row: `SG` on a script's rows, zero on an accurate span's. -/
+theorem lg_eq {r : ℕ} (hr : r < n) : M LG r = (1 - M AC r) * M SG r := by
+  have c := sat hsat (mem_acc (c := .sub (k LG) (.mul (om (k AC)) (k SG))) (by simp [accC])) hr
+  simp only [Expr.eval, ev_k hr, om, one, eval_cst, Nat.cast_one] at c
+  linear_combination c
+
+omit hopc hr8 hread hR in
+/-- A continuing row keeps its span's mode. -/
+theorem ac_cont {r : ℕ} (hr : r + 1 < n) (hg : M GC (r + 1) = 1) : M AC (r + 1) = M AC r := by
+  have c := sat hsat (mem_acc (c := .mul (k GC) (.sub (k AC) (kp AC))) (by simp [accC])) hr
+  simp only [Expr.eval, ev_k hr, ev_kp hr, hg, one_mul] at c
+  linear_combination c
+
+omit hopc hr8 hread hR in
 /-- Inactive rows are a suffix and count nothing. -/
 theorem inactive {f : ℕ} (hf : f < n) (h0 : M ACT f = 0) :
-    ∀ j, f ≤ j → j < n → M ACT j = 0 ∧ M OP j * M SG j = 0 ∧ M FS j = 0 := by
+    ∀ j, f ≤ j → j < n → M ACT j = 0 ∧ M OP j * M LG j = 0 ∧ M FS j = 0 := by
   intro j h1 h2
   have hact : M ACT j = 0 := by
     induction j, h1 using Nat.le_induction with
@@ -681,15 +699,15 @@ theorem inactive {f : ℕ} (hf : f < n) (h0 : M ACT f = 0) :
   have := natCast_inj_of_lt (Fields.lt_P (by omega)) (Fields.lt_P (by norm_num)) e
   refine ⟨hact, by rw [vo, show (M OP j).val = 0 by omega]; simp, by rw [hact, sub_zero, mul_one] at hfa; exact hfa⟩
 
-/-- **The walker's total.** If every script starts with at most `2^25` bytes left, the sigop sum is the sum,
-over first rows, of the legacy sigops of their scripts. -/
+/-- **The walker's total.** If every span starts with at most `2^25` bytes left, the legacy sum is the sum,
+over the first rows of the scripts (`AC = 0`; an accurate span counts nothing here), of their legacy sigops. -/
 theorem total (hrem : ∀ r < n, M FS r = 1 → 1 ≤ (M REM r).val ∧ (M REM r).val ≤ 2 ^ 25) (hn : 0 < n) :
     M SUMS (n - 1) = ∑ f ∈ (Finset.range n).filter (fun f => M FS f = 1),
-      ((Spec.Block.sigOps (Fields.slice R (M POS f).val (M REM f).val) : ℕ) : F) := by
+      (1 - M AC f) * ((Spec.Block.sigOps (Fields.slice R (M POS f).val (M REM f).val) : ℕ) : F) := by
   rw [sums_eq hsat (n - 1) (by omega), show n - 1 + 1 = n by omega]
   -- from any segment start (or the inactive suffix) to the end
-  set g := fun j => M OP j * M SG j
-  set h := fun j => ((Spec.Block.sigOps (Fields.slice R (M POS j).val (M REM j).val) : ℕ) : F)
+  set g := fun j => M OP j * M LG j
+  set h := fun j => (1 - M AC j) * ((Spec.Block.sigOps (Fields.slice R (M POS j).val (M REM j).val) : ℕ) : F)
   have claim : ∀ d f, n - f = d → f ≤ n → (M ACT f = 0 ∨ M FS f = 1) →
       ∑ j ∈ Finset.Ico f n, g j = ∑ j ∈ Finset.Ico f n, (if M FS j = 1 then h j else 0) := by
     intro d
@@ -727,7 +745,22 @@ theorem total (hrem : ∀ r < n, M FS r = 1 → 1 ≤ (M REM r).val ∧ (M REM r
           ← Finset.sum_Ico_consecutive (fun j => if M FS j = 1 then h j else 0) (show f ≤ f + L by omega)
             (show f + L ≤ n by omega), ih']
         congr 1
-        rw [Finset.sum_Ico_eq_sum_range, Finset.sum_Ico_eq_sum_range, show f + L - f = L by omega, seg]
+        -- the span's mode is its first row's
+        have hac : ∀ j, j < L → M AC (f + j) = M AC f := by
+          intro j
+          induction j with
+          | zero => intro _; rfl
+          | succ j ihj =>
+            intro hj
+            rw [show f + (j + 1) = f + j + 1 by omega, ac_cont hsat (by omega) (by
+              rw [show f + j + 1 = f + (j + 1) by omega]; exact cont' (j + 1) (by omega) hj), ihj (by omega)]
+        have hg : ∑ j ∈ Finset.range L, g (f + j) = (1 - M AC f) * ∑ j ∈ Finset.range L, M OP (f + j) * M SG (f + j) := by
+          rw [Finset.mul_sum]
+          refine Finset.sum_congr rfl (fun j hj => ?_)
+          have hjL := Finset.mem_range.mp hj
+          simp only [g]
+          rw [lg_eq hsat (show f + j < n by omega), hac j hjL]; ring
+        rw [Finset.sum_Ico_eq_sum_range, Finset.sum_Ico_eq_sum_range, show f + L - f = L by omega, hg, seg]
         rw [Finset.sum_eq_single 0]
         · simp [hfs, h, L]
         · intro j hj hj0
@@ -748,5 +781,151 @@ theorem total (hrem : ∀ r < n, M FS r = 1 → 1 ≤ (M REM r).val ∧ (M REM r
   rw [Finset.range_eq_Ico, hc, Finset.sum_filter]
 
 end Segments
+
+/-! ### Bounds on the two sums (CONNECT-RULES step 3)
+
+Each row adds at most 80 to `4·SUMS + SUMA`: a script's opcode at most `4·20`, an accurate span's at most
+`4·20` (the previous opcode's value `PV` is at most 20). So the two totals are naturals with
+`4·S + A ≤ 80·n`, which keeps the context's check from wrapping. -/
+
+section Bounds
+
+variable {n : ℕ} {pub : ℕ → F} {M : ℕ → ℕ → F}
+  (hsat : ∀ r < n, ∀ c ∈ constraints, c.eval n preCols pub M r = 0)
+  (hopc : ∀ r < n, M OP r = 1 → M SG r = (Tables.sigN (M B r).val : F) ∧
+    M MS r = (Tables.msN (M B r).val : F) ∧ M DV r = (Tables.dvN (M B r).val : F))
+include hsat hopc
+
+omit hsat hopc in
+theorem dvN_le (b : ℕ) : Tables.dvN b ≤ 20 := by unfold Tables.dvN; split_ifs <;> omega
+
+omit hopc in
+theorem acc_bool {c : ℕ} (hc : boolC (k c) ∈ accC) {r : ℕ} (hr : r < n) : M c r = 0 ∨ M c r = 1 := by
+  have := sat hsat (mem_acc hc) hr
+  simp only [boolC, Expr.eval, ev_k hr, eval_cst, Nat.cast_one] at this
+  rcases mul_eq_zero.mp this with h | h
+  · exact Or.inl h
+  · exact Or.inr (sub_eq_zero.mp h)
+
+/-- On an active row the previous opcode's value is at most 20. -/
+theorem pv_le : ∀ r < n, M ACT r = 1 → ∃ v : ℕ, v ≤ 20 ∧ M PV r = (v : F) := by
+  intro r
+  induction r with
+  | zero =>
+    intro h0 ha
+    have c := sat hsat (mem_script (c := .mul first (.mul (k ACT) (om (k FS)))) (by simp [scriptC])) h0
+    simp only [Expr.eval, ev_first h0, if_true, one_mul, ev_k h0, om, one, eval_cst, Nat.cast_one, ha] at c
+    have hfs : M FS 0 = 1 := by linear_combination -c
+    have c2 := sat hsat (mem_acc (c := .mul (k FS) (.sub (k PV) (cst 20))) (by simp [accC])) h0
+    simp only [Expr.eval, ev_k h0, eval_cst, hfs, one_mul] at c2
+    exact ⟨20, le_rfl, by push_cast; linear_combination c2⟩
+  | succ r ih =>
+    intro hr ha
+    rcases bool hsat (c := FS) (by simp [bools]) hr with f0 | f1
+    · have gc := defn hsat (a := GC) (e := .mul (k ACT) (om (k FS))) (by simp [localC]) hr
+      simp only [Expr.eval, ev_k hr, om, one, eval_cst, Nat.cast_one, ha, f0, sub_zero, mul_one] at gc
+      have c1 := sat hsat (mem_script (c := .mul notFirst (.mul (k ACT) (om (kp ACT)))) (by simp [scriptC])) hr
+      simp only [Expr.eval, ev_notFirst hr, one_mul, ev_k hr, ev_kp hr, om, one, eval_cst, Nat.cast_one, ha] at c1
+      have ha' : M ACT r = 1 := by linear_combination -c1
+      have c2 := sat hsat (mem_acc (c := .mul (k GC) (.sub (k PV) (kp NPV))) (by simp [accC])) hr
+      simp only [Expr.eval, ev_k hr, ev_kp hr, gc, one_mul] at c2
+      have hr' : r < n := by omega
+      have c3 := sat hsat (mem_acc (c := .sub (k NPV) (.add (.mul (k OP) (k DV)) (.mul (om (k OP)) (k PV))))
+        (by simp [accC])) hr'
+      simp only [Expr.eval, ev_k hr', om, one, eval_cst, Nat.cast_one] at c3
+      obtain ⟨v, hv, e⟩ := ih hr' ha'
+      rcases bool hsat (c := OP) (by simp [bools]) hr' with o0 | o1
+      · refine ⟨v, hv, ?_⟩
+        rw [o0] at c3; rw [← e]; linear_combination c2 + c3
+      · refine ⟨Tables.dvN (M B r).val, dvN_le _, ?_⟩
+        rw [o1] at c3; rw [← (hopc r hr' o1).2.2]; linear_combination c2 + c3
+    · have c2 := sat hsat (mem_acc (c := .mul (k FS) (.sub (k PV) (cst 20))) (by simp [accC])) hr
+      simp only [Expr.eval, ev_k hr, eval_cst, f1, one_mul] at c2
+      exact ⟨20, le_rfl, by push_cast; linear_combination c2⟩
+
+/-- **A row's cost.** Its legacy weight `u` and its weighted accurate count `a` are naturals with
+`4·u + a ≤ 80`. -/
+theorem row_cost {r : ℕ} (hr : r < n) :
+    ∃ u a : ℕ, 4 * u + a ≤ 80 ∧ M OP r * M LG r = (u : F) ∧ M OP r * M AN r = (a : F) := by
+  rcases bool hsat (c := OP) (by simp [bools]) hr with o0 | o1
+  · exact ⟨0, 0, by norm_num, by simp [o0], by simp [o0]⟩
+  -- an opcode row is active
+  have ha : M ACT r = 1 := by
+    rcases bool hsat (c := ACT) (by simp [bools]) hr with a0 | a1
+    · exfalso
+      obtain ⟨hk, -, -⟩ := kinds hsat hr
+      have bv := fun d (hd : d ∈ bools) => Fields.bool_val (bool hsat hd hr)
+      obtain ⟨vo, lo⟩ := bv OP (by simp [bools]); obtain ⟨vl, ll⟩ := bv LN (by simp [bools])
+      obtain ⟨vd, ld⟩ := bv DT (by simp [bools]); obtain ⟨vi, li⟩ := bv INF (by simp [bools])
+      have e : (((M OP r).val + (M LN r).val + (M DT r).val + (M INF r).val : ℕ) : F) = ((0 : ℕ) : F) := by
+        push_cast; rw [← vo, ← vl, ← vd, ← vi, hk, a0]
+      have := natCast_inj_of_lt (Fields.lt_P (by omega)) (Fields.lt_P (by norm_num)) e
+      have h0 : M OP r = 0 := by rw [vo, show (M OP r).val = 0 by omega]; simp
+      rw [o1] at h0; exact one_ne_zero h0
+    · exact a1
+  obtain ⟨v, hv, epv⟩ := pv_le hsat hopc r hr ha
+  obtain ⟨hsg, hms, -⟩ := hopc r hr o1
+  have lg := lg_eq hsat hr
+  have m1 := sat hsat (mem_acc (c := .sub (k M1) (.mul (k MS) (k PV))) (by simp [accC])) hr
+  have an := sat hsat (mem_acc (c := .sub (k AN) (.mul (.add (k AC) (.mul (cst 3) (k W4)))
+    (.add (.sub (k SG) (.mul (cst 20) (k MS))) (k M1)))) (by simp [accC])) hr
+  have w4ac := sat hsat (mem_acc (c := .mul (k W4) (om (k AC))) (by simp [accC])) hr
+  simp only [Expr.eval, ev_k hr, om, one, eval_cst, Nat.cast_one, Nat.cast_ofNat, sub_eq_zero] at m1 an w4ac
+  have bac := acc_bool hsat (c := AC) (by simp [accC]) hr
+  have bw4 := acc_bool hsat (c := W4) (by simp [accC]) hr
+  set b := (M B r).val
+  -- the table's values for this byte: checksig (1, 0), multisig (20, 1) or neither (0, 0)
+  have hcase : (Tables.sigN b = 1 ∧ Tables.msN b = 0) ∨ (Tables.sigN b = 20 ∧ Tables.msN b = 1) ∨
+      (Tables.sigN b = 0 ∧ Tables.msN b = 0) := by
+    unfold Tables.sigN Tables.msN
+    by_cases h1 : b = 0xac ∨ b = 0xad
+    · left; rw [if_pos h1]; refine ⟨rfl, ?_⟩; rw [if_neg]; omega
+    · by_cases h2 : b = 0xae ∨ b = 0xaf
+      · right; left; rw [if_neg h1, if_pos h2, if_pos h2]; exact ⟨rfl, rfl⟩
+      · right; right; rw [if_neg h1, if_neg h2, if_neg h2]; exact ⟨rfl, rfl⟩
+  rw [o1, one_mul, one_mul, lg, an, m1, hsg, hms, epv]
+  rcases bac with a0 | a1
+  · -- a script row: the legacy weight
+    have w0 : M W4 r = 0 := by rw [a0] at w4ac; linear_combination w4ac
+    rw [a0, w0]
+    rcases hcase with ⟨e1, e2⟩ | ⟨e1, e2⟩ | ⟨e1, e2⟩ <;> rw [e1, e2]
+    · exact ⟨1, 0, by norm_num, by push_cast; ring, by push_cast; ring⟩
+    · exact ⟨20, 0, by norm_num, by push_cast; ring, by push_cast; ring⟩
+    · exact ⟨0, 0, by norm_num, by push_cast; ring, by push_cast; ring⟩
+  · rw [a1]
+    rcases bw4 with w0 | w1 <;> [rw [w0]; rw [w1]] <;>
+      rcases hcase with ⟨e1, e2⟩ | ⟨e1, e2⟩ | ⟨e1, e2⟩ <;> rw [e1, e2]
+    · exact ⟨0, 1, by norm_num, by push_cast; ring, by push_cast; ring⟩
+    · exact ⟨0, v, by omega, by push_cast; ring, by push_cast; ring⟩
+    · exact ⟨0, 0, by norm_num, by push_cast; ring, by push_cast; ring⟩
+    · exact ⟨0, 4, by norm_num, by push_cast; ring, by push_cast; ring⟩
+    · exact ⟨0, 4 * v, by omega, by push_cast; ring, by push_cast; ring⟩
+    · exact ⟨0, 0, by norm_num, by push_cast; ring, by push_cast; ring⟩
+
+/-- **The totals are bounded naturals**: `SUMS = S`, `SUMA = A` with `4·S + A ≤ 80·(r + 1)`. -/
+theorem sums_nat : ∀ r < n, ∃ S A : ℕ, 4 * S + A ≤ 80 * (r + 1) ∧ M SUMS r = (S : F) ∧ M SUMA r = (A : F) := by
+  intro r
+  induction r with
+  | zero =>
+    intro h0
+    obtain ⟨u, a, hb, eu, ea⟩ := row_cost hsat hopc h0
+    have c1 := sat hsat (mem_script (c := .mul first (.sub (k SUMS) (.mul (k OP) (k LG)))) (by simp [scriptC])) h0
+    have c2 := sat hsat (mem_acc (c := .mul first (.sub (k SUMA) (.mul (k OP) (k AN)))) (by simp [accC])) h0
+    simp only [Expr.eval, ev_first h0, if_true, one_mul, ev_k h0, sub_eq_zero] at c1 c2
+    exact ⟨u, a, by omega, by rw [c1, eu], by rw [c2, ea]⟩
+  | succ r ih =>
+    intro hr
+    obtain ⟨S, A, hb, eS, eA⟩ := ih (by omega)
+    obtain ⟨u, a, hb', eu, ea⟩ := row_cost hsat hopc hr
+    have c1 := sat hsat (mem_script (c := .mul notFirst (.sub (.sub (k SUMS) (kp SUMS)) (.mul (k OP) (k LG))))
+      (by simp [scriptC])) hr
+    have c2 := sat hsat (mem_acc (c := .mul notFirst (.sub (.sub (k SUMA) (kp SUMA)) (.mul (k OP) (k AN))))
+      (by simp [accC])) hr
+    simp only [Expr.eval, ev_notFirst hr, one_mul, ev_k hr, ev_kp hr] at c1 c2
+    refine ⟨S + u, A + a, by omega, ?_, ?_⟩
+    · push_cast; rw [← eS, ← eu]; linear_combination c1
+    · push_cast; rw [← eA, ← ea]; linear_combination c2
+
+end Bounds
 
 end StarkedAir.Block.Walk

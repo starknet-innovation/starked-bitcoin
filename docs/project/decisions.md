@@ -616,3 +616,21 @@ Rejected: changing `connectTx` and `ClaimsOK` in place (it breaks the gate's sta
 To undo: revert the six hashes; the build then fails on the pins and nothing else.
 
 Confirmed by the owner, 2026-11-20 ("That works."): D-056 is accepted, and the work stays on the branch `connect-rules`.
+
+### D-057 — CONNECT-RULES step 3: a block-only opcode table; the AIR before its Lean soundness; `strict` always on
+Date: 2026-11-20 · By: agent (Claude); **to confirm by the owner** · Status: proposed (applied on branch `connect-rules`)
+Decision: (1) The accurate sigop count needs three more opcode columns. `block_tables` is shared with the
+set-pass system, so the block system uses a copy, `block_tablesb` (`Tables.tablesB`), and the set-pass AIRs,
+keys and Lean proofs do not change. (2) Step 3's AIRs, witness and tests are committed with the Lean proofs
+repaired (every earlier theorem holds, `lake build` passes) but **without** the soundness of the P2SH and
+witness parts, which is the next work item; the docs say "enforced and tested, not proven" until it lands.
+(3) The AIR applies the P2SH and witness sigop parts to every block (`strict`), where Core exempts block
+170,060; the difference can only reject, and matters only for a from-genesis run.
+Why: (1) changing the shared table would change the set VK and its proofs for no gain; (2) the soundness
+proof is several sessions of work, and the AIR is needed to re-measure sizes (TIERS-2) and to build step 4;
+(3) a per-block flag would be one more public input pinned by the leaf.
+Rejected: a 17th component for the accurate walk (recursion and GPU plumbing); deriving the three opcode
+facts with range lookups in the walker (more columns on the largest of these components).
+To undo: (1) point `hashSys` component 5 back at `Tables.tables` after widening it; (3) add a public bit.
+Sixteen `Compat.lean` pins re-pinned under D-056.
+

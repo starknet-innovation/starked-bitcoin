@@ -88,14 +88,18 @@ theorem walk_r8 : ∀ r < 2 ^ Ls 6, (inst 6).main Walk.TOPF r = 1 → ((inst 6).
     (by simp [siteVals, siteEval, siteLookup, hashSys, hL 6 (by decide), Walk.walk, Walk.lookups, Walk.k, Expr.eval,
       StarkedAir.Sha256.eval_col, StarkedAir.Sha256.eval_cst, wrap_zero hr])
 
-/-- **The walker's opcode facts** are the opcode table's row for its byte. -/
-theorem walk_opc : ∀ r < 2 ^ Ls 6, (inst 6).main Walk.OP r = 1 →
+/-- **The walker's opcode facts** are the opcode table's row for its byte (with the three columns of the
+accurate count). -/
+theorem walk_opc_all : ∀ r < 2 ^ Ls 6, (inst 6).main Walk.OP r = 1 →
     (inst 6).main Walk.PN r = (Tables.pushN ((inst 6).main Walk.B r).val : F) ∧
     (inst 6).main Walk.K1 r = (Tables.isK 0x4c ((inst 6).main Walk.B r).val : F) ∧
     (inst 6).main Walk.K2 r = (Tables.isK 0x4d ((inst 6).main Walk.B r).val : F) ∧
     (inst 6).main Walk.K4 r = (Tables.isK 0x4e ((inst 6).main Walk.B r).val : F) ∧
     (inst 6).main Walk.SG r = (Tables.sigN ((inst 6).main Walk.B r).val : F) ∧
-    (inst 6).main Walk.NZP r = (Tables.nzp ((inst 6).main Walk.B r).val : F) := by
+    (inst 6).main Walk.NZP r = (Tables.nzp ((inst 6).main Walk.B r).val : F) ∧
+    (inst 6).main Walk.HI r = (Tables.hiN ((inst 6).main Walk.B r).val : F) ∧
+    (inst 6).main Walk.MS r = (Tables.msN ((inst 6).main Walk.B r).val : F) ∧
+    (inst 6).main Walk.DV r = (Tables.dvN ((inst 6).main Walk.B r).val : F) := by
   intro r hr ho
   have hs := site_mem hL (i := 6) (by decide) hr (k := 2) (by simp [hashSys, Walk.walk, Walk.lookups])
   have hm : siteMult hashSys inst pub (6, r, 2) = -1 := by
@@ -111,21 +115,33 @@ theorem walk_opc : ∀ r < 2 ^ Ls 6, (inst 6).main Walk.OP r = 1 →
     simp [Tables.tab, PreCol.eval, List.getElem?_range h256]
   have hv5 : siteVals hashSys inst pub (5, r', 1) = [((r' % 256 : ℕ) : F), (Tables.pushN (r' % 256) : F),
       (Tables.isK 0x4c (r' % 256) : F), (Tables.isK 0x4d (r' % 256) : F), (Tables.isK 0x4e (r' % 256) : F),
-      (Tables.sigN (r' % 256) : F), (Tables.nzp (r' % 256) : F)] := by
-    simp [siteVals, siteEval, siteLookup, hashSys, hL 5 (by decide), Tables.tables, Expr.eval,
+      (Tables.sigN (r' % 256) : F), (Tables.nzp (r' % 256) : F), (Tables.hiN (r' % 256) : F),
+      (Tables.msN (r' % 256) : F), (Tables.dvN (r' % 256) : F)] := by
+    simp [siteVals, siteEval, siteLookup, hashSys, hL 5 (by decide), Tables.tablesB, Tables.preColsB, Expr.eval,
       Tables.preCols, pre, wrap_zero hr', List.range_succ, ev]
   have hv6 : siteVals hashSys inst pub (6, r, 2) = [(inst 6).main Walk.B r, (inst 6).main Walk.PN r,
       (inst 6).main Walk.K1 r, (inst 6).main Walk.K2 r, (inst 6).main Walk.K4 r, (inst 6).main Walk.SG r,
-      (inst 6).main Walk.NZP r] := by
+      (inst 6).main Walk.NZP r, (inst 6).main Walk.HI r, (inst 6).main Walk.MS r, (inst 6).main Walk.DV r] := by
     simp [siteVals, siteEval, siteLookup, hashSys, hL 6 (by decide), Walk.walk, Walk.lookups, Walk.k,
       StarkedAir.Sha256.eval_col, wrap_zero hr]
   rw [hv5, hv6] at hsv
   simp only [List.cons.injEq, and_true] at hsv
-  obtain ⟨e0, e1, e2, e3, e4, e5, e6⟩ := hsv
+  obtain ⟨e0, e1, e2, e3, e4, e5, e6, e7, e8, e9⟩ := hsv
   have hb : ((inst 6).main Walk.B r).val = r' % 256 := by
     rw [← e0]; exact ZMod.val_natCast_of_lt (by unfold P; omega)
   rw [hb]
-  exact ⟨e1.symm, e2.symm, e3.symm, e4.symm, e5.symm, e6.symm⟩
+  exact ⟨e1.symm, e2.symm, e3.symm, e4.symm, e5.symm, e6.symm, e7.symm, e8.symm, e9.symm⟩
+
+theorem walk_opc : ∀ r < 2 ^ Ls 6, (inst 6).main Walk.OP r = 1 →
+    (inst 6).main Walk.PN r = (Tables.pushN ((inst 6).main Walk.B r).val : F) ∧
+    (inst 6).main Walk.K1 r = (Tables.isK 0x4c ((inst 6).main Walk.B r).val : F) ∧
+    (inst 6).main Walk.K2 r = (Tables.isK 0x4d ((inst 6).main Walk.B r).val : F) ∧
+    (inst 6).main Walk.K4 r = (Tables.isK 0x4e ((inst 6).main Walk.B r).val : F) ∧
+    (inst 6).main Walk.SG r = (Tables.sigN ((inst 6).main Walk.B r).val : F) ∧
+    (inst 6).main Walk.NZP r = (Tables.nzp ((inst 6).main Walk.B r).val : F) := by
+  intro r hr ho
+  obtain ⟨a1, a2, a3, a4, a5, a6, -⟩ := walk_opc_all hL hsat hL24 r hr ho
+  exact ⟨a1, a2, a3, a4, a5, a6⟩
 
 theorem ctx_site {r k : ℕ} (hr : r < 2 ^ Ls 7) (hk : k < 11) : ((7, r, k) : Site) ∈ sites hashSys inst :=
   site_mem hL (i := 7) (by decide) hr (by simp [hashSys, Ctx.ctx, Ctx.lookups]; omega)
@@ -166,10 +182,11 @@ theorem tx0_link : ∃ ρ < 2 ^ Ls 1, (inst 1).main Fields.K_LOCK ρ = 1 ∧ (in
   simp only [List.cons.injEq, and_true] at hsv
   exact ⟨r', hr', hl, hsv.1, hsv.2.1, hsv.2.2.1, hsv.2.2.2.1, hsv.2.2.2.2⟩
 
-/-- **The block totals**: the context's `tot(WT, NSEG, HASC)` is the fields' last row. -/
-theorem tot_link : (inst 7).main Ctx.WT 0 = (inst 1).main Fields.WB (2 ^ Ls 1 - 1) ∧
+/-- **The block totals**: the context's `tot(WT, NSEG, HASC, W20T)` is the fields' last row. -/
+theorem tot_link4 : (inst 7).main Ctx.WT 0 = (inst 1).main Fields.WB (2 ^ Ls 1 - 1) ∧
     (inst 7).main Ctx.NSEG 0 = (inst 1).main Fields.NS (2 ^ Ls 1 - 1) ∧
-    (inst 7).main Ctx.HASC 0 = (inst 1).main Fields.HASC (2 ^ Ls 1 - 1) := by
+    (inst 7).main Ctx.HASC 0 = (inst 1).main Fields.HASC (2 ^ Ls 1 - 1) ∧
+    (inst 7).main Ctx.W20T 0 = (inst 1).main Fields.W20S (2 ^ Ls 1 - 1) := by
   have hn0 : 0 < 2 ^ Ls 7 := by positivity
   obtain ⟨i', r', k', hr', hy, hsm, hsv⟩ := link hL hsat hL24 (ctx_site hL hsat hL24 hn0 (k := 3) (by norm_num)) rfl
     (ctx_first_mult hL hsat hL24 (Or.inr (Or.inl rfl)))
@@ -184,19 +201,27 @@ theorem tot_link : (inst 7).main Ctx.WT 0 = (inst 1).main Fields.WB (2 ^ Ls 1 - 
       show r' + 1 < 2 ^ Ls 1 by omega]
   subst hlast
   have h1 : siteVals hashSys inst pub (1, 2 ^ Ls 1 - 1, 31) = [(inst 1).main Fields.WB (2 ^ Ls 1 - 1),
-      (inst 1).main Fields.NS (2 ^ Ls 1 - 1), (inst 1).main Fields.HASC (2 ^ Ls 1 - 1)] := by
+      (inst 1).main Fields.NS (2 ^ Ls 1 - 1), (inst 1).main Fields.HASC (2 ^ Ls 1 - 1),
+      (inst 1).main Fields.W20S (2 ^ Ls 1 - 1)] := by
     simp [siteVals, siteEval, siteLookup, hashSys, hL 1 (by decide), Fields.fields, Fields.lookups, Fields.chkLookups,
       Fields.k, StarkedAir.Sha256.eval_col, wrap_zero hr']
   have h7 : siteVals hashSys inst pub (7, 0, 3) = [(inst 7).main Ctx.WT 0, (inst 7).main Ctx.NSEG 0,
-      (inst 7).main Ctx.HASC 0] := by
+      (inst 7).main Ctx.HASC 0, (inst 7).main Ctx.W20T 0] := by
     simp [siteVals, siteEval, siteLookup, hashSys, hL 7 (by decide), Ctx.ctx, Ctx.lookups, Ctx.k,
       StarkedAir.Sha256.eval_col, wrap_zero hn0]
   rw [h1, h7] at hsv
   simp only [List.cons.injEq, and_true] at hsv
-  exact ⟨hsv.1.symm, hsv.2.1.symm, hsv.2.2.symm⟩
+  exact ⟨hsv.1.symm, hsv.2.1.symm, hsv.2.2.1.symm, hsv.2.2.2.symm⟩
 
-/-- **The sigop total**: the context's `SIGS` is the walker's last-row sum. -/
-theorem sigops_link : (inst 7).main Ctx.SIGS 0 = (inst 6).main Walk.SUMS (2 ^ Ls 6 - 1) := by
+theorem tot_link : (inst 7).main Ctx.WT 0 = (inst 1).main Fields.WB (2 ^ Ls 1 - 1) ∧
+    (inst 7).main Ctx.NSEG 0 = (inst 1).main Fields.NS (2 ^ Ls 1 - 1) ∧
+    (inst 7).main Ctx.HASC 0 = (inst 1).main Fields.HASC (2 ^ Ls 1 - 1) := by
+  obtain ⟨a1, a2, a3, -⟩ := tot_link4 hL hsat hL24
+  exact ⟨a1, a2, a3⟩
+
+/-- **The sigop totals**: the context's `SIGS` and `SIGA` are the walker's last-row sums. -/
+theorem sigops_link2 : (inst 7).main Ctx.SIGS 0 = (inst 6).main Walk.SUMS (2 ^ Ls 6 - 1) ∧
+    (inst 7).main Ctx.SIGA 0 = (inst 6).main Walk.SUMA (2 ^ Ls 6 - 1) := by
   have hn0 : 0 < 2 ^ Ls 7 := by positivity
   obtain ⟨i', r', k', hr', hy, hsm, hsv⟩ := link hL hsat hL24 (ctx_site hL hsat hL24 hn0 (k := 4) (by norm_num)) rfl
     (ctx_first_mult hL hsat hL24 (Or.inr (Or.inr rfl)))
@@ -209,15 +234,19 @@ theorem sigops_link : (inst 7).main Ctx.SIGS 0 = (inst 6).main Walk.SUMS (2 ^ Ls
     simp only [siteMult, siteEval, siteLookup, hashSys, hL 6 (by decide)]
     simp [Walk.walk, Walk.lookups, Walk.ev_last (M := (inst 6).main) (pub := pub) hr', show r' + 1 < 2 ^ Ls 6 by omega]
   subst hlast
-  have h6 : siteVals hashSys inst pub (6, 2 ^ Ls 6 - 1, 4) = [(inst 6).main Walk.SUMS (2 ^ Ls 6 - 1)] := by
+  have h6 : siteVals hashSys inst pub (6, 2 ^ Ls 6 - 1, 4) = [(inst 6).main Walk.SUMS (2 ^ Ls 6 - 1),
+      (inst 6).main Walk.SUMA (2 ^ Ls 6 - 1)] := by
     simp [siteVals, siteEval, siteLookup, hashSys, hL 6 (by decide), Walk.walk, Walk.lookups, Walk.k,
       StarkedAir.Sha256.eval_col, wrap_zero hr']
-  have h7 : siteVals hashSys inst pub (7, 0, 4) = [(inst 7).main Ctx.SIGS 0] := by
+  have h7 : siteVals hashSys inst pub (7, 0, 4) = [(inst 7).main Ctx.SIGS 0, (inst 7).main Ctx.SIGA 0] := by
     simp [siteVals, siteEval, siteLookup, hashSys, hL 7 (by decide), Ctx.ctx, Ctx.lookups, Ctx.k,
       StarkedAir.Sha256.eval_col, wrap_zero hn0]
   rw [h6, h7] at hsv
   simp only [List.cons.injEq, and_true] at hsv
-  exact hsv.symm
+  exact ⟨hsv.1.symm, hsv.2.symm⟩
+
+theorem sigops_link : (inst 7).main Ctx.SIGS 0 = (inst 6).main Walk.SUMS (2 ^ Ls 6 - 1) :=
+  (sigops_link2 hL hsat hL24).1
 
 /-- **The commitment output**: with `HASC`, the context's `commit(CPOS, CLEN)` is a fields row's selected
 output. -/

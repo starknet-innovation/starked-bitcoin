@@ -8,6 +8,7 @@ const M31 = core.fields.m31.M31;
 const QM31 = core.fields.qm31.QM31;
 const fields = @import("fields.zig");
 const connect_rules = @import("connect_rules.zig");
+const sigcost = @import("sigcost.zig");
 
 pub const fpwalk_json = @embedFile("air:block_fpwalk");
 pub const urec_json = @embedFile("air:block_urec");
@@ -24,7 +25,7 @@ pub const PUB_SUBL = 159;
 pub const PUB_SUBH = 160;
 pub const N_PUB = 161;
 /// Main columns (Lean `Coin.N_MAIN`).
-pub const N_MAIN = 170;
+pub const N_MAIN = 173;
 /// The coin component's `CTX` column (Lean `Coin.CTX`).
 pub const CTX_COL = 80;
 
@@ -221,7 +222,7 @@ pub fn urecColumns(a: std.mem.Allocator, log_size: u32, undo: []const u8, recs: 
     const TL = 3;
     const n = @as(usize, 1) << @intCast(log_size);
     if (recs.len + 1 > n) return error.RecordsDoNotFit;
-    const cols = try zeros(a, 21, n);
+    const cols = try zeros(a, 39, n);
     cols[S][0] = M31.one();
     try undo_reads.append(a, 0);
     for (recs, 0..) |rc, r| {
@@ -241,6 +242,54 @@ pub fn urecColumns(a: std.mem.Allocator, log_size: u32, undo: []const u8, recs: 
             cols[16 + i][r] = f(undo[rc.start + 4 + i]);
             try undo_reads.append(a, @intCast(rc.start + 4 + i));
         }
+    }
+    // CONNECT-RULES step 3 (Lean `URec.classC`): the spent script's class, on every row (the tests
+    // are on zero values off the records). U 0..3 = 21..24; Z16 I16 Z17 I17 Z22 I22 = 25..30;
+    // ZM IM = 31, 32; PC = 33; Z87 I87 = 34, 35; CP C20 C32 = 36..38.
+    for (0..n) |r| {
+        var u = [4]u32{ 0, 0, 0, 0 };
+        if (r < recs.len) {
+            const st = recs[r].start;
+            u[0] = undo[st + 17];
+            try undo_reads.append(a, @intCast(st + 17));
+            if (u[0] == 0x16 or u[0] == 0x17 or u[0] == 0x22) {
+                if (st + 19 >= undo.len) return error.BadUndoStream;
+                u[1] = undo[st + 18];
+                u[2] = undo[st + 19];
+                try undo_reads.append(a, @intCast(st + 18));
+                try undo_reads.append(a, @intCast(st + 19));
+            }
+        }
+        const z16 = u[0] == 0x16;
+        const z17 = u[0] == 0x17;
+        const z22 = u[0] == 0x22;
+        const exp1: u32 = if (z17) 0xa9 else 0;
+        const exp2: u32 = if (z16 or z17) 0x14 else if (z22) 0x20 else 0;
+        const zm = u[1] == exp1 and u[2] == exp2;
+        const pc = z17 and zm;
+        if (pc) {
+            const st = recs[r].start;
+            if (st + 40 >= undo.len) return error.BadUndoStream;
+            u[3] = undo[st + 40];
+            try undo_reads.append(a, @intCast(st + 40));
+        }
+        const z87 = u[3] == 0x87;
+        for (0..4) |i| cols[21 + i][r] = f(u[i]);
+        const pat = f(u[1]).sub(f(exp1)).add(f(256).mul(f(u[2]).sub(f(exp2))));
+        std.debug.assert(pat.isZero() == zm);
+        const tests = [_]struct { c: usize, z: bool, e: M31 }{
+            .{ .c = 25, .z = z16, .e = f(u[0]).sub(f(0x16)) }, .{ .c = 27, .z = z17, .e = f(u[0]).sub(f(0x17)) },
+            .{ .c = 29, .z = z22, .e = f(u[0]).sub(f(0x22)) }, .{ .c = 31, .z = zm, .e = pat },
+            .{ .c = 34, .z = z87, .e = f(u[3]).sub(f(0x87)) },
+        };
+        for (tests) |t| {
+            cols[t.c][r] = f(@intFromBool(t.z));
+            cols[t.c + 1][r] = invOrZero(t.e);
+        }
+        cols[33][r] = f(@intFromBool(pc));
+        cols[36][r] = f(@intFromBool(pc and z87));
+        cols[37][r] = f(@intFromBool(z16 and zm));
+        cols[38][r] = f(@intFromBool(z22 and zm));
     }
     return cols;
 }
@@ -438,6 +487,14 @@ pub fn coinColumns(a: std.mem.Allocator, log_size: u32, in: CoinInput, raw_reads
             if (csv and v2) lock = connect_rules.inputLock(seq);
             cols[LKH][r] = f(@intFromBool(lock == .height));
             cols[LKT][r] = f(@intFromBool(lock == .time));
+            // Step 3: the spent script's class, as the undo record's row yields it (UP, U20, U32).
+            if (!is_cb) {
+                const rc = in.recs[j];
+                const cls = sigcost.classOf(in.undo[rc.start + UHDR ..][0..rc.tl]);
+                cols[170][r] = f(@intFromBool(cls.p2sh));
+                cols[171][r] = f(@intFromBool(cls.w20));
+                cols[172][r] = f(@intFromBool(cls.w32));
+            }
         }
         var tuple: [W]M31 = [_]M31{M31.zero()} ** W;
         var m: i2 = 0;

@@ -17,7 +17,7 @@ open StarkedAir
 open StarkedAir.Sha256 (col pre cst eval_col eval_cst boolC sumPow)
 
 theorem mem_lock {c : Expr} (h : c ∈ lockC) : c ∈ constraints := by
-  simp only [constraints, List.mem_append]; exact Or.inr h
+  simp only [constraints, List.mem_append]; tauto
 
 /-- The version's bytes: `b1 + b2 + b3 + b0² = b0` exactly when the version is 0 or 1. -/
 theorem ver_arith {b0 b1 b2 b3 : ℕ} :

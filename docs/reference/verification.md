@@ -76,7 +76,7 @@ session 39).
 |---|---|
 | `CheckBlock`, `ContextualCheckBlock` (Merkle root and mutation, sizes, `CheckTransaction`, finality, BIP34, witness commitment, weight) | enforced (`Spec/Block.lean`, `block_sound`) |
 | Legacy sigops × 4 ≤ 80,000 (`bad-blk-sigops`, `CheckBlock`) | enforced |
-| **Full sigop cost** with P2SH and witness sigops (`bad-blk-sigops`, `ConnectBlock`) | **not enforced.** Specified and fuzzed (`Spec/ConnectRules.lean`); CONNECT-RULES |
+| **Full sigop cost** with P2SH and witness sigops (`bad-blk-sigops`, `ConnectBlock`) | **enforced by the AIRs on branch `connect-rules`, tested against the Core-fuzzed reference; not in the published proofs. Lean: only the legacy part is proven** (`sigops_ok`); the P2SH and witness parts are open ([connect-rules.md](../design/connect-rules.md), step 3) |
 | BIP68 sequence locks, height-based (`bad-txns-nonfinal`, `SequenceLocks`) | enforced by the AIRs since CONNECT-RULES step 2 (`Block.in_lock`, `epoch_systems_coreL`); **not** by the proofs of 935,001–972,500, made with the earlier AIRs. In Lean the CSV bit is a hypothesis of `epoch_systems_coreL` (below) |
 | **BIP68 sequence locks, time-based** | **not enforced.** Specified and fuzzed; CONNECT-RULES step 4 |
 | Inputs exist and are unspent (`bad-txns-inputs-missingorspent`) | enforced over an epoch ([utxo.md](../design/utxo.md) rules 1, 2) |

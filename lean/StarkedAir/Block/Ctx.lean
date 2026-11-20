@@ -16,7 +16,7 @@ constant.
   yielded as the digest `NONCE_ID`; the 32 bytes after the pattern must equal the digest of the
   commitment node (`wcid`).
 * **Limits** (rows 118–131, byte decompositions through the range table): the commitment script is at
-  least 38 bytes, `weight = 4·len − 3·W ≤ 4,000,000`, `sigops ≤ 20,000` (the spec's `·4 ≤ 80,000`), and
+  least 38 bytes, `weight = 4·len − 3·W ≤ 4,000,000`, the sigop cost `4·legacy + accurate + P2WPKH ≤ 80,000`, and
   the previous MTP's 16-bit limbs.
 * **Without a commitment**: no transaction is segwit (`NSEG = 0`), which is `unexpected-witness`.
 
@@ -164,7 +164,13 @@ def MHI : ℕ := 37
 def HC : ℕ := 38
 def CID : ℕ := 39
 def MZ : ℕ := 40
-def N_MAIN : ℕ := 41
+/-- CONNECT-RULES step 3: the weighted accurate count (`block_walk`) and the inputs counted as P2WPKH
+(the fields), both constant like `SIGS`. -/
+def SIGA : ℕ := 41
+def W20T : ℕ := 42
+/-- The low bit of `80000 − cost`: the range value has two bytes, and the bound needs 17 bits. -/
+def PAR : ℕ := 43
+def N_MAIN : ℕ := 44
 
 def consts : List ℕ := [A0, SEG0, W0, L0, WT, NSEG, HASC, SIGS, CPOS, CLEN, CLO, CHI, TL16, TH16, MLO, MHI, HC, CID]
 
@@ -196,7 +202,8 @@ def constraints : List Expr :=
     .mul (p P_CHKH) (.mul (.pub 4) (.sub (k ACC) (.pub 2))),
     .mul (p P_CHKL) (.mul (k HC) (.sub (k ACC) (.sub (k CLEN) (cst 38)))),
     .mul (p P_CHKW) (.sub (k ACC) (.add (.sub (cst 4000000) (.mul (cst 4) (.pub 0))) (.mul (cst 3) (k WT)))),
-    .mul (p P_CHKS) (.sub (k ACC) (.sub (cst 20000) (k SIGS))) ] ++
+    .mul (p P_CHKS) (.sub (.add (.mul (cst 2) (k ACC)) (k PAR))
+      (.sub (.sub (.sub (cst 80000) (.mul (cst 4) (k SIGS))) (k SIGA)) (k W20T))) ] ++
   consts.map (fun x => .mul notFirst (.sub (k x) (kp x))) ++
   [ boolC (k ACTR), boolC (k HASC), boolC (k HC),
     .sub (k HC) (.mul (.pub 6) (k HASC)),
@@ -204,7 +211,8 @@ def constraints : List Expr :=
     .mul (om (k HC)) (k NSEG),
     .sub (k MLO) (.pub 3), .sub (k MHI) (.pub 7),
     .sub (k CLO) (.add (.mul (.pub 5) (k MLO)) (.mul (om (.pub 5)) (k TL16))),
-    .sub (k CHI) (.add (.mul (.pub 5) (k MHI)) (.mul (om (.pub 5)) (k TH16))) ]
+    .sub (k CHI) (.add (.mul (.pub 5) (k MHI)) (.mul (om (.pub 5)) (k TH16))),
+    .mul notFirst (.sub (k SIGA) (kp SIGA)), .mul notFirst (.sub (k W20T) (kp W20T)), boolC (k PAR) ]
 
 /-- Digest limbs from the register: limb `j` is `LG (j xor 1)`. -/
 def limbs : List Expr := (List.range 16).map fun j => k (LG (if j % 2 = 0 then j + 1 else j - 1))
@@ -213,8 +221,8 @@ def lookups : List Lookup :=
   [ ⟨REL_BYTE, .neg (k ACTR), [k ADDR, k B]⟩,
     ⟨Tables.REL_R8, .neg one, [k RA]⟩,
     ⟨REL_TX, .neg (p P_FIRST), [cst 0, k A0, k SEG0, k W0, k L0]⟩,
-    ⟨REL_TOT, .neg (p P_FIRST), [k WT, k NSEG, k HASC]⟩,
-    ⟨Walk.REL_SIGOPS, .neg (p P_FIRST), [k SIGS]⟩,
+    ⟨REL_TOT, .neg (p P_FIRST), [k WT, k NSEG, k HASC, k W20T]⟩,
+    ⟨Walk.REL_SIGOPS, .neg (p P_FIRST), [k SIGS, k SIGA]⟩,
     ⟨REL_COMMIT, .neg (.mul (p P_FIRST) (k HASC)), [k CPOS, k CLEN]⟩,
     ⟨REL_CTX, p P_FIRST, [k CLO, k CHI]⟩,
     ⟨REL_DIGEST, .mul (p P_FIRST) (k MZ), cst ZERO_ID :: (List.range 16).map (fun _ => cst 0)⟩,

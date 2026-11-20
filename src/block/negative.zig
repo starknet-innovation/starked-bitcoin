@@ -413,3 +413,244 @@ test "block negative: BIP68: a forged lock bit is caught by the fields' constrai
         try std.testing.expectEqual(@as(usize, FIELDS), v1.comp);
     }
 }
+
+// ---- CONNECT-RULES step 3: the full sigop cost ----
+
+const rules = @import("connect_rules.zig");
+
+/// One input of the synthetic spend: its scriptSig, its witness stack and the script it spends.
+const SigIn = struct { sig: []const u8 = &.{}, wit: []const []const u8 = &.{}, spent: []const u8 };
+
+/// A script that pushes `data` (direct push, `PUSHDATA1` or `PUSHDATA2`).
+fn push(a: std.mem.Allocator, data: []const u8) ![]u8 {
+    var w = W.empty;
+    if (data.len < 0x4c) try w.append(a, @intCast(data.len)) else if (data.len <= 0xff) {
+        try w.appendSlice(a, &.{ 0x4c, @intCast(data.len) });
+    } else {
+        try w.appendSlice(a, &.{ 0x4d, @intCast(data.len & 0xff), @intCast(data.len >> 8) });
+    }
+    try w.appendSlice(a, data);
+    return w.toOwnedSlice(a);
+}
+
+const p2sh_spk = [_]u8{ 0xa9, 0x14 } ++ [_]u8{0x11} ** 20 ++ [_]u8{0x87};
+const p2wpkh_spk = [_]u8{ 0x00, 0x14 } ++ [_]u8{0x11} ** 20;
+const p2wsh_spk = [_]u8{ 0x00, 0x20 } ++ [_]u8{0x22} ** 32;
+const p2tr_spk = [_]u8{ 0x51, 0x20 } ++ [_]u8{0x33} ** 32;
+
+/// A segwit block at `height` (BIP34 coinbase with the witness commitment) whose second transaction
+/// has the inputs `ins` followed by a taproot key spend (so the transaction always carries a witness),
+/// and the fetched undo stream that gives each input its spent script (coins from the block before).
+fn sigBlock(a: std.mem.Allocator, height: u32, ins: []const SigIn) !struct { raw: []u8, undo: []u8 } {
+    const nonce = [_]u8{0x42} ** 32;
+    const cbs = [_]u8{ 0x03, @intCast(height & 0xff), @intCast((height >> 8) & 0xff), @intCast(height >> 16), 0xaa, 0xbb };
+    const sig64 = [_]u8{0x30} ** 64;
+    const all = try a.alloc(SigIn, ins.len + 1);
+    @memcpy(all[0..ins.len], ins);
+    const key_stack = try a.dupe([]const u8, &.{&sig64});
+    all[ins.len] = .{ .wit = key_stack, .spent = &p2tr_spk };
+    const tins = try a.alloc(In, all.len);
+    const wits = try a.alloc([]const []const u8, all.len);
+    var undo = W.empty;
+    try undo.append(a, 1);
+    for (all, tins, wits, 0..) |x, *ti, *wi, i| {
+        ti.* = .{ .n = @intCast(i), .script = x.sig };
+        wi.* = x.wit;
+        try int(a, &undo, u32, 2 * (height - 1));
+        try int(a, &undo, u64, 1000000);
+        try compact(a, &undo, x.spent.len);
+        try undo.appendSlice(a, x.spent);
+    }
+    const tx1 = Tx{ .version = 2, .ins = tins, .outs = &.{.{ .value = 1000, .script = &p2wpkh_spk }}, .wit = wits };
+    const cb_stack = try a.dupe([]const u8, &.{&nonce});
+    const cb_wit = try a.dupe([]const []const u8, &.{cb_stack});
+    var cb = Tx{ .version = 2, .ins = try a.dupe(In, &.{.{ .hash = [_]u8{0} ** 32, .n = 0xffffffff, .script = try a.dupe(u8, &cbs) }}), .outs = &.{.{}}, .wit = cb_wit };
+    var txs = [_]Tx{ cb, tx1 };
+    const cscript = try commitmentScript(a, &txs, nonce);
+    cb.outs = try a.dupe(Out, &.{ .{ .value = 625000000, .script = &.{0x51} }, .{ .value = 0, .script = cscript } });
+    txs[0] = cb;
+    return .{ .raw = try block(a, &txs, 1700000000), .undo = try undo.toOwnedSlice(a) };
+}
+
+const sig_ctx = checks.Ctx{ .height = 500000, .prev_mtp = 1231715347, .anc = checks.ancOf("170") };
+
+fn judgeU(a: std.mem.Allocator, raw: []const u8, undo: []const u8, ctx: checks.Ctx) !Verdict {
+    var c = ctx;
+    c.force = true;
+    const airs = try bsys.parseAirs(a);
+    const b = bsys.buildU(a, raw, undo, c) catch |e| {
+        std.debug.print("  (witness generation failed: {s})\n", .{@errorName(e)});
+        return .rejected;
+    };
+    if (try bsys.firstViolation(a, &airs, &b)) |v| {
+        std.debug.print("  {s} row {d} violates constraint {d}\n", .{ bsys.names[v.comp], v.row, v.constraint });
+        return .rejected;
+    }
+    if (try bsys.unbalanced(a, &airs, &b)) |rel| {
+        std.debug.print("  relation {d} unbalanced\n", .{rel});
+        return .rejected;
+    }
+    return .accepted;
+}
+
+test "block negative: sigop cost: P2SH and witness sigops are counted as Core counts them (CONNECT-RULES step 3)" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const airs = try bsys.parseAirs(a);
+    const sig71 = [_]u8{0x30} ** 71;
+    const pk = [_]u8{0x02} ** 33;
+    // Redeem and witness scripts.
+    const ms15 = [_]u8{0x5f} ++ [_]u8{0x21} ++ [_]u8{0x02} ** 33 ++ [_]u8{ 0x5f, 0xae }; // 15 … 15 CHECKMULTISIG
+    const ms16v = [_]u8{ 0x60, 0xaf, 0x51, 0xae, 0xae, 0xac, 0xad }; // 16, 1, then 20 (after a multisig), 1, 1
+    const long = [_]u8{0xac} ** 300; // through PUSHDATA2
+    const mid = [_]u8{0xae} ** 100; // through PUSHDATA1
+    const wprog20 = [_]u8{ 0x00, 0x14 } ++ [_]u8{0x55} ** 20;
+    const wprog32 = [_]u8{ 0x00, 0x20 } ++ [_]u8{0x66} ** 32;
+    const not22 = [_]u8{ 0x00, 0x15 } ++ [_]u8{0x55} ** 20; // 22 bytes, not a program
+    const v1_34 = [_]u8{ 0x51, 0x20 } ++ [_]u8{0x66} ** 32; // 34 bytes, version 1
+    const wscript = [_]u8{ 0x53, 0xae, 0xac, 0x02, 0xac, 0xac, 0xad }; // 3, 1, a push over two, 1: 5
+    const cases = [_]struct { name: []const u8, in: SigIn, p2sh: u32 = 0, wit: u32 = 0 }{
+        .{ .name = "P2SH, 15-of-15", .in = .{ .sig = try push(a, &ms15), .spent = &p2sh_spk }, .p2sh = 15 },
+        .{ .name = "P2SH, 16 then 1 then two bare multisigs", .in = .{ .sig = try push(a, &ms16v), .spent = &p2sh_spk }, .p2sh = 16 + 1 + 20 + 2 },
+        .{ .name = "P2SH, 300 CHECKSIGs through PUSHDATA2", .in = .{ .sig = try push(a, &long), .spent = &p2sh_spk }, .p2sh = 300 },
+        .{ .name = "P2SH, 100 multisigs through PUSHDATA1", .in = .{ .sig = try push(a, &mid), .spent = &p2sh_spk }, .p2sh = 2000 },
+        .{ .name = "P2SH, two pushes: the last is the redeem script", .in = .{ .sig = try std.mem.concat(a, u8, &.{ try push(a, &ms15), try push(a, &.{ 0xac, 0xac }) }), .spent = &p2sh_spk }, .p2sh = 2 },
+        .{ .name = "P2SH, scriptSig not push-only (a NOP)", .in = .{ .sig = try std.mem.concat(a, u8, &.{ &.{0x61}, try push(a, &ms15) }), .spent = &p2sh_spk } },
+        .{ .name = "P2SH, scriptSig ends in a truncated push", .in = .{ .sig = &.{ 0x01, 0xac, 0x05, 0xac, 0xac }, .spent = &p2sh_spk } },
+        .{ .name = "P2SH, last operation is OP_1 (empty redeem script)", .in = .{ .sig = try std.mem.concat(a, u8, &.{ try push(a, &ms15), &.{0x51} }), .spent = &p2sh_spk } },
+        .{ .name = "P2SH, last operation is an empty PUSHDATA1", .in = .{ .sig = try std.mem.concat(a, u8, &.{ try push(a, &ms15), &.{ 0x4c, 0x00 } }), .spent = &p2sh_spk } },
+        .{ .name = "P2SH, OP_RESERVED (0x50) is push-only", .in = .{ .sig = try std.mem.concat(a, u8, &.{ &.{0x50}, try push(a, &.{0xac}) }), .spent = &p2sh_spk }, .p2sh = 1 },
+        .{ .name = "the same scriptSig, not spending P2SH", .in = .{ .sig = try push(a, &ms15), .spent = &.{ 0x76, 0xa9 } } },
+        .{ .name = "P2SH-P2WPKH", .in = .{ .sig = try push(a, &wprog20), .wit = &.{ &sig71, &pk }, .spent = &p2sh_spk }, .wit = 1 },
+        .{ .name = "P2SH-P2WSH", .in = .{ .sig = try push(a, &wprog32), .wit = &.{ &sig71, &wscript }, .spent = &p2sh_spk }, .wit = 5 },
+        .{ .name = "P2SH, 22 bytes that are not a program", .in = .{ .sig = try push(a, &not22), .wit = &.{&wscript}, .spent = &p2sh_spk } },
+        .{ .name = "P2SH, a version 1 program", .in = .{ .sig = try push(a, &v1_34), .wit = &.{&wscript}, .spent = &p2sh_spk } },
+        .{ .name = "P2WPKH", .in = .{ .wit = &.{ &sig71, &pk }, .spent = &p2wpkh_spk }, .wit = 1 },
+        .{ .name = "P2WPKH, empty witness", .in = .{ .spent = &p2wpkh_spk }, .wit = 1 },
+        .{ .name = "P2WSH", .in = .{ .wit = &.{ &sig71, &wscript }, .spent = &p2wsh_spk }, .wit = 5 },
+        .{ .name = "P2WSH, one item", .in = .{ .wit = &.{&ms16v}, .spent = &p2wsh_spk }, .wit = 16 + 1 + 20 + 2 },
+        .{ .name = "P2WSH, empty stack", .in = .{ .spent = &p2wsh_spk } },
+        .{ .name = "P2WSH, empty last item", .in = .{ .wit = &.{ &wscript, &.{} }, .spent = &p2wsh_spk } },
+        .{ .name = "taproot script path (no sigops)", .in = .{ .wit = &.{ &wscript, &wscript }, .spent = &p2tr_spk } },
+    };
+    var ins = std.ArrayList(SigIn).empty;
+    var p2sh: u32 = 0;
+    var wit: u32 = 0;
+    for (cases) |c| {
+        // Each case alone: the native reference agrees with the expected counts.
+        const one = try sigBlock(a, 500000, &.{c.in});
+        const nat = try rules.blockRules(a, one.raw, one.undo, 500000, true);
+        if (nat.sigops.p2sh != c.p2sh or nat.sigops.witness != c.wit) {
+            std.debug.print("{s}: native P2SH {d} witness {d}, expected {d} and {d}\n", .{ c.name, nat.sigops.p2sh, nat.sigops.witness, c.p2sh, c.wit });
+            return error.TestUnexpectedResult;
+        }
+        try ins.append(a, c.in);
+        p2sh += c.p2sh;
+        wit += c.wit;
+    }
+    // All of them in one transaction: the AIRs hold and count the same.
+    const blk = try sigBlock(a, 500000, ins.items);
+    const b = try bsys.buildU(a, blk.raw, blk.undo, sig_ctx);
+    if (try bsys.firstViolation(a, &airs, &b)) |v| {
+        std.debug.print("{s} row {d} violates constraint {d}\n", .{ bsys.names[v.comp], v.row, v.constraint });
+        return error.TestUnexpectedResult;
+    }
+    try std.testing.expect(try bsys.unbalanced(a, &airs, &b) == null);
+    const nat = try rules.blockRules(a, blk.raw, blk.undo, 500000, true);
+    try std.testing.expectEqual(p2sh, nat.sigops.p2sh);
+    try std.testing.expectEqual(wit, nat.sigops.witness);
+    try std.testing.expectEqual(rules.cost(nat.sigops), b.sigop_cost);
+    std.debug.print("sigop cost: {d} cases in one transaction: legacy {d}, P2SH {d}, witness {d}, cost {d}, as Core counts\n", .{ cases.len, nat.sigops.legacy, p2sh, wit, b.sigop_cost });
+}
+
+test "block negative: sigop cost: 80,000 is accepted and 80,001 rejected, through P2SH and through witness sigops" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    // 500 bare multisigs in a redeem script: 10,000 sigops, cost 40,000. The legacy count stays 0.
+    const r500 = [_]u8{0xae} ** 500;
+    const redeem = SigIn{ .sig = try push(a, &r500), .spent = &p2sh_spk };
+    // 4,000 bare multisigs in a witness script: cost 80,000.
+    const w4000 = [_]u8{0xae} ** 4000;
+    const wsh = SigIn{ .wit = &.{&w4000}, .spent = &p2wsh_spk };
+    const one_more = SigIn{ .spent = &p2wpkh_spk };
+    const cases = [_]struct { name: []const u8, ins: []const SigIn, cost: u64, want: Verdict }{
+        .{ .name = "two redeem scripts of 10,000 sigops", .ins = &.{ redeem, redeem }, .cost = 80000, .want = .accepted },
+        .{ .name = "the same and a P2WPKH input", .ins = &.{ redeem, redeem, one_more }, .cost = 80001, .want = .rejected },
+        .{ .name = "three redeem scripts of 10,000 sigops", .ins = &.{ redeem, redeem, redeem }, .cost = 120000, .want = .rejected },
+        .{ .name = "a witness script of 80,000 sigops", .ins = &.{wsh}, .cost = 80000, .want = .accepted },
+        .{ .name = "the same and a P2WPKH input", .ins = &.{ wsh, one_more }, .cost = 80001, .want = .rejected },
+        .{ .name = "one redeem script and half the cost in a witness script", .ins = &.{ redeem, .{ .wit = &.{w4000[0..2000]}, .spent = &p2wsh_spk } }, .cost = 80000, .want = .accepted },
+    };
+    for (cases) |c| {
+        const blk = try sigBlock(a, 500000, c.ins);
+        const nat = try rules.blockRules(a, blk.raw, blk.undo, 500000, true);
+        try std.testing.expectEqual(c.cost, rules.cost(nat.sigops));
+        try std.testing.expectEqual(@as(u32, 0), nat.sigops.legacy);
+        std.debug.print("sigop cost {d} (legacy 0): {s}\n", .{ c.cost, c.name });
+        try std.testing.expectEqual(c.want, try judgeU(a, blk.raw, blk.undo, sig_ctx));
+    }
+}
+
+test "block negative: sigop cost: a forged class, push-only flag or witness request is rejected" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const airs = try bsys.parseAirs(a);
+    const one = M31.one();
+    const zero = M31.zero();
+    const ms = [_]u8{ 0x53, 0xae };
+    const ins = [_]SigIn{
+        .{ .sig = try push(a, &ms), .spent = &p2sh_spk },
+        .{ .wit = &.{&ms}, .spent = &p2wsh_spk },
+        .{ .spent = &p2wpkh_spk },
+    };
+    const blk = try sigBlock(a, 500000, &ins);
+    const Forge = enum { none, urec_class, coin_class, fields_class, fields_w20, walk_po, fields_ws, walk_w4 };
+    for (std.enums.values(Forge)) |fg| {
+        const b = try bsys.buildU(a, blk.raw, blk.undo, sig_ctx);
+        const fm = b.mains[1];
+        const wm = b.mains[6];
+        const um = b.mains[13];
+        const cm = b.mains[14];
+        // The rows: the fields' second input row (the first is the coinbase's) and so on.
+        var kin = std.ArrayList(usize).empty;
+        var kwc = std.ArrayList(usize).empty;
+        for (0..fm[2].len) |q| {
+            if (fm[2][q].eql(one)) try kin.append(a, q);
+            if (fm[5][q].eql(one)) try kwc.append(a, q);
+        }
+        const ki0 = for (0..cm[1].len) |q| {
+            if (cm[1][q].eql(one)) break q;
+        } else unreachable;
+        switch (fg) {
+            .none => {},
+            // The undo record denies the P2SH class (URec.CP).
+            .urec_class => um[36][0] = zero,
+            // The coin row denies it (Coin.UP): its tuple is no longer the record's.
+            .coin_class => cm[170][ki0] = zero,
+            // The fields' input row denies it (Fields.CP).
+            .fields_class => fm[206][kin.items[1]] = zero,
+            // The fields drop the P2WPKH class of the third input (Fields.CW20).
+            .fields_w20 => fm[207][kin.items[3]] = zero,
+            // The walker says the scriptSig is not push-only (Walk.PO), on the script's rows.
+            .walk_po => for (0..wm[0].len) |q| {
+                if (wm[0][q].eql(one) and wm[51][q].isZero() and wm[59][q].eql(one)) wm[59][q] = zero;
+            },
+            // The second input's witness stack ignores the request (Fields.WS on its rows, and WQ).
+            .fields_ws => for (kwc.items[2]..kwc.items[3]) |q| {
+                fm[226][q] = zero;
+                fm[227][q] = zero;
+            },
+            // The walker counts the redeem script with weight 1 (Walk.W4).
+            .walk_w4 => for (0..wm[0].len) |q| {
+                wm[52][q] = zero;
+            },
+        }
+        const viol = try bsys.firstViolation(a, &airs, &b);
+        const unb = try bsys.unbalanced(a, &airs, &b);
+        std.debug.print("forgery {s}: {s}\n", .{ @tagName(fg), if (viol != null) "a constraint is violated" else if (unb != null) "a lookup is unbalanced" else "accepted" });
+        try std.testing.expectEqual(fg != .none, viol != null or unb != null);
+    }
+}

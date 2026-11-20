@@ -16,7 +16,7 @@ namespace StarkedAir.Block.Walk
 
 open StarkedAir
 open StarkedAir.Sha256 (col pre cst boolC)
-open StarkedAir.Block.Fields (degE REL_SCRIPT)
+open StarkedAir.Block.Fields (degE REL_SCRIPT REL_ASPAN)
 
 def REL_SIGOPS : ℕ := 15
 
@@ -68,7 +68,40 @@ def NLK2 : ℕ := 47
 def NLK4 : ℕ := 48
 def SUMS : ℕ := 49
 def GC : ℕ := 50
-def N_MAIN : ℕ := 51
+/-! CONNECT-RULES step 3: the accurate count and the scriptSig's last push.
+
+* A span is walked either as a **script** (legacy count, `AC = 0`: the scriptSigs and scriptPubKeys) or
+  as an **accurate span** (`AC = 1`: a redeem script, weight 4, `W4 = 1`; or a witness script, weight 1).
+  The accurate count of a multisig is the previous opcode's `DV` (`PV`, 20 at a span's start).
+* Every script also outputs `PO` (it parses and no opcode is above `OP_16`: `IsPushOnly`) and the span
+  `(RS, RL)` of its last operation's data (`RL = 0` when that operation carries none). These three are
+  constant over the script, so its first row can offer them; they are fixed where they are known.
+* `SUMS` adds the legacy weights of the scripts, `SUMA` the weighted accurate counts of the spans. -/
+def AC : ℕ := 51
+def W4 : ℕ := 52
+/-- From the opcode table: above `OP_16`, multisig, the count a following multisig takes. -/
+def HI : ℕ := 53
+def MS : ℕ := 54
+def DV : ℕ := 55
+/-- Opcodes above `OP_16` so far in the span, this row included; its is-zero test. -/
+def HCN : ℕ := 56
+def ZH : ℕ := 57
+def INVH : ℕ := 58
+def PO : ℕ := 59
+def RS : ℕ := 60
+def RL : ℕ := 61
+/-- Whether the data starting after this row ends with the span (`NDR = REM − 1`); `EZ`: and data starts. -/
+def ZE : ℕ := 62
+def INVE : ℕ := 63
+def EZ : ℕ := 64
+def PV : ℕ := 65
+def NPV : ℕ := 66
+def M1 : ℕ := 67
+/-- The row's accurate amount (before `OP`), its legacy weight (`SG` on script rows), the second sum. -/
+def AN : ℕ := 68
+def LG : ℕ := 69
+def SUMA : ℕ := 70
+def N_MAIN : ℕ := 71
 
 def preCols : List PreCol := [.isFirst, .notLast]
 
@@ -133,17 +166,43 @@ def scriptC : List Expr :=
     .mul notFirst (.mul (k FS) (om (kp ZR))),
     .mul notFirst (.mul (.sub (kp ACT) (k ACT)) (om (kp ZR))),
     .mul isLast (k ACT),
-    .mul first (.sub (k SUMS) (.mul (k OP) (k SG))),
-    .mul notFirst (.sub (.sub (k SUMS) (kp SUMS)) (.mul (k OP) (k SG))) ]
+    .mul first (.sub (k SUMS) (.mul (k OP) (k LG))),
+    .mul notFirst (.sub (.sub (k SUMS) (kp SUMS)) (.mul (k OP) (k LG))) ]
 
-def constraints : List Expr := localC ++ stepC ++ scriptC
+/-- The data that starts after this row: after a direct push opcode, or after a `PUSHDATA`'s last
+length byte when the length is not zero. -/
+def entE : Expr := .add (.mul (k OP) (k NZP)) (.mul (k LEF) (om (k ZA)))
+
+/-- CONNECT-RULES step 3 (see the columns' note). -/
+def accC : List Expr :=
+  [ boolC (k AC), boolC (k W4), .mul (k W4) (om (k AC)) ] ++
+  [AC, W4, PO, RS, RL].map (fun x => .mul (k GC) (.sub (k x) (kp x))) ++
+  [ .sub (k HCN) (.add (.mul (k GC) (kp HCN)) (.mul (k OP) (k HI))) ] ++
+  isZero ZH INVH (k HCN) ++
+  [ .mul (k ZR) (.sub (k PO) (.mul (k ZH) (k NOP))) ] ++
+  isZero ZE INVE (.add (.sub (k NDR) (k REM)) one) ++
+  [ .sub (k EZ) (.mul entE (k ZE)),
+    .mul (k EZ) (.sub (k RL) (k NDR)),
+    .mul (k EZ) (.sub (.sub (k RS) (k POS)) one),
+    .mul (k ZR) (.mul (om (k DT)) (k RL)),
+    .mul (k FS) (.sub (k PV) (cst 20)),
+    .mul (k GC) (.sub (k PV) (kp NPV)),
+    .sub (k NPV) (.add (.mul (k OP) (k DV)) (.mul (om (k OP)) (k PV))),
+    .sub (k M1) (.mul (k MS) (k PV)),
+    .sub (k AN) (.mul (.add (k AC) (.mul (cst 3) (k W4))) (.add (.sub (k SG) (.mul (cst 20) (k MS))) (k M1))),
+    .sub (k LG) (.mul (om (k AC)) (k SG)),
+    .mul first (.sub (k SUMA) (.mul (k OP) (k AN))),
+    .mul notFirst (.sub (.sub (k SUMA) (kp SUMA)) (.mul (k OP) (k AN))) ]
+
+def constraints : List Expr := localC ++ stepC ++ scriptC ++ accC
 
 def lookups : List Lookup :=
-  [ ⟨REL_SCRIPT, .neg (k FS), [k POS, k REM]⟩,
+  [ ⟨REL_SCRIPT, .neg (.mul (k FS) (om (k AC))), [k POS, k REM, k PO, k RS, k RL]⟩,
     ⟨REL_BYTE, .neg (k ACT), [k POS, k B]⟩,
-    ⟨Tables.REL_OPC, .neg (k OP), [k B, k PN, k K1, k K2, k K4, k SG, k NZP]⟩,
+    ⟨Tables.REL_OPC, .neg (k OP), [k B, k PN, k K1, k K2, k K4, k SG, k NZP, k HI, k MS, k DV]⟩,
     ⟨Tables.REL_R8, .neg (k TOPF), [.sub (k B) (cst 2)]⟩,
-    ⟨REL_SIGOPS, isLast, [k SUMS]⟩ ]
+    ⟨REL_SIGOPS, isLast, [k SUMS, k SUMA]⟩,
+    ⟨REL_ASPAN, .neg (.mul (k FS) (k AC)), [k POS, k REM, k W4]⟩ ]
 
 def walk : Comp where
   air := { name := "block_walk", nMain := N_MAIN, pre := preCols, constraints := constraints }

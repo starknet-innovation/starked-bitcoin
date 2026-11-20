@@ -7,7 +7,7 @@ const std = @import("std");
 const M31 = @import("stwo_core").fields.m31.M31;
 
 pub const json = @embedFile("air:block_walk");
-pub const N_MAIN = 51;
+pub const N_MAIN = 71;
 
 const ACT = 0;
 const FS = 1;
@@ -54,6 +54,64 @@ const NLK2 = 47;
 const NLK4 = 48;
 const SUMS = 49;
 const GC = 50;
+// CONNECT-RULES step 3 (Lean `Walk.accC`).
+const AC = 51;
+const W4 = 52;
+const HI = 53;
+const MS = 54;
+const DV = 55;
+const HCN = 56;
+const ZH = 57;
+const INVH = 58;
+const PO = 59;
+const RS = 60;
+const RL = 61;
+const ZE = 62;
+const INVE = 63;
+const EZ = 64;
+const PV = 65;
+const NPV = 66;
+const M1 = 67;
+const AN = 68;
+const LG = 69;
+const SUMA = 70;
+
+/// The opcode table's columns for the accurate count (Lean `Tables.hiN`, `msN`, `dvN`).
+pub fn hiN(b: u8) u32 {
+    return @intFromBool(b > 0x60);
+}
+pub fn msN(b: u8) u32 {
+    return @intFromBool(b == 0xae or b == 0xaf);
+}
+pub fn dvN(b: u8) u32 {
+    return if (b >= 0x51 and b <= 0x60) b - 0x50 else 20;
+}
+
+/// A walked span: a script (`mode` 0, legacy count), or an accurate span of weight 1 (`mode` 1, a
+/// witness script) or 4 (`mode` 2, a redeem script).
+pub const Span = struct { start: u32, len: u32, mode: u8 = 0 };
+
+/// What the walker outputs for a span besides its counts: `po` (it parses and no opcode is above
+/// `OP_16`), and the data of its last operation `(rs, rl)` when a push's data ends exactly with the
+/// span (else both 0), as the AIR fixes them.
+pub const SpanOut = struct { po: bool, rs: u32, rl: u32 };
+
+pub fn spanOut(raw: []const u8, start: u32, len: u32) SpanOut {
+    var st = State{};
+    var hi: u32 = 0;
+    var out: SpanOut = .{ .po = false, .rs = 0, .rl = 0 };
+    for (0..len) |j| {
+        const pos = start + @as(u32, @intCast(j));
+        const b = raw[pos];
+        if (st.kind == .op) hi += hiN(b);
+        const nxt = step(st, b);
+        const rem = len - @as(u32, @intCast(j));
+        if ((st.kind == .op or st.kind == .ln) and nxt.kind == .dt and nxt.dr == rem - 1) out = .{ .po = false, .rs = pos + 1, .rl = rem - 1 };
+        st = nxt;
+    }
+    out.po = hi == 0 and st.kind == .op;
+    return out;
+}
 
 pub fn sigW(b: u8) u32 {
     return switch (b) {
@@ -107,6 +165,7 @@ pub const Out = struct {
     opcodes: []u8,
     ranges: []u32,
     sigops: u32,
+    siga: u32 = 0,
 };
 
 fn f(x: anytype) M31 {
@@ -117,9 +176,9 @@ fn invOrZero(x: M31) M31 {
     return x.inv() catch M31.zero();
 }
 
-pub fn rowsNeeded(scripts: []const [2]u32) usize {
+pub fn rowsNeeded(spans: []const Span) usize {
     var n: usize = 0;
-    for (scripts) |s| n += s[1];
+    for (spans) |s| n += s.len;
     return n + 1;
 }
 
@@ -130,13 +189,19 @@ pub fn rowsNeeded(scripts: []const [2]u32) usize {
 /// its byte (`expand`).
 pub const Rec = extern struct { w0: u32, rem: u32, val: u32, sums: u32 };
 
+/// The step 3 state of a walked row (host only so far; the device kernel does not know it yet).
+pub const Ext = struct { mode: u8, po: bool, rs: u32, rl: u32, hcn: u32, pv: u32, suma: u32 };
+
 /// The host's sequential pass: one record per walked row, and what the other components read.
 pub const Plan = struct {
     recs: []Rec,
+    ext: []Ext,
     reads: []u32,
     opcodes: []u8,
     ranges: []u32,
+    /// The legacy count of the scripts, and the weighted accurate count of the accurate spans.
     sigops: u32,
+    siga: u32,
 };
 
 fn lkCode(lk: u8) u32 {
@@ -177,27 +242,43 @@ fn step(st: State, b: u8) State {
     };
 }
 
-pub fn plan(a: std.mem.Allocator, log_size: u32, raw: []const u8, scripts: []const [2]u32) !Plan {
+pub fn plan(a: std.mem.Allocator, log_size: u32, raw: []const u8, spans: []const Span) !Plan {
     const n = @as(usize, 1) << @intCast(log_size);
-    const active = rowsNeeded(scripts) - 1;
+    const active = rowsNeeded(spans) - 1;
     if (active + 1 > n) return error.TooManyRows;
     if (raw.len >= 1 << 24) return error.TooManyRows;
     const recs = try a.alloc(Rec, active);
+    const ext = try a.alloc(Ext, active);
     const reads = try a.alloc(u32, active);
     var opcodes = std.ArrayList(u8).empty;
     var ranges = std.ArrayList(u32).empty;
     var r: usize = 0;
     var sums: u32 = 0;
-    for (scripts) |sp| {
+    var suma: u32 = 0;
+    for (spans) |span| {
+        const sp = [2]u32{ span.start, span.len };
+        const so = spanOut(raw, span.start, span.len);
+        const wgt: u32 = switch (span.mode) {
+            0 => 0,
+            1 => 1,
+            else => 4,
+        };
         var st = State{};
+        var hcn: u32 = 0;
+        var pv: u32 = 20;
         for (0..sp[1]) |j| {
             const pos: u32 = sp[0] + @as(u32, @intCast(j));
             const b = raw[pos];
             reads[r] = pos;
+            ext[r] = .{ .mode = span.mode, .po = so.po, .rs = so.rs, .rl = so.rl, .hcn = hcn, .pv = pv, .suma = suma };
             switch (st.kind) {
                 .op => {
                     try opcodes.append(a, b);
-                    sums += sigW(b);
+                    if (span.mode == 0) sums += sigW(b) else suma += wgt * (sigW(b) - 20 * msN(b) + msN(b) * pv);
+                    hcn += hiN(b);
+                    pv = dvN(b);
+                    ext[r].hcn = hcn;
+                    ext[r].suma = suma;
                 },
                 .ln => if (st.li + 1 == st.lk and st.lk == 4 and b >= 2) try ranges.append(a, b - 2),
                 else => {},
@@ -218,7 +299,7 @@ pub fn plan(a: std.mem.Allocator, log_size: u32, raw: []const u8, scripts: []con
             r += 1;
         }
     }
-    return .{ .recs = recs, .reads = reads, .opcodes = try opcodes.toOwnedSlice(a), .ranges = try ranges.toOwnedSlice(a), .sigops = sums };
+    return .{ .recs = recs, .ext = ext, .reads = reads, .opcodes = try opcodes.toOwnedSlice(a), .ranges = try ranges.toOwnedSlice(a), .sigops = sums, .siga = suma };
 }
 
 /// Main columns in `2^log_size` rows from the plan (the device's `walk` kernel computes the same).
@@ -318,11 +399,48 @@ pub fn columns(a: std.mem.Allocator, log_size: u32, raw: []const u8, p: Plan) ![
         }
         cols[GC][r] = f(@intFromBool((rc.w0 >> 30) & 1 == 0));
         cols[SUMS][r] = f(rc.sums);
+        // Step 3.
+        const x = p.ext[r];
+        const ac: u32 = @intFromBool(x.mode != 0);
+        const w4: u32 = @intFromBool(x.mode == 2);
+        cols[AC][r] = f(ac);
+        cols[W4][r] = f(w4);
+        cols[HCN][r] = f(x.hcn);
+        cols[ZH][r] = f(@intFromBool(x.hcn == 0));
+        cols[INVH][r] = invOrZero(f(x.hcn));
+        cols[PO][r] = f(@intFromBool(x.po));
+        cols[RS][r] = f(x.rs);
+        cols[RL][r] = f(x.rl);
+        const e = cols[NDR][r].sub(f(rem)).add(one);
+        const ze = e.isZero();
+        cols[ZE][r] = f(@intFromBool(ze));
+        cols[INVE][r] = invOrZero(e);
+        const ent = (st.kind == .op or st.kind == .ln) and nxt.kind == .dt;
+        cols[EZ][r] = f(@intFromBool(ent and ze));
+        cols[PV][r] = f(x.pv);
+        var sg: u32 = 0;
+        var ms: u32 = 0;
+        if (st.kind == .op) {
+            cols[HI][r] = f(hiN(b));
+            ms = msN(b);
+            sg = sigW(b);
+            cols[MS][r] = f(ms);
+            cols[DV][r] = f(dvN(b));
+            cols[NPV][r] = f(dvN(b));
+        } else cols[NPV][r] = f(x.pv);
+        const m1 = ms * x.pv;
+        cols[M1][r] = f(m1);
+        cols[AN][r] = f((ac + 3 * w4) * (sg - 20 * ms + m1));
+        cols[LG][r] = f((1 - ac) * sg);
+        cols[SUMA][r] = f(x.suma);
     }
     // Padding rows: inactive; zero tests on zero values.
     const inv_m1 = invOrZero(M31.zero().sub(one));
     for (p.recs.len..n) |r| {
         cols[SUMS][r] = f(p.sigops);
+        cols[SUMA][r] = f(p.siga);
+        cols[ZH][r] = one;
+        cols[INVE][r] = one;
         cols[ZA][r] = one;
         cols[INVD][r] = inv_m1;
         cols[INVR][r] = inv_m1;
@@ -330,7 +448,7 @@ pub fn columns(a: std.mem.Allocator, log_size: u32, raw: []const u8, p: Plan) ![
     return cols;
 }
 
-pub fn generate(a: std.mem.Allocator, log_size: u32, raw: []const u8, scripts: []const [2]u32) !Out {
-    const p = try plan(a, log_size, raw, scripts);
-    return .{ .cols = try columns(a, log_size, raw, p), .reads = p.reads, .opcodes = p.opcodes, .ranges = p.ranges, .sigops = p.sigops };
+pub fn generate(a: std.mem.Allocator, log_size: u32, raw: []const u8, spans: []const Span) !Out {
+    const p = try plan(a, log_size, raw, spans);
+    return .{ .cols = try columns(a, log_size, raw, p), .reads = p.reads, .opcodes = p.opcodes, .ranges = p.ranges, .sigops = p.sigops, .siga = p.siga };
 }

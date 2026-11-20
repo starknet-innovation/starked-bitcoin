@@ -122,6 +122,7 @@ pub fn main() !void {
     const needs_mode = std.posix.getenv("STARKED_SURVEY_NEEDS") != null;
     const bip68_mode = std.posix.getenv("STARKED_SURVEY_BIP68") != null;
     const rules_mode = std.posix.getenv("STARKED_SURVEY_RULES") != null;
+    const sigops_mode = std.posix.getenv("STARKED_SURVEY_SIGOPS") != null;
     while (true) {
         _ = arena.reset(.retain_capacity);
         const a = arena.allocator();
@@ -140,6 +141,18 @@ pub fn main() !void {
             try w.flush();
             continue;
         };
+        // STARKED_SURVEY_SIGOPS=1: what the accurate sigop count would add to `block_walk` (CONNECT-RULES
+        // step 3). Prints `height,walk_need,redeem_n,redeem_bytes,wscript_n,wscript_bytes,p2sh,witness`.
+        if (sigops_mode) {
+            const c = sb.block.connect_rules.blockRules(a, raw, undo, height, true) catch |e| {
+                try w.print("{d},error,{s}\n", .{ height, @errorName(e) });
+                try w.flush();
+                continue;
+            };
+            try w.print("{d},{d},{d},{d},{d},{d},{d},{d}\n", .{ height, sh.needs[sys.C.walk], c.redeem_n, c.redeem_bytes, c.wscript_n, c.wscript_bytes, c.sigops.p2sh, c.sigops.witness });
+            try w.flush();
+            continue;
+        }
         // STARKED_SURVEY_RULES=1: the native check of CONNECT-RULES (`block/connect_rules.zig`). Prints
         // `height,sigop_cost,legacy,p2sh,witness,inputs,height_locks,height_failed,time_locks`, then one
         // line `tl,height,coin_height,lock` per time-based lock, which needs median times past to check.

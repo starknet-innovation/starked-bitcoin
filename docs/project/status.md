@@ -4,7 +4,7 @@ Rewritten at the end of every session; see [README.md](README.md#ending-a-sessio
 If `HEAD at last update` doesn't match `git log -1`, this file is stale:
 follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work).
 
-- **Updated:** 2026-11-20 (owner confirmed D-056 and the branch `connect-rules`, and posted the Delving follow-up; stwo-zig URL now `starknet-innovation/stwo-zig`)
+- **Updated:** 2026-11-20 (session 42: CONNECT-RULES step 3 built and tested on branch `connect-rules`; its Lean soundness is open; stwo-zig URL moved)
 - **HEAD at last update:** this session's commit on branch `connect-rules` (after b319bfb, which is `main` and pushed)
 - **Branches:** `main` = b319bfb (pushed): the AIRs of the published proofs. `connect-rules` (local): step 2, whose AIRs give other block VKs; merge it when the re-prove is made (or when the owner says).
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
@@ -28,7 +28,7 @@ including the seal's composed statement (`seal_soundW`); trusted items in [verif
 
 **Owner's order (2026-11-19): A–D below come before items 0–3.**
 
-A. CONNECT-RULES ([connect-rules.md](../design/connect-rules.md)), on branch `connect-rules`, step 3 of 5: the full sigop cost. Start with a survey mode that counts, per block, the rows `block_walk` gains from redeem scripts and from the last witness item of P2WSH spends (`src/bin/survey.zig`, next to `STARKED_SURVEY_NEEDS`), to confirm they fit the padding. Then: classify the spent script in `block_fpwalk` (P2SH, witness program version and length), add the accurate-count mode to the walker (`lean/StarkedAir/Block/Walk.lean`, `src/block/walk.zig`; spec `txSigOpCost` in `Spec/ConnectRules.lean`; `walk_eq_sigOps` is the proof pattern), and replace the block bound by `4·(legacy + P2SH) + witness ≤ 80,000`. Follow step 2's pattern: new statements beside the old ones (D-056), `Compat.lean` pins re-pinned with a note, `SITES` in `src/block/system.zig` kept equal to Lean's `hashRows`, golden hashes updated. Optional before step 3: add the CSV bit to `LeafOut` and `BlockAt` so the recursion hands it to `epoch_systems_coreL` (connect-rules.md, step 2, "Open in Lean").
+A. CONNECT-RULES ([connect-rules.md](../design/connect-rules.md)), on branch `connect-rules`. Step 3 (full sigop cost) is built and tested; **next: its Lean soundness**, in the order of "Open in Lean" there: (1) `lean/StarkedAir/Block/WalkSound.lean`: the accurate automaton, `SUMA` = Σ weight × `sigOpsAccurate` over the accurate spans (pattern: `segment`, `total`; spec `Spec/ConnectRules.lean`); (2) `(PO, RS, RL)` = `lastPush`; (3) `URec.classC` = `isP2SH` / `witnessProgram`; (4) the fields' flags and the `aspan`/`wreq` relations (pattern: `script_sum` in `Block/ScriptSum.lean`); (5) `SigOpCostOK` from `Block.sigops_nat`. Then step 4 (time-based BIP68, D-054) and step 5 (GPU walker kernel in `src/gpu/cuda/witness.zig` still builds 51 columns; VKs; parity).
 B. SNAP-HASH: [snapshot-hash.md](../design/snapshot-hash.md) is drafted. The Delving follow-up, posted by the owner on 2026-11-20 (draft: `~/Workshop/prove-any-chain/delving-3070-reply3.md`: cost split, the SHA-256/Blake2s correction, the hash proposal). No circuit work before a reaction.
 C. TIERS-2 (D-055): after A's steps 2–4, rerun `scripts/tier_search.py` on new needs (`survey`, `STARKED_SURVEY_NEEDS=1`), add the profile in `src/block/system.zig` (`Profile`, `profileLogs`, `sizesAuto`), time one 2^23 block on a GPU in both profiles.
 D. Re-prove once, after A–C: blocks 935,001–972,500, trees, join, set passes, seal. A from-genesis run is approved in principle (owner), after A.
@@ -51,6 +51,8 @@ D. Re-prove once, after A–C: blocks 935,001–972,500, trees, join, set passes
 
 ## Needs owner
 
+- **D-057** ([decisions.md](decisions.md)): confirm, or reject, the three choices of step 3: a block-only copy of the opcode table, the AIR landing before its Lean soundness, and `strict` always on.
+- **Push:** `main` has one local commit (c83ddb1, the stwo-zig URL; it changes the site's "in Zig" link when pushed). Branch `connect-rules` is local.
 - **STWO-225-FU:** follow up on stwo-zig#225 upstream? Outward-facing.
 
 ## Verify the current state

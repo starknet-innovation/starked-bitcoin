@@ -59,6 +59,17 @@ theorem const_eq {X : ℕ} (hX : X ∈ consts) : ∀ r < n, M X r = M X 0 := by
     simp only [Expr.eval, ev_notFirst hr, ev_k hr, ev_kp hr, one_mul, sub_eq_zero] at this
     rw [this, ih (by omega)]
 
+/-- A step 3 total (`SIGA`, `W20T`) is constant, like the `consts` columns. -/
+theorem const_eq' {X : ℕ} (hX : X = SIGA ∨ X = W20T) : ∀ r < n, M X r = M X 0 := by
+  intro r hr
+  induction r with
+  | zero => rfl
+  | succ r ih =>
+    have := sat hsat (c := .mul notFirst (.sub (k X) (kp X))) (by
+      rcases hX with rfl | rfl <;> simp [constraints]) hr
+    simp only [Expr.eval, ev_notFirst hr, ev_k hr, ev_kp hr, one_mul, sub_eq_zero] at this
+    rw [this, ih (by omega)]
+
 theorem bool_of {c : ℕ} (hc : boolC (k c) ∈ constraints) {r : ℕ} (hr : r < n) : M c r = 0 ∨ M c r = 1 := by
   have := sat hsat hc hr
   simp only [boolC, Expr.eval, ev_k hr, eval_cst, Nat.cast_one] at this
@@ -89,7 +100,7 @@ theorem row_eqs {r : ℕ} (hr : r < n) :
     rv (fun x => bn x.chkH) r * (pub 4 * (M ACC r - pub 2)) = 0 ∧
     rv (fun x => bn x.chkL) r * (M HC r * (M ACC r - (M CLEN r - 38))) = 0 ∧
     rv (fun x => bn x.chkW) r * (M ACC r - (4000000 - 4 * pub 0 + 3 * M WT r)) = 0 ∧
-    rv (fun x => bn x.chkS) r * (M ACC r - (20000 - M SIGS r)) = 0 := by
+    rv (fun x => bn x.chkS) r * (2 * M ACC r + M PAR r - (80000 - 4 * M SIGS r - M SIGA r - M W20T r)) = 0 := by
   have q := fun (cc : Expr) (h : cc ∈ constraints) => sat hsat h hr
   have e : ∀ i (g : Role → ℕ), preCols.getD i (.periodic [0]) = tabR g →
       (p i).eval n preCols pub M r = rv g r := fun i g hi => ev_role hi hr
@@ -108,7 +119,8 @@ theorem row_eqs {r : ℕ} (hr : r < n) :
   have c11 := q (.mul (p P_CHKL) (.mul (k HC) (.sub (k ACC) (.sub (k CLEN) (cst 38))))) (by simp [constraints])
   have c12 := q (.mul (p P_CHKW) (.sub (k ACC) (.add (.sub (cst 4000000) (.mul (cst 4) (.pub 0))) (.mul (cst 3) (k WT)))))
     (by simp [constraints])
-  have c13 := q (.mul (p P_CHKS) (.sub (k ACC) (.sub (cst 20000) (k SIGS)))) (by simp [constraints])
+  have c13 := q (.mul (p P_CHKS) (.sub (.add (.mul (cst 2) (k ACC)) (k PAR))
+    (.sub (.sub (.sub (cst 80000) (.mul (cst 4) (k SIGS))) (k SIGA)) (k W20T)))) (by simp [constraints])
   simp only [Expr.eval, ev_k hr, eval_cst, Nat.cast_ofNat, e P_SCB (fun x => bn (decide (x.base = 2))) rfl, e P_SB34 (fun x => bn (decide (x.base = 3))) rfl, e P_SW (fun x => bn (decide (x.base = 4))) rfl, e P_SC (fun x => bn (decide (x.base = 5))) rfl,
     e P_OFF (·.off) rfl, e P_SHDR (fun x => bn (decide (x.base = 1))) rfl, e P_EXP (fun x => x.exp.getD 0) rfl, e P_HEXP (fun x => bn x.exp.isSome) rfl, e P_SC1 (fun x => bn x.sc1) rfl, e P_HI (fun x => bn x.hi) rfl, e P_CAPT0 (fun x => bn x.capT0) rfl,
     e P_CAPT1 (fun x => bn x.capT1) rfl, e P_CAPM0 (fun x => bn x.capM0) rfl, e P_CAPM1 (fun x => bn x.capM1) rfl, e P_CHKH (fun x => bn x.chkH) rfl, e P_CHKL (fun x => bn x.chkL) rfl, e P_CHKW (fun x => bn x.chkW) rfl,
@@ -308,8 +320,10 @@ theorem weight_fact : ∃ D : ℕ, D < 2 ^ 24 ∧ ((D : ℕ) : F) = 4000000 - 4 
   rw [e, ← show M ACC 125 = _ from acc]; linear_combination chk
 
 omit hread hseg ha0 in
-/-- **The sigop check**: `20,000 − SIGS` is a 2-byte natural. -/
-theorem sigops_fact : ∃ D : ℕ, D < 2 ^ 16 ∧ ((D : ℕ) : F) = 20000 - M SIGS 0 := by
+omit hread hseg ha0 in
+/-- **The sigop check**: `80,000 − 4·SIGS − SIGA − W20T` is a natural below `2^17` (two range bytes,
+doubled, plus the parity bit). -/
+theorem sigops_fact : ∃ D : ℕ, D < 2 ^ 17 ∧ ((D : ℕ) : F) = 80000 - 4 * M SIGS 0 - M SIGA 0 - M W20T 0 := by
   have h127 : 127 < n := by omega
   have acc := acc_ra hsat hn hnP (a := 126) (d := 1) (by omega) (by norm_num) rfl
     (fun j hj => by interval_cases j <;> rfl) (fun j hj => by interval_cases j <;> rfl)
@@ -317,9 +331,15 @@ theorem sigops_fact : ∃ D : ℕ, D < 2 ^ 16 ∧ ((D : ℕ) : F) = 20000 - M SI
   obtain ⟨D, hD, e⟩ := ra_sum_lt hsat hn hnP hra (a := 126) (d := 1) (by omega)
   have chk := (row_eqs hsat h127).2.2.2.2.2.2.2.2.2.2.2.2
   simp [rv_mod (show 127 < 256 by norm_num), role, bn] at chk
-  rw [const_eq hsat (X := SIGS) (by simp [consts]) 127 h127] at chk
-  refine ⟨D, by simpa using hD, ?_⟩
-  rw [e, ← show M ACC 127 = _ from acc]; linear_combination chk
+  rw [const_eq hsat (X := SIGS) (by simp [consts]) 127 h127, const_eq' hsat (X := SIGA) (Or.inl rfl) 127 h127,
+    const_eq' hsat (X := W20T) (Or.inr rfl) 127 h127] at chk
+  have hD' : D < 2 ^ 16 := by simpa using hD
+  have hacc : M ACC 127 = ((D : ℕ) : F) := by rw [e]; exact acc
+  rcases bool_of hsat (c := PAR) (by simp [constraints]) h127 with p0 | p1
+  · refine ⟨2 * D, by omega, ?_⟩
+    push_cast; rw [← hacc]; rw [p0] at chk; linear_combination chk
+  · refine ⟨2 * D + 1, by omega, ?_⟩
+    push_cast; rw [← hacc]; rw [p1] at chk; linear_combination chk
 
 omit hread hseg ha0 in
 /-- **The previous MTP's limbs** are 16-bit. -/

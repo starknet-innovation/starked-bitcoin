@@ -23,7 +23,7 @@ theorem r8_lt {i r k : ℕ} (hs : ((i, r, k) : Site) ∈ sites hashSys inst) (hu
   rw [hrel, show Tables.REL_R8 = 9 from rfl, yt] at hy
   obtain ⟨rfl, rfl⟩ : i' = 5 ∧ k' = 0 := by omega
   have e : siteVals hashSys inst pub (5, r', 0) = [((r' % 256 : ℕ) : F)] := by
-    simp [siteVals, siteEval, siteLookup, hashSys, hL 5 (by decide), Tables.tables, Expr.eval, Tables.preCols,
+    simp [siteVals, siteEval, siteLookup, hashSys, hL 5 (by decide), Tables.tablesB, Expr.eval, Tables.preColsB, Tables.preCols,
       Tables.tab, PreCol.eval, wrap_zero hr', pre, List.getElem?_range (Nat.mod_lt r' (by norm_num : 0 < 256))]
   rw [e, hv] at hsv
   simp only [List.cons.injEq, and_true] at hsv
@@ -31,7 +31,7 @@ theorem r8_lt {i r k : ℕ} (hs : ((i, r, k) : Site) ∈ sites hashSys inst) (hu
   omega
 
 /-- The fields site of check lookup `j` (`chkLookups` index `j`). -/
-theorem fields_chk_site {r j : ℕ} (hr : r < 2 ^ Ls 1) (hj : j < 32) :
+theorem fields_chk_site {r j : ℕ} (hr : r < 2 ^ Ls 1) (hj : j < 38) :
     ((1, r, 8 + j) : Site) ∈ sites hashSys inst ∧
     siteLookup hashSys ((1, r, 8 + j) : Site) = Fields.chkLookups.getD j ⟨0, .const 0, []⟩ := by
   refine ⟨site_mem hL (by decide) hr (by simp [hashSys, Fields.fields, Fields.lookups, Fields.chkLookups]; omega), ?_⟩

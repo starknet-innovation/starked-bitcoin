@@ -101,7 +101,10 @@ theorem filter_sites {P : Site → Prop} [DecidablePred P] {i0 k0 : ℕ} (hi0 : 
 theorem balanced : Balanced hashSys inst pub := fun R v => by
   have := hsat.2 R v; simpa [extTotal] using this
 
-/-- **Script multiplicities**: the fields' yield is `smult ∈ {0, 1}`, the walker's use `−FS ∈ {0, −1}`. -/
+/-- The walker's use of a script: `FS · (1 − AC)`, the first row of a span walked as a script. -/
+def wsm (M : ℕ → ℕ → F) (r : ℕ) : F := M Walk.FS r * (1 - M Walk.AC r)
+
+/-- **Script multiplicities**: the fields' yield is `smult ∈ {0, 1}`, the walker's use `−wsm ∈ {0, −1}`. -/
 theorem script_mult1 {r : ℕ} (hr : r < 2 ^ Ls 1) :
     siteMult hashSys inst pub (1, r, 30) = Fields.smult (inst 1).main r := by
   simp only [siteMult, siteEval, siteLookup, hashSys, hL 1 (by decide)]
@@ -109,17 +112,30 @@ theorem script_mult1 {r : ℕ} (hr : r < 2 ^ Ls 1) :
     StarkedAir.Sha256.eval_col, StarkedAir.Sha256.eval_cst, wrap_zero hr, Fields.smult]
 
 theorem script_mult6 {r : ℕ} (hr : r < 2 ^ Ls 6) :
-    siteMult hashSys inst pub (6, r, 0) = -(inst 6).main Walk.FS r := by
+    siteMult hashSys inst pub (6, r, 0) = -wsm (inst 6).main r := by
   simp only [siteMult, siteEval, siteLookup, hashSys, hL 6 (by decide)]
-  simp [Walk.walk, Walk.lookups, Expr.eval, Walk.k, StarkedAir.Sha256.eval_col, wrap_zero hr]
+  simp [Walk.walk, Walk.lookups, Expr.eval, Walk.k, Walk.om, Walk.one, StarkedAir.Sha256.eval_col,
+    StarkedAir.Sha256.eval_cst, wrap_zero hr, wsm]
+
+/-- The walker's script use is 0 or 1. -/
+theorem wsm01 {r : ℕ} (hr : r < 2 ^ Ls 6) : wsm (inst 6).main r = 0 ∨ wsm (inst 6).main r = 1 := by
+  have ws := hash_walk_sat hL hsat
+  have bFS : (inst 6).main Walk.FS r = 0 ∨ (inst 6).main Walk.FS r = 1 :=
+    air_bool ws (c := Walk.FS) (by simp [Walk.walk, Walk.constraints, Walk.localC, Walk.bools, Walk.k]) hr
+  have bAC : (inst 6).main Walk.AC r = 0 ∨ (inst 6).main Walk.AC r = 1 :=
+    air_bool ws (c := Walk.AC) (by simp [Walk.walk, Walk.constraints, Walk.accC, Walk.k]) hr
+  unfold wsm
+  rcases bFS with a | a <;> rcases bAC with b | b <;> simp [a, b]
 
 theorem script_vals1 {r : ℕ} (hr : r < 2 ^ Ls 1) :
-    siteVals hashSys inst pub (1, r, 30) = [(inst 1).main Fields.SSC r, (inst 1).main Fields.VAL r] := by
+    siteVals hashSys inst pub (1, r, 30) = [(inst 1).main Fields.SSC r, (inst 1).main Fields.VAL r,
+      (inst 1).main Fields.SPO r, (inst 1).main Fields.SRS r, (inst 1).main Fields.SRL r] := by
   simp [siteVals, siteEval, siteLookup, hashSys, hL 1 (by decide), Fields.fields, Fields.lookups,
     Fields.chkLookups, Fields.k, StarkedAir.Sha256.eval_col, wrap_zero hr]
 
 theorem script_vals6 {r : ℕ} (hr : r < 2 ^ Ls 6) :
-    siteVals hashSys inst pub (6, r, 0) = [(inst 6).main Walk.POS r, (inst 6).main Walk.REM r] := by
+    siteVals hashSys inst pub (6, r, 0) = [(inst 6).main Walk.POS r, (inst 6).main Walk.REM r,
+      (inst 6).main Walk.PO r, (inst 6).main Walk.RS r, (inst 6).main Walk.RL r] := by
   simp [siteVals, siteEval, siteLookup, hashSys, hL 6 (by decide), Walk.walk, Walk.lookups, Walk.k,
     StarkedAir.Sha256.eval_col, wrap_zero hr]
 
@@ -127,9 +143,11 @@ theorem script_vals6 {r : ℕ} (hr : r < 2 ^ Ls 6) :
 walker's first rows. -/
 theorem script_sum (g : List F → ℕ) :
     ∑ r ∈ (Finset.range (2 ^ Ls 1)).filter (fun r => Fields.smult (inst 1).main r = 1),
-      g [(inst 1).main Fields.SSC r, (inst 1).main Fields.VAL r] =
-    ∑ r ∈ (Finset.range (2 ^ Ls 6)).filter (fun r => (inst 6).main Walk.FS r = 1),
-      g [(inst 6).main Walk.POS r, (inst 6).main Walk.REM r] := by
+      g [(inst 1).main Fields.SSC r, (inst 1).main Fields.VAL r, (inst 1).main Fields.SPO r,
+        (inst 1).main Fields.SRS r, (inst 1).main Fields.SRL r] =
+    ∑ r ∈ (Finset.range (2 ^ Ls 6)).filter (fun r => wsm (inst 6).main r = 1),
+      g [(inst 6).main Walk.POS r, (inst 6).main Walk.REM r, (inst 6).main Walk.PO r,
+        (inst 6).main Walk.RS r, (inst 6).main Walk.RL r] := by
   classical
   have fs := hash_fields_sat' hL hsat
   have ws : ∀ r < 2 ^ Ls 6, ∀ c ∈ Walk.constraints, c.eval (2 ^ Ls 6) Walk.preCols pub (inst 6).main r = 0 := by
@@ -151,7 +169,7 @@ theorem script_sum (g : List F → ℕ) :
     · rw [script_mult1 hL hsat hL24 hr]
       rcases Fields.smult01 fs hr with e | e <;> simp [e]
     · rw [script_mult6 hL hsat hL24 hr]
-      rcases Walk.bool ws (c := Walk.FS) (by simp [Walk.bools]) hr with e | e <;> simp [e]
+      rcases wsm01 hL hsat hL24 hr with e | e <;> simp [e]
   have hP : (sites hashSys inst).length < P := by rw [hash_sites_len hL]; exact hash_rows_lt_P hL24
   have heq := yields_eq_uses (balanced hL hsat hL24) hm hP
   have hsum := congrArg (fun M : Multiset (List F) => (M.map g).sum) heq
@@ -162,7 +180,7 @@ theorem script_sum (g : List F → ℕ) :
       · exact ⟨rfl, rfl⟩
       · exfalso
         have := hp.2; rw [script_mult6 hL hsat hL24 hr] at this
-        rcases Walk.bool ws (c := Walk.FS) (by simp [Walk.bools]) hr with e | e <;> rw [e] at this
+        rcases wsm01 hL hsat hL24 hr with e | e <;> rw [e] at this
         · simp at this
         · exact n1 this.symm)
     (by simp [hashSys, Fields.fields, Fields.lookups, Fields.chkLookups])] at hsum
@@ -181,11 +199,13 @@ theorem script_sum (g : List F → ℕ) :
   simp only [Function.comp_def] at hsum
   have e1 : ∀ r ∈ (Finset.range (2 ^ Ls 1)).filter (fun r => siteRel hashSys (1, r, 30) = 11 ∧
       siteMult hashSys inst pub (1, r, 30) = 1), g (siteVals hashSys inst pub (1, r, 30)) =
-      g [(inst 1).main Fields.SSC r, (inst 1).main Fields.VAL r] := by
+      g [(inst 1).main Fields.SSC r, (inst 1).main Fields.VAL r, (inst 1).main Fields.SPO r,
+        (inst 1).main Fields.SRS r, (inst 1).main Fields.SRL r] := by
     intro r hr; rw [script_vals1 hL hsat hL24 (Finset.mem_range.mp (Finset.mem_filter.mp hr).1)]
   have e2 : ∀ r ∈ (Finset.range (2 ^ Ls 6)).filter (fun r => siteRel hashSys (6, r, 0) = 11 ∧
       siteMult hashSys inst pub (6, r, 0) = -1), g (siteVals hashSys inst pub (6, r, 0)) =
-      g [(inst 6).main Walk.POS r, (inst 6).main Walk.REM r] := by
+      g [(inst 6).main Walk.POS r, (inst 6).main Walk.REM r, (inst 6).main Walk.PO r,
+        (inst 6).main Walk.RS r, (inst 6).main Walk.RL r] := by
     intro r hr; rw [script_vals6 hL hsat hL24 (Finset.mem_range.mp (Finset.mem_filter.mp hr).1)]
   rw [Finset.sum_congr rfl e1, Finset.sum_congr rfl e2] at hsum
   have f1 : (Finset.range (2 ^ Ls 1)).filter (fun r => siteRel hashSys (1, r, 30) = 11 ∧
@@ -195,7 +215,7 @@ theorem script_sum (g : List F → ℕ) :
     · rintro ⟨hr, -, h⟩; exact ⟨hr, by rw [← script_mult1 hL hsat hL24 hr]; exact h⟩
     · rintro ⟨hr, h⟩; exact ⟨hr, rfl, by rw [script_mult1 hL hsat hL24 hr]; exact h⟩
   have f2 : (Finset.range (2 ^ Ls 6)).filter (fun r => siteRel hashSys (6, r, 0) = 11 ∧
-      siteMult hashSys inst pub (6, r, 0) = -1) = (Finset.range (2 ^ Ls 6)).filter (fun r => (inst 6).main Walk.FS r = 1) := by
+      siteMult hashSys inst pub (6, r, 0) = -1) = (Finset.range (2 ^ Ls 6)).filter (fun r => wsm (inst 6).main r = 1) := by
     ext r; simp only [Finset.mem_filter, Finset.mem_range]
     constructor
     · rintro ⟨hr, -, h⟩; rw [script_mult6 hL hsat hL24 hr, neg_inj] at h; exact ⟨hr, h⟩

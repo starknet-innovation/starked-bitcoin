@@ -402,8 +402,78 @@ def lockC : List Expr :=
     .sub (k LKH) (.mul (.pub 5) (.mul (k A1) (oneMinus (k T22)))),
     .sub (k LKT) (.mul (.pub 5) (.mul (k A1) (k T22))) ]
 
+/-! ### The full sigop cost (CONNECT-RULES step 3)
+
+Columns from `203` on. Per non-coinbase input (`GIN`):
+- from the walker, with the scriptSig's tuple: `SPO` (push-only), `(SRS, SRL)` (its last push);
+- from the coin component, with the input's tuple: the spent script's class `CP`, `CW20`, `CW32`;
+- `AR0`: P2SH spent by a non-empty push-only scriptSig, so the last push is the redeem script. If it is
+  not empty (`ARQ`) it is walked as an accurate span of weight 4. If its length is 22 or 34 (`RDF`) its
+  first two bytes are read: `RWA` says it is a version 0 witness program, `RW32` one of 32 bytes;
+- `W20S` counts the inputs whose program, native or wrapped, is version 0 with 20 bytes (one sigop);
+- `N32`: the program is version 0 with 32 bytes. In a segwit transaction the input's witness stack row
+  takes the request `wreq(tx, inputs left)` (`WS`), carries it down its items, and the last item, if
+  not empty, is walked as an accurate span of weight 1 (`WQ`). -/
+
+def SPO : ℕ := 203
+def SRS : ℕ := 204
+def SRL : ℕ := 205
+def CP : ℕ := 206
+def CW20 : ℕ := 207
+def CW32 : ℕ := 208
+def NZI : ℕ := 209
+def AR0 : ℕ := 210
+def ZRL : ℕ := 211
+def INVRL : ℕ := 212
+def ARQ : ℕ := 213
+def LQ : ℕ := 214
+def ZLN : ℕ := 215
+def INVLN : ℕ := 216
+def RDF : ℕ := 217
+def RB0 : ℕ := 218
+def RB1 : ℕ := 219
+def ZPG : ℕ := 220
+def INVPG : ℕ := 221
+def RWA : ℕ := 222
+def RW32 : ℕ := 223
+def W20S : ℕ := 224
+def N32 : ℕ := 225
+def WS : ℕ := 226
+def WQ : ℕ := 227
+/-- `RWA − RW32`: the redeem script is a version 0 program of 20 bytes (stored, and constrained to a bit). -/
+def RW20 : ℕ := 228
+def N_SIG : ℕ := 229
+
+/-- `aspan(start, len, weight-4 flag)` (the walker's `REL_ASPAN`) and `wreq(tx, inputs left)`. -/
+def REL_ASPAN : ℕ := 26
+def REL_WREQ : ℕ := 27
+
+def sigC : List Expr :=
+  [ .sub (k NZI) (.mul (k GIN) (oneMinus (k ZV))),
+    .sub (k AR0) (.mul (k NZI) (.mul (k CP) (k SPO))) ] ++
+  isZero ZRL INVRL (k SRL) ++
+  [ .sub (k ARQ) (.mul (k AR0) (oneMinus (k ZRL))),
+    .sub (k LQ) (.mul (.sub (k SRL) (c 22)) (.sub (k SRL) (c 34))) ] ++
+  isZero ZLN INVLN (k LQ) ++
+  [ .sub (k RDF) (.mul (k AR0) (k ZLN)) ] ++
+  isZero ZPG INVPG (.add (k RB0) (.mul (c 256) (.add (.sub (k RB1) (k SRL)) (c 2)))) ++
+  [ .sub (k RWA) (.mul (k RDF) (k ZPG)),
+    .sub (.mul (c 12) (k RW32)) (.mul (k RWA) (.sub (k SRL) (c 22))),
+    .mul first (k W20S),
+    .mul notFirst (.sub (.sub (.sub (k W20S) (kp W20S)) (.mul (k GIN) (k CW20))) (k RW20)),
+    .sub (k N32) (.add (.mul (k GIN) (k CW32)) (k RW32)),
+    boolC (k WS),
+    .mul (k WS) (oneMinus (.add (k K_WCNT) (k K_WITEM))),
+    .mul (k K_WITEM) (.sub (k WS) (kp WS)),
+    .sub (k WQ) (.mul (k K_WITEM) (.mul (k WS) (k Z1))),
+    -- the multiplicities built from these are 0 or 1 whatever the other components offer
+    boolC (k CP), boolC (k SPO), boolC (k N32), boolC (k CW20),
+    -- a redeem script to walk is shorter than `2^24` (range slots 4–6, unused on input rows otherwise)
+    .mul (k ARQ) (.sub (k SRL) (le3 (rg 4) (rg 5) (rg 6))),
+    .sub (k RW20) (.sub (k RWA) (k RW32)), boolC (k RW20) ]
+
 def constraints : List Expr :=
-  kindC ++ transC ++ tileC ++ compactC ++ segC ++ countC ++ zeroC ++ bitC ++ txC ++ pubC ++ chkC ++ lockC
+  kindC ++ transC ++ tileC ++ compactC ++ segC ++ countC ++ zeroC ++ bitC ++ txC ++ pubC ++ chkC ++ lockC ++ sigC
 
 /-- Byte reads: the CompactSize's bytes, and a segwit head's marker and flag. -/
 def lookups : List Lookup :=
@@ -424,18 +494,26 @@ def chkLookups : List Lookup :=
       [.add (k BASEC) (c j), by4 j]⟩) ++
   [ ⟨REL_BYTE, .neg (.add (k GIN) (k MMB)), [k AQ, k BQ]⟩ ] ++
   (List.range 13).map (fun j => ⟨Tables.REL_R8, .neg one, [rg j]⟩) ++
-  [ ⟨REL_SCRIPT, .mul (.add (k K_IN) (k K_OUT)) (oneMinus (k ZV)), [k SSC, k VAL]⟩,
-    ⟨REL_TOT, isLast, [k WB, k NS, k HASC]⟩,
+  [ ⟨REL_SCRIPT, .mul (.add (k K_IN) (k K_OUT)) (oneMinus (k ZV)), [k SSC, k VAL, k SPO, k SRS, k SRL]⟩,
+    ⟨REL_TOT, isLast, [k WB, k NS, k HASC, k W20S]⟩,
     ⟨REL_CTX, .neg first, [k CLO, k CHI]⟩,
     ⟨REL_COMMIT, k ISC, [k SSC, k VAL]⟩,
     -- M3b: output and input tokens for the coin events (`Block/Coin.lean`)
     ⟨24, k K_OUT, [k TXI, k START, k LEN, k SSC, k VAL, vlo, vhi]⟩,
-    ⟨25, k K_IN, [k TXI, k START, lo16, k LKH, k LKT]⟩ ] ++
+    ⟨25, k K_IN, [k TXI, k START, lo16, k LKH, k LKT, k CP, k CW20, k CW32]⟩ ] ++
   -- BIP68: a transaction head's 4 version bytes
-  (List.range 4).map (fun j => ⟨REL_BYTE, .neg (k K_TXH), [.add (k START) (c j), k (VBY j)]⟩)
+  (List.range 4).map (fun j => ⟨REL_BYTE, .neg (k K_TXH), [.add (k START) (c j), k (VBY j)]⟩) ++
+  -- The full sigop cost (indices 32–37): the redeem script's first two bytes, the accurate spans (a
+  -- redeem script, a last witness item), and the request from an input to its witness stack
+  [ ⟨REL_BYTE, .neg (k RDF), [k SRS, k RB0]⟩,
+    ⟨REL_BYTE, .neg (k RDF), [.add (k SRS) (c 1), k RB1]⟩,
+    ⟨REL_ASPAN, k ARQ, [k SRS, k SRL, c 1]⟩,
+    ⟨REL_ASPAN, .mul (k WQ) (oneMinus (k ZV)), [k SSC, k VAL, c 0]⟩,
+    ⟨REL_WREQ, .mul (k N32) (k SEG), [k TXI, k INL]⟩,
+    ⟨REL_WREQ, .neg (.mul (k K_WCNT) (k WS)), [k TXI, k WINL]⟩ ]
 
 def fields : Comp where
-  air := { name := "block_fields", nMain := N_LOCK, pre := preCols, constraints := constraints }
+  air := { name := "block_fields", nMain := N_SIG, pre := preCols, constraints := constraints }
   lookups := lookups ++ chkLookups
 
 /-- Polynomial degree of an expression. -/

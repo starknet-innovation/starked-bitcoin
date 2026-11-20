@@ -51,7 +51,7 @@ const TXA = 114;
 const WST = 115;
 const TXI = 116;
 const TXM = 117;
-pub const N_MAIN = 203;
+pub const N_MAIN = 229;
 const MAX_SIZE: u64 = 0x02000000;
 
 /// One token row.
@@ -284,7 +284,7 @@ test "block fields: the sample blocks tokenize and satisfy the fields AIR (with 
         const rows = try tokenize(a, raw);
         const log_size: u32 = @max(8, std.math.log2_int_ceil(usize, raw.len + 1), std.math.log2_int_ceil(usize, rows.len + 1));
         const fm = try generate(a, log_size, raw, rows);
-        _ = try checks.fill(a, fm, raw, rows, s.ctx);
+        _ = try checks.fill(a, fm, raw, rows, s.ctx, try @import("sigcost.zig").blank(a, rows.len));
         const pubs = checks.pubs(raw, rows[0].val, s.ctx);
         const tr = interp.RowTrace{ .log_size = log_size, .pubs = &pubs, .preprocessed = @ptrCast(try fields_air.genPreprocessed(a, log_size)), .main = @ptrCast(fm) };
         if (try interp.firstViolation(a, fields_air, tr)) |v| {
@@ -349,7 +349,7 @@ test "block fields: large and segwit samples satisfy the fields AIR (run with Re
         };
         const log_size: u32 = std.math.log2_int_ceil(usize, rows.len + 1);
         const fm = try generate(a, log_size, raw, rows);
-        _ = try checks.fill(a, fm, raw, rows, s.ctx);
+        _ = try checks.fill(a, fm, raw, rows, s.ctx, try @import("sigcost.zig").blank(a, rows.len));
         const pubs = checks.pubs(raw, rows[0].val, s.ctx);
         const tr = interp.RowTrace{ .log_size = log_size, .pubs = &pubs, .preprocessed = @ptrCast(try fields_air.genPreprocessed(a, log_size)), .main = @ptrCast(fm) };
         std.debug.print("block of {d} bytes: {d} rows ({d} segwit txs), log {d}\n", .{ raw.len, rows.len, nseg, log_size });

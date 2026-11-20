@@ -212,6 +212,13 @@ pub const BlockRules = struct {
     height_failed: u32 = 0,
     /// Time-based locks that apply: the caller checks them, as they need median times past.
     time_locks: []TimeLock = &.{},
+    /// The spans an accurate sigop count reads (strict only): redeem scripts (the last push of a
+    /// push-only scriptSig spending P2SH) and witness scripts (the last witness item of a version 0,
+    /// 32-byte program, native or wrapped). Counts and total bytes.
+    redeem_n: u32 = 0,
+    redeem_bytes: u64 = 0,
+    wscript_n: u32 = 0,
+    wscript_bytes: u64 = 0,
 };
 
 /// Both rules over a raw block and its undo stream (`0x01`, then per non-coinbase input LE32 code
@@ -243,6 +250,18 @@ pub fn blockRules(a: std.mem.Allocator, raw: []const u8, undo: []const u8, heigh
                 },
                 .time => |l| try tl.append(a, .{ .coin_height = c, .lock = l }),
             }
+        };
+        if (strict and !tx.coinbase) for (tx.ins, spent.items) |in, sp| {
+            var prog = witnessProgram(sp);
+            if (isP2SH(sp)) if (lastPush(in.script_sig)) |redeem| {
+                out.redeem_n += 1;
+                out.redeem_bytes += redeem.len;
+                prog = witnessProgram(redeem);
+            };
+            if (prog) |pr| if (pr.version == 0 and pr.prog.len == 32) if (in.last_witness) |lw| {
+                out.wscript_n += 1;
+                out.wscript_bytes += lw.len;
+            };
         };
         const s = txSigOps(tx, spent.items, strict);
         out.sigops.legacy += s.legacy;
