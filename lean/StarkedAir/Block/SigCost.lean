@@ -882,11 +882,11 @@ theorem block_sigop_cost (hL8 : 8 ≤ Ls 7) (S : Setup inst pub (Ls 1)) {e : ℕ
     (claim : ℕ → ℕ → Spec.CoinEpoch.Claim)
     (hcl : ∀ (t : ℕ) (tx : Spec.Block.Tx), S.b.txs[t]? = some tx → 1 ≤ t → ∀ k < tx.vin.length,
       ClaimAt inst pub (Ls 13) (((parts.take t).map List.length).sum + k) (claim t k))
-    (out : ℕ → ℕ → Spec.Block.TxOut)
     (hreal : ∀ (t : ℕ) (tx : Spec.Block.Tx), S.b.txs[t]? = some tx → 1 ≤ t → ∀ k < tx.vin.length,
-      (claim t k).ser = Spec.Block.serTxOut (out t k)) :
+      ∃ o : Spec.Block.TxOut, (claim t k).ser = Spec.Block.serTxOut o) :
     Spec.ConnectRules.SigOpCostOK true ((S.b.txs.zipIdx).map fun p =>
-      (p.1, (List.range p.1.vin.length).map fun k => (out p.2 k).scriptPubKey)) := by
+      (p.1, if p.2 = 0 then [] else
+        (List.range p.1.vin.length).map fun k => (Spec.CoinEpoch.decSer (claim p.2 k).ser).2)) := by
   obtain ⟨D, hD⟩ := cost_rows hL hsat hL24 hL8 S
   rw [gin_sum hL hsat hL24 S he hon hlen hst hf htg (rowCost inst pub S.b)] at hD
   unfold Spec.ConnectRules.SigOpCostOK
@@ -895,7 +895,8 @@ theorem block_sigop_cost (hL8 : 8 ≤ Ls 7) (S : Setup inst pub (Ls 1)) {e : ℕ
   have hper : ∀ t < S.b.txs.length,
       (S.b.txs[t]?.map fun a => ((fun p : Spec.Block.Tx × List Spec.Block.Bytes =>
         Spec.ConnectRules.txSigOpCost true p.1 p.2) ∘ fun p : Spec.Block.Tx × ℕ =>
-        (p.1, (List.range p.1.vin.length).map fun k => (out p.2 k).scriptPubKey)) (a, 0 + t)).getD 0 =
+        (p.1, if p.2 = 0 then [] else
+          (List.range p.1.vin.length).map fun k => (Spec.CoinEpoch.decSer (claim p.2 k).ser).2)) (a, 0 + t)).getD 0 =
       4 * (S.b.txs[t]?.map Spec.Block.legacySigOps).getD 0 + (if 1 ≤ t then
         ∑ k ∈ Finset.range ((S.b.txs[t]?.map (·.vin.length)).getD 0),
           rowCost inst pub S.b ((ioRows inst S.m).getD (((parts.take t).map List.length).sum + k) 0) else 0) := by
@@ -907,25 +908,21 @@ theorem block_sigop_cost (hL8 : 8 ≤ Ls 7) (S : Setup inst pub (Ls 1)) {e : ℕ
     by_cases ht1 : 1 ≤ t
     · have hcb : tx.isCoinbase = false :=
         Spec.Block.not_coinbase_of_inputs tx (txs_later hL hsat hL24 S ht1 htN htx)
-      rw [if_pos ht1, hcb]
+      rw [if_pos ht1, hcb, if_neg (show ¬ t = 0 by omega)]
       simp only [Bool.not_true, Bool.or_self, Bool.false_eq_true, if_false]
       rw [sum_zip_range (fun p : Spec.Block.TxIn × Spec.Block.Bytes =>
         4 * p2shSigOps p.2 p.1.scriptSig + Spec.ConnectRules.countWitnessSigOps p.1.scriptSig p.2 p.1.witness)
-        (fun k => (out t k).scriptPubKey) tx.vin]
+        (fun k => (Spec.CoinEpoch.decSer (claim t k).ser).2) tx.vin]
       congr 1
       refine Finset.sum_congr rfl (fun k hk => ?_)
       have hkv := Finset.mem_range.mp hk
+      obtain ⟨o, ho⟩ := hreal t tx htx ht1 k hkv
       obtain ⟨inp, hinp, -, hrc⟩ := in_row_cost hL hsat hL24 S he hon hlen hst hf htg htx ht1 hkv
-        (hcl t tx htx ht1 k hkv) (hreal t tx htx ht1 k hkv)
-      rw [hinp, hrc]; rfl
+        (hcl t tx htx ht1 k hkv) ho
+      rw [hinp, hrc, ho, Spec.CoinEpoch.decSer_script]; rfl
     · have ht0 : t = 0 := by omega
       subst ht0
-      obtain ⟨ρ, t0, inp, -, -, -, ht0, -, -, -, -, -, hv, hnull, -⟩ := cb_facts hL hsat hL24 hL8 S
-      rw [htx, Option.some.injEq] at ht0
-      subst ht0
-      have hcb : tx.isCoinbase = true := by
-        unfold Spec.Block.Tx.isCoinbase; rw [hv]; exact hnull
-      rw [if_neg ht1, hcb]; simp
+      simp
   rw [Finset.sum_congr rfl (fun t ht => hper t (Finset.mem_range.mp ht)), Finset.sum_add_distrib, ← Finset.mul_sum]
   have hleg : ∑ t ∈ Finset.range S.b.txs.length, (S.b.txs[t]?.map Spec.Block.legacySigOps).getD 0 =
       (S.b.txs.map Spec.Block.legacySigOps).sum := by

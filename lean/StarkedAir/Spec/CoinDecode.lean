@@ -48,6 +48,19 @@ theorem decSer_ser (o : TxOut) (h0 : 0 ≤ o.value) (h1 : o.value < 2 ^ 64) :
   have : o.value.toNat < 256 ^ 8 := by omega
   rw [Nat.mod_eq_of_lt this, Int.toNat_of_nonneg h0]
 
+/-- A serialized output's script, whatever its amount. -/
+theorem decSer_script (o : TxOut) : (decSer (serTxOut o)).2 = o.scriptPubKey := by
+  unfold decSer serTxOut serVarBytes
+  have hl := leBytes_length 8 (o.value % 2 ^ 64).toNat
+  have hc : (leBytes 8 (o.value % 2 ^ 64).toNat ++ (serCompact o.scriptPubKey.length ++ o.scriptPubKey)).getD 8 0 =
+      (serCompact o.scriptPubKey.length).getD 0 0 := by
+    rw [List.getD_append_right _ _ _ _ (by omega), hl]
+    have hne : (serCompact o.scriptPubKey.length) ≠ [] := by unfold serCompact; split_ifs <;> simp
+    obtain ⟨a, l, hal⟩ := List.exists_cons_of_ne_nil hne
+    rw [hal]; simp
+  show List.drop (8 + compactLen _) _ = _
+  rw [hc, compactLen_ser, ← List.drop_drop, List.drop_left' hl, List.drop_left]
+
 /-! ### The epoch's transactions as Core's -/
 
 /-- Transaction `t` of block `B` in context, with its claims decoded. -/
