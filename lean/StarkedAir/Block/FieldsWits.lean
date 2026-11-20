@@ -6,6 +6,7 @@ sum to `lastAcc` of the stack's items when the stack is marked, to 0 otherwise. 
 -/
 import StarkedAir.Block.FieldsScripts
 import StarkedAir.Block.TxWits
+import StarkedAir.Block.TxRows
 import StarkedAir.Spec.SigClass
 
 namespace StarkedAir.Spec.Block
@@ -267,6 +268,182 @@ theorem wq_sum : ∑ r ∈ Finset.range m, qN M R r =
       (by simp [K_BLK, K_WITEM])
   have := claim m 0 (by simp) (by omega) h0
   rwa [← Finset.range_eq_Ico] at this
+
+/-- **The stacks of a witness section.** From a count row `r` with `w + 1` stacks left, parsed by `witsT`
+into `ws`: the parse ends at a row `r'`; every count row `c` before it has between 1 and `w + 1` stacks
+left, and its stack is `ws[w + 1 − left]`; all rows in between are witness rows. -/
+theorem wits_rows : ∀ w r, r < m → M K_WCNT r = 1 → (M WINL r).val = w + 1 →
+    ∀ (ws : List (List Spec.Block.Bytes)) (rest : List Spec.Block.Tok),
+    Spec.Block.witsT (w + 1) (toksFrom M R m r) = some (ws, rest) →
+    ∃ r', r < r' ∧ r' ≤ m ∧ rest = toksFrom M R m r' ∧
+      (∀ c, r ≤ c → c < r' → M K_WCNT c = 1 → 1 ≤ (M WINL c).val ∧ (M WINL c).val ≤ w + 1 ∧
+        stackItems M R m c = ws.getD (w + 1 - (M WINL c).val) []) := by
+  intro w
+  induction w with
+  | zero =>
+    intro r hr hw hwl ws rest hws
+    obtain ⟨items, re, hit, hre, hrem, hz, hk, w1, hrow, -⟩ := stack_rows hsat R hcs hmn hpad hfit hr hw
+    rw [toksFrom_cons hr, tok_wcnt hsat R hcs hmn hpad hfit (by omega) hw] at hws
+    simp only [Spec.Block.witsT] at hws
+    split_ifs at hws with hc
+    rw [hit] at hws
+    simp only [Spec.Block.witsT, Option.map_some, Option.some.injEq, Prod.mk.injEq] at hws
+    obtain ⟨rfl, rfl⟩ := hws
+    refine ⟨re + 1, by omega, by omega, rfl, fun c h1 h2 hcw => ?_⟩
+    rcases Nat.eq_or_lt_of_le h1 with rfl | hlt
+    · refine ⟨by omega, by omega, ?_⟩
+      rw [hwl]; simp [stackItems, hit]
+    · exfalso
+      have h := (hrow (c - (r + 1)) (by omega)).1
+      rw [show r + 1 + (c - (r + 1)) = c by omega] at h
+      have := kinds_at hsat (show c < n by omega) (a := K_WITEM) (by simp [K_WITEM]) h K_WCNT (by simp [K_WCNT])
+      rw [hcw] at this; simp [K_WCNT, K_WITEM] at this
+  | succ w ih =>
+    intro r hr hw hwl ws rest hws
+    obtain ⟨items, re, hit, hre, hrem, hz, hk, w1, hrow, -⟩ := stack_rows hsat R hcs hmn hpad hfit hr hw
+    obtain ⟨hlt, -, -, -, -, -, hnext⟩ := stack_end hsat R hcs hmn hpad hfit hrem hk hz (w := w + 1)
+      (by rw [w1]; exact hwl)
+    obtain ⟨hw1, hwl1⟩ := hnext (by omega)
+    rw [toksFrom_cons hr, tok_wcnt hsat R hcs hmn hpad hfit (by omega) hw] at hws
+    simp only [Spec.Block.witsT] at hws
+    split_ifs at hws with hc
+    rw [hit] at hws
+    dsimp only at hws
+    cases hws' : Spec.Block.witsT (w + 1) (toksFrom M R m (re + 1)) with
+    | none => rw [hws'] at hws; simp at hws
+    | some p =>
+      obtain ⟨ws', rest'⟩ := p
+      rw [hws'] at hws
+      simp only [Option.map_some, Option.some.injEq, Prod.mk.injEq] at hws
+      obtain ⟨rfl, rfl⟩ := hws
+      obtain ⟨r', hr', hr'm, hrest, hall⟩ := ih (re + 1) hlt hw1 hwl1 ws' rest' hws'
+      refine ⟨r', by omega, hr'm, hrest, fun c h1 h2 hcw => ?_⟩
+      rcases Nat.eq_or_lt_of_le h1 with rfl | hlt'
+      · refine ⟨by omega, by omega, ?_⟩
+        rw [hwl]; simp [stackItems, hit]
+      · by_cases hcre : c ≤ re
+        · exfalso
+          have h := (hrow (c - (r + 1)) (by omega)).1
+          rw [show r + 1 + (c - (r + 1)) = c by omega] at h
+          have := kinds_at hsat (show c < n by omega) (a := K_WITEM) (by simp [K_WITEM]) h K_WCNT (by simp [K_WCNT])
+          rw [hcw] at this; simp [K_WCNT, K_WITEM] at this
+        · obtain ⟨a, b, e⟩ := hall c (by omega) h2 hcw
+          refine ⟨a, by omega, ?_⟩
+          rw [e, show w + 1 + 1 - (M WINL c).val = (w + 1 - (M WINL c).val) + 1 by omega]
+          simp
+
+/-- **A row's transaction.** Every row after the block row and before the padding lies between a
+transaction's head row `rh` and its lock-time row `ρ`. -/
+theorem row_tx (hnp : ∀ r < m, M K_PAD r = 0) {c : ℕ} (h1 : 1 ≤ c) (hc : c < m) :
+    ∃ rh ρ tx, rh ≤ c ∧ c ≤ ρ ∧ ρ < m ∧ M K_TXH rh = 1 ∧ M K_LOCK ρ = 1 ∧
+      Spec.Block.txT (toksFrom M R m rh) = some (tx, toksFrom M R m (ρ + 1)) ∧
+      (∀ j, rh < j → j ≤ ρ → M K_TXH j = 0) ∧ (∀ j, rh ≤ j → j < ρ → M K_LOCK j = 0) := by
+  classical
+  have hn0 : 0 < n := by omega
+  have ht1 : M K_TXH 1 = 1 := (next_kind hsat (show 0 + 1 < n by omega)).1 (first_blk hsat hn0)
+  set rh := Nat.findGreatest (fun r => M K_TXH r = 1) c with hrh
+  have hspec : M K_TXH rh = 1 := Nat.findGreatest_spec (P := fun r => M K_TXH r = 1) h1 ht1
+  have hle : rh ≤ c := Nat.findGreatest_le c
+  have hmax : ∀ k, rh < k → k ≤ c → ¬ M K_TXH k = 1 := fun k a b => Nat.findGreatest_is_greatest a b
+  obtain ⟨tx, r', rw, v, nIn, l, htx, hrw1, hrw2, hr'm, hl, -, -, -, -, -, -, -, notxh, nolock, -⟩ :=
+    tx_cols hsat R hcs hmn hpad hfit (show rh < m by omega) hspec
+  refine ⟨rh, r', tx, hle, ?_, hr'm, hspec, hl, htx, notxh, nolock⟩
+  by_contra hcon
+  have hr1 : r' + 1 < n := by omega
+  have nk := next_kind hsat hr1
+  rcases (z1_spec hsat (show r' < n by omega)).1 with z0 | z1
+  · exact hmax (r' + 1) (by omega) (by omega) (nk.2.2.2.2.2.2.2.2.2.2.1 hl z0)
+  · have := nk.2.2.2.2.2.2.2.2.2.2.2.1 hl z1
+    rw [hnp (r' + 1) (by omega)] at this; exact zero_ne_one this
+
+omit hcs hpad hfit in
+/-- Within a transaction's rows, the segwit flag and the input count are the head row's. -/
+theorem tx_const {rh ρ : ℕ} (hρ : ρ < m) (notxh : ∀ j, rh < j → j ≤ ρ → M K_TXH j = 0) :
+    ∀ j, rh ≤ j → j ≤ ρ → M SEG j = M SEG rh ∧ M NIN j = M NIN rh := by
+  intro j h1
+  induction j, h1 using Nat.le_induction with
+  | base => intro _; exact ⟨rfl, rfl⟩
+  | succ j hj ih =>
+    intro h2
+    obtain ⟨a, b⟩ := ih (by omega)
+    obtain ⟨-, -, c3, -, -, -, -, c8, -⟩ := counters hsat (show j + 1 < n by omega)
+    have hT := notxh (j + 1) (by omega) h2
+    exact ⟨by rw [c8 hT, a], by rw [c3 hT, b]⟩
+
+/-- **An input row's place.** An input row is row `rh + 1 + i` of a transaction with head row `rh` and
+lock-time row `ρ`: it carries input `i`, has `nIn − i` inputs left, and the transaction's segwit flag. -/
+theorem in_tx (hnp : ∀ r < m, M K_PAD r = 0) {c : ℕ} (hc : c < m) (hk : M K_IN c = 1) :
+    ∃ rh ρ tx i inp, c = rh + 1 + i ∧ ρ < m ∧ M K_TXH rh = 1 ∧ M K_LOCK ρ = 1 ∧ c < ρ ∧ TxAt M R m ρ tx ∧
+      (∀ j, rh ≤ j → j < ρ → M K_LOCK j = 0) ∧ (∀ j, rh < j → j ≤ ρ → M K_TXH j = 0) ∧
+      i < tx.vin.length ∧ tx.vin[i]? = some inp ∧ InRow M R c inp ∧
+      (M INL c).val + i = tx.vin.length ∧ (M SEG c = 1 ↔ tx.hasWitness = true) := by
+  have hcn : c < n := by omega
+  have ku : ∀ b < 9, K_IN ≠ b → M b c = 0 := fun b hb hne =>
+    kind_unique hsat hcn (a := K_IN) (b := b) (by simp [K_IN]) hb hne hk
+  have hc1 : 1 ≤ c := by
+    rcases Nat.eq_zero_or_pos c with rfl | h
+    · have := ku K_BLK (by simp [K_BLK]) (by simp [K_IN, K_BLK])
+      rw [first_blk hsat (by omega)] at this; exact absurd this one_ne_zero
+    · exact h
+  obtain ⟨rh, ρ, tx, hle, hcρ, hρm, ht, hl, htx, notxh, nolock⟩ := row_tx hsat R hcs hmn hpad hfit hnp hc1 hc
+  have ne1 : ∀ {b : ℕ}, b < 9 → K_IN ≠ b → M b c = 1 → False := fun hb hne h => by
+    rw [ku _ hb hne] at h; exact zero_ne_one h
+  have hrc : rh < c := by
+    rcases Nat.eq_or_lt_of_le hle with e | e
+    · exact (ne1 (by simp [K_TXH]) (by simp [K_IN, K_TXH]) (e ▸ ht)).elim
+    · exact e
+  have hcl : c < ρ := by
+    rcases Nat.eq_or_lt_of_le hcρ with e | e
+    · exact (ne1 (by simp [K_LOCK]) (by simp [K_IN, K_LOCK]) (e ▸ hl)).elim
+    · exact e
+  have hat : TxAt M R m ρ tx := ⟨rh, by omega, ht, notxh, htx⟩
+  obtain ⟨rh', hrh', ht', hnt', hvl, -, hins, hno, -, houts, hwr, -, hseg, hle2⟩ :=
+    tx_rows hsat R hcs hmn hpad hfit hat hρm
+  obtain rfl : rh' = rh := by
+    rcases lt_trichotomy rh' rh with h | h | h
+    · have := hnt' rh h (by omega); rw [ht] at this; exact absurd this one_ne_zero
+    · exact h
+    · have := notxh rh' h (by omega); rw [ht'] at this; exact absurd this one_ne_zero
+  -- the row is one of the inputs
+  have hi : c < rh' + 1 + tx.vin.length := by
+    by_contra hcon
+    rcases Nat.lt_or_ge c (rh' + 2 + tx.vin.length) with a | a
+    · have : c = rh' + 1 + tx.vin.length := by omega
+      exact ne1 (by simp [K_NOUT]) (by simp [K_IN, K_NOUT]) (this ▸ hno)
+    rcases Nat.lt_or_ge c (rh' + 2 + tx.vin.length + tx.vout.length) with b | b
+    · obtain ⟨out, -, hrow⟩ := houts (c - (rh' + 2 + tx.vin.length)) (by omega)
+      have := hrow.kind
+      rw [show rh' + 2 + tx.vin.length + (c - (rh' + 2 + tx.vin.length)) = c by omega] at this
+      exact ne1 (by simp [K_OUT]) (by simp [K_IN, K_OUT]) this
+    · rcases hwr c b hcl with g | g
+      · exact ne1 (by simp [K_WCNT]) (by simp [K_IN, K_WCNT]) g
+      · exact ne1 (by simp [K_WITEM]) (by simp [K_IN, K_WITEM]) g
+  obtain ⟨i, rfl⟩ : ∃ i, c = rh' + 1 + i := ⟨c - (rh' + 1), by omega⟩
+  have hiv : i < tx.vin.length := by omega
+  obtain ⟨inp, hinp, hrow⟩ := hins i hiv
+  -- the inputs left
+  have inl : ∀ q, q < tx.vin.length → M INL (rh' + 1 + q) = M VAL rh' - (q : F) := by
+    intro q
+    induction q with
+    | zero =>
+      intro _
+      obtain ⟨-, c2, -⟩ := counters hsat (show rh' + 1 < n by omega)
+      rw [Nat.add_zero, c2 (notxh (rh' + 1) (by omega) (by omega)), ((row_sets hsat (show rh' < n by omega)).2.1 ht).1,
+        kinds_at hsat (show rh' < n by omega) (a := K_TXH) (by simp [K_TXH]) ht K_IN (by simp [K_IN])]
+      simp [K_TXH, K_IN]
+    | succ q ih =>
+      intro hq
+      obtain ⟨-, c2, -⟩ := counters hsat (show rh' + 1 + q + 1 < n by omega)
+      obtain ⟨inp', -, hr'⟩ := hins q (by omega)
+      rw [show rh' + 1 + (q + 1) = rh' + 1 + q + 1 by omega, c2 (notxh _ (by omega) (by omega)), ih (by omega), hr'.kind]
+      push_cast; ring
+  have hval : (M INL (rh' + 1 + i)).val + i = tx.vin.length := by
+    have e : M INL (rh' + 1 + i) = ((tx.vin.length - i : ℕ) : F) := by
+      rw [inl i hiv, Nat.cast_sub (by omega), hvl, ZMod.natCast_zmod_val]
+    rw [e, ZMod.val_natCast_of_lt (lt_of_le_of_lt (Nat.sub_le _ _) (by rw [hvl]; exact ZMod.val_lt _))]
+    omega
+  refine ⟨rh', ρ, tx, i, inp, rfl, hρm, ht, hl, hcl, hat, nolock, notxh, hiv, hinp, hrow, hval, ?_⟩
+  rw [(tx_const hsat hmn hρm notxh _ (by omega) (by omega)).1]; exact hseg
 
 end Wits
 
