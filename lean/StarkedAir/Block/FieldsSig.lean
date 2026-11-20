@@ -309,6 +309,37 @@ theorem in_cost {ρ : ℕ} (hρ : ρ < n) (hgin : M GIN ρ = 1) (sp : Spec.Block
       have w32 : isW 32 lp = true := (wk 32 (by norm_num)).mpr ⟨l34, a, by omega⟩
       rw [z, w32, hp, hpt]; simp
 
+omit R in
+/-- The request multiplicities are bits: a redeem script (`ARQ`), a witness script (`WQ · (1 − ZV)`), a
+witness request and its use. -/
+theorem req_bools {r : ℕ} (hr : r < n) :
+    (M ARQ r = 0 ∨ M ARQ r = 1) ∧ (M WQ r * (1 - M ZV r) = 0 ∨ M WQ r * (1 - M ZV r) = 1) ∧
+    (M N32 r * M SEG r = 0 ∨ M N32 r * M SEG r = 1) ∧ (M K_WCNT r * M WS r = 0 ∨ M K_WCNT r * M WS r = 1) := by
+  have hb : ∀ {x y : F}, (x = 0 ∨ x = 1) → (y = 0 ∨ y = 1) → (x * y = 0 ∨ x * y = 1) := by
+    intro x y hx hy; rcases hx with h | h <;> rcases hy with h' | h' <;> simp [h, h']
+  have om : ∀ {x : F}, (x = 0 ∨ x = 1) → (1 - x = 0 ∨ 1 - x = 1) := by
+    intro x hx; rcases hx with h | h <;> simp [h]
+  obtain ⟨dNZI, dAR0, dARQ, -⟩ := sig_defs hsat hr
+  have hgin := chk_defn hsat (a := GIN) (e := .mul (k K_IN) (oneMinus (k ZT))) (by simp [chkC, prevoutC]) hr
+  simp only [Expr.eval, oneMinus, one, ev_k hr, eval_cst, Nat.cast_one] at hgin
+  have zt := chk_bool hsat (e := ZT) (by simp [chkC, prevoutC]) hr
+  have zv := chk_bool hsat (e := ZV) (by simp [chkC, totalsC]) hr
+  have kin := kind_bool hsat (c := K_IN) (by simp [kinds, K_IN]) hr
+  have cp := bool_of hsat (mem_sig (c := boolC (k CP)) (by simp [sigC])) hr
+  have spo := bool_of hsat (mem_sig (c := boolC (k SPO)) (by simp [sigC])) hr
+  have zrl := bool_of hsat (mem_sig (c := boolC (k ZRL)) (by simp [sigC, isZero])) hr
+  have n32 := bool_of hsat (mem_sig (c := boolC (k N32)) (by simp [sigC])) hr
+  have ws := bool_of hsat (mem_sig (c := boolC (k WS)) (by simp [sigC])) hr
+  have kw := kind_bool hsat (c := K_WCNT) (by simp [kinds, K_WCNT]) hr
+  have ki := kind_bool hsat (c := K_WITEM) (by simp [kinds, K_WITEM]) hr
+  refine ⟨?_, ?_, hb n32 (seg_bool hsat hr), hb kw ws⟩
+  · rw [dARQ, dAR0, dNZI, hgin]
+    exact hb (hb (hb (hb kin (om zt)) (om zv)) (hb cp spo)) (om zrl)
+  · have := defn hsat (mem_sig (c := .sub (k WQ) (.mul (k K_WITEM) (.mul (k WS) (k Z1)))) (by simp [sigC])) hr
+    simp only [Expr.eval, ev_k hr] at this
+    rw [this]
+    exact hb (hb ki (hb ws (z1_spec hsat hr).1)) (om zv)
+
 end Sig
 
 end StarkedAir.Block.Fields

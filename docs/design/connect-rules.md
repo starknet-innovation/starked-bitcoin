@@ -296,24 +296,28 @@ The native reference (`connect_rules.zig`) is the one fuzzed against Core in ste
 | A span's rows carry any decoration | `seg_gen` | `Block/WalkAcc.lean` |
 | 1. `SUMA` = Σ over the spans of `(AC + 3·W4) · sigOpsAccurate(bytes)` | `seg_acc`, `total_acc` | `Block/WalkAcc.lean` |
 | 2. A script's `PO` is `pushOnly`; for a push-only script `RL` is its last push's length and `RS + RL` the span's end | `span_out` | `Block/WalkAcc.lean` |
+| 3. The records' class flags are `isP2SH` / `isW 20` / `isW 32` of the spent script, for a claim that is a real `serTxOut` | `URec.class_spec`, `urec_class_bytes`, `claim_class`; spec `ser_p2sh`, `ser_w`, `countWitness_eq`, `count_split` | `Block/CoinClass.lean`, `Spec/SigClass.lean` |
+| 4a. A marked witness stack's rows request `lastAcc` of its items; over all rows | `stack_q`, `wq_sum` | `Block/FieldsWits.lean` |
+| 4b. A stack row's `(TXI, WINL)` names its input's witness; an input row's place, inputs left and segwit flag | `wits_rows`, `row_tx`, `wcnt_tx`, `in_tx` | `Block/FieldsWits.lean` |
+| 4c. A non-coinbase input row: `aN = 4·p2shSigOps`, `GIN·CW20 + RW20 = w20Of`, `N32 = n32Of` | `in_cost` | `Block/FieldsSig.lean` |
+| 4d. Walker accurate spans = redeem requests + witness requests; marked stacks = requesting inputs | `aspan_sum`, `wreq_sum` | `Block/SigCost.lean` |
 
-**Still open, with the plan** (each step builds on the ones above):
+**Still open, with the plan** (all in `Block/SigCost.lean` unless noted):
 
-3. *Class bits.* `block_urec` reads `ser[8]`, `ser[9]`, `ser[10]`, `ser[31]` of the claim's `serTxOut`.
-   For a claim that is a real `serTxOut o` (true for every claim at the epoch level): `CP = [isP2SH]`,
-   `C20`/`C32` = `[witnessProgram = (0, 20 or 32 bytes)]` of `o.scriptPubKey`. Then `coin_urec` and
-   `coin_row_tok` carry them to the input's `block_fields` row (`CP`, `CW20`, `CW32`).
-4. *Fields.* (a) the script relation gives a non-empty scriptSig's `(SPO, SRS, SRL)` from `span_out`;
-   (b) per non-coinbase input row: `4·[ARQ]·acc(redeem) + (GIN·CW20 + RW20) + N32·SEG·acc(last witness
-   item)` is `4·p2shSigOps + countWitnessSigOps` (a case analysis in the spec); (c) the `aspan`
-   relation has two yield sites, so `pair_sum` needs a three-site variant; `wreq` is `pair_sum` with a
-   function `g(tx, inputs left)` = the accurate count of that input's last witness item, which avoids
-   proving that requests are unique; (d) the witness rows: a stack's rows sum to `WS · acc(last item)`
-   (`stack_sim`, `K_WITEM(r+1) = (K_WCNT + K_WITEM)(1 − Z1)`), and a stack row's `(TXI, WINL)` names
-   its input (an induction like `wits_sim`).
-5. *Block.* `A + w` as naturals (`sums_nat`, per-span bound `sigOpsAccurate s ≤ 20·|s|`), the sum over
-   the coin rows by transaction (`sum_by_parts`, `ioRows`), a fifth clause of `block_factsL`
-   (`SigOpCostOK` on the claims' scripts), and the epoch statement.
+- `sig_out`: a fields row with `smult = 1` has the walker's `span_out` (via `script_sum` with an
+  indicator, as `in_match_r` does); `rdf_read`: `RDF = 1` reads `RB0`, `RB1` at `SRS`, `SRS + 1`
+  (`byte_read_R` at sites `(1, ρ, 40)`, `(1, ρ, 41)`).
+- The walker's total as a natural: generalize `Walk.total_gen` to any `AddCommMonoid` (`span_sum`), add
+  `sigOpsAccurate s ≤ 20·|s|` (a `runG fA` induction), so `Σ weight·acc ≤ 80·n < P` and it equals the `A`
+  of `sigops_nat`. Same for `W20S` as the sum of the rows' `GIN·CW20 + RW20`.
+- The row identity: `A + w = Σ over non-coinbase input rows of 4·p2shSigOps + countWitnessSigOps`, with
+  the witness of row `ρ` given by `g(TXI, INL)` (`wq_sum`, `wcnt_tx`, `S.hidx`, `wreq_sum`, `in_tx`,
+  `in_cost`, `count_split`; a non-segwit transaction's witnesses are empty).
+- From rows to `(t, k)`: the coin rows `pre t + k` and `ioRows` (`coin_row_tok`, `coin_row_tx`,
+  `sum_by_parts`); row `ioRows[pre t + k]` is `rh_t + 1 + k` because `k ↦ ioRows[pre t + k]` is an
+  increasing injection into the transaction's `nIn` input rows. Class bits through `claim_class`.
+- A fifth clause of `block_factsL`: `SigOpCostOK true` for claims that are real outputs' serializations;
+  then the epoch statement, `Compat.lean` if a pinned statement changes (D-056), docs.
 
 Until 3–5 are done the full-cost rule is enforced by the AIRs and tested, not proven.
 
