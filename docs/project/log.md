@@ -21,6 +21,21 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-11-20 · stwo-zig moved to starknet-innovation/stwo-zig: references updated
+
+Who: Claude (agent, Fable 5.2); owner: "the repo changed place: It is now hosted here https://github.com/starknet-innovation/stwo-zig make sure this is recorded everywhere needed"
+Roadmap: none
+Done:
+- `.gitmodules`, `README.md`, `web/index.html` ("in Zig" link), `docs/project/roadmap.md` (STWO-225, VL-FRI), `docs/reference/zig.md`, `docs/design/overview.md` now name `starknet-innovation/stwo-zig`. The pin is unchanged (`d34b26903`).
+- Not edited, by rule: past log entries and dated reports (`docs/reports/2026-10-*`) keep the old `teddyjfpender/stwo-zig` links; GitHub redirects them.
+Evidence:
+- `git fetch https://github.com/starknet-innovation/stwo-zig.git d34b26903710e2f0451a0369f302f87d63d8f1dc` in the submodule: rc 0.
+- `curl -sI` on the new repo's `/pull/299`, `/pull/241`, `/issues/225`: HTTP 200; on the old repo URL: 301 to the new one.
+- `git submodule sync third_party/stwo-zig`: the local origin is the new URL.
+Problems / lessons:
+- Existing clones (node, pods) keep the old URL until `git submodule sync`; the redirect covers them meanwhile.
+Next: unchanged (see status.md).
+
 ## 2026-11-19 · session 40 · CONNECT-RULES step 1: both rules specified, fuzzed against Core, checked on 37,500 blocks; TIERS-2 simulated; SNAP-HASH proposal
 
 Who: Claude (agent, Fable 5.2); owner: "1. I accept. 2. Yes let's try." (D-054, D-055)

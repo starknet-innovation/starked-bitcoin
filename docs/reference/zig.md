@@ -75,7 +75,10 @@ zig-out/bin/spike fullrun <log_size> <check|cpu|metal> data/headers.bin [from] [
 
 ## Dependency on stwo-zig
 
-- stwo-zig is pinned as the submodule `third_party/stwo-zig`. The packages
+- stwo-zig is pinned as the submodule `third_party/stwo-zig`, from
+  https://github.com/starknet-innovation/stwo-zig (the repository moved there from
+  `teddyjfpender/stwo-zig` in 2026-11; GitHub redirects the old URL, and issue and PR numbers are
+  unchanged). An existing clone picks the new URL up with `git submodule sync`. The packages
   used are `stwo_core`, `stwo_prover_engine`, `stwo_cpu_backend`,
   `stwo_metal_backend` and `stwo_proof_wire`.
 - **Do not edit the submodule in place.** Generic changes go to the stwo-zig
