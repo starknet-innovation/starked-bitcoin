@@ -446,7 +446,7 @@ theorem cost_rows (hL8 : 8 ≤ Ls 7) (S : Setup inst pub (Ls 1)) :
   obtain ⟨hA1, hA2⟩ := Walk.total_acc_nat ws (walk_opc hL hsat hL24) (fun r hr ho => by
       obtain ⟨-, -, -, -, -, -, a7, a8, a9⟩ := walk_opc_all hL hsat hL24 r hr ho
       exact ⟨a7, a8, a9⟩) (walk_r8 hL hsat hL24) (Rb inst pub) (walk_read hL hsat hL24) (by omega)
-    (walk_rem hL hsat hL24 S) (by positivity) rb6
+    (walk_rem hL hsat hL24 S) (by positivity)
   have hAA := natCast_inj_of_lt (by omega) (by omega) (eA.symm.trans hA1)
   -- as the fields' requests
   set g : List F → ℕ := fun v => (if v.getD 2 0 = 1 then 4 else 1) *

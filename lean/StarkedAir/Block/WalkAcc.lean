@@ -897,8 +897,7 @@ theorem span_sum {β : Type} [AddCommMonoid β] (g h : ℕ → β)
 
 /-- **The walker's accurate total as a natural**: at most 80 per row, and the sum over the spans of
 the weight (0, 1 or 4) times the accurate count. -/
-theorem total_acc_nat (hrem : ∀ r < n, M FS r = 1 → 1 ≤ (M REM r).val ∧ (M REM r).val ≤ 2 ^ 25) (hn : 0 < n)
-    (hn24 : n ≤ 2 ^ 24) :
+theorem total_acc_nat (hrem : ∀ r < n, M FS r = 1 → 1 ≤ (M REM r).val ∧ (M REM r).val ≤ 2 ^ 25) (hn : 0 < n) :
     M SUMA (n - 1) = ((∑ f ∈ (Finset.range n).filter (fun f => M FS f = 1), (M AC f + 3 * M W4 f).val *
       Spec.ConnectRules.sigOpsAccurate (Fields.slice R (M POS f).val (M REM f).val) : ℕ) : F) ∧
     ∑ f ∈ (Finset.range n).filter (fun f => M FS f = 1), (M AC f + 3 * M W4 f).val *

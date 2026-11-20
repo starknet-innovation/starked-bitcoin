@@ -96,6 +96,12 @@ import StarkedAir.Block.CoinEvents
 import StarkedAir.Block.CoinEpochSound
 import StarkedAir.Block.CoinClaims
 import StarkedAir.Block.CoinEpochCore
+import StarkedAir.Block.WalkAcc
+import StarkedAir.Block.CoinClass
+import StarkedAir.Block.FieldsWits
+import StarkedAir.Block.FieldsSig
+import StarkedAir.Block.SigCost
+import StarkedAir.Block.SigEpoch
 import StarkedAir.Block.AggregateBlocks
 import StarkedAir.Block.CoinWFE
 import StarkedAir.Block.CoinRecs
@@ -145,6 +151,8 @@ import StarkedAir.Block.FpWalk
 import StarkedAir.Block.URec
 import StarkedAir.Spec.Coins
 import StarkedAir.Spec.ConnectRules
+import StarkedAir.Spec.SigWalk
+import StarkedAir.Spec.SigClass
 import StarkedAir.Circuit.Composition
 import StarkedAir.Circuit.CompositionLogUp
 import StarkedAir.Circuit.CompositionSound

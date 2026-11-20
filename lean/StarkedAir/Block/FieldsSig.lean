@@ -17,7 +17,7 @@ open StarkedAir.Spec.ConnectRules (sigOpsAccurate lastAcc pushOnly lastPush isP2
 noncomputable def aN (M : ℕ → ℕ → F) (R : Spec.Block.Bytes) (r : ℕ) : ℕ :=
   if M ARQ r = 1 then 4 * sigOpsAccurate (slice R (M SRS r).val (M SRL r).val) else 0
 
-theorem slice_drop' {R : Spec.Block.Bytes} {a v d : ℕ} (hd : d ≤ v) :
+theorem slice_drop' {R : Spec.Block.Bytes} {a v d : ℕ} (_hd : d ≤ v) :
     (slice R a v).drop d = slice R (a + d) (v - d) := by
   simp [slice, List.drop_take, List.drop_drop]
 
