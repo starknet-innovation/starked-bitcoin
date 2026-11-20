@@ -287,17 +287,35 @@ The native reference (`connect_rules.zig`) is the one fuzzed against Core in ste
   of at most two per row. `walk_rem`: every span, script or accurate, is 1 to 2^25 bytes long.
 - Sixteen pins of the `Compat.lean` gate re-pinned (D-056); no `compat_*` statement changed.
 
-**Open in Lean** (what a proof of `SigOpCostOK` still needs):
+**Lean soundness of step 3, in progress (2026-11-20).** Proven so far (standard axioms):
 
-1. `SUMA` equals the sum, over the accurate spans, of weight × `sigOpsAccurate` (the walker's second
-   automaton; `walk_eq_sigOps` and `segment` are the pattern).
-2. A script's `(PO, RS, RL)` are `lastPush` of its bytes.
-3. The records' class bits are `isP2SH` and `witnessProgram` of the spent script.
-4. The fields' flags (`AR0`, `RWA`, `RW32`, `N32`) and the two request relations: the accurate spans
-   are exactly Core's redeem and witness scripts, each once.
-5. The sum over the block: `A + w = 4·P2SH + witness`, hence `SigOpCostOK`, and the epoch statement.
+| Part | Theorem | File |
+|---|---|---|
+| The walker automaton with a decoration equals a fold over Core's `GetOp` parse | `runG_opsD` | `Spec/SigWalk.lean` |
+| Its three instances: accurate count, `IsPushOnly`, last push | `acc_run`, `po_run`, `last_run`, `lastPush_suffix` | `Spec/SigWalk.lean` |
+| A span's rows carry any decoration | `seg_gen` | `Block/WalkAcc.lean` |
+| 1. `SUMA` = Σ over the spans of `(AC + 3·W4) · sigOpsAccurate(bytes)` | `seg_acc`, `total_acc` | `Block/WalkAcc.lean` |
+| 2. A script's `PO` is `pushOnly`; for a push-only script `RL` is its last push's length and `RS + RL` the span's end | `span_out` | `Block/WalkAcc.lean` |
 
-Until then the full-cost rule is enforced by the AIRs and tested, not proven.
+**Still open, with the plan** (each step builds on the ones above):
+
+3. *Class bits.* `block_urec` reads `ser[8]`, `ser[9]`, `ser[10]`, `ser[31]` of the claim's `serTxOut`.
+   For a claim that is a real `serTxOut o` (true for every claim at the epoch level): `CP = [isP2SH]`,
+   `C20`/`C32` = `[witnessProgram = (0, 20 or 32 bytes)]` of `o.scriptPubKey`. Then `coin_urec` and
+   `coin_row_tok` carry them to the input's `block_fields` row (`CP`, `CW20`, `CW32`).
+4. *Fields.* (a) the script relation gives a non-empty scriptSig's `(SPO, SRS, SRL)` from `span_out`;
+   (b) per non-coinbase input row: `4·[ARQ]·acc(redeem) + (GIN·CW20 + RW20) + N32·SEG·acc(last witness
+   item)` is `4·p2shSigOps + countWitnessSigOps` (a case analysis in the spec); (c) the `aspan`
+   relation has two yield sites, so `pair_sum` needs a three-site variant; `wreq` is `pair_sum` with a
+   function `g(tx, inputs left)` = the accurate count of that input's last witness item, which avoids
+   proving that requests are unique; (d) the witness rows: a stack's rows sum to `WS · acc(last item)`
+   (`stack_sim`, `K_WITEM(r+1) = (K_WCNT + K_WITEM)(1 − Z1)`), and a stack row's `(TXI, WINL)` names
+   its input (an induction like `wits_sim`).
+5. *Block.* `A + w` as naturals (`sums_nat`, per-span bound `sigOpsAccurate s ≤ 20·|s|`), the sum over
+   the coin rows by transaction (`sum_by_parts`, `ioRows`), a fifth clause of `block_factsL`
+   (`SigOpCostOK` on the claims' scripts), and the epoch statement.
+
+Until 3–5 are done the full-cost rule is enforced by the AIRs and tested, not proven.
 
 **Not done here:** the GPU walker kernel (`src/gpu/cuda/witness.zig`) builds the old 51 columns; the
 CPU path is the reference until step 5.
