@@ -597,6 +597,107 @@ theorem in_rows (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
   rw [hid k hk] at hinp hinl
   exact ⟨finp k hk, hinp, hje, hki1, hρm, hkin, htxi, hT, hrow, hinl, hseg⟩
 
+omit hL24 in
+/-- An input row of a transaction other than the first is a non-coinbase input row. -/
+theorem gin_of_txi {ρ : ℕ} (hρ : ρ < 2 ^ Ls 1) (hk : (inst 1).main Fields.K_IN ρ = 1)
+    (hne : (inst 1).main Fields.TXI ρ ≠ 0) : (inst 1).main Fields.GIN ρ = 1 := by
+  have fs := hash_fields_sat' hL hsat
+  have c := Fields.sat fs (Fields.mem_chk (c := .mul (Fields.k Fields.ZT) (Fields.k Fields.TXI))
+    (by simp [Fields.chkC, Fields.prevoutC])) hρ
+  simp only [Expr.eval, Fields.ev_k hρ] at c
+  have hzt : (inst 1).main Fields.ZT ρ = 0 := by
+    rcases mul_eq_zero.mp c with h | h
+    · exact h
+    · exact absurd h hne
+  rw [Fields.chk_defn fs (a := Fields.GIN) (e := .mul (Fields.k Fields.K_IN) (Fields.oneMinus (Fields.k Fields.ZT)))
+    (by simp [Fields.chkC, Fields.prevoutC]) hρ]
+  simp [Expr.eval, Fields.ev_k hρ, Fields.oneMinus, Fields.one, StarkedAir.Sha256.eval_cst, hk, hzt]
+
+/-- **An input's row cost is Core's.** For input `k` of transaction `t ≥ 1` whose claim is a real
+output `o`: its fields row is a non-coinbase input row, and the row's cost is
+`4 · p2shSigOps + countWitnessSigOps` of the spent script, the scriptSig and the witness. -/
+theorem in_row_cost (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
+    (hon : ∀ j < 2 ^ Ls 14, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
+    (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
+    {parts : List (List Spec.Block.Tok)} (hf : List.Forall₂ Spec.Block.IoTx S.b.txs parts)
+    (htg : Spec.Block.tagged 0 (Fields.toksFrom (inst 1).main (Rb inst pub) S.m 0) = Spec.Block.tagParts 0 parts)
+    {t : ℕ} {tx : Spec.Block.Tx} (htx : S.b.txs[t]? = some tx) (ht1 : 1 ≤ t) {k : ℕ} (hk : k < tx.vin.length)
+    {c : Spec.CoinEpoch.Claim} (hc : ClaimAt inst pub (Ls 13) (((parts.take t).map List.length).sum + k) c)
+    {o : Spec.Block.TxOut} (ho : c.ser = Spec.Block.serTxOut o) :
+    ∃ inp, tx.vin[k]? = some inp ∧
+      (inst 1).main Fields.GIN ((ioRows inst S.m).getD (((parts.take t).map List.length).sum + k) 0) = 1 ∧
+      rowCost inst pub S.b ((ioRows inst S.m).getD (((parts.take t).map List.length).sum + k) 0) =
+        4 * p2shSigOps o.scriptPubKey inp.scriptSig +
+          Spec.ConnectRules.countWitnessSigOps inp.scriptSig o.scriptPubKey inp.witness := by
+  have fs := hash_fields_sat' hL hsat
+  obtain ⟨rb0, rb1, rb2, rb3, rb4, rb5, rb6, rb7, rb8, rb9, rb10, rb11, rb12, rb13, rb14⟩ := rows_le_all hL24
+  have hlenR := len_R hL hsat hL24 (inst := inst) (pub := pub)
+  have hP : P = 2147483647 := rfl
+  have hmn := S.hmn
+  obtain ⟨inp, hinp, hje, hki, hρm, hkin, htxi, hT, hrow, hinl, hseg⟩ :=
+    in_rows hL hsat hL24 S he hon hlen hst hf htg htx ht1 k hk
+  set ρ := (ioRows inst S.m).getD (((parts.take t).map List.length).sum + k) 0 with hρdef
+  have hρn : ρ < 2 ^ Ls 1 := by omega
+  have htN : t < S.b.txs.length := (List.getElem?_eq_some_iff.mp htx).1
+  have htP : t < P := by have := S.hN25; omega
+  have hgin : (inst 1).main Fields.GIN ρ = 1 := gin_of_txi hL hsat hρn hkin (by
+    rw [htxi]; intro h0
+    have := natCast_inj_of_lt (a := t) (b := 0) htP (by omega) (by simpa using h0)
+    omega)
+  refine ⟨inp, hinp, hgin, ?_⟩
+  -- the spent script's class, through the coin row
+  obtain ⟨c1, c2, c3⟩ := claim_class hL hsat hL24 (by omega) hc ho
+  have e5 : (inst 1).main Fields.CP ρ = (inst 14).main Coin.UP (((parts.take t).map List.length).sum + k) := by
+    have := congrArg (fun l => l.getD 5 0) hT; simpa [fIn, cIn] using this.symm
+  have e6 : (inst 1).main Fields.CW20 ρ = (inst 14).main Coin.U20 (((parts.take t).map List.length).sum + k) := by
+    have := congrArg (fun l => l.getD 6 0) hT; simpa [fIn, cIn] using this.symm
+  have e7 : (inst 1).main Fields.CW32 ρ = (inst 14).main Coin.U32 (((parts.take t).map List.length).sum + k) := by
+    have := congrArg (fun l => l.getD 7 0) hT; simpa [fIn, cIn] using this.symm
+  rw [← e5] at c1; rw [← e6] at c2; rw [← e7] at c3
+  -- the scriptSig's bytes
+  have hssc := Fields.ssc_val fs (Rb inst pub) S.hcs S.hmn S.hpad S.hfit hρm (a := Fields.K_IN) (Or.inl rfl) hkin
+  rw [if_pos rfl] at hssc
+  obtain ⟨hv, hlenρ, -, -, hfitρ⟩ := Fields.row_info fs (Rb inst pub) S.hcs S.hmn S.hpad S.hfit hρm
+    (a := Fields.K_IN) (by simp [Fields.K_IN]) hkin (by simp [Fields.K_IN, Fields.K_LOCK])
+    (by simp [Fields.K_IN, Fields.K_PAD])
+  simp only [Fields.lenN, Fields.K_IN, Fields.K_BLK, Fields.K_TXH, if_false, if_true,
+    show (2 : ℕ) ≠ 0 by norm_num, show (2 : ℕ) ≠ 1 by norm_num] at hlenρ
+  have hsig : slice (Rb inst pub) ((inst 1).main Fields.SSC ρ).val ((inst 1).main Fields.VAL ρ).val = inp.scriptSig := by
+    rw [hssc, hrow.script]
+  have hka := Fields.kinds_at fs hρn (a := Fields.K_IN) (by simp [Fields.K_IN]) hkin
+  obtain ⟨E1, E2, E3⟩ := Fields.in_cost fs (Rb inst pub) hρn hgin o.scriptPubKey c1 c2 c3 (by omega) (by omega)
+    (fun hz => sig_out hL hsat hL24 S hρn (by
+      unfold Fields.smult
+      rw [hkin, hka Fields.K_OUT (by simp [Fields.K_OUT]), hz]; simp [Fields.K_IN, Fields.K_OUT]))
+    (fun hr => rdf_read hL hsat hL24 hρn hr)
+  rw [hsig] at E1 E2 E3
+  -- the input's witness
+  have htv : ((inst 1).main Fields.TXI ρ).val = t := by rw [htxi]; exact ZMod.val_natCast_of_lt htP
+  have hwit : gW S.b ((inst 1).main Fields.TXI ρ).val ((inst 1).main Fields.INL ρ).val = inp.witness := by
+    rw [gW, htv, htx]
+    simp only [Option.map_some, Option.getD_some]
+    rw [show tx.vin.length - ((inst 1).main Fields.INL ρ).val = k by omega, List.getD_eq_getElem?_getD,
+      List.getElem?_map, hinp]; rfl
+  have hw20 := Spec.ConnectRules.w20Of_le inp.scriptSig o.scriptPubKey
+  have hn32 := Spec.ConnectRules.n32Of_le inp.scriptSig o.scriptPubKey
+  unfold rowCost
+  rw [E1, E2, E3, hwit, ZMod.val_natCast_of_lt (by omega), Spec.ConnectRules.count_split]
+  rcases Fields.seg_bool fs hρn with s0 | s1
+  · -- no witness in the transaction
+    have hw : tx.hasWitness = false := by
+      rw [Bool.eq_false_iff]; intro h
+      rw [hseg.mpr h] at s0; exact one_ne_zero s0
+    have hwe : inp.witness = [] := by
+      unfold Spec.Block.Tx.hasWitness at hw
+      rw [List.any_eq_false] at hw
+      have := hw inp (List.mem_of_getElem? hinp)
+      simpa using this
+    rw [s0, hwe]; simp [lastAcc]
+  · rw [s1, mul_one]
+    interval_cases hq : n32Of inp.scriptSig o.scriptPubKey
+    · simp
+    · simp; omega
+
 end System
 
 end StarkedAir.Block
