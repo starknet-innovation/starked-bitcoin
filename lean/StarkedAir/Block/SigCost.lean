@@ -67,6 +67,12 @@ theorem strict_mono_id {n : ℕ} (f : ℕ → ℕ) (hm : ∀ a b, a < b → b < 
   intro a ha
   have := lo a ha; have := hi (n - a - 1) a (by omega); omega
 
+theorem list_sum_getD (f : ℕ → ℕ) : ∀ l : List ℕ, (l.map f).sum = ∑ j ∈ Finset.range l.length, f (l.getD j 0)
+  | [] => by simp
+  | a :: l => by
+    rw [List.map_cons, List.sum_cons, list_sum_getD f l, List.length_cons, Finset.sum_range_succ', add_comm]
+    simp
+
 /-- The witness of the input of transaction `t` that has `v` inputs left (itself included). -/
 def gW (b : Spec.Block.Blk) (t v : ℕ) : List Spec.Block.Bytes :=
   (b.txs[t]?.map fun tx => (tx.vin.map (·.witness)).getD (tx.vin.length - v) []).getD []
@@ -697,6 +703,151 @@ theorem in_row_cost (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
     interval_cases hq : n32Of inp.scriptSig o.scriptPubKey
     · simp
     · simp; omega
+
+omit hL24 in
+/-- A row that is no input row, or an input row of the first transaction, is no non-coinbase input row. -/
+theorem gin_zero {ρ : ℕ} (hρ : ρ < 2 ^ Ls 1)
+    (h : (inst 1).main Fields.K_IN ρ ≠ 1 ∨ (inst 1).main Fields.TXI ρ = 0) : (inst 1).main Fields.GIN ρ ≠ 1 := by
+  have fs := hash_fields_sat' hL hsat
+  have hg := Fields.chk_defn fs (a := Fields.GIN)
+    (e := .mul (Fields.k Fields.K_IN) (Fields.oneMinus (Fields.k Fields.ZT))) (by simp [Fields.chkC, Fields.prevoutC]) hρ
+  simp only [Expr.eval, Fields.ev_k hρ, Fields.oneMinus, Fields.one, StarkedAir.Sha256.eval_cst, Nat.cast_one] at hg
+  rcases h with h | h
+  · rcases Fields.kind_bool fs (c := Fields.K_IN) (by simp [Fields.kinds, Fields.K_IN]) hρ with a | a
+    · rw [hg, a]; simp
+    · exact absurd a h
+  · have c := Fields.sat fs (Fields.mem_chk (c := .mul (Fields.oneMinus (Fields.k Fields.ZT))
+      (.sub (.mul (Fields.k Fields.TXI) (Fields.k Fields.INVT)) Fields.one)) (by simp [Fields.chkC, Fields.prevoutC])) hρ
+    simp only [Expr.eval, Fields.ev_k hρ, Fields.oneMinus, Fields.one, StarkedAir.Sha256.eval_cst, Nat.cast_one, h,
+      zero_mul, zero_sub, mul_neg, mul_one, neg_eq_zero] at c
+    rw [hg, c, mul_zero]; exact zero_ne_one
+
+/-- **The non-coinbase input rows, by transaction.** A sum over them is the sum, over the transactions
+after the first and their inputs `k`, at the fields row of coin row `pre t + k`. -/
+theorem gin_sum (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
+    (hon : ∀ j < 2 ^ Ls 14, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
+    (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
+    {parts : List (List Spec.Block.Tok)} (hf : List.Forall₂ Spec.Block.IoTx S.b.txs parts)
+    (htg : Spec.Block.tagged 0 (Fields.toksFrom (inst 1).main (Rb inst pub) S.m 0) = Spec.Block.tagParts 0 parts)
+    (C : ℕ → ℕ) :
+    ∑ ρ ∈ (Finset.range (2 ^ Ls 1)).filter (fun ρ => (inst 1).main Fields.GIN ρ = 1), C ρ =
+    ∑ t ∈ Finset.range S.b.txs.length, (if 1 ≤ t then
+      ∑ k ∈ Finset.range ((S.b.txs[t]?.map (·.vin.length)).getD 0),
+        C ((ioRows inst S.m).getD (((parts.take t).map List.length).sum + k) 0) else 0) := by
+  classical
+  have fs := hash_fields_sat' hL hsat
+  have cs := coin_sat hL hsat hL24
+  have hmn := S.hmn
+  set io := ioRows inst S.m with hio
+  have hft := fields_tagged hL hsat hL24 S
+  rw [htg] at hft
+  have he' : e = (parts.map List.length).sum := by
+    rw [hlen, ← Spec.Block.tagParts_length 0, hft, List.length_map]
+  set Fn : ℕ → ℕ := fun ρ => if (inst 1).main Fields.GIN ρ = 1 then C ρ else 0 with hFn
+  -- over the input and output rows
+  have stepa : ∑ ρ ∈ (Finset.range (2 ^ Ls 1)).filter (fun ρ => (inst 1).main Fields.GIN ρ = 1), C ρ =
+      ∑ ρ ∈ (Finset.range S.m).filter (fun r => (inst 1).main Fields.K_OUT r = 1 ∨ (inst 1).main Fields.K_IN r = 1),
+        Fn ρ := by
+    rw [Finset.sum_filter]
+    symm
+    apply Finset.sum_subset
+    · intro x hx
+      have := (Finset.mem_filter.mp hx).1
+      exact Finset.mem_range.mpr (by have := Finset.mem_range.mp this; omega)
+    · intro x hx hnx
+      have hxn := Finset.mem_range.mp hx
+      rw [hFn]; simp only
+      rw [if_neg]
+      apply gin_zero hL hsat hxn
+      left
+      intro hk
+      apply hnx
+      refine Finset.mem_filter.mpr ⟨Finset.mem_range.mpr ?_, Or.inr hk⟩
+      by_contra hc
+      have := Fields.kinds_at fs hxn (a := Fields.K_PAD) (by simp [Fields.K_PAD]) (S.hpad x hxn (by omega))
+        Fields.K_IN (by simp [Fields.K_IN])
+      rw [hk] at this; simp [Fields.K_IN, Fields.K_PAD] at this
+  have stepb : ∑ ρ ∈ (Finset.range S.m).filter
+        (fun r => (inst 1).main Fields.K_OUT r = 1 ∨ (inst 1).main Fields.K_IN r = 1), Fn ρ =
+      ∑ j ∈ Finset.range io.length, Fn (io.getD j 0) := by
+    rw [← list_sum_filter_range, ← list_sum_getD]; rfl
+  rw [stepa, stepb, ← hlen, he', sum_by_parts, List.length_map, ← hf.length_eq]
+  refine Finset.sum_congr rfl (fun t ht => ?_)
+  have htN := Finset.mem_range.mp ht
+  obtain ⟨tx, htx⟩ : ∃ tx, S.b.txs[t]? = some tx := ⟨_, List.getElem?_eq_getElem htN⟩
+  obtain ⟨hpl, hpe⟩ := part_len hf htx
+  have hpre1 : ((parts.take (t + 1)).map List.length).sum = ((parts.take t).map List.length).sum +
+      (tx.vin.length + tx.vout.length) := by rw [pre_succ parts hpl, hpe]
+  have hle : ((parts.take (t + 1)).map List.length).sum ≤ e := by
+    rw [he']
+    have := pre_mono parts (t := t + 1) (t' := parts.length) (by omega) le_rfl
+    rwa [List.take_length] at this
+  rw [htx, Option.map_some, Option.getD_some, ← List.map_take,
+    show (parts.map List.length).getD t 0 = tx.vin.length + tx.vout.length by
+      rw [← hpe]; simp [List.getD_eq_getElem?_getD, List.getElem?_eq_getElem hpl],
+    Finset.sum_range_add]
+  -- the outputs' rows add nothing
+  have houts : ∑ x ∈ Finset.range tx.vout.length,
+      Fn (io.getD (((parts.take t).map List.length).sum + (tx.vin.length + x)) 0) = 0 := by
+    apply Finset.sum_eq_zero
+    intro q hq
+    have hqv := Finset.mem_range.mp hq
+    have hje : ((parts.take t).map List.length).sum + (tx.vin.length + q) < e := by omega
+    have hko := (coin_kind_pos hL hsat hL24 S he hon hlen hst hf htg hje htx rfl (by omega)).1.mpr (by omega)
+    obtain ⟨hkout, -⟩ := (coin_row_tok hL hsat hL24 S he hon hlen hst hje).1 hko
+    have hρ : io.getD (((parts.take t).map List.length).sum + (tx.vin.length + q)) 0 < 2 ^ Ls 1 := by
+      have : io.getD (((parts.take t).map List.length).sum + (tx.vin.length + q)) 0 ∈ io := by
+        rw [List.getD_eq_getElem _ _ (by omega)]; exact List.getElem_mem _
+      have := (mem_ioRows.mp this).1; omega
+    rw [hFn]; simp only
+    rw [if_neg]
+    apply gin_zero hL hsat hρ
+    left
+    rw [Fields.kinds_at fs hρ (a := Fields.K_OUT) (by simp [Fields.K_OUT]) hkout Fields.K_IN (by simp [Fields.K_IN])]
+    simp [Fields.K_IN, Fields.K_OUT]
+  rw [houts, add_zero]
+  by_cases ht1 : 1 ≤ t
+  · rw [if_pos ht1]
+    refine Finset.sum_congr rfl (fun k hk => ?_)
+    obtain ⟨inp, -, hje, -, hρm, hkin, htxi, -⟩ :=
+      in_rows hL hsat hL24 S he hon hlen hst hf htg htx ht1 k (Finset.mem_range.mp hk)
+    have htP : t < P := by
+      have := S.hN25
+      have : 2 ^ Ls 1 < P := rows_lt_P hL24 (by decide)
+      omega
+    rw [hFn]; simp only
+    rw [if_pos (gin_of_txi hL hsat (by omega) hkin (by
+      rw [htxi]; intro h0
+      have := natCast_inj_of_lt (a := t) (b := 0) htP (by unfold P; norm_num) (by simpa using h0)
+      omega))]
+  · rw [if_neg ht1]
+    have ht0 : t = 0 := by omega
+    apply Finset.sum_eq_zero
+    intro k hk
+    have hkv := Finset.mem_range.mp hk
+    have hje : ((parts.take t).map List.length).sum + k < e := by omega
+    have hcbi := (coin_kind_pos hL hsat hL24 S he hon hlen hst hf htg hje htx rfl (by omega)).2.2.mpr ⟨hkv, ht0⟩
+    have hkc : (inst 14).main Coin.KI (((parts.take t).map List.length).sum + k) +
+        (inst 14).main Coin.CBI (((parts.take t).map List.length).sum + k) = 1 := by
+      rcases Coin.kinds cs (show ((parts.take t).map List.length).sum + k < 2 ^ Ls 14 by omega) with g | g | g | g
+      · rw [g.2.2.1] at hcbi; exact absurd hcbi zero_ne_one
+      · rw [g.2.2.1] at hcbi; exact absurd hcbi zero_ne_one
+      · rw [g.2.1, g.2.2.1]; simp
+      · rw [g.2.2.1] at hcbi; exact absurd hcbi zero_ne_one
+    obtain ⟨hkin, hTXI, -⟩ := (coin_row_tok hL hsat hL24 S he hon hlen hst hje).2 hkc
+    obtain ⟨t0, q0, tx0, htx0, hT0, hjq0, hq0, -, -⟩ := coin_row_tx hL hsat hL24 S he hon hlen hst hf htg hje
+    obtain ⟨hpl0, hpe0⟩ := part_len hf htx0
+    obtain ⟨rfl, -⟩ := decomp_unique parts hpl hpl0 (by omega) (by omega)
+      (show ((parts.take t).map List.length).sum + k = _ from hjq0)
+    have hρ : io.getD (((parts.take t).map List.length).sum + k) 0 < 2 ^ Ls 1 := by
+      have : io.getD (((parts.take t).map List.length).sum + k) 0 ∈ io := by
+        rw [List.getD_eq_getElem _ _ (by omega)]; exact List.getElem_mem _
+      have := (mem_ioRows.mp this).1; omega
+    rw [hFn]; simp only
+    rw [if_neg]
+    apply gin_zero hL hsat hρ
+    right
+    rw [← hTXI, hT0, ht0]; simp
 
 end System
 
