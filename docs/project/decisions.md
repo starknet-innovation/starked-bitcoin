@@ -615,3 +615,4 @@ Rejected: changing `connectTx` and `ClaimsOK` in place (it breaks the gate's sta
 `epoch_systems_core` need the CSV bit, which the recursion does not provide).
 To undo: revert the six hashes; the build then fails on the pins and nothing else.
 
+Confirmed by the owner, 2026-11-20 ("That works."): D-056 is accepted, and the work stays on the branch `connect-rules`.

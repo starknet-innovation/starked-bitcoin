@@ -1,7 +1,7 @@
 # starked-bitcoin
 
 STARK proofs of Bitcoin consensus, built with
-[stwo-zig](https://github.com/teddyjfpender/stwo-zig) (circle STARKs over
+[stwo-zig](https://github.com/starknet-innovation/stwo-zig) (circle STARKs over
 M31). The constraints are defined and **formally verified in Lean 4**, then
 interpreted by the Zig prover and verifier.
 

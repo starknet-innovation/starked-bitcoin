@@ -29,7 +29,8 @@ Non-goals for now:
 
 ## Prover stack
 
-- **stwo-zig** is pinned as a git submodule at `third_party/stwo-zig`.
+- **stwo-zig** (https://github.com/starknet-innovation/stwo-zig) is pinned as a git submodule at
+  `third_party/stwo-zig`.
   Bitcoin-specific AIRs live in this repo. Generic changes go into a stwo-zig
   fork and are upstreamed when they are useful to others: native-AIR recursion
   statements, GPU codegen for custom AIRs, and constraint-IR export.

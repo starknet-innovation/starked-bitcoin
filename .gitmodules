@@ -1,3 +1,3 @@
 [submodule "third_party/stwo-zig"]
 	path = third_party/stwo-zig
-	url = https://github.com/teddyjfpender/stwo-zig.git
+	url = https://github.com/starknet-innovation/stwo-zig.git
