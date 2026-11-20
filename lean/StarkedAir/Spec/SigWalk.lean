@@ -397,4 +397,19 @@ theorem lastPush_suffix (s : Bytes) (hp : (opsD s).2 = true) : lastPush s <:+ s 
   · obtain ⟨e, he, hs⟩ := key s.length s rfl hp hne
     rw [lastPush, he]; exact hs
 
+/-- The count of opcodes above `OP_16` is at most the bytes walked. -/
+theorem hi_run_le : ∀ (l : Bytes) (s : WS) (st : Unit), (runG fH s st l).1 ≤ l.length
+  | [], _, _ => by simp [runG]
+  | x :: l, s, st => by
+    simp only [runG, List.length_cons]
+    have h1 : (fH s st x).2 ≤ 1 := by
+      cases s <;> simp only [fH, fGH, gH, le_refl, Nat.zero_le]
+      split_ifs <;> omega
+    have := hi_run_le l (wstep s x).1 (fH s st x).1
+    omega
+
+/-- A parsed script's run ends at an opcode, whatever the decoration. -/
+theorem last_ws (s : Bytes) : (opsD s).2 = true ↔ (runG fL .op 0 s).2.1 = .op :=
+  (runG_opsD gL (fun _ v => v) (fun _ _ _ => rfl) s 0).2.1
+
 end StarkedAir.Spec.ConnectRules
