@@ -51,6 +51,10 @@ theorem sum_filter_split {α : Type} (P P₁ P₂ : α → Prop) [DecidablePred 
       · have : ¬ P a := fun hp => by rcases ha.mp hp with x | x <;> contradiction
         simp [List.filter_cons, this, h1, h2, ih]
 
+/-- The witness of the input of transaction `t` that has `v` inputs left (itself included). -/
+def gW (b : Spec.Block.Blk) (t v : ℕ) : List Spec.Block.Bytes :=
+  (b.txs[t]?.map fun tx => (tx.vin.map (·.witness)).getD (tx.vin.length - v) []).getD []
+
 section System
 
 variable {inst : ℕ → Inst} {pub : ℕ → F} {Ls : ℕ → ℕ}
@@ -327,6 +331,50 @@ theorem rdf_read {ρ : ℕ} (hρ : ρ < 2 ^ Ls 1) (h : (inst 1).main Fields.RDF 
     rw [e]; exact ZMod.val_natCast_of_lt (Fields.lt_P (by change _ < (Rb inst pub).length at p0; omega))
   rw [hv] at b1
   exact ⟨b0, b1⟩
+
+/-- **The requested witness scripts are the requesting inputs' last witness items.** -/
+theorem wq_total (S : Setup inst pub (Ls 1)) :
+    ∑ r ∈ Finset.range S.m, Fields.qN (inst 1).main (Rb inst pub) r =
+    ∑ ρ ∈ (Finset.range (2 ^ Ls 1)).filter
+        (fun ρ => (inst 1).main Fields.N32 ρ * (inst 1).main Fields.SEG ρ = 1),
+      lastAcc (gW S.b ((inst 1).main Fields.TXI ρ).val ((inst 1).main Fields.INL ρ).val) := by
+  have fs := hash_fields_sat' hL hsat
+  have hP : 2 ^ Ls 1 < P := rows_lt_P hL24 (by decide)
+  have hmn := S.hmn
+  -- a stack's items are its input's witness
+  have key : ∀ c < S.m, (inst 1).main Fields.K_WCNT c = 1 →
+      Fields.stackItems (inst 1).main (Rb inst pub) S.m c =
+        gW S.b ((inst 1).main Fields.TXI c).val ((inst 1).main Fields.WINL c).val := by
+    intro c hc hw
+    obtain ⟨rh, ρ, tx, hρm, hl, hrc, hcρ, hat, nolock, -, -, hst⟩ :=
+      Fields.wcnt_tx fs (Rb inst pub) S.hcs S.hmn S.hpad S.hfit S.hnp hc hw
+    have htx := S.hidx ρ (by omega) hl tx hat
+    have hlk : locks (inst 1).main ρ = locks (inst 1).main c :=
+      Fields.locks_const (fun j a b => by rw [nolock j (by omega) b]; exact zero_ne_one) (by omega)
+    rw [hst, gW, (Fields.txi_val fs hP (show c < 2 ^ Ls 1 by omega)).1, ← hlk, htx]; rfl
+  have hwr := wreq_sum hL hsat hL24 (fun v => lastAcc (gW S.b (v.getD 0 0).val (v.getD 1 0).val))
+  simp only [List.getD_cons_zero, List.getD_cons_succ] at hwr
+  rw [Fields.wq_sum fs (Rb inst pub) S.hcs S.hmn S.hpad S.hfit, hwr]
+  rw [Finset.sum_filter, ← Finset.sum_range_add_sum_Ico _ (show S.m ≤ 2 ^ Ls 1 by omega)]
+  have hz : ∑ r ∈ Finset.Ico S.m (2 ^ Ls 1), (if (inst 1).main Fields.K_WCNT r * (inst 1).main Fields.WS r = 1 then
+      lastAcc (gW S.b ((inst 1).main Fields.TXI r).val ((inst 1).main Fields.WINL r).val) else 0) = 0 := by
+    apply Finset.sum_eq_zero
+    intro r hr
+    obtain ⟨h1, h2⟩ := Finset.mem_Ico.mp hr
+    have := Fields.kinds_at fs h2 (a := Fields.K_PAD) (by simp [Fields.K_PAD]) (S.hpad r h2 h1) Fields.K_WCNT
+      (by simp [Fields.K_WCNT])
+    rw [if_neg]
+    rw [this]; simp [Fields.K_WCNT, Fields.K_PAD]
+  rw [hz, add_zero]
+  refine Finset.sum_congr rfl (fun c hc => ?_)
+  have hcm := Finset.mem_range.mp hc
+  have hcn : c < 2 ^ Ls 1 := by omega
+  rcases Fields.kind_bool fs (c := Fields.K_WCNT) (by simp [Fields.kinds, Fields.K_WCNT]) hcn with k0 | k1
+  · rw [if_neg (by rw [k0]; simp), if_neg (by rw [k0]; simp)]
+  · rw [k1, one_mul]
+    by_cases hws : (inst 1).main Fields.WS c = 1
+    · rw [if_pos ⟨rfl, hws⟩, if_pos hws, key c hcm k1]
+    · rw [if_neg (fun h => hws h.2), if_neg hws]
 
 end System
 
