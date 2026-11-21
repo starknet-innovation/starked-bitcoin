@@ -1,7 +1,7 @@
 /-
 **Input claims are the undo stream's records (D-041, steps 1–3 of utxo.md's plan).** The undo stream
-`Ub` (committed in `C_h`, `commit_sound`) is a sequence of records `code(4) ‖ ctx(3) ‖ tl(2) ‖ script(tl)`
-from offset 1. `recStart`/`recAt` parse it sequentially. `rec_starts`: URec's record starts are exactly
+`Ub` (committed in `C_h`, `commit_sound`) is a sequence of records `code(4) ‖ ctx(3) ‖ tl(2) ‖ script(tl) ‖ mtp(4)`
+(the last field is the record's claimed median time past, CONNECT-RULES step 4) from offset 1. `recStart`/`recAt` parse it sequentially. `rec_starts`: URec's record starts are exactly
 that parse (`rows_sound`, `tl_bytes`, `urec_bytes`). `claim_is_record`: every input claim the coin
 component uses (`ClaimAt`) is the record at its URec row, so the claims are a function of the committed
 stream and the row index — no choice is left to the prover.
@@ -18,7 +18,7 @@ def tlAt (u : Spec.Block.Bytes) (s : ℕ) : ℕ := Spec.Block.le ((List.range 2)
 /-- Where record `r` starts, parsing from offset 1. -/
 def recStart (u : Spec.Block.Bytes) : ℕ → ℕ
   | 0 => 1
-  | r + 1 => recStart u r + 9 + tlAt u (recStart u r)
+  | r + 1 => recStart u r + 9 + tlAt u (recStart u r) + 4
 
 /-- Record `r` as a claim: its code, script and creating transaction's index. -/
 def recAt (u : Spec.Block.Bytes) (r : ℕ) : Claim :=

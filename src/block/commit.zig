@@ -236,7 +236,7 @@ test "block commitment: a 3-block undo stream satisfies and balances; a wrong pu
     var b = try bsys.buildU(a, s.raw, &undo, s.ctx);
     try std.testing.expect((try bsys.firstViolation(a, &airs, &b)) == null);
     try std.testing.expect((try bsys.unbalanced(a, &airs, &b)) == null);
-    try std.testing.expectEqualSlices(u32, &(try commitment(a, try bsys.undoStreamOf(a, s.raw, &undo, null, s.ctx.height))), &b.commitment_words);
+    try std.testing.expectEqualSlices(u32, &(try commitment(a, try bsys.undoStreamOf(a, s.raw, &undo, null, null, s.ctx.height))), &b.commitment_words);
     // The public limbs enter by a lookup: a wrong one leaves the digest relation unbalanced.
     b.pubs[9 + 5] = b.pubs[9 + 5].add(M31.one());
     try std.testing.expect((try bsys.unbalanced(a, &airs, &b)) != null);

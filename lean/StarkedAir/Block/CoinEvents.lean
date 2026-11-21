@@ -636,9 +636,15 @@ noncomputable def blockTerm (inst : ℕ → Inst) (pub : ℕ → F) (L : ℕ) (t
       | none => 0
     else if 1 ≤ t then -(z - phiOf pub (rowTuple inst pub L (((parts.take t).map List.length).sum + q)))⁻¹ else 0
 
+/-- The block's time claims' fractions, summed (CONNECT-RULES step 4): the part of the public partial sum
+that is not coin events. -/
+noncomputable def claimSum (inst : ℕ → Inst) (L : ℕ) : QM :=
+  ∑ r ∈ Finset.range (2 ^ L), RunSum.cQ (inst 14).main Coin.FC2 r
+
 /-- **The block's partial sum, by its coin events.** The public partial sum is, over the block's
 transactions and their input/output positions: each created output's `1/(z − φ)` (with its coin's
-tuple), minus each non-coinbase input's `1/(z − φ)` (with its row's claimed tuple). -/
+tuple), minus each non-coinbase input's `1/(z − φ)` (with its row's claimed tuple); plus the block's
+time claims (`claimSum`). -/
 theorem coin_block_sum (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
     (hon : ∀ j < 2 ^ Ls 14, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
     (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
@@ -646,10 +652,11 @@ theorem coin_block_sum (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14
     (htg : Spec.Block.tagged 0 (Fields.toksFrom (inst 1).main (Rb inst pub) S.m 0) = Spec.Block.tagParts 0 parts)
     {h : ℕ} (hp2 : pub 2 = (h : F)) (hh : h < 2 ^ 23) {lost : Bool} (hlost : pub Coin.PUB_LOST = if lost then 1 else 0) :
     RunSum.pQ pub Coin.PUB_S = ∑ t ∈ Finset.range S.b.txs.length, ∑ q ∈ Finset.range ((parts.getD t []).length),
-      blockTerm inst pub (Ls 14) S.b.txs parts h lost t q := by
+      blockTerm inst pub (Ls 14) S.b.txs parts h lost t q + claimSum inst (Ls 14) := by
   have cs := coin_sat hL hsat hL24
-  obtain ⟨hS, hrow⟩ := Coin.coin_runsum cs (n := 2 ^ Ls 14) (by positivity)
-  rw [hS]
+  obtain ⟨hS, hrow, -⟩ := Coin.coin_runsum cs (n := 2 ^ Ls 14) (by positivity)
+  rw [hS, claimSum]
+  congr 1
   -- e is the total length
   have hft := fields_tagged hL hsat hL24 S
   rw [htg] at hft

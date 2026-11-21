@@ -1,8 +1,10 @@
 // starked-bitcoin device witness v1 (src/gpu/cuda/witness.zig): block_walk columns.
-// Row r < count expands record recs[4 + 4r] (w0: pos 0-23, kind 24-25 (op, ln, dt, inf),
-// li 26-27, lk code 28-29 (0, 1, 2, 4), first 30; rem; val = dr or lacc; sums) with its byte
-// raw[pos] as block/walk.zig columns: the row's state, the automaton step, the zero tests and
-// their inverses. Rows past count are padding (SUMS = recs[0], ZA = 1, INVD = INVR = 1/(-1)).
+// Row r < count expands record recs[8 + 8r] (w0: pos 0-23, kind 24-25 (op, ln, dt, inf),
+// li 26-27, lk code 28-29 (0, 1, 2, 4), first 30; rem; val = dr or lacc; sums; x0: mode 0-1,
+// po 2, pv 3-7, hcn 8-31; rs; rl; suma) with its byte raw[pos] as block/walk.zig columns: the
+// row's state, the automaton step, the zero tests and their inverses, and the accurate count
+// (columns 51-70). Rows past count are padding (SUMS = recs[0], SUMA = recs[1], ZA = ZH = 1,
+// INVE = 1, INVD = INVR = 1/(-1)).
 typedef unsigned long long u64;
 __device__ __forceinline__ unsigned starked_rotr(unsigned x, unsigned n) { return (x >> n) | (x << (32u - n)); }
 #define STARKED_P 0x7fffffffu
@@ -20,18 +22,19 @@ __device__ __forceinline__ unsigned m31_inv(unsigned x) {
     return r;
 }
 
-extern "C" __global__ void __launch_bounds__(256) starked_witness_walk_v1_54608d8c5ecee451(
+extern "C" __global__ void __launch_bounds__(256) starked_witness_walk_v1_81d3e9f7290113be(
     const unsigned *raw, const unsigned *recs, unsigned count, const u64 *columns, unsigned rows) {
     const unsigned r = blockIdx.x * blockDim.x + threadIdx.x;
     if (r >= rows) return;
 #define PUT(c, v) (((unsigned *)columns[(c)])[r] = (v))
-    unsigned v[51];
-    for (unsigned c = 0; c < 51u; ++c) v[c] = 0u;
+    unsigned v[71];
+    for (unsigned c = 0; c < 71u; ++c) v[c] = 0u;
     const unsigned inv_m1 = m31_inv(STARKED_P - 1u);
     if (r >= count) {
-        v[49] = recs[0]; v[30] = 1u; v[33] = inv_m1; v[35] = inv_m1;
+        v[49] = recs[0]; v[70] = recs[1]; v[30] = 1u; v[33] = inv_m1; v[35] = inv_m1;
+        v[57] = 1u; v[63] = 1u;
     } else {
-        const unsigned *rc = recs + 4ull + 4ull * (u64)r;
+        const unsigned *rc = recs + 8ull + 8ull * (u64)r;
         const unsigned w0 = rc[0], rem = rc[1], val = rc[2], sums = rc[3];
         const unsigned pos = w0 & 0xffffffu, kind = (w0 >> 24u) & 3u, li = (w0 >> 26u) & 3u;
         const unsigned lkc = (w0 >> 28u) & 3u, first = (w0 >> 30u) & 1u;
@@ -85,7 +88,31 @@ extern "C" __global__ void __launch_bounds__(256) starked_witness_walk_v1_54608d
         }
         v[50] = first ? 0u : 1u;
         v[49] = sums;
+        // Step 3 (walk.zig columns, "Step 3"): the accurate count.
+        const unsigned x0 = rc[4];
+        const unsigned mode = x0 & 3u, po = (x0 >> 2u) & 1u, pv = (x0 >> 3u) & 31u, hcn = x0 >> 8u;
+        const unsigned ac = mode != 0u ? 1u : 0u, w4 = mode == 2u ? 1u : 0u;
+        v[51] = ac; v[52] = w4;
+        v[56] = hcn; v[57] = hcn == 0u ? 1u : 0u; v[58] = hcn == 0u ? 0u : m31_inv(hcn);
+        v[59] = po; v[60] = rc[5]; v[61] = rc[6];
+        const unsigned e = m31_add(m31_sub(v[40] % STARKED_P, rem % STARKED_P), 1u);
+        v[62] = e == 0u ? 1u : 0u; v[63] = e == 0u ? 0u : m31_inv(e);
+        v[64] = ((kind == 0u || kind == 1u) && nk == 2u && e == 0u) ? 1u : 0u;
+        v[65] = pv;
+        unsigned sg = 0u, ms = 0u;
+        if (kind == 0u) {
+            const unsigned dv = (b >= 0x51u && b <= 0x60u) ? b - 0x50u : 20u;
+            v[53] = b > 0x60u ? 1u : 0u;
+            ms = (b == 0xaeu || b == 0xafu) ? 1u : 0u;
+            sg = v[13];
+            v[54] = ms; v[55] = dv; v[66] = dv;
+        } else v[66] = pv;
+        const unsigned m1 = ms * pv;
+        v[67] = m1;
+        v[68] = (ac + 3u * w4) * (sg - 20u * ms + m1);
+        v[69] = (1u - ac) * sg;
+        v[70] = rc[7];
     }
-    for (unsigned c = 0; c < 51u; ++c) PUT(c, v[c]);
+    for (unsigned c = 0; c < 71u; ++c) PUT(c, v[c]);
 #undef PUT
 }

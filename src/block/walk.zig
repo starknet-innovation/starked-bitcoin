@@ -187,9 +187,11 @@ pub fn rowsNeeded(spans: []const Span) usize {
 /// 0 none, 1, 2, 3 = 4), first byte of its script (30); `val` = `dr` (dt) or `lacc` (ln); `sums`
 /// the running sigop count including this row. The row's columns are a function of the record and
 /// its byte (`expand`).
-pub const Rec = extern struct { w0: u32, rem: u32, val: u32, sums: u32 };
+/// Step 3 adds four words (the device kernel's copy of `Ext`): `x0` = mode (bits 0–1), `po` (2),
+/// `pv` (3–7), `hcn` (8–31); `rs`; `rl`; `suma`.
+pub const Rec = extern struct { w0: u32, rem: u32, val: u32, sums: u32, x0: u32 = 0, rs: u32 = 0, rl: u32 = 0, suma: u32 = 0 };
 
-/// The step 3 state of a walked row (host only so far; the device kernel does not know it yet).
+/// The step 3 state of a walked row (the host's form; `Rec.x0 … suma` carry the same to the device).
 pub const Ext = struct { mode: u8, po: bool, rs: u32, rl: u32, hcn: u32, pv: u32, suma: u32 };
 
 /// The host's sequential pass: one record per walked row, and what the other components read.
@@ -294,6 +296,10 @@ pub fn plan(a: std.mem.Allocator, log_size: u32, raw: []const u8, spans: []const
                 .rem = sp[1] - @as(u32, @intCast(j)),
                 .val = @intCast(val),
                 .sums = sums,
+                .x0 = @as(u32, ext[r].mode) | @as(u32, @intFromBool(ext[r].po)) << 2 | ext[r].pv << 3 | ext[r].hcn << 8,
+                .rs = ext[r].rs,
+                .rl = ext[r].rl,
+                .suma = ext[r].suma,
             };
             st = step(st, b);
             r += 1;

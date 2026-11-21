@@ -334,8 +334,9 @@ test "block negative: BIP68 height-based relative locks (CONNECT-RULES step 2)" 
         .{ .name = "lock 2, version 0", .version = 0, .seq = 2, .want = .accepted },
         .{ .name = "lock 2, version 256", .version = 256, .seq = 2, .want = .rejected },
         .{ .name = "lock 2, version 0xffffffff (unsigned)", .version = 0xffffffff, .seq = 2, .want = .rejected },
-        // Time-based locks are not enforced before step 4 (docs/design/connect-rules.md).
-        .{ .name = "time lock 2 (bit 22)", .seq = 0x00400002, .want = .accepted },
+        // A time-based lock against a claimed MTP of 0 (the default): met. Whether the claim is the
+        // chain's MTP is the resolver's check, not the block's (step 4, docs/design/connect-rules.md).
+        .{ .name = "time lock 2 (bit 22), claim 0", .seq = 0x00400002, .want = .accepted },
     };
     for (cases) |c| {
         std.debug.print("BIP68: {s}\n", .{c.name});
@@ -348,6 +349,98 @@ test "block negative: BIP68 height-based relative locks (CONNECT-RULES step 2)" 
     std.debug.print("BIP68: lock 2 at height 1000 (before CSV)\n", .{});
     const pre = try legacy(a, .{ .version = 2, .ins = &.{.{ .seq = 2 }}, .outs = &.{.{}} });
     try std.testing.expectEqual(Verdict.accepted, try judge(a, pre, pre_ctx));
+}
+
+fn judgeM(a: std.mem.Allocator, raw: []const u8, mtps: []const u32, ctx: checks.Ctx) !Verdict {
+    var c = ctx;
+    c.force = true;
+    const airs = try bsys.parseAirs(a);
+    const b = bsys.buildFull(a, raw, try bsys.syntheticUndo(a, raw, c.height), c, .{ .mtps = mtps }) catch |e| {
+        std.debug.print("  (witness generation failed: {s})\n", .{@errorName(e)});
+        return .rejected;
+    };
+    if (try bsys.firstViolation(a, &airs, &b)) |v| {
+        std.debug.print("  {s} row {d} violates constraint {d}\n", .{ bsys.names[v.comp], v.row, v.constraint });
+        return .rejected;
+    }
+    if (try bsys.unbalanced(a, &airs, &b)) |rel| {
+        std.debug.print("  relation {d} unbalanced\n", .{rel});
+        return .rejected;
+    }
+    return .accepted;
+}
+
+test "block negative: BIP68 time-based relative locks against the claimed MTP (CONNECT-RULES step 4)" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const prev: u32 = 1231715347;
+    const ctx = checks.Ctx{ .height = 500000, .prev_mtp = prev, .anc = checks.ancOf("170") };
+    // Core: the lock is met when prev_mtp >= claim + 512 * lock (claim: the MTP of the block before the coin's).
+    const Case = struct { name: []const u8, seq: u32, version: u32 = 2, claim: u32, want: Verdict, nclaims: usize };
+    const cases = [_]Case{
+        .{ .name = "lock 2, claim = prev - 1024 (exactly met)", .seq = 0x00400002, .claim = prev - 1024, .want = .accepted, .nclaims = 1 },
+        .{ .name = "lock 2, claim = prev - 1023", .seq = 0x00400002, .claim = prev - 1023, .want = .rejected, .nclaims = 1 },
+        .{ .name = "lock 2, claim = prev", .seq = 0x00400002, .claim = prev, .want = .rejected, .nclaims = 1 },
+        .{ .name = "lock 2, claim = prev + 1", .seq = 0x00400002, .claim = prev + 1, .want = .rejected, .nclaims = 1 },
+        .{ .name = "lock 2, claim = 0xffffffff", .seq = 0x00400002, .claim = 0xffffffff, .want = .rejected, .nclaims = 1 },
+        .{ .name = "lock 2, claim = prev - 1024 - 65536 (other limb)", .seq = 0x00400002, .claim = prev - 1024 - 65536, .want = .accepted, .nclaims = 1 },
+        .{ .name = "lock 2, claim = prev - 1024 + 65536", .seq = 0x00400002, .claim = prev - 1024 + 65536, .want = .rejected, .nclaims = 1 },
+        .{ .name = "lock 1, claim = prev - 512", .seq = 0x00400001, .claim = prev - 512, .want = .accepted, .nclaims = 1 },
+        .{ .name = "lock 1, claim = prev - 511", .seq = 0x00400001, .claim = prev - 511, .want = .rejected, .nclaims = 1 },
+        .{ .name = "lock 65535, claim = prev - 512*65535", .seq = 0x0040ffff, .claim = prev - 512 * 65535, .want = .accepted, .nclaims = 1 },
+        .{ .name = "lock 65535, claim = prev - 512*65535 + 1", .seq = 0x0040ffff, .claim = prev - 512 * 65535 + 1, .want = .rejected, .nclaims = 1 },
+        .{ .name = "lock 2 with the unused bits set, claim = prev - 1023", .seq = 0x7fff0002, .claim = prev - 1023, .want = .rejected, .nclaims = 1 },
+        // A zero time lock is checked like any other: met by every true claim (the MTP never decreases).
+        .{ .name = "lock 0, claim = prev", .seq = 0x00400000, .claim = prev, .want = .accepted, .nclaims = 1 },
+        .{ .name = "lock 0, claim = prev + 1", .seq = 0x00400000, .claim = prev + 1, .want = .rejected, .nclaims = 1 },
+        .{ .name = "lock 2 disabled (bit 31), claim = prev", .seq = 0x80400002, .claim = prev, .want = .accepted, .nclaims = 0 },
+        .{ .name = "lock 2, version 1, claim = prev", .seq = 0x00400002, .version = 1, .claim = prev, .want = .accepted, .nclaims = 0 },
+        .{ .name = "height lock 1 (no time bit), claim = prev", .seq = 1, .claim = prev, .want = .accepted, .nclaims = 0 },
+    };
+    for (cases) |c| {
+        std.debug.print("BIP68 time: {s}\n", .{c.name});
+        const raw = try segwitBlock(a, 500000, .{ .version = c.version, .seq = c.seq });
+        try std.testing.expectEqual(c.want, try judgeM(a, raw, &.{c.claim}, ctx));
+        if (c.want == .accepted) {
+            // The claims the block adds to its public sum: one per enforced time lock.
+            const b = try bsys.buildFull(a, raw, try bsys.syntheticUndo(a, raw, 500000), ctx, .{ .mtps = &.{c.claim} });
+            try std.testing.expectEqual(c.nclaims, b.nclaims);
+        }
+    }
+    // Without `force`, the witness builder refuses an unmet lock.
+    const raw = try segwitBlock(a, 500000, .{ .seq = 0x00400002 });
+    try std.testing.expectError(error.TimeLockNotMet, bsys.buildFull(a, raw, try bsys.syntheticUndo(a, raw, 500000), ctx, .{ .mtps = &.{prev - 1023} }));
+}
+
+test "block negative: BIP68 time claims: the honest claim is the median time past before the coin's block" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    // A chain whose header `i` has time `1000 + i`: the median of the 11 before block `c` is `1000 + c − 6`.
+    const headers = try a.alloc([80]u8, 500000);
+    for (headers, 0..) |*h, i| {
+        @memset(h, 0);
+        std.mem.writeInt(u32, h[68..72], @intCast(1000 + i), .little);
+    }
+    const ctx = checks.Ctx{ .height = 500000, .prev_mtp = 1231715347, .anc = checks.ancOf("170") };
+    const Case = struct { seq: u32, version: u32 = 2, want: u32 };
+    // The synthetic undo's coins are from height 499,999.
+    for ([_]Case{
+        .{ .seq = 0x00400002, .want = 1000 + 499999 - 6 },
+        .{ .seq = 0x00400000, .want = 1000 + 499999 - 6 },
+        .{ .seq = 1, .want = 0 },
+        .{ .seq = 0x80400002, .want = 0 },
+        .{ .seq = 0x00400002, .version = 1, .want = 0 },
+    }) |c| {
+        const raw = try segwitBlock(a, 500000, .{ .version = c.version, .seq = c.seq });
+        const claims = try bsys.timeClaims(a, raw, try bsys.syntheticUndo(a, raw, 500000), headers, 500000);
+        try std.testing.expectEqualSlices(u32, &.{c.want}, claims);
+        try std.testing.expectEqual(Verdict.accepted, try judgeM(a, raw, claims, ctx));
+    }
+    // Before CSV activation no claim is made.
+    const pre = try legacy(a, .{ .version = 2, .ins = &.{.{ .seq = 0x00400002 }}, .outs = &.{.{}} });
+    for (try bsys.timeClaims(a, pre, try bsys.syntheticUndo(a, pre, 1000), headers, 1000)) |m| try std.testing.expectEqual(@as(u32, 0), m);
 }
 
 test "block negative: BIP68: a forged lock bit is caught by the fields' constraint; a cleared one unbalances the input tuple" {

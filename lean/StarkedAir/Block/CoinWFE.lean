@@ -198,7 +198,7 @@ theorem epoch_systems_wf (nb : ℕ) (inst : ℕ → ℕ → Inst) (pub : ℕ →
           ((α, z) ∉ Bad →
             init.length + Multiset.card (created g0 (allTxs N blocks)) + Multiset.card (spent (allTxs N blocks)) +
               fin.length < P →
-            ∑ i ∈ Finset.range nb, RunSum.pQ (pub i) Coin.PUB_S + (init.map (efrac N γ α z)).sum =
+            ∑ i ∈ Finset.range nb, (RunSum.pQ (pub i) Coin.PUB_S - claimSum (inst i) (L i 14)) + (init.map (efrac N γ α z)).sum =
               (fin.map (efrac N γ α z)).sum →
             (∃ m, Spec.Coins.connectTxs (Spec.Coins.untag (vmap coinOfVal (viewOf init))) (allTxC N blocks) =
                 some (Spec.Coins.untag (vmap coinOfVal m), (allTxC N blocks).map Spec.Coins.claimFee) ∧

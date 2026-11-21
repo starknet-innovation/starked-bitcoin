@@ -747,7 +747,7 @@ fn proveBlock(gpa: std.mem.Allocator, a: std.mem.Allocator, block_path: []const 
     const ctx = sb.block.checks.Ctx{ .height = height, .prev_mtp = PF.prevMtp(all, height), .anc = PF.ancestors(all, height) };
     var timer = try std.time.Timer.start();
     const airs = try BS.parseAirs(a);
-    const b = try BS.buildFull(a, raw, undo, ctx, .{ .auto = true });
+    const b = try BS.buildFull(a, raw, undo, ctx, .{ .auto = true, .mtps = try BS.timeClaims(a, raw, undo, all, height) });
     if (b.ntx > 1 and undo.len == 1) {
         std.debug.print("REJECTED: the block spends outputs; pass its undo stream (scripts/fetch_undo.py), not `-`\n", .{});
         return error.UndoRequired;

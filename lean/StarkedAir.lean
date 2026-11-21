@@ -102,6 +102,7 @@ import StarkedAir.Block.FieldsWits
 import StarkedAir.Block.FieldsSig
 import StarkedAir.Block.SigCost
 import StarkedAir.Block.SigEpoch
+import StarkedAir.Block.TimeLock
 import StarkedAir.Block.AggregateBlocks
 import StarkedAir.Block.CoinWFE
 import StarkedAir.Block.CoinRecs

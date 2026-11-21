@@ -352,7 +352,7 @@ test "block proof file: round trip, verify, and the header checks (block 170, te
     var c: [32]u8 = undefined;
     for (0..8) |w| std.mem.writeInt(u32, c[4 * w ..][0..4], b.commitment_words[w], .little);
     var want: [32]u8 = undefined;
-    std.crypto.hash.blake2.Blake2s256.hash(try bs.undoStreamOf(a, s.raw, s.undo, null, s.ctx.height), &want, .{});
+    std.crypto.hash.blake2.Blake2s256.hash(try bs.undoStreamOf(a, s.raw, s.undo, null, null, s.ctx.height), &want, .{});
     try std.testing.expectEqualSlices(u8, &want, &c);
 }
 
@@ -382,11 +382,12 @@ test "block 170 with its undo stream from the node: the commitment is blake2s of
     var c: [32]u8 = undefined;
     for (0..8) |w| std.mem.writeInt(u32, c[4 * w ..][0..4], b.commitment_words[w], .little);
     // Computed independently (Python hashlib.blake2s over the fetched stream with the record's 3-byte
-    // creating-transaction index, 0, and its 2-byte serTxOut length, 76, after its code).
+    // creating-transaction index, 0, and its 2-byte serTxOut length, 76, after its code, and the 4-byte
+    // claimed median time past, 0, after its serTxOut: CONNECT-RULES step 4; 90 bytes).
     var want: [32]u8 = undefined;
-    _ = try std.fmt.hexToBytes(&want, "d36ebac0076bd797bb6a9cb46a43319f48603a5c065c34e12c6df84a5c152480");
+    _ = try std.fmt.hexToBytes(&want, "ab90e2fa55d75f5870e58c228e7f1d93123d154ad5821b4c152b6734ae3a3c4f");
     try std.testing.expectEqualSlices(u8, &want, &c);
-    try std.testing.expectEqual(@as(u32, 86), b.pubs[8].toU32());
+    try std.testing.expectEqual(@as(u32, 90), b.pubs[8].toU32());
 }
 
 test "block proof file: a self-contained window binds block 170 to a 1024-header MMR (test strength)" {

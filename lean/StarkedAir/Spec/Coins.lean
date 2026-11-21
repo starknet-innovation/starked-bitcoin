@@ -206,6 +206,16 @@ def heightLockOk (h version sequence coinHeight : ℕ) : Bool :=
       decide (sequence / 2 ^ 22 % 2 = 0)) ||
     decide (coinHeight + sequence % 2 ^ 16 ≤ h)
 
+/-- **The time-based half of Core's `SequenceLocks`** (BIP68, CONNECT-RULES step 4), for one input: when
+CSV is active, the version is at least 2, bit 31 of the sequence is clear and bit 22 is set, the median
+time past of the block before the coin's (`coinMtp`) plus `512 ·` the sequence's low 16 bits is at most the
+median time past of the block before the spending one (`prevMtp`). Core: `nMinTime = coinMtp +
+(lock << 9) − 1` must be below the block's previous median time past. -/
+def timeLockOk (h version sequence coinMtp prevMtp : ℕ) : Bool :=
+  !(decide (CSV_HEIGHT ≤ h) && decide (2 ≤ version) && decide (sequence / 2 ^ 31 % 2 = 0) &&
+      decide (sequence / 2 ^ 22 % 2 = 1)) ||
+    decide (coinMtp + 512 * (sequence % 2 ^ 16) ≤ prevMtp)
+
 /-- `spendIns` with each input's height lock checked against the coin it finds (`version` is the
 transaction's; each input is its prevout and its sequence). -/
 def spendInsL (h version : ℕ) : CView → List (OutPoint × ℕ) → Option (CView × ℤ)

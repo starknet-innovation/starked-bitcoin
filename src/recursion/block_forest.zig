@@ -406,10 +406,10 @@ test "block VK round trip; expected keys fold as the nodes do" {
 
 /// SHA-256 of the uniform block VK set up (`setup`) from the test-strength proofs of blocks 0 and 170
 /// (block sizes 2^11 and 2^12). It pins the block AIRs and the leaf circuit.
-/// Since CONNECT-RULES step 3 (2026-11-20: the full sigop cost; step 2, 2026-11-19, gave `95cda9e5…f426`). With the AIRs of m3a5
+/// Since CONNECT-RULES step 4 (2026-11-20: the time-based lock's claim; step 3 gave `6f40f98f…9292`, step 2 `95cda9e5…f426`). With the AIRs of m3a5
 /// (2196ba3), which D-045 kept unchanged and the proofs of blocks 935,001-972,500 use, it was
 /// `golden_vk_0_170_m3a5`.
-pub const golden_vk_0_170 = "6f40f98ffbc27945451564a1b088df2cf1dcf53d3a8804ad86fef470347a9292";
+pub const golden_vk_0_170 = "6a1508994399ed79bb7a8493991b800385be8e146973a87f955b525a43c08b82";
 pub const golden_vk_0_170_m3a5 = "dc0661443658274e9d278072f5118a5c7a1d91d04616c2ce02650a3090c695f8";
 
 test "block VK golden: the uniform key of blocks 0 and 170" {

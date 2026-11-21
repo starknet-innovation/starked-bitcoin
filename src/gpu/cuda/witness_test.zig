@@ -4,7 +4,7 @@
 //!
 //! 1. Kernels = CPU generators: for a block, `witness.Bound.upload` + `generate` over host memory
 //!    reproduce `block.system.buildFull`'s `block_sha` (144), `block_b2s` (312), `block_msg` (38),
-//!    `block_walk` (51) and `block_bytes` (12) columns and
+//!    `block_walk` (71) and `block_bytes` (12) columns and
 //!    `system.preprocessedNatural` (tree 0) exactly. Block 0 uniform and tiered, blocks 170 and
 //!    91812 tiered; `STARKED_WITNESS_SAMPLES=2,4,5` adds small samples, `STARKED_WITNESS_LARGE=400000`
 //!    a large block (tiered, its own L; SHA and Blake2s only; several GB of RAM).
@@ -255,7 +255,7 @@ fn checkSampleOpts(host: *const Host, cat: *const catalog_mod.Catalog, airs: *co
         const img = hostWords(bound.buffers.inputs);
         const l = plan.layout;
         const C = bs.C;
-        inline for (.{ l.comps + 24 + 8 + 5, l.periods + 24, l.msgs + 1, l.walk + 4 + 3, l.mults }, .{ C.sha, C.b2s, C.msg, C.walk, C.bytes }) |at, comp| {
+        inline for (.{ l.comps + 24 + 8 + 5, l.periods + 24, l.msgs + 1, l.walk + 8 + 3, l.mults }, .{ C.sha, C.b2s, C.msg, C.walk, C.bytes }) |at, comp| {
             img[at] ^= 1;
             try bound.generate(&session);
             const first = switch (comp) {
@@ -282,7 +282,7 @@ fn checkSampleOpts(host: *const Host, cat: *const catalog_mod.Catalog, airs: *co
         try expectColumns("block_sha", @ptrCast(b.mains[bs.C.sha]), staging1[plan.sha_first..][0..witness.SHA_COLUMNS]);
         std.debug.print("cuda witness: mutations (a message word, a Blake2s counter, a message id, a sigop sum, a byte multiplicity) are caught\n", .{});
     }
-    std.debug.print("cuda witness: block {d} {s} (L {d}, sha log {d}: {d} compressions; b2s log {d}: {d} blocks): kernels = CPU for block_sha (144), block_b2s (312), block_msg (38), block_walk (51), block_bytes (12){s}; {d} launches, {d} KiB uploaded, {d} ms on the host\n", .{
+    std.debug.print("cuda witness: block {d} {s} (L {d}, sha log {d}: {d} compressions; b2s log {d}: {d} blocks): kernels = CPU for block_sha (144), block_b2s (312), block_msg (38), block_walk (71), block_bytes (12){s}; {d} launches, {d} KiB uploaded, {d} ms on the host\n", .{
         s.ctx.height,                     @tagName(b.profile), b.log_size, plan.sha_log, inputs.compressions.len, plan.b2s_log, inputs.blocks.len,
         if (pre) " and tree 0" else "", session.launches,    session.context.uploaded / 1024, elapsed / std.time.ns_per_ms,
     });
@@ -313,10 +313,10 @@ test "cuda witness: the AOT generators (host C++) reproduce block_sha, block_b2s
     } else |_| {}
     if (std.process.getEnvVarOwned(a, "STARKED_WITNESS_LARGE")) |h| {
         const height = try std.fmt.parseInt(u32, h, 10);
-        for (sb.block.checks.samples_large) |s| if (s.ctx.height == height) {
-            try checkSample(&host, &cat, airs, s, .tiered, 0, false);
-            break;
+        const s = for (sb.block.checks.samples_large) |s| {
+            if (s.ctx.height == height) break s;
         } else return error.NoSuchLargeSample;
+        try checkSample(&host, &cat, airs, s, .tiered, 0, false);
     } else |_| {}
 }
 

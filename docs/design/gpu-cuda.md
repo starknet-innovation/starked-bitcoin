@@ -146,6 +146,16 @@ After phase 1 the host witness at 2^23 was walk (0.70 s on the M4 Pro), msg (0.4
 
 The sigop automaton is sequential per script, so the host keeps that pass (`walk.plan`, a tight loop with no field inversions) and the kernel expands each record into the 51 columns (the next state, the zero tests and their inverses). `walk.generate` is now `plan` + `columns`, and `msg.generate` collects its reads through `appendReads`: the CPU columns are unchanged (golden hashes). With `skip_device_columns`, `buildFull` leaves the three mains empty and keeps `Built.raw`, `msgs`, `walk_recs` and `byte_mults`.
 
+**CONNECT-RULES (2026-11-20, branch `connect-rules`).** `block_walk` has 71 columns since step 3 (the
+accurate sigop count). The record is now 32 bytes per walked row: the four words above, then `x0` (mode,
+`po`, `pv`, `hcn`), `rs`, `rl` and the running accurate count; the header's second word is the accurate
+total (`SUMA` on padding rows). The kernel writes all 71 columns. The other changed components (`fields`,
+`ctx`, `urec`, `coin`, `tablesb`) are host witnesses; their constraint and LogUp kernels are regenerated
+in `gpu/cuda_aot` (6 constraint, 6 LogUp, 1 witness source replaced; the set-pass kernels did not
+change). Host checks: `zig build cuda-test -Dcuda=true -Doptimize=ReleaseFast` passes (kernels = CPU on
+blocks 0, 170, 91,812, and with `STARKED_WITNESS_LARGE=970347` on a 2^23 block with P2SH and witness
+spans); `cuda-check` passes. **Not run on a GPU**: device parity and timings of the new AIRs need a pod.
+
 Host checks (`witness_test.zig`): the kernels as host C++ equal the CPU columns of all five generated components for blocks 0 (uniform, tiered), 170, 91812, 91722, 91842, 91880 and 400000 (L 22); flipping a message id, a sigop sum or a byte multiplicity changes the output; `.trace_generation` over block 0's real plans equals the CPU storage order.
 
 M4 Pro, production, tiered, `cuda-prove --skip-cpu` (stops at session open):

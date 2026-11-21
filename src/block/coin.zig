@@ -25,7 +25,7 @@ pub const PUB_SUBL = 159;
 pub const PUB_SUBH = 160;
 pub const N_PUB = 161;
 /// Main columns (Lean `Coin.N_MAIN`).
-pub const N_MAIN = 173;
+pub const N_MAIN = 193;
 /// The coin component's `CTX` column (Lean `Coin.CTX`).
 pub const CTX_COL = 80;
 
@@ -134,7 +134,12 @@ pub fn fpwalkColumns(a: std.mem.Allocator, log_size: u32, raw: []const u8, undo:
 }
 
 /// An undo record's parts.
-pub const Rec = struct { start: u32, tl: u32, code: u32, value: u64, ctx: u32 };
+pub const Rec = struct { start: u32, tl: u32, code: u32, value: u64, ctx: u32, mtp: u32 = 0 };
+
+/// CONNECT-RULES step 4: after its `serTxOut`, each in-circuit record carries the claimed median time
+/// past of the block before the spent coin's (4 bytes, 0 when no time lock is enforced). It is under the
+/// block commitment, so it is fixed before the epoch challenge (D-054).
+pub const UMTP = 4;
 
 /// A record's header in the in-circuit stream: the 4-byte code, the creating transaction's index (3
 /// bytes), and the `serTxOut` length (2 bytes). The index and the length are committed with the code: the
@@ -164,8 +169,12 @@ fn parseRecs(a: std.mem.Allocator, undo: []const u8, hdr: usize) ![]Rec {
         const tl = 8 + sl.h + sl.v;
         if (p + hdr + tl > undo.len) return error.BadUndoStream;
         if (tl_hdr) |x| if (x != tl) return error.BadUndoStream;
-        try out.append(a, .{ .start = @intCast(p), .tl = @intCast(tl), .code = code, .value = value, .ctx = cx });
-        p += hdr + tl;
+        var mtp: u32 = 0;
+        const tail: usize = if (hdr == UHDR) UMTP else 0;
+        if (p + hdr + tl + tail > undo.len) return error.BadUndoStream;
+        if (hdr == UHDR) mtp = std.mem.readInt(u32, undo[p + hdr + tl ..][0..4], .little);
+        try out.append(a, .{ .start = @intCast(p), .tl = @intCast(tl), .code = code, .value = value, .ctx = cx, .mtp = mtp });
+        p += hdr + tl + tail;
     }
     return out.toOwnedSlice(a);
 }
@@ -179,9 +188,10 @@ pub fn records(a: std.mem.Allocator, undo: []const u8) ![]Rec {
 /// The in-circuit undo stream from a fetched one (`0x01`, per record a 4-byte code and a `serTxOut`) and
 /// the creating transactions' indices (`ctx`, per record; 0 when absent). A same-block creator's index is
 /// found by txid.
-pub fn undoStream(a: std.mem.Allocator, fetched: []const u8, ctx: ?[]const u32, raw: []const u8, rows: []const fields.Row, txids: []const [32]u8, height: u32) ![]u8 {
+pub fn undoStream(a: std.mem.Allocator, fetched: []const u8, ctx: ?[]const u32, mtps: ?[]const u32, raw: []const u8, rows: []const fields.Row, txids: []const [32]u8, height: u32) ![]u8 {
     const recs = try parseRecs(a, fetched, 4);
     if (ctx) |c| if (c.len != recs.len) return error.CtxCountMismatch;
+    if (mtps) |c| if (c.len != recs.len) return error.MtpCountMismatch;
     var out = std.ArrayList(u8).empty;
     try out.append(a, 1);
     var txi: u32 = 0;
@@ -208,10 +218,51 @@ pub fn undoStream(a: std.mem.Allocator, fetched: []const u8, ctx: ?[]const u32, 
         std.mem.writeInt(u16, hdr[7..9], @intCast(rc.tl), .little);
         try out.appendSlice(a, &hdr);
         try out.appendSlice(a, fetched[rc.start + 4 ..][0..rc.tl]);
+        var mb: [UMTP]u8 = undefined;
+        std.mem.writeInt(u32, &mb, if (mtps) |c| c[j] else 0, .little);
+        try out.appendSlice(a, &mb);
         j += 1;
     }
     if (j != recs.len) return error.ExtraUndoRecords;
     return out.toOwnedSlice(a);
+}
+
+/// CONNECT-RULES step 4: the claims an honest prover commits, per undo record in input order: for an
+/// input whose time lock is enforced (as `coinColumns` decides: CSV active, version at least 2, bit 31 of
+/// the sequence clear, bit 22 set), the median time past of the block before the spent coin's (Core's
+/// `GetMedianTimePast` of block `c − 1`, from `headers` 0..); 0 for every other record.
+pub fn timeClaims(a: std.mem.Allocator, fetched: []const u8, raw: []const u8, rows: []const fields.Row, headers: []const [80]u8, height: u32) ![]u32 {
+    const recs = try parseRecs(a, fetched, 4);
+    const out = try a.alloc(u32, recs.len);
+    @memset(out, 0);
+    const csv = height >= connect_rules.CSV_HEIGHT;
+    var v2 = false;
+    var txi: u32 = 0;
+    var j: usize = 0;
+    for (rows) |tok| {
+        if (tok.kind == fields.K_TXH) v2 = std.mem.readInt(u32, raw[tok.start..][0..4], .little) >= 2;
+        if (tok.kind == fields.K_LOCK) {
+            txi += 1;
+            continue;
+        }
+        if (tok.kind != fields.K_IN or txi == 0) continue;
+        if (j >= recs.len) return error.MissingUndoRecord;
+        const seq = std.mem.readInt(u32, raw[tok.start + tok.len - 4 ..][0..4], .little);
+        if (csv and v2 and connect_rules.inputLock(seq) == .time) {
+            const c: usize = recs[j].code >> 1;
+            if (c > headers.len) return error.MissingHeaders;
+            // The median of the (up to) 11 headers before block `c`.
+            const lo = if (c >= 11) c - 11 else 0;
+            var t: [11]u32 = undefined;
+            const n = c - lo;
+            for (headers[lo..c], 0..) |h, i| t[i] = std.mem.readInt(u32, h[68..72], .little);
+            std.mem.sort(u32, t[0..n], {}, std.sort.asc(u32));
+            out[j] = if (n == 0) 0 else t[n / 2];
+        }
+        j += 1;
+    }
+    if (j != recs.len) return error.ExtraUndoRecords;
+    return out;
 }
 
 /// `block_urec`: one row per record; appends its reads to `undo_reads`.
@@ -222,7 +273,7 @@ pub fn urecColumns(a: std.mem.Allocator, log_size: u32, undo: []const u8, recs: 
     const TL = 3;
     const n = @as(usize, 1) << @intCast(log_size);
     if (recs.len + 1 > n) return error.RecordsDoNotFit;
-    const cols = try zeros(a, 39, n);
+    const cols = try zeros(a, 43, n);
     cols[S][0] = M31.one();
     try undo_reads.append(a, 0);
     for (recs, 0..) |rc, r| {
@@ -241,6 +292,11 @@ pub fn urecColumns(a: std.mem.Allocator, log_size: u32, undo: []const u8, recs: 
         for (0..5) |i| {
             cols[16 + i][r] = f(undo[rc.start + 4 + i]);
             try undo_reads.append(a, @intCast(rc.start + 4 + i));
+        }
+        // Step 4 (Lean `URec.MT`): the claimed median time past, after the serTxOut.
+        for (0..UMTP) |i| {
+            cols[39 + i][r] = f(undo[rc.start + UHDR + rc.tl + i]);
+            try undo_reads.append(a, @intCast(rc.start + UHDR + rc.tl + i));
         }
     }
     // CONNECT-RULES step 3 (Lean `URec.classC`): the spent script's class, on every row (the tests
@@ -307,6 +363,8 @@ pub const CoinInput = struct {
     chal: Challenge,
     /// Tests only: build the witness of a block whose relative lock is not met (see `checks.Ctx.force`).
     force: bool = false,
+    /// The previous block's median time past (public inputs 3 and 7), for time-based relative locks.
+    prev_mtp: u32 = 0,
 };
 
 pub const CoinOut = struct {
@@ -315,6 +373,9 @@ pub const CoinOut = struct {
     digest_uses: []u32,
     sum: QM31,
     nin: u32,
+    /// The time claims the block uses (step 4): the sum of their fractions, already in `sum`.
+    claims: QM31 = QM31.zero(),
+    nclaims: u32 = 0,
 };
 
 fn txidLimbs(t: [32]u8) [16]M31 {
@@ -453,6 +514,9 @@ pub fn coinColumns(a: std.mem.Allocator, log_size: u32, in: CoinInput, raw_reads
     var prev_ko = false;
     var prev_start: u32 = 0;
     var acc = QM31.zero();
+    var claims = QM31.zero();
+    var acc2 = QM31.zero();
+    var nclaims: u32 = 0;
     const b3 = struct {
         fn put(c: [][]M31, base: usize, row: usize, v: u32, rg: *std.ArrayList(u32), al: std.mem.Allocator) !void {
             if (v >= 1 << 24) return error.RangeOverflow;
@@ -481,6 +545,7 @@ pub fn coinColumns(a: std.mem.Allocator, log_size: u32, in: CoinInput, raw_reads
         cols[J][r] = f(j);
         // An input's lock, as the fields yield it (the coinbase's too: its tuple is the same relation's).
         var lock: connect_rules.Lock = .none;
+        var claim_fr = QM31.zero();
         if (!is_out) {
             const seq = std.mem.readInt(u32, in.raw[tok.start + tok.len - 4 ..][0..4], .little);
             cols[SQL][r] = f(seq & 0xffff);
@@ -494,10 +559,42 @@ pub fn coinColumns(a: std.mem.Allocator, log_size: u32, in: CoinInput, raw_reads
                 cols[170][r] = f(@intFromBool(cls.p2sh));
                 cols[171][r] = f(@intFromBool(cls.w20));
                 cols[172][r] = f(@intFromBool(cls.w32));
+                // Step 4 (Lean `Coin.timeC`): the record's claimed median time past; for an enforced time
+                // lock, `prev_mtp − claim − 512·lock` as a two-limb subtraction, and the claim's fraction.
+                cols[173][r] = f(rc.mtp & 0xffff);
+                cols[174][r] = f(rc.mtp >> 16);
+                if (lock == .time) {
+                    const lk: u32 = seq & 0xffff;
+                    const sa = lk & 127;
+                    const sh = lk >> 7;
+                    cols[175][r] = f(sa);
+                    cols[176][r] = f(sh & 0xff);
+                    cols[177][r] = f(sh >> 8);
+                    const need: u64 = @as(u64, rc.mtp) + 512 * @as(u64, lk);
+                    if (need > in.prev_mtp and !in.force) return error.TimeLockNotMet;
+                    const lo: i64 = @as(i64, in.prev_mtp & 0xffff) - @as(i64, rc.mtp & 0xffff) - 512 * @as(i64, sa);
+                    const bw: i64 = if (lo >= 0) 0 else if (lo >= -65536) 1 else 2;
+                    const ql: u32 = @intCast(lo + 65536 * bw);
+                    const hi: i64 = @as(i64, in.prev_mtp >> 16) - @as(i64, rc.mtp >> 16) - @as(i64, sh) - bw;
+                    const qh: u32 = @intCast(hi & 0xffff);
+                    cols[178][r] = f(@intFromBool(bw >= 1));
+                    cols[179][r] = f(@intFromBool(bw >= 2));
+                    const tq = [4]u32{ ql & 0xff, ql >> 8, qh & 0xff, qh >> 8 };
+                    for (tq, 0..) |b, i| cols[180 + i][r] = f(b);
+                    try ranges.appendSlice(a, &tq);
+                    try ranges.appendSlice(a, &.{ sa, 2 * sa, sh & 0xff });
+                    const fr2 = try claimFrac(ch, rc.code >> 1, rc.mtp);
+                    cols[184][r] = M31.one();
+                    setQ(cols, 185, r, fr2);
+                    claim_fr = fr2;
+                    claims = claims.add(fr2);
+                    nclaims += 1;
+                }
             }
         }
         var tuple: [W]M31 = [_]M31{M31.zero()} ** W;
         var m: i2 = 0;
+        _ = &claim_fr;
         if (is_out) {
             cols[KO][r] = M31.one();
             cols[LEN][r] = f(tok.len);
@@ -681,6 +778,8 @@ pub fn coinColumns(a: std.mem.Allocator, log_size: u32, in: CoinInput, raw_reads
         for (ch.alpha, tuple) |al, t| phi = phi.add(al.mulM31(t));
         const fr = if (m == 0) QM31.zero() else (try ch.z.sub(phi).inv()).mulM31(mv);
         acc = acc.add(fr);
+        acc2 = acc2.add(claim_fr);
+        setQ(cols, 189, r, acc2);
         setQ(cols, FC, r, fr);
         setQ(cols, ACC, r, acc);
         prev_start = tok.start;
@@ -773,8 +872,9 @@ pub fn coinColumns(a: std.mem.Allocator, log_size: u32, in: CoinInput, raw_reads
         cols[INVB][r] = (f(0).sub(f(0x6a))).inv() catch unreachable;
         cols[J][r] = f(j);
         setQ(cols, ACC, r, acc);
+        setQ(cols, 189, r, acc2);
     }
-    return .{ .cols = cols, .digest_uses = digest_uses, .sum = acc, .nin = j };
+    return .{ .cols = cols, .digest_uses = digest_uses, .sum = acc.add(acc2), .nin = j, .claims = claims, .nclaims = nclaims };
 }
 
 /// The public inputs 41–158 for a challenge and a block's sum.
@@ -790,6 +890,21 @@ pub fn pubs(ch: Challenge, sum: QM31, nin: u32, lost: bool, height: u32) [N_PUB 
     out[PUB_SUBL - 41] = f(sub & 0xffffff);
     out[PUB_SUBH - 41] = f(sub >> 24);
     return out;
+}
+
+/// The slot and value that tag a time claim's tuple (Lean `Coin.CLAIM_SLOT`, `CLAIM_TAG`): the code's
+/// high limb, below 2^16 on every coin tuple.
+pub const CLAIM_SLOT = 19;
+pub const CLAIM_TAG = 65536;
+
+/// The fraction `1/(z − φ₂)` of a time claim: the median time past of the block before height
+/// `coin_height` is `mtp` (step 4; Lean `Coin.tuple2`).
+pub fn claimFrac(ch: Challenge, coin_height: u32, mtp: u32) !QM31 {
+    var phi = ch.alpha[0].mulM31(f(coin_height));
+    phi = phi.add(ch.alpha[1].mulM31(f(mtp & 0xffff)));
+    phi = phi.add(ch.alpha[2].mulM31(f(mtp >> 16)));
+    phi = phi.add(ch.alpha[CLAIM_SLOT].mulM31(f(CLAIM_TAG)));
+    return ch.z.sub(phi).inv();
 }
 
 /// The fraction `1/(z − φ)` of a coin created by output `vout` of transaction `ctx` (txid `txid`) of a

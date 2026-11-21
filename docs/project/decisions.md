@@ -635,3 +635,33 @@ To undo: (1) point `hashSys` component 5 back at `Tables.tables` after widening 
 Confirmed by the owner, 2026-11-20 ("I'm ok but I want the lean proof asap"): D-057 is accepted. The soundness proof of (2) landed the same day (`block_sigop_cost`, `epoch_systems_coreS`).
 Sixteen `Compat.lean` pins re-pinned under D-056.
 
+### D-058 — CONNECT-RULES step 4: the claim's format and place in the public sum; four gate statements change; how to resolve the claims is open
+Date: 2026-11-20 · By: agent (Claude); **to confirm by the owner** · Status: proposed (parts 1–2 applied on branch `connect-rules`; part 3 open)
+Decision: (1) **Block side as built.** Every in-circuit undo record ends with a 4-byte claimed median time
+past (0 when unused; one format, no flag). `block_coin` checks `MTP(h−1) ≥ claim + 512·lock` on every input
+whose time lock is enforced, a zero lock included, and adds the claim's fraction to the **same** public
+partial sum through a second running sum, under a tuple tagged in slot 19 (`65536`, a value no coin event
+has there). The claim's key is the coin's height. Public inputs and recursion circuits do not change.
+(2) **Four `Compat.lean` statements change**, the first since the gate exists: `URec.rows_sound` (a record is
+4 bytes longer) and `epoch_blocks`, `epoch_systems_core`, `epoch_systems_wf` (the blocks' public sums are
+taken net of their claims, `claimSum`). Eight pins are re-pinned under D-056.
+(3) **Open: how the claims are resolved** ([connect-rules.md](../design/connect-rules.md) "Step 4").
+The resolver proof of D-054's option A is sound only if its list of claims is fixed before the epoch
+challenge (its digest in the seed), which the accepted design does not say. Options: R2, that resolver with
+the seed change (a new proof system inside the recursion, a path per claim); R5, no resolver: the coin's
+event carries `MTP(c − 1)` from its creation, the spend's event carries the claim, and the existing coin
+balance forces them equal (changes the event encoding, the set-pass AIR and the set file; `block_anc`
+below the CSV height for a run from genesis); D, leave time locks unproven. Agent's recommendation: R5.
+Why: (1) keeping the claims in the existing sum avoids a new public input, hence any change to the leaf,
+node, root and seal circuits; the tag keeps claims and events apart in one LogUp argument. Enforcing a zero
+lock costs one claim and avoids proving in the AIR that the median time past never decreases. (2) The
+public sum is no longer the events' sum, so the old statements are false as written; "net of claims" is
+what the block systems prove today. (3) is a soundness question and changes what is re-proven, so it is the
+owner's.
+Rejected: a separate public input for the claims' sum (every recursion circuit would carry it); a claim
+only on time-locked records (a flag per record and a variable record length for no measurable saving:
+4 bytes on 2.8·10^8 records per 37,500 blocks is about 3 % of the undo stream).
+To undo: (1) drop `Coin.timeC`, the seven range lookups and columns 173–192, `URec.MT` and its four reads;
+(2) revert the four statements and the eight hashes. Under R5, the fraction of (1) and all of (2) are
+undone by the design itself.
+

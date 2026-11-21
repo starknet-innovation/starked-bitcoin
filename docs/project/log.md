@@ -21,6 +21,33 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-11-20 · session 44 · CONNECT-RULES step 4 (block side built and proven; resolving the claims is an open decision) and step 5's local part (walker device kernel)
+
+Who: Claude (agent, Fable 5.2); owner: "do step 4 and 5"
+Roadmap: CONNECT-RULES in progress (step 4: block side done, the resolution blocked on D-058; step 5: kernels done on the host, GPU parity and the re-prove not run)
+Done:
+- Step 4, AIRs (Lean, exported): `block_urec` reads a 4-byte claimed median time past after each record's `serTxOut` (43 columns, 28 lookups); `block_coin` (`Coin.timeC`, 193 columns, 104 lookups) checks `MTP(h−1) ≥ claim + 512·lock` on every enforced time lock and adds the claim's fraction to the public sum (second running sum, tuple tagged in slot 19). Public inputs and recursion circuits unchanged.
+- Step 4, witness (Zig): undo stream v2 (`coin.undoStream(…, mtps, …)`, `system.Opts.mtps`), `coin.zig` time columns, `error.TimeLockNotMet`, `Built.claims_sum`/`nclaims`, `SITES` 28/104.
+- Step 4, Lean: the whole tree repaired for the new AIRs; new `Block/TimeLock.lean` (`in_time_lock`, `urec_mt_bytes`, `coin_mtp_lt`, `claim_sum_eq`, `phi2Q_eq`), `Coin.time_row`/`time_bits`, `coin_urec_mtp`, `Fields.lkt_of`, `Spec.Coins.timeLockOk`, `RunSum` section `Rows3`; `coin_block_sum`/`block_event_sum` now `events + claimSum`; the epoch statements net of `claimSum`.
+- `Compat.lean`: 8 pins re-pinned; **4 statements changed** (`URec.rows_sound`, `epoch_blocks`, `epoch_systems_core`, `epoch_systems_wf`), recorded in the file and in D-058.
+- Step 4, claims: `system.timeClaims` (the honest claim per record from the header file), used by `epoch_run.zig` (commitment and witness) and `chainproof prove-block`; tested on a synthetic chain.
+- Finding: the resolver of the accepted design is unsound unless its claim list is fixed before the challenge. Options R2 / R5 / D written up in connect-rules.md "Step 4"; D-058 asks the owner (agent's recommendation: R5, the coin carries its time).
+- Step 5 (local part): `walk.Rec` is 8 words (the step 3 state for the device), the `walk` kernel writes 71 columns, `Built.siga`; `gpu/cuda_aot` regenerated for the changed block AIRs (set-pass kernels unchanged); `witness_test.zig`'s large-sample lookup fixed (it only ever accepted the first sample).
+Evidence:
+- `lake build`: exit 0 (scratch `lake5.log`); `#print axioms` of `in_time_lock`, `claim_sum_eq`, `phi2Q_eq`: `propext`, `Classical.choice`, `Quot.sound`.
+- `scripts/check_air_drift.sh`: 93 of 93 `ok`, exit 0.
+- `zig build test -Doptimize=ReleaseFast`: `--summary all`: 11/11 steps, 154/156 tests passed, 2 skipped, exit 0, after re-pinning three goldens that pin the block AIRs (`golden_small`, `golden_vk_0_170` = `6a150899…8b82`, the block 170 commitment `ab90e2fa…3c4f`, recomputed independently with Python's `hashlib.blake2s`; `pub 8` 86 → 90). The 17 new time-lock cases are in "block negative: BIP68 time-based relative locks against the claimed MTP".
+- `zig build cuda-test -Dcuda=true -Doptimize=ReleaseFast`: exit 0; with `STARKED_WITNESS_LARGE=970347 … -Dtest-filter="the AOT generators"`: kernels = CPU for `block_walk` (71) on a 2^23 block. `zig build cuda-check -Dcuda=true`: exit 0.
+Problems / lessons:
+- Two fractions per row do not fit `RunSum`'s single-fraction lemmas: a second running sum (`FC2`, `ACC2`) with its own lemmas (`Rows3`) was simpler than generalising.
+- `simp` with `Coin.lookups` (104 entries) times out in `whnf`; `rfl` lemmas per lookup (`lk0…lk6`, `lg0…lg6`) and `lookups_len` avoid it.
+- Running `check_air_drift.sh` while `lake build` rewrites oleans reports false drift. Run them in sequence.
+- I designed the block side before checking the resolver's soundness. The check (who fixes the resolver's rows before the challenge?) should have come first: under R5 the claim's fraction built today is replaced.
+- Not done: the resolver or R5; a run over real blocks with time locks; GPU parity of the new AIRs; TIERS-2 on the new needs; the re-prove (owner's go, GPU spend).
+Next: the owner decides D-058 (R2, R5 or D). Then build that; then TIERS-2, GPU parity, the re-prove.
+
+---
+
 ## 2026-11-20 · session 43 · CONNECT-RULES step 3: the full sigop cost proven in Lean (block and epoch statements)
 
 Who: Claude (agent, Fable 5.2); owner: "I'm ok but I want the lean proof asap" (D-057 confirmed)

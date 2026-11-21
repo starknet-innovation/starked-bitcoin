@@ -85,6 +85,7 @@ pub const Epoch = struct {
         return bs.buildFull(a, f.raw, f.undo, self.ctxOf(i), .{
             .chal = self.ch,
             .ctx = f.ctx,
+            .mtps = try bs.timeClaims(a, f.raw, f.undo, self.all, self.heights[i]),
             .profile = if (size == .tiered) .tiered else .uniform,
             .auto = size == .auto,
             .skip_device_columns = skip_device_columns,
@@ -146,7 +147,7 @@ pub fn load(a: std.mem.Allocator, all: []const [80]u8, n: u32, dir: []const u8, 
         std.crypto.hash.sha2.Sha256.hash(f.raw[0..80], &h1, .{});
         std.crypto.hash.sha2.Sha256.hash(&h1, &hashes[i], .{});
         // The commitment is of the in-circuit stream, which holds the creating transactions' indices.
-        std.crypto.hash.blake2.Blake2s256.hash(try bs.undoStreamOf(ta, f.raw, f.undo, f.ctx, hh), &commits[i], .{});
+        std.crypto.hash.blake2.Blake2s256.hash(try bs.undoStreamOf(ta, f.raw, f.undo, f.ctx, try bs.timeClaims(ta, f.raw, f.undo, all, hh), hh), &commits[i], .{});
         _ = try set.apply(ta, f.raw, &all[hh], hh, false);
         try set.maybeCompact();
     }

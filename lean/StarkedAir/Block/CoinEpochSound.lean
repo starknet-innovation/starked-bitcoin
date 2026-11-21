@@ -324,7 +324,8 @@ theorem block_claims (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
   exact ⟨claim, fun t tx htx ht1 k i hi => hclaim t k tx htx ht1 i hi⟩
 
 /-- **The block's partial sum, as epoch events.** With a claim function giving each input row's tuple,
-the public partial sum is the block's created events' `1/(z − φ(encE))` minus its spent events'. -/
+the public partial sum is the block's created events' `1/(z − φ(encE))` minus its spent events', plus the
+block's time claims (`claimSum`, CONNECT-RULES step 4). -/
 theorem block_event_sum (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
     (hon : ∀ j < 2 ^ Ls 14, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
     (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
@@ -338,10 +339,12 @@ theorem block_event_sum (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 1
           tupleOf (FpWalk.gQ pub) i.prevout.hash i.prevout.n (claim t k).code (claim t k).ser (claim t k).ctx) :
     let F' := fun ev : CEv => (RunSum.pQ pub Coin.PUB_Z - phiOf pub (encE N (FpWalk.gQ pub) ev))⁻¹
     let B : BlockC := ⟨h, S.b.txs, lost, claim⟩
-    RunSum.pQ pub Coin.PUB_S = ((created (N h) (blockTxs N B)).map F').sum - ((spent (blockTxs N B)).map F').sum := by
+    RunSum.pQ pub Coin.PUB_S = ((created (N h) (blockTxs N B)).map F').sum - ((spent (blockTxs N B)).map F').sum +
+      claimSum inst (Ls 14) := by
   intro F' B
-  rw [coin_block_sum hL hsat hL24 S he hon hlen hst hf htg hp2 hh hlost, created_sum, spent_sum,
-    blockTxs_length]
+  rw [coin_block_sum hL hsat hL24 S he hon hlen hst hf htg hp2 hh hlost]
+  congr 1
+  rw [created_sum, spent_sum, blockTxs_length]
   have hsp : ((blockTxs N B).map fun t => (t.ins.map F').sum).sum = ∑ t ∈ Finset.range S.b.txs.length,
       (match S.b.txs[t]? with | some tx => ((txIns N B t tx).map F').sum | none => 0) := by
     unfold blockTxs

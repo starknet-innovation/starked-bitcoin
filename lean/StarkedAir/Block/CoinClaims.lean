@@ -769,7 +769,7 @@ theorem block_factsL (S : Setup inst pub (Ls 1)) {h : ℕ} (hp2 : pub 2 = (h : F
     (hα : ∀ k < Coin.W, RunSum.pQ pub (Coin.PUB_ALPHA k) = α ^ k)
     (hne : ∀ (t' : ℕ) (tx' : Spec.Block.Tx), S.b.txs[t']? = some tx' → tx'.vin ≠ [] ∧ tx'.vout ≠ []) :
     ∃ claim : ℕ → ℕ → Claim,
-      (∀ N : ℕ → ℕ, RunSum.pQ pub Coin.PUB_S =
+      (∀ N : ℕ → ℕ, RunSum.pQ pub Coin.PUB_S - claimSum inst (Ls 14) =
         blockSum N (efrac N (FpWalk.gQ pub) α (RunSum.pQ pub Coin.PUB_Z)) ⟨h, S.b.txs, lost, claim⟩) ∧
       (∀ (N : ℕ → ℕ) (t : ℕ) (tx : Spec.Block.Tx), S.b.txs[t]? = some tx →
         ∀ ev ∈ txIns N ⟨h, S.b.txs, lost, claim⟩ t tx, ∃ c : Claim, ev = (ev.1, (c.code, c.ser), N (c.code / 2) + c.ctx) ∧
@@ -791,7 +791,7 @@ theorem block_factsL (S : Setup inst pub (Ls 1)) {h : ℕ} (hp2 : pub 2 = (h : F
     fun hp5 N t tx htx ht1 hcv => ?_⟩
   · have hs := block_event_sum hL hsat hL24 S he hon hlen hst hf htg hp2 hh hlost N claim
       (fun t tx htx ht1 k i hi => (hcl t tx htx ht1 k i hi).1)
-    rw [hs]
+    rw [hs, add_sub_cancel_right]
     unfold blockSum efrac
     congr 1 <;> congr 1 <;> apply Multiset.map_congr rfl <;> intro ev _ <;>
       rw [phiOf_poly pub α hα _ (by rw [encE_length]; rfl)]
@@ -824,7 +824,7 @@ theorem block_facts (S : Setup inst pub (Ls 1)) {h : ℕ} (hp2 : pub 2 = (h : F)
     (hα : ∀ k < Coin.W, RunSum.pQ pub (Coin.PUB_ALPHA k) = α ^ k)
     (hne : ∀ (t' : ℕ) (tx' : Spec.Block.Tx), S.b.txs[t']? = some tx' → tx'.vin ≠ [] ∧ tx'.vout ≠ []) :
     ∃ claim : ℕ → ℕ → Claim,
-      (∀ N : ℕ → ℕ, RunSum.pQ pub Coin.PUB_S =
+      (∀ N : ℕ → ℕ, RunSum.pQ pub Coin.PUB_S - claimSum inst (Ls 14) =
         blockSum N (efrac N (FpWalk.gQ pub) α (RunSum.pQ pub Coin.PUB_Z)) ⟨h, S.b.txs, lost, claim⟩) ∧
       (∀ (N : ℕ → ℕ) (t : ℕ) (tx : Spec.Block.Tx), S.b.txs[t]? = some tx →
         ∀ ev ∈ txIns N ⟨h, S.b.txs, lost, claim⟩ t tx, ∃ c : Claim, ev = (ev.1, (c.code, c.ser), N (c.code / 2) + c.ctx) ∧

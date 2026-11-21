@@ -79,7 +79,7 @@ pub fn profileLogs(L: u32, profile: Profile) [N_COMP]u32 {
 }
 
 /// Lookup sites per row of the 15 hashed-system components (Lean `hashRows`, Link.lean).
-pub const SITES = [15]u64{ 1, 46, 4, 6, 11, 2, 6, 12, 3, 1, 6, 11, 4, 24, 97 };
+pub const SITES = [15]u64{ 1, 46, 4, 6, 11, 2, 6, 12, 3, 1, 6, 11, 4, 28, 104 };
 
 /// Lean's `SizeOk` (Link.lean): each hashed-system component has at most 2^24 rows and the lookup
 /// site count `Σ kᵢ·2^logsᵢ` is below P. The soundness theorems cover only such sizes: uniform up to
@@ -113,6 +113,9 @@ pub const Built = struct {
     reads: []u32,
     /// M3b: the block's partial LogUp sum and its non-coinbase input count.
     coin_sum: @import("stwo_core").fields.qm31.QM31 = @import("stwo_core").fields.qm31.QM31.zero(),
+    /// Step 4: the sum of the block's time claims' fractions (part of `coin_sum`), and their number.
+    claims_sum: @import("stwo_core").fields.qm31.QM31 = @import("stwo_core").fields.qm31.QM31.zero(),
+    nclaims: u32 = 0,
     nin: u32 = 0,
     /// The `block_sha` inputs (compressions and final per-period `Meta`, after the digest
     /// multiplicities) and the in-circuit undo stream (`block_b2s`'s message): what a device witness
@@ -124,6 +127,8 @@ pub const Built = struct {
     raw: []const u8 = &.{},
     msgs: []const msg.Message = &.{},
     walk_recs: []const walk.Rec = &.{},
+    /// The accurate spans' weighted sigop count (the walker's `SUMA` total; the device kernel's padding rows).
+    siga: u32 = 0,
     /// The `block_bytes` multiplicities (reads per block position), with `skip_device_columns`.
     byte_mults: []const u32 = &.{},
 };
@@ -132,6 +137,9 @@ pub const Built = struct {
 pub const Opts = struct {
     chal: coin.Challenge = coin.Challenge.testing(),
     ctx: ?[]const u32 = null,
+    /// Step 4: per undo record, the claimed median time past of the block before the spent coin's (0
+    /// where no time lock is enforced); null: all zero.
+    mtps: ?[]const u32 = null,
     /// Pad the trace to at least 2^min_log rows (benchmarks: a small block at a real block's size).
     min_log: u32 = 0,
     /// The size profile to try; `tiered` falls back to `uniform` when the block doesn't fit it.
@@ -211,12 +219,18 @@ fn txidsOf(a: std.mem.Allocator, ntx: u32, msgs: []const msg.Message, digests: a
 
 /// The in-circuit undo stream of a block (`coin.undoStream`): the fetched records with their creating
 /// transactions' indices. Its Blake2s is the block's public commitment.
-pub fn undoStreamOf(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctxs: ?[]const u32, height: u32) ![]u8 {
+/// CONNECT-RULES step 4: the time claims of a block's undo records (`coin.timeClaims`), for `Opts.mtps`
+/// and `undoStreamOf`. `headers`: the chain's headers from genesis, at least up to the block.
+pub fn timeClaims(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, headers: []const [80]u8, height: u32) ![]u32 {
+    return coin.timeClaims(a, fetched, raw, try fields.tokenize(a, raw), headers, height);
+}
+
+pub fn undoStreamOf(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctxs: ?[]const u32, mtps: ?[]const u32, height: u32) ![]u8 {
     const rows = try fields.tokenize(a, raw);
     const ntx: u32 = @intCast(rows[0].val);
     const msgs = try msg.messages(a, try msg.txRanges(a, rows));
     const pl = try bsha.plan(a, raw, msgs);
-    return coin.undoStream(a, fetched, ctxs, raw, rows, try txidsOf(a, ntx, msgs, pl.digests), height);
+    return coin.undoStream(a, fetched, ctxs, mtps, raw, rows, try txidsOf(a, ntx, msgs, pl.digests), height);
 }
 
 /// What sizing a block needs, before any witness column: its tokens, messages, SHA plan (with the
@@ -243,7 +257,7 @@ pub const Shape = struct {
 
 /// `fetched`: the fetched undo stream; `ctxs`: the spent coins' creating transaction indices (or null).
 /// A wrong merkle root is an error unless `force`.
-pub fn shape(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctxs: ?[]const u32, height: u32, force: bool) !Shape {
+pub fn shape(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctxs: ?[]const u32, mtps: ?[]const u32, height: u32, force: bool) !Shape {
     const rows = try fields.tokenize(a, raw);
     const ntx: u32 = @intCast(rows[0].val);
     const txs = try msg.txRanges(a, rows);
@@ -251,7 +265,7 @@ pub fn shape(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctxs: ?
     var pl = try bsha.plan(a, raw, msgs);
     // M3b: the txids, and the in-circuit undo stream.
     const txids = try txidsOf(a, ntx, msgs, pl.digests);
-    const undo = try coin.undoStream(a, fetched, ctxs, raw, rows, txids, height);
+    const undo = try coin.undoStream(a, fetched, ctxs, mtps, raw, rows, txids, height);
     const nodes = try merkle.tree(a, ntx);
     const root = try merkle.extendPlan(a, &pl, nodes);
     if (!std.mem.eql(u8, raw[36..68], &bsha.digestBytes(root)) and !force) return error.BadMerkleRoot;
@@ -299,7 +313,7 @@ pub fn buildFull(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctx
     var ctx = ctx0;
     if (!ctx.csv()) ctx.prev_mtp = 0;
     if (ctx.csv() and ctx.anc == null) return error.MissingAncestors;
-    const sh = try shape(a, raw, fetched, opts.ctx, ctx.height, ctx.force);
+    const sh = try shape(a, raw, fetched, opts.ctx, opts.mtps, ctx.height, ctx.force);
     const rows = sh.rows;
     const ntx = sh.ntx;
     const txs = sh.txs;
@@ -336,7 +350,7 @@ pub fn buildFull(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctx
     var coin_raw_reads = std.ArrayList(u32).empty;
     var coin_ranges = std.ArrayList(u32).empty;
     const lost = lostHeight(ctx.height);
-    const co = try coin.coinColumns(a, logs[C.coin], .{ .raw = raw, .undo = undo, .rows = rows, .height = ctx.height, .txids = txids, .recs = recs, .lost = lost, .chal = opts.chal, .force = ctx.force }, &coin_raw_reads, &coin_ranges);
+    const co = try coin.coinColumns(a, logs[C.coin], .{ .raw = raw, .undo = undo, .rows = rows, .height = ctx.height, .txids = txids, .recs = recs, .lost = lost, .chal = opts.chal, .force = ctx.force, .prev_mtp = ctx.prev_mtp }, &coin_raw_reads, &coin_ranges);
     var fp_raw_reads = std.ArrayList(u32).empty;
     var fp_undo_reads = std.ArrayList(u32).empty;
     const allsegs = try std.mem.concat(a, coin.Seg, &.{ osegs, usegs });
@@ -413,12 +427,15 @@ pub fn buildFull(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctx
         .commitment = cx.hc,
         .reads = reads.items,
         .coin_sum = co.sum,
+        .claims_sum = co.claims,
+        .nclaims = co.nclaims,
         .nin = co.nin,
         .sha_plan = pl,
         .undo = undo,
         .raw = raw,
         .msgs = msgs,
         .walk_recs = wp.recs,
+        .siga = wk.siga,
         .byte_mults = byte_mults,
     };
 }
@@ -621,7 +638,7 @@ test "sigop cost: what the walker, the fields and the undo records count is Core
     defer arena.deinit();
     const a = arena.allocator();
     for ([_][]const checks.Sample{ &checks.samples_small, &checks.samples_large }) |set| for (set) |s| {
-        const sh = try shape(a, s.raw, s.undo, null, s.ctx.height, false);
+        const sh = try shape(a, s.raw, s.undo, null, null, s.ctx.height, false);
         const wp = try walk.plan(a, std.math.log2_int_ceil(usize, sh.needs[C.walk]), s.raw, sh.sig.spans);
         const nat = try rules.blockRules(a, s.raw, s.undo, s.ctx.height, true);
         try std.testing.expectEqual(nat.sigops.legacy, wp.sigops);
@@ -676,15 +693,15 @@ test "block system: block 0's STWZEVA-composed proof is byte-identical and verif
 /// block, proved by `proof_file.prove` at test strength (10 PoW bits, 3 queries, blowup 1). They pin
 /// the block AIRs: a change here is a change of every block proof and VK.
 /// Since CONNECT-RULES step 2 (2026-11-19: `block_fields` and `block_coin` gained the height-based
-/// relative lock) and step 3 (2026-11-20: the full sigop cost). The values of m3a5 (2196ba3), which D-045 kept unchanged and with which the proofs
+/// relative lock) step 3 (2026-11-20: the full sigop cost) and step 4 (2026-11-20: the time-based lock's claim). The values of m3a5 (2196ba3), which D-045 kept unchanged and with which the proofs
 /// of blocks 935,001-972,500 were made, are in `golden_small_m3a5`.
 pub const golden_small = [_][]const u8{
-    "d979da466c67710ea8bf9e3cb4aa4a7ca455ecdd087f7f065d014899bb60f26c", // 0
-    "4e540e8199539bf32c64f984cda148bd9e14c0fd39a8ffcc446c4bacd5ff8ad4", // 170
-    "436f19d25ceb27effa30bfda213ac0b596531a46d18f2fed90d8e55b3ad27208", // 91722
-    "82a1c42cb4fc2e157bb19aaae2bee5a136a21fbfe3e82aafce192e2fe2aa7bfa", // 91812
-    "84e59db217dd3fea7693fc4cd8f8555f82a6120d7eecd715a825bd55822df0c2", // 91842
-    "c64ce662ca43aa2732a135c87946b3916933e2564b8986151a770e9202405925", // 91880
+    "c9bca23c32a9355cabc801d8cfb643804d19201a3cfcae712a43d17829102502", // 0
+    "530bf9d8f098935c457676dc549285012df1504cf0a054e0e8daab8d9106c712", // 170
+    "b768a9508cff2f40a97b994e5586b2d12e80e5136a5ac70c09d5710815251b94", // 91722
+    "8605a38362c5ea5e6fc371035455363a27b041dd7af5b90a87116c8fdeaa0a6b", // 91812
+    "af2f7c58028bcf49ab4468aeedf25e32c92e4edd5df49e32f1b0daddedfe77e3", // 91842
+    "28b2426efe315380121d7251abb28148b46b8359848b9bae4c3b5fa0dd568321", // 91880
 };
 
 /// The same hashes with the AIRs before CONNECT-RULES step 2 (m3a5, 2196ba3). Kept for reference only.
@@ -829,7 +846,7 @@ test "block sizes: shape's needs give buildFull's (L, profile) on every sample (
         var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer arena.deinit();
         const a = arena.allocator();
-        const sh = try shape(a, s.raw, s.undo, null, s.ctx.height, false);
+        const sh = try shape(a, s.raw, s.undo, null, null, s.ctx.height, false);
         const r = sizeReport(sh.needs);
         const b = try buildFull(a, s.raw, s.undo, s.ctx, .{ .auto = true });
         std.debug.print("height {d}: survey L={d} {s} (uniform {d}, binding {s}); buildFull L={d} {s}\n", .{ s.ctx.height, r.sized.L, @tagName(r.sized.profile), r.uniform_L, if (r.binding) |i| names[i] else "floor", b.log_size, @tagName(b.profile) });

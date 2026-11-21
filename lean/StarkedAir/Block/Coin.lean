@@ -28,6 +28,7 @@ public.
 -/
 import StarkedAir.Block.URec
 import StarkedAir.Block.Ctx
+import StarkedAir.Block.RunSum
 
 namespace StarkedAir.Block.Coin
 
@@ -141,7 +142,26 @@ undo record to the fields' input row. -/
 def UP : ℕ := 170
 def U20 : ℕ := 171
 def U32 : ℕ := 172
-def N_MAIN : ℕ := 173
+/-! CONNECT-RULES step 4: a time-based relative lock. `ML`, `MH`: the claimed median time past of the
+block before the spent coin's (16-bit limbs, from the undo record). The lock `SQL = SA + 128·SH`
+(`SA < 128`, `SH = SH0 + 256·SHB < 512`), so `512·SQL = 512·SA + 65536·SH`. The check
+`prevMTP − claim − 512·SQL ≥ 0` is a two-limb subtraction: borrow `BW0 + BW1`, result bytes `TQ 0 … 3`.
+`FC2`: the claim's fraction `+1/(z − φ₂)` in the block's partial sum, `φ₂` the tuple
+`(HC, ML, MH)` with `65536` in the code's high slot, a value no coin tuple has there. -/
+def ML : ℕ := 173
+def MH : ℕ := 174
+def SA : ℕ := 175
+def SH0 : ℕ := 176
+def SHB : ℕ := 177
+def BW0 : ℕ := 178
+def BW1 : ℕ := 179
+def TQ (i : ℕ) : ℕ := 180 + i
+/-- `KI · LKT`: a time lock is enforced on this row (the claim's multiplicity). -/
+def TM : ℕ := 184
+def FC2 : ℕ := 185
+/-- The claims' running sum; the public partial sum is `ACC + ACC2` at the last row. -/
+def ACC2 : ℕ := 189
+def N_MAIN : ℕ := 193
 
 -- public inputs (after the block's 41 and the fingerprint's `γ` at 41–44)
 def PUB_Z : ℕ := 45
@@ -274,19 +294,46 @@ def localC : List Expr :=
     .sub (k SIDC) (.add (.mul (k KO) (k START)) (.mul (k KI) (k J))) ] ++
   (List.range 16).map (fun i => .mul (k KI) (.sub (k (TLB i)) (prevLimb i)))
 
+/-- The slot of a tuple that tags a time claim (the code's high limb, below `2^16` on every coin). -/
+def CLAIM_SLOT : ℕ := 19
+def CLAIM_TAG : ℕ := 65536
+
+/-- A time claim's tuple: the coin's height, the claimed time's limbs, the tag. -/
+def tuple2 : List Expr :=
+  [k HC, k ML, k MH] ++ (List.replicate 16 (cst 0)) ++ [cst CLAIM_TAG] ++ (List.replicate 6 (cst 0))
+
+#guard tuple2.length = W
+
+def phi2 : QE :=
+  (List.range W).foldl (fun acc j => acc.add ((pubQ (PUB_ALPHA j)).mul (base (tuple2.getD j (cst 0))))) (base (cst 0))
+
+/-- A time lock is enforced on this row. -/
+def tm : Expr := k TM
+
 /-- The running sum (`ExtSum`'s constraints, on this layout). -/
 def mE : Expr := k MM
 def fracC : List Expr := (((pubQ PUB_Z).sub phi).mul (colQ FC) |>.sub (base mE)).coords
 def zeroC : List Expr := (colQ FC).coords.map fun e => .mul (.sub one (.mul mE mE)) e
 def accC : List Expr := ((colQ ACC).sub (((base notFirst).mul (colQ ACC (-1))).add (colQ FC))).coords
-def lastC : List Expr := ((base isLast).mul ((colQ ACC).sub (pubQ PUB_S))).coords
+def lastC : List Expr := ((base isLast).mul (((colQ ACC).add (colQ ACC2)).sub (pubQ PUB_S))).coords
 
 /-- A height-based relative lock (BIP68): the spent coin's height plus the lock is at most the block's. -/
 def lockC : List Expr :=
   [ boolC (k LKH),
     .mul (k KI) (.mul (k LKH) (.sub (.sub (.sub height (k HC)) (k SQL)) (b3 LB))) ]
 
-def constraints : List Expr := localC ++ fracC ++ zeroC ++ accC ++ lastC ++ amountC ++ lockC
+/-- A time-based relative lock (BIP68): the block's previous median time past (public inputs 3 and 7, its
+16-bit limbs) is at least the claimed one plus `512 · lock`; and the claim's fraction. -/
+def timeC : List Expr :=
+  [ boolC (k LKT), boolC (k SHB), boolC (k BW0), boolC (k BW1), .sub (k TM) (.mul (k KI) (k LKT)),
+    .mul tm (.sub (k SQL) (.add (k SA) (.mul (cst 128) (.add (k SH0) (.mul (cst 256) (k SHB)))))),
+    .mul tm (.sub (.add (.sub (.sub (.pub 3) (k ML)) (.mul (cst 512) (k SA))) (.mul (cst 65536) (.add (k BW0) (k BW1))))
+      (pair (TQ 0) (TQ 1))),
+    .mul tm (.sub (.sub (.sub (.sub (.pub 7) (k MH)) (.add (k SH0) (.mul (cst 256) (k SHB)))) (.add (k BW0) (k BW1)))
+      (pair (TQ 2) (TQ 3))) ] ++
+  RunSum.fracC FC2 PUB_Z phi2 tm ++ RunSum.zeroC FC2 tm ++ RunSum.accC FC2 ACC2
+
+def constraints : List Expr := localC ++ fracC ++ zeroC ++ accC ++ lastC ++ amountC ++ lockC ++ timeC
 
 def r8 (e : Expr) (m : Expr) : Lookup := ⟨Tables.REL_R8, .neg m, [e]⟩
 
@@ -294,7 +341,7 @@ def lookups : List Lookup :=
   [ ⟨REL_OUTT, .neg (k KO), [k TXI, k START, k LEN, k SSC, k SVAL, k VL, k VH]⟩,
     ⟨REL_INT, .neg (.add (k KI) (k CBI)), [k TXI, k START, k SQL, k LKH, k LKT, k UP, k U20, k U32]⟩,
     ⟨Sha.REL_DIGEST, .neg (k KO), (.add (.mul (cst 2) (k TXI)) one) :: (List.range 16).map (fun i => k (TLB i))⟩,
-    ⟨URec.REL_UREC, .neg (k KI), [k J, k CLO, k CHI, k VL, k VH, k CTX, k UP, k U20, k U32]⟩,
+    ⟨URec.REL_UREC, .neg (k KI), [k J, k CLO, k CHI, k VL, k VH, k CTX, k UP, k U20, k U32, k ML, k MH]⟩,
     ⟨FpWalk.REL_SEG, k KO, [cst 0, k START, k START, k LEN]⟩,
     ⟨FpWalk.REL_FP, .neg (.add (k KO) (k KI)),
       [k KI, k SIDC, k SLEN, k FH, k (FH + 1), k (FH + 2), k (FH + 3)]⟩,
@@ -317,17 +364,48 @@ def lookups : List Lookup :=
   (List.range 3).map (fun i => r8 (k (Q3 i)) (k MC1)) ++
   (List.range 4).map (fun i => r8 (k (H3 i)) (k MC1)) ++
   [r8 (k H3C) (k MC1)] ++
-  (List.range 3).map (fun i => r8 (k (LB i)) (.mul (k KI) (k LKH)))
+  (List.range 3).map (fun i => r8 (k (LB i)) (.mul (k KI) (k LKH))) ++
+  (List.range 4).map (fun i => r8 (k (TQ i)) tm) ++
+  [r8 (k SA) tm, r8 (.mul (cst 2) (k SA)) tm, r8 (k SH0) tm]
 
 /-- The use multiplicities that occur (every lookup but the segment yield, index 4). -/
 def useMults : List Expr :=
   [ .neg (k KO), .neg (.add (k KI) (k CBI)), .neg (k KI), .neg (.add (k KO) (k KI)), .neg (.mul (k KO) (om (k ZS))),
-    .neg (.mul notFirst on), .neg (.mul (k KI) (k CBC)), .neg (k MNB), .neg (k MC1), .neg on, .neg (k MLO), .neg (.mul (k KI) (k LKH)) ]
+    .neg (.mul notFirst on), .neg (.mul (k KI) (k CBC)), .neg (k MNB), .neg (k MC1), .neg on, .neg (k MLO), .neg (.mul (k KI) (k LKH)),
+    .neg tm ]
 
 set_option maxRecDepth 20000 in
-theorem mult_cases : ∀ j < 97, j ≠ 4 → (lookups.getD j ⟨0, .const 0, []⟩).mult ∈ useMults := by decide
+theorem mult_cases : ∀ j < 104, j ≠ 4 → (lookups.getD j ⟨0, .const 0, []⟩).mult ∈ useMults := by decide
 
-theorem lookups_len : lookups.length = 97 := by decide
+theorem lookups_len : lookups.length = 104 := by decide
+
+/-! The first lookups by index (by `rfl`: unfolding the whole list in `simp` is slow). -/
+theorem lk0 : lookups.getD 0 ⟨0, .const 0, []⟩ =
+    ⟨REL_OUTT, .neg (k KO), [k TXI, k START, k LEN, k SSC, k SVAL, k VL, k VH]⟩ := rfl
+theorem lk1 : lookups.getD 1 ⟨0, .const 0, []⟩ =
+    ⟨REL_INT, .neg (.add (k KI) (k CBI)), [k TXI, k START, k SQL, k LKH, k LKT, k UP, k U20, k U32]⟩ := rfl
+theorem lk2 : lookups.getD 2 ⟨0, .const 0, []⟩ =
+    ⟨Sha.REL_DIGEST, .neg (k KO), (.add (.mul (cst 2) (k TXI)) one) :: (List.range 16).map (fun i => k (TLB i))⟩ := rfl
+theorem lk3 : lookups.getD 3 ⟨0, .const 0, []⟩ =
+    ⟨URec.REL_UREC, .neg (k KI), [k J, k CLO, k CHI, k VL, k VH, k CTX, k UP, k U20, k U32, k ML, k MH]⟩ := rfl
+theorem lk4 : lookups.getD 4 ⟨0, .const 0, []⟩ = ⟨FpWalk.REL_SEG, k KO, [cst 0, k START, k START, k LEN]⟩ := rfl
+theorem lk5 : lookups.getD 5 ⟨0, .const 0, []⟩ = ⟨FpWalk.REL_FP, .neg (.add (k KO) (k KI)),
+    [k KI, k SIDC, k SLEN, k FH, k (FH + 1), k (FH + 2), k (FH + 3)]⟩ := rfl
+theorem lk6 : lookups.getD 6 ⟨0, .const 0, []⟩ = ⟨REL_BYTE, .neg (.mul (k KO) (om (k ZS))), [k SSC, k SB]⟩ := rfl
+
+theorem lg0 (h : 0 < lookups.length) : lookups[0] =
+    ⟨REL_OUTT, .neg (k KO), [k TXI, k START, k LEN, k SSC, k SVAL, k VL, k VH]⟩ := rfl
+theorem lg1 (h : 1 < lookups.length) : lookups[1] =
+    ⟨REL_INT, .neg (.add (k KI) (k CBI)), [k TXI, k START, k SQL, k LKH, k LKT, k UP, k U20, k U32]⟩ := rfl
+theorem lg2 (h : 2 < lookups.length) : lookups[2] =
+    ⟨Sha.REL_DIGEST, .neg (k KO), (.add (.mul (cst 2) (k TXI)) one) :: (List.range 16).map (fun i => k (TLB i))⟩ := rfl
+theorem lg3 (h : 3 < lookups.length) : lookups[3] =
+    ⟨URec.REL_UREC, .neg (k KI), [k J, k CLO, k CHI, k VL, k VH, k CTX, k UP, k U20, k U32, k ML, k MH]⟩ := rfl
+theorem lg4 (h : 4 < lookups.length) : lookups[4] = ⟨FpWalk.REL_SEG, k KO, [cst 0, k START, k START, k LEN]⟩ := rfl
+theorem lg5 (h : 5 < lookups.length) : lookups[5] = ⟨FpWalk.REL_FP, .neg (.add (k KO) (k KI)),
+    [k KI, k SIDC, k SLEN, k FH, k (FH + 1), k (FH + 2), k (FH + 3)]⟩ := rfl
+theorem lg6 (h : 6 < lookups.length) : lookups[6] = ⟨REL_BYTE, .neg (.mul (k KO) (om (k ZS))), [k SSC, k SB]⟩ := rfl
+
 
 def coin : Comp where
   air := { name := "block_coin", nMain := N_MAIN, pre := preCols, constraints := constraints }

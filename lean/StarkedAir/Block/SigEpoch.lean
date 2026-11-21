@@ -28,7 +28,7 @@ theorem block_factsS (S : Setup inst pub (Ls 1)) {h : ℕ} (hp2 : pub 2 = (h : F
     (hα : ∀ k < Coin.W, RunSum.pQ pub (Coin.PUB_ALPHA k) = α ^ k)
     (hne : ∀ (t' : ℕ) (tx' : Spec.Block.Tx), S.b.txs[t']? = some tx' → tx'.vin ≠ [] ∧ tx'.vout ≠ []) :
     ∃ claim : ℕ → ℕ → Claim,
-      (∀ N : ℕ → ℕ, RunSum.pQ pub Coin.PUB_S =
+      (∀ N : ℕ → ℕ, RunSum.pQ pub Coin.PUB_S - claimSum inst (Ls 14) =
         blockSum N (efrac N (FpWalk.gQ pub) α (RunSum.pQ pub Coin.PUB_Z)) ⟨h, S.b.txs, lost, claim⟩) ∧
       (∀ (N : ℕ → ℕ) (t : ℕ) (tx : Spec.Block.Tx), S.b.txs[t]? = some tx →
         ∀ ev ∈ txIns N ⟨h, S.b.txs, lost, claim⟩ t tx, ∃ c : Claim, ev = (ev.1, (c.code, c.ser), N (c.code / 2) + c.ctx) ∧
@@ -56,7 +56,7 @@ theorem block_factsS (S : Setup inst pub (Ls 1)) {h : ℕ} (hp2 : pub 2 = (h : F
     fun hp5 N t tx htx ht1 hcv => ?_, fun hL8 hreal => ?_⟩
   · have hs := block_event_sum hL hsat hL24 S he hon hlen hst hf htg hp2 hh hlost N claim
       (fun t tx htx ht1 k i hi => (hcl t tx htx ht1 k i hi).1)
-    rw [hs]
+    rw [hs, add_sub_cancel_right]
     unfold blockSum efrac
     congr 1 <;> congr 1 <;> apply Multiset.map_congr rfl <;> intro ev _ <;>
       rw [phiOf_poly pub α hα _ (by rw [encE_length]; rfl)]
@@ -278,7 +278,7 @@ theorem epoch_blocksS (nb : ℕ) (inst : ℕ → ℕ → Inst) (pub : ℕ → �
       (∀ B ∈ blocks, ∀ tx ∈ B.txs, (∀ o ∈ tx.vout, 0 ≤ o.value ∧ o.value ≤ Spec.Block.MAX_MONEY) ∧
         Spec.Coins.outSum tx ≤ Spec.Block.MAX_MONEY) ∧
       ∀ N : ℕ → ℕ,
-        ∑ i ∈ Finset.range nb, RunSum.pQ (pub i) Coin.PUB_S = (blocks.map (blockSum N (efrac N γ α z))).sum ∧
+        ∑ i ∈ Finset.range nb, (RunSum.pQ (pub i) Coin.PUB_S - claimSum (inst i) (L i 14)) = (blocks.map (blockSum N (efrac N γ α z))).sum ∧
         (∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → ∀ (t : ℕ) (tx : Spec.Block.Tx), B.txs[t]? = some tx →
           ∀ ev ∈ txIns N B t tx, ∃ c : Claim, ev = (ev.1, (c.code, c.ser), N (c.code / 2) + c.ctx) ∧
             (c.code < 2 ^ 26 → c.ctx < 2 ^ 25 → (c.code / 2 < B.h ∨ (c.code / 2 = B.h ∧ c.ctx < t))) ∧
@@ -302,7 +302,7 @@ theorem epoch_blocksS (nb : ℕ) (inst : ℕ → ℕ → Inst) (pub : ℕ → �
       obtain ⟨h1, h2, -, -⟩ := txs_basic (hL i hi) (hsat i hi) (hL24 i hi) (S i) tx (List.mem_of_getElem? htx)
       exact ⟨h1, h2⟩
   have key : ∀ i, ∃ claim : ℕ → ℕ → Claim, i < nb →
-      (∀ N : ℕ → ℕ, RunSum.pQ (pub i) Coin.PUB_S =
+      (∀ N : ℕ → ℕ, RunSum.pQ (pub i) Coin.PUB_S - claimSum (inst i) (L i 14) =
         blockSum N (efrac N γ α z) ⟨h0 + i, (S i).b.txs, lost i, claim⟩) ∧
       (∀ (N : ℕ → ℕ) (t : ℕ) (tx : Spec.Block.Tx), (S i).b.txs[t]? = some tx →
         ∀ ev ∈ txIns N ⟨h0 + i, (S i).b.txs, lost i, claim⟩ t tx, ∃ c : Claim,
@@ -410,7 +410,7 @@ theorem epoch_systems_coreS (nb : ℕ) (inst : ℕ → ℕ → Inst) (pub : ℕ 
           ((α, z) ∉ Bad →
             init.length + Multiset.card (created g0 (allTxs N blocks)) + Multiset.card (spent (allTxs N blocks)) +
               fin.length < P →
-            ∑ i ∈ Finset.range nb, RunSum.pQ (pub i) Coin.PUB_S + (init.map (efrac N γ α z)).sum =
+            ∑ i ∈ Finset.range nb, (RunSum.pQ (pub i) Coin.PUB_S - claimSum (inst i) (L i 14)) + (init.map (efrac N γ α z)).sum =
               (fin.map (efrac N γ α z)).sum →
             (∃ m, Spec.Coins.connectTxsL (Spec.Coins.untag (vmap coinOfVal (viewOf init))) (allTxC N blocks) =
                 some (Spec.Coins.untag (vmap coinOfVal m), (allTxC N blocks).map Spec.Coins.claimFee) ∧

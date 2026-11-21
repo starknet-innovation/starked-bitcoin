@@ -11,7 +11,7 @@
 //! | `pre` | one thread per (row, column), one launch per tree-0 cohort | every preprocessed column | `ir.PreCol.at` |
 //! | `bytes` | one thread per row | `block_bytes`' 12 columns | `block/bytes.zig generate` (multiplicities from the host) |
 //! | `msg` | one thread per row (binary search for its message) | `block_msg`'s 38 columns | `block/msg.zig generate`, `setUses`, `merkle.addHeaderUses` |
-//! | `walk` | one thread per row (its record from the host's sequential pass) | `block_walk`'s 51 columns | `block/walk.zig columns` |
+//! | `walk` | one thread per row (its record from the host's sequential pass) | `block_walk`'s 71 columns | `block/walk.zig columns` |
 //! | `b2_gadget` | one thread per row (recomputes its period's G steps) | the Blake2s gadget's 300 columns of any component (`set_b2c`, `set_lc`, `set_mt`) | `hash/blake2s_air.zig fillPeriod` |
 //! | `sha_gadget` | one thread per row (from `sha_words`' trace) | the SHA-256 gadget's 124 columns of any component (`set_shac`) | `sha256/witness.zig columns` |
 //!
@@ -63,7 +63,7 @@ pub const B2S_COLUMNS: usize = 312;
 pub const MSG_COLUMNS: usize = bmsg.N_MAIN;
 pub const BYTES_COLUMNS: usize = bbytes.N_MAIN;
 pub const WALK_COLUMNS: usize = bwalk.N_MAIN;
-const WALK_REC_WORDS = 4;
+const WALK_REC_WORDS = 8;
 const SHA_COMP_WORDS = 24;
 const SHA_META_WORDS = 6;
 const B2S_PERIOD_WORDS = 27;
@@ -146,7 +146,7 @@ fn contract(allocator: std.mem.Allocator, which: Which) ![]u8 {
         .b2s => std.fmt.allocPrint(allocator, "starked-bitcoin/witness-b2s/v{d};args=sigma,periods,count,columns,rows;block_b2s 312 natural columns: fillPeriod(periods[min(p,count)]: h8,m16,tlo,thi,last) + B2sFill extras;columns=u64 pointers;grid=rows/{d};threads={d}", .{ version, threads, threads }),
         .bytes => std.fmt.allocPrint(allocator, "starked-bitcoin/witness-bytes/v{d};args=raw,mults,len,columns,rows;block_bytes 12 natural columns: bytes.generate (pos, byte, bits, active, mult) from raw (bytes, little-endian words) and mults[r] for r < len;columns=u64 pointers;grid=rows/{d};threads={d}", .{ version, threads, threads }),
         .msg => std.fmt.allocPrint(allocator, "starked-bitcoin/witness-msg/v{d};args=raw,msgs,count,columns,rows;block_msg 38 natural columns: msg.generate + setUses + merkle.addHeaderUses from raw (bytes, little-endian words) and msgs[{d}m]: row,id,flags(hdr,wtx,seg,split),i,a,w,l,dl,prev_dl;columns=u64 pointers;grid=rows/{d};threads={d}", .{ version, bmsg.DESC_WORDS, threads, threads }),
-        .walk => std.fmt.allocPrint(allocator, "starked-bitcoin/witness-walk/v{d};args=raw,recs,count,columns,rows;block_walk 51 natural columns: walk.columns from raw and recs[0]=sigops, recs[4+4r..]: w0(pos,kind,li,lk,first),rem,val,sums;columns=u64 pointers;grid=rows/{d};threads={d}", .{ version, threads, threads }),
+        .walk => std.fmt.allocPrint(allocator, "starked-bitcoin/witness-walk/v{d};args=raw,recs,count,columns,rows;block_walk 71 natural columns: walk.columns from raw and recs[0]=sigops, recs[1]=siga, recs[8+8r..]: w0(pos,kind,li,lk,first),rem,val,sums,x0(mode,po,pv,hcn),rs,rl,suma;columns=u64 pointers;grid=rows/{d};threads={d}", .{ version, threads, threads }),
         .b2_gadget => std.fmt.allocPrint(allocator, "starked-bitcoin/witness-b2-gadget/v{d};args=sigma,periods,count,columns,rows;the Blake2s gadget's 300 natural columns of any component: fillPeriod(periods[27 min(r/88, count-1)..]: h8,m16,tlo,thi,last);columns=u64 pointers (300);grid=rows/{d};threads={d}", .{ version, threads, threads }),
         .sha_gadget => std.fmt.allocPrint(allocator, "starked-bitcoin/witness-sha-gadget/v{d};args=words,ktab,count(unused),columns,rows;the SHA-256 gadget's 124 natural columns of any component: sha256 columns(shaRole, K=ktab[0..64]) from the sha_words trace;columns=u64 pointers (124);grid=rows/{d};threads={d}", .{ version, threads, threads }),
         .pre => std.fmt.allocPrint(allocator, "starked-bitcoin/witness-pre/v{d};args=desc,values,first,log_size,columns;out[i]=PreCol.at(i,2^log) natural;desc=kind,k,voff,vlen,ptr_lo,ptr_hi,0,0;grid=rows/{d},columns;threads={d}", .{ version, threads, threads }),
@@ -737,23 +737,26 @@ fn sourceOf(allocator: std.mem.Allocator, which: Which, name: []const u8) ![]u8 
         , .{ version, header, m31, threads, name, bmsg.DESC_WORDS, bmsg.DESC_WORDS }),
         .walk => std.fmt.allocPrint(allocator,
             \\// starked-bitcoin device witness v{d} (src/gpu/cuda/witness.zig): block_walk columns.
-            \\// Row r < count expands record recs[4 + 4r] (w0: pos 0-23, kind 24-25 (op, ln, dt, inf),
-            \\// li 26-27, lk code 28-29 (0, 1, 2, 4), first 30; rem; val = dr or lacc; sums) with its byte
-            \\// raw[pos] as block/walk.zig columns: the row's state, the automaton step, the zero tests and
-            \\// their inverses. Rows past count are padding (SUMS = recs[0], ZA = 1, INVD = INVR = 1/(-1)).
+            \\// Row r < count expands record recs[8 + 8r] (w0: pos 0-23, kind 24-25 (op, ln, dt, inf),
+            \\// li 26-27, lk code 28-29 (0, 1, 2, 4), first 30; rem; val = dr or lacc; sums; x0: mode 0-1,
+            \\// po 2, pv 3-7, hcn 8-31; rs; rl; suma) with its byte raw[pos] as block/walk.zig columns: the
+            \\// row's state, the automaton step, the zero tests and their inverses, and the accurate count
+            \\// (columns 51-70). Rows past count are padding (SUMS = recs[0], SUMA = recs[1], ZA = ZH = 1,
+            \\// INVE = 1, INVD = INVR = 1/(-1)).
             \\{s}{s}
             \\extern "C" __global__ void __launch_bounds__({d}) {s}(
             \\    const unsigned *raw, const unsigned *recs, unsigned count, const u64 *columns, unsigned rows) {{
             \\    const unsigned r = blockIdx.x * blockDim.x + threadIdx.x;
             \\    if (r >= rows) return;
             \\#define PUT(c, v) (((unsigned *)columns[(c)])[r] = (v))
-            \\    unsigned v[51];
-            \\    for (unsigned c = 0; c < 51u; ++c) v[c] = 0u;
+            \\    unsigned v[71];
+            \\    for (unsigned c = 0; c < 71u; ++c) v[c] = 0u;
             \\    const unsigned inv_m1 = m31_inv(STARKED_P - 1u);
             \\    if (r >= count) {{
-            \\        v[49] = recs[0]; v[30] = 1u; v[33] = inv_m1; v[35] = inv_m1;
+            \\        v[49] = recs[0]; v[70] = recs[1]; v[30] = 1u; v[33] = inv_m1; v[35] = inv_m1;
+            \\        v[57] = 1u; v[63] = 1u;
             \\    }} else {{
-            \\        const unsigned *rc = recs + 4ull + 4ull * (u64)r;
+            \\        const unsigned *rc = recs + 8ull + 8ull * (u64)r;
             \\        const unsigned w0 = rc[0], rem = rc[1], val = rc[2], sums = rc[3];
             \\        const unsigned pos = w0 & 0xffffffu, kind = (w0 >> 24u) & 3u, li = (w0 >> 26u) & 3u;
             \\        const unsigned lkc = (w0 >> 28u) & 3u, first = (w0 >> 30u) & 1u;
@@ -807,8 +810,32 @@ fn sourceOf(allocator: std.mem.Allocator, which: Which, name: []const u8) ![]u8 
             \\        }}
             \\        v[50] = first ? 0u : 1u;
             \\        v[49] = sums;
+            \\        // Step 3 (walk.zig columns, "Step 3"): the accurate count.
+            \\        const unsigned x0 = rc[4];
+            \\        const unsigned mode = x0 & 3u, po = (x0 >> 2u) & 1u, pv = (x0 >> 3u) & 31u, hcn = x0 >> 8u;
+            \\        const unsigned ac = mode != 0u ? 1u : 0u, w4 = mode == 2u ? 1u : 0u;
+            \\        v[51] = ac; v[52] = w4;
+            \\        v[56] = hcn; v[57] = hcn == 0u ? 1u : 0u; v[58] = hcn == 0u ? 0u : m31_inv(hcn);
+            \\        v[59] = po; v[60] = rc[5]; v[61] = rc[6];
+            \\        const unsigned e = m31_add(m31_sub(v[40] % STARKED_P, rem % STARKED_P), 1u);
+            \\        v[62] = e == 0u ? 1u : 0u; v[63] = e == 0u ? 0u : m31_inv(e);
+            \\        v[64] = ((kind == 0u || kind == 1u) && nk == 2u && e == 0u) ? 1u : 0u;
+            \\        v[65] = pv;
+            \\        unsigned sg = 0u, ms = 0u;
+            \\        if (kind == 0u) {{
+            \\            const unsigned dv = (b >= 0x51u && b <= 0x60u) ? b - 0x50u : 20u;
+            \\            v[53] = b > 0x60u ? 1u : 0u;
+            \\            ms = (b == 0xaeu || b == 0xafu) ? 1u : 0u;
+            \\            sg = v[13];
+            \\            v[54] = ms; v[55] = dv; v[66] = dv;
+            \\        }} else v[66] = pv;
+            \\        const unsigned m1 = ms * pv;
+            \\        v[67] = m1;
+            \\        v[68] = (ac + 3u * w4) * (sg - 20u * ms + m1);
+            \\        v[69] = (1u - ac) * sg;
+            \\        v[70] = rc[7];
             \\    }}
-            \\    for (unsigned c = 0; c < 51u; ++c) PUT(c, v[c]);
+            \\    for (unsigned c = 0; c < 71u; ++c) PUT(c, v[c]);
             \\#undef PUT
             \\}}
             \\
@@ -864,6 +891,8 @@ pub const Inputs = struct {
     msgs: []const u32,
     walk_recs: []const bwalk.Rec,
     sigops: u32,
+    /// The accurate spans' weighted count (`block_walk`'s `SUMA` on padding rows).
+    siga: u32 = 0,
     /// `block_bytes`: the reads per block position.
     byte_mults: []const u32,
     /// Size the inputs slot by the components' log sizes (the largest inputs they admit) instead of
@@ -889,6 +918,7 @@ pub const Inputs = struct {
             .msgs = try bmsg.descriptors(allocator, built.msgs),
             .walk_recs = built.walk_recs,
             .sigops = built.sigops,
+            .siga = built.siga,
             // A full build (`skip_device_columns` off) keeps only the reads.
             .byte_mults = if (built.byte_mults.len == built.raw.len) built.byte_mults else try bbytes.multiplicities(allocator, built.raw.len, built.reads),
         };
@@ -1348,6 +1378,7 @@ pub const Plan = struct {
         @memcpy(std.mem.sliceAsBytes(out[l.raw..])[0..in.raw.len], in.raw);
         @memcpy(out[l.msgs..][0..in.msgs.len], in.msgs);
         out[l.walk] = in.sigops;
+        out[l.walk + 1] = in.siga;
         const recs: [*]const u32 = @ptrCast(in.walk_recs.ptr);
         @memcpy(out[l.walk + WALK_REC_WORDS ..][0 .. WALK_REC_WORDS * in.walk_recs.len], recs[0 .. WALK_REC_WORDS * in.walk_recs.len]);
         @memcpy(out[l.mults..][0..in.byte_mults.len], in.byte_mults);

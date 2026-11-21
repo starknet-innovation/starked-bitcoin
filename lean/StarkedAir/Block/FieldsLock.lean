@@ -199,6 +199,30 @@ theorem lkh_of {rh r : ℕ} (hrh : rh ≤ r) (hr : r < m) (ht : M K_TXH rh = 1)
   simp only [Expr.eval, ev_k hrn, oneMinus, one, eval_cst, Nat.cast_one, a1, t0, hp5, sub_zero, mul_one] at lk
   exact lk
 
+/-- **An enforced time lock sets `LKT`** (CONNECT-RULES step 4). For an input row `r` of the transaction whose head is `rh`:
+with CSV active (`pub 5 = 1`), the version at least 2, bit 31 of the sequence clear and bit 22 set,
+`LKT = 1`. -/
+theorem lkt_of {rh r : ℕ} (hrh : rh ≤ r) (hr : r < m) (ht : M K_TXH rh = 1)
+    (hnt : ∀ j, rh < j → j ≤ r → M K_TXH j = 0) (hi : M K_IN r = 1) (hp5 : pub 5 = 1)
+    (hv : 2 ≤ Spec.Block.le (slice R (M START rh).val 4)) {s : ℕ}
+    (hs : s = Spec.Block.le (slice R ((M START r).val + 36 + prefOf M r + (M VAL r).val) 4))
+    (h31 : s / 2 ^ 31 % 2 = 0) (h22 : s / 2 ^ 22 % 2 = 1) : M LKT r = 1 := by
+  have hrn : r < n := by omega
+  obtain ⟨b22, b31, -⟩ := seq_bits hsat R hcs hmn hpad hfit hby hrg hn hr hi hs
+  have v2 : M V2 r = 1 := by
+    rw [v2_const hsat hrn hnt r hrh le_rfl]
+    exact (v2_head hsat R hvb (by omega) ht).mpr hv
+  have t1 : M T22 r = 1 := b22.mpr h22
+  have d0 : M D31 r = 0 := by
+    rcases lock_bool hsat (X := D31) (by simp) hrn with h | h
+    · exact h
+    · have := b31.mp h; omega
+  have a1 := defn hsat (a := A1) (e := .mul (k V2) (oneMinus (k D31))) (mem_lock (by simp [lockC])) hrn
+  have lk := defn hsat (a := LKT) (e := .mul (.pub 5) (.mul (k A1) (k T22))) (mem_lock (by simp [lockC])) hrn
+  simp only [Expr.eval, ev_k hrn, oneMinus, one, eval_cst, Nat.cast_one, v2, d0, sub_zero, mul_one] at a1
+  simp only [Expr.eval, ev_k hrn, a1, t1, hp5, mul_one] at lk
+  exact lk
+
 omit hcs hmn hpad hfit hby hrg hvb in
 /-- **An input row with a transaction's lock count is one of its rows.** If the rows from the head `rh`
 to the lock time `ρ` have `ρ`'s lock count, an input row `r` with that count lies strictly between them. -/

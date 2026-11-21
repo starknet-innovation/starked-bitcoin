@@ -4,7 +4,7 @@ Rewritten at the end of every session; see [README.md](README.md#ending-a-sessio
 If `HEAD at last update` doesn't match `git log -1`, this file is stale:
 follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work).
 
-- **Updated:** 2026-11-20 (session 43: CONNECT-RULES step 3's Lean soundness proven on branch `connect-rules`: `block_sigop_cost`, `epoch_systems_coreS`)
+- **Updated:** 2026-11-20 (session 44: CONNECT-RULES step 4's block side built and proven on branch `connect-rules` (`in_time_lock`); resolving the time claims awaits the owner (D-058); step 5's walker kernel done on the host)
 - **HEAD at last update:** this session's commit on branch `connect-rules` (after b319bfb, which is `main` and pushed)
 - **Branches:** `main` = b319bfb (pushed): the AIRs of the published proofs. `connect-rules` (local): step 2, whose AIRs give other block VKs; merge it when the re-prove is made (or when the owner says).
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
@@ -28,7 +28,7 @@ including the seal's composed statement (`seal_soundW`); trusted items in [verif
 
 **Owner's order (2026-11-19): A–D below come before items 0–3.**
 
-A. CONNECT-RULES ([connect-rules.md](../design/connect-rules.md)), on branch `connect-rules`. Steps 1–3 are done; step 3 (full sigop cost) is built, tested and **proven** (`Block.block_sigop_cost` in `lean/StarkedAir/Block/SigCost.lean`, `Block.epoch_systems_coreS` in `Block/SigEpoch.lean`; D-057 confirmed). **Next: step 4** (time-based BIP68, D-054): start in `lean/StarkedAir/Spec/ConnectRules.lean` (`timeLockOk`) and the design's step 4 section (the committed claim of old blocks' median time past, the resolver, the balance; the epoch root and seal take one more child). Then step 5 (GPU walker kernel in `src/gpu/cuda/witness.zig` still builds 51 columns; VKs; parity). Open in Lean, not blocking: carry `epoch_systems_coreL`/`coreS` into the recursion's guarantee (`LeafOut`, `BlockAt`: the CSV bit, `8 ≤ L 7`), and derive "initial coins are serialized outputs" from the set proof. Also: rerun the full Zig suite once (148/154 before the golden update; the 15 affected tests pass since).
+A. CONNECT-RULES ([connect-rules.md](../design/connect-rules.md)), on branch `connect-rules`. Steps 1–3 are done and proven. **Step 4 is half done**: the block checks every enforced time lock against a claimed median time past committed in the undo stream (`Block.in_time_lock`, `lean/StarkedAir/Block/TimeLock.lean`; `Coin.timeC`; tests in `src/block/negative.zig`), but nothing yet proves the claim is the chain's. **Blocked on the owner: D-058** (how to resolve the claims: R2 a resolver proof with its list in the seed, R5 the coin carries its time (recommended), or D leave unproven; "Step 4" in the design). After the decision: R5 starts in `lean/StarkedAir/Block/Coin.lean` (`tuple`, the spent and created events; drop `tuple2`, `FC2`, `ACC2`) and `lean/StarkedAir/Block/CoinEpochSound.lean` (`encE`); R2 starts with the seed (`src/block/epoch.zig` `seedOfRoots`, `lean/StarkedAir/Circuit/EpochRoot.lean`). The honest claims are computed from the header file (`system.timeClaims`, used by `prove-epoch`, `cuda-epoch`, `prove-block`); not yet run on real blocks that have time locks. **Step 5**: the walker's device kernel writes the 71 columns and `gpu/cuda_aot` is regenerated (`zig build cuda-test -Dcuda=true -Doptimize=ReleaseFast` passes); device parity on a pod and the re-prove are not run (GPU spend: owner's go).
 B. SNAP-HASH: [snapshot-hash.md](../design/snapshot-hash.md) is drafted. The Delving follow-up, posted by the owner on 2026-11-20 (draft: `~/Workshop/prove-any-chain/delving-3070-reply3.md`: cost split, the SHA-256/Blake2s correction, the hash proposal). No circuit work before a reaction.
 C. TIERS-2 (D-055): after A's steps 2–4, rerun `scripts/tier_search.py` on new needs (`survey`, `STARKED_SURVEY_NEEDS=1`), add the profile in `src/block/system.zig` (`Profile`, `profileLogs`, `sizesAuto`), time one 2^23 block on a GPU in both profiles.
 D. Re-prove once, after A–C: blocks 935,001–972,500, trees, join, set passes, seal. A from-genesis run is approved in principle (owner), after A.
@@ -51,7 +51,8 @@ D. Re-prove once, after A–C: blocks 935,001–972,500, trees, join, set passes
 
 ## Needs owner
 
-- **D-057** ([decisions.md](decisions.md)): confirm, or reject, the three choices of step 3: a block-only copy of the opcode table, the AIR landing before its Lean soundness, and `strict` always on.
+- **D-058** ([decisions.md](decisions.md)): confirm the block side of step 4 as built and the four changed `Compat.lean` statements, and **choose how the time claims are resolved** (R2, R5 or D). The agent recommends R5. The finding behind it (the accepted resolver design is unsound unless its list is fixed before the challenge) is a security claim to check.
+- **GPU:** device parity of the new AIRs and timings need a pod (cost); not started.
 - **Push:** `main` has one local commit (c83ddb1, the stwo-zig URL; it changes the site's "in Zig" link when pushed). Branch `connect-rules` is local.
 - **STWO-225-FU:** follow up on stwo-zig#225 upstream? Outward-facing.
 

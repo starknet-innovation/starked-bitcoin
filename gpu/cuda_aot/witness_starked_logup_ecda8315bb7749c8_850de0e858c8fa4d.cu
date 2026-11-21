@@ -1,5 +1,5 @@
-// starked-bitcoin LogUp fraction kernel v1 (src/gpu/cuda/logup.zig): AIR block_walk, digest fec4ea0626e67b7b27113ffc768ee8827abc19c5d39a8dab642b253386dcb074.
-// 5 lookups in 3 batches, 15 source columns, tuples up to 7 values.
+// starked-bitcoin LogUp fraction kernel v1 (src/gpu/cuda/logup.zig): AIR block_walk, digest eea32890fb8b991989983de3fad5e4e54df375742a21fb3b08e2745d0dee8d1b.
+// 6 lookups in 3 batches, 24 source columns, tuples up to 10 values.
 typedef unsigned long long u64;
 #define STARKED_P 2147483647u
 struct StarkedQm31 { unsigned a, b, c, d; };
@@ -56,7 +56,7 @@ __device__ __forceinline__ unsigned starked_natural_row(unsigned s, unsigned log
     const unsigned c = starked_brev(s, log_size);
     return c < (n >> 1u) ? c << 1u : ((n - c) << 1u) - 1u;
 }
-extern "C" __global__ void __launch_bounds__(256) starked_logup_v1_0484a297e7de3a48(
+extern "C" __global__ void __launch_bounds__(256) starked_logup_v1_ecda8315bb7749c8(
     const unsigned *sources, unsigned *const *outputs, const unsigned *pubs,
     const unsigned *powers, const unsigned *z, unsigned *denominators,
     unsigned *error, unsigned log_size) {
@@ -82,13 +82,26 @@ extern "C" __global__ void __launch_bounds__(256) starked_logup_v1_0484a297e7de3
     const unsigned v256 = sources[(u64)0u * rows + r_0];
     const unsigned v257 = starked_sub(v1, v256);
     const unsigned v259 = sources[(u64)14u * rows + r_0];
-    const unsigned v260 = sources[(u64)11u * rows + r_0];
-    const unsigned v268 = starked_neg(v4);
-    const unsigned v269 = starked_neg(v0);
-    const unsigned v270 = starked_neg(v7);
-    const unsigned v271 = starked_neg(v40);
-    const unsigned v272 = 2u;
-    const unsigned v273 = starked_sub(v53, v272);
+    const unsigned v268 = sources[(u64)15u * rows + r_0];
+    const unsigned v271 = sources[(u64)16u * rows + r_0];
+    const unsigned v274 = starked_sub(v1, v268);
+    const unsigned v282 = sources[(u64)20u * rows + r_0];
+    const unsigned v286 = sources[(u64)21u * rows + r_0];
+    const unsigned v290 = sources[(u64)22u * rows + r_0];
+    const unsigned v297 = sources[(u64)17u * rows + r_0];
+    const unsigned v344 = sources[(u64)19u * rows + r_0];
+    const unsigned v350 = sources[(u64)18u * rows + r_0];
+    const unsigned v357 = sources[(u64)11u * rows + r_0];
+    const unsigned v365 = sources[(u64)23u * rows + r_0];
+    const unsigned v373 = starked_mul(v4, v274);
+    const unsigned v374 = starked_neg(v373);
+    const unsigned v375 = starked_neg(v0);
+    const unsigned v376 = starked_neg(v7);
+    const unsigned v377 = starked_neg(v40);
+    const unsigned v378 = 2u;
+    const unsigned v379 = starked_sub(v53, v378);
+    const unsigned v380 = starked_mul(v4, v268);
+    const unsigned v381 = starked_neg(v380);
     const StarkedQm31 minus_z = {starked_neg(z[0]), starked_neg(z[1]), starked_neg(z[2]), starked_neg(z[3])};
     const StarkedQm31 alpha1 = starked_q_load(powers + 4);
     const StarkedQm31 alpha2 = starked_q_load(powers + 8);
@@ -97,10 +110,16 @@ extern "C" __global__ void __launch_bounds__(256) starked_logup_v1_0484a297e7de3
     const StarkedQm31 alpha5 = starked_q_load(powers + 20);
     const StarkedQm31 alpha6 = starked_q_load(powers + 24);
     const StarkedQm31 alpha7 = starked_q_load(powers + 28);
+    const StarkedQm31 alpha8 = starked_q_load(powers + 32);
+    const StarkedQm31 alpha9 = starked_q_load(powers + 36);
+    const StarkedQm31 alpha10 = starked_q_load(powers + 40);
     StarkedQm31 d0 = minus_z;
     d0.a = starked_add(d0.a, 11u);
     d0 = starked_q_add(d0, starked_q_mul_base(alpha1, v232));
     d0 = starked_q_add(d0, starked_q_mul_base(alpha2, v113));
+    d0 = starked_q_add(d0, starked_q_mul_base(alpha3, v282));
+    d0 = starked_q_add(d0, starked_q_mul_base(alpha4, v286));
+    d0 = starked_q_add(d0, starked_q_mul_base(alpha5, v290));
     StarkedQm31 d1 = minus_z;
     d1.a = starked_add(d1.a, 3u);
     d1 = starked_q_add(d1, starked_q_mul_base(alpha1, v232));
@@ -112,16 +131,25 @@ extern "C" __global__ void __launch_bounds__(256) starked_logup_v1_0484a297e7de3
     d2 = starked_q_add(d2, starked_q_mul_base(alpha3, v123));
     d2 = starked_q_add(d2, starked_q_mul_base(alpha4, v124));
     d2 = starked_q_add(d2, starked_q_mul_base(alpha5, v125));
-    d2 = starked_q_add(d2, starked_q_mul_base(alpha6, v260));
+    d2 = starked_q_add(d2, starked_q_mul_base(alpha6, v357));
     d2 = starked_q_add(d2, starked_q_mul_base(alpha7, v122));
+    d2 = starked_q_add(d2, starked_q_mul_base(alpha8, v297));
+    d2 = starked_q_add(d2, starked_q_mul_base(alpha9, v350));
+    d2 = starked_q_add(d2, starked_q_mul_base(alpha10, v344));
     StarkedQm31 d3 = minus_z;
     d3.a = starked_add(d3.a, 9u);
-    d3 = starked_q_add(d3, starked_q_mul_base(alpha1, v273));
+    d3 = starked_q_add(d3, starked_q_mul_base(alpha1, v379));
     StarkedQm31 d4 = minus_z;
     d4.a = starked_add(d4.a, 15u);
     d4 = starked_q_add(d4, starked_q_mul_base(alpha1, v259));
+    d4 = starked_q_add(d4, starked_q_mul_base(alpha2, v365));
+    StarkedQm31 d5 = minus_z;
+    d5.a = starked_add(d5.a, 26u);
+    d5 = starked_q_add(d5, starked_q_mul_base(alpha1, v232));
+    d5 = starked_q_add(d5, starked_q_mul_base(alpha2, v113));
+    d5 = starked_q_add(d5, starked_q_mul_base(alpha3, v271));
     {
-        const StarkedQm31 n = starked_q_add(starked_q_mul_base(d1, v268), starked_q_mul_base(d0, v269));
+        const StarkedQm31 n = starked_q_add(starked_q_mul_base(d1, v374), starked_q_mul_base(d0, v375));
         const StarkedQm31 d = starked_q_mul(d0, d1);
         if ((d.a | d.b | d.c | d.d) == 0u) atomicOr(error, 2u);
         outputs[0][row] = n.a;
@@ -132,7 +160,7 @@ extern "C" __global__ void __launch_bounds__(256) starked_logup_v1_0484a297e7de3
         slot[0] = d.a; slot[1] = d.b; slot[2] = d.c; slot[3] = d.d;
     }
     {
-        const StarkedQm31 n = starked_q_add(starked_q_mul_base(d3, v270), starked_q_mul_base(d2, v271));
+        const StarkedQm31 n = starked_q_add(starked_q_mul_base(d3, v376), starked_q_mul_base(d2, v377));
         const StarkedQm31 d = starked_q_mul(d2, d3);
         if ((d.a | d.b | d.c | d.d) == 0u) atomicOr(error, 2u);
         outputs[4][row] = n.a;
@@ -143,8 +171,8 @@ extern "C" __global__ void __launch_bounds__(256) starked_logup_v1_0484a297e7de3
         slot[0] = d.a; slot[1] = d.b; slot[2] = d.c; slot[3] = d.d;
     }
     {
-        const StarkedQm31 n = {v257, 0u, 0u, 0u};
-        const StarkedQm31 d = d4;
+        const StarkedQm31 n = starked_q_add(starked_q_mul_base(d5, v257), starked_q_mul_base(d4, v381));
+        const StarkedQm31 d = starked_q_mul(d4, d5);
         if ((d.a | d.b | d.c | d.d) == 0u) atomicOr(error, 2u);
         outputs[8][row] = n.a;
         outputs[9][row] = n.b;

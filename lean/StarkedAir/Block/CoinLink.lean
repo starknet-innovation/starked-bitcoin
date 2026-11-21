@@ -188,10 +188,10 @@ theorem outt_sites {r : ℕ} :
   · simp only [siteMult, siteEval, siteLookup, hashSys, hL 1 (by decide)]
     simp [Fields.fields, Fields.lookups, Fields.chkLookups, Expr.eval, Fields.k, StarkedAir.Sha256.eval_col, wrap_zero hr]
   · simp only [siteMult, siteEval, siteLookup, hashSys, hL 14 (by decide)]
-    simp [Coin.coin, Coin.lookups, Expr.eval, Coin.k, StarkedAir.Sha256.eval_col, wrap_zero hr]
+    simp [Coin.coin, Coin.lookups_len, Coin.lk0, Coin.lk1, Coin.lk2, Coin.lk3, Coin.lk4, Coin.lk5, Coin.lk6, Coin.lg0, Coin.lg1, Coin.lg2, Coin.lg3, Coin.lg4, Coin.lg5, Coin.lg6, Expr.eval, Coin.k, StarkedAir.Sha256.eval_col, wrap_zero hr]
   · simp [siteVals, siteEval, siteLookup, hashSys, hL 1 (by decide), Fields.fields, Fields.lookups,
       Fields.chkLookups, Fields.k, StarkedAir.Sha256.eval_col, wrap_zero hr]
-  · simp [siteVals, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups, Coin.k,
+  · simp [siteVals, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups_len, Coin.lk0, Coin.lk1, Coin.lk2, Coin.lk3, Coin.lk4, Coin.lk5, Coin.lk6, Coin.lg0, Coin.lg1, Coin.lg2, Coin.lg3, Coin.lg4, Coin.lg5, Coin.lg6, Coin.k,
       StarkedAir.Sha256.eval_col, wrap_zero hr]
 
 /-- The input relation's sites: the fields' yield `K_IN`, the coin use `−(KI + CBI)`. -/
@@ -208,11 +208,11 @@ theorem int_sites {r : ℕ} :
   · simp only [siteMult, siteEval, siteLookup, hashSys, hL 1 (by decide)]
     simp [Fields.fields, Fields.lookups, Fields.chkLookups, Expr.eval, Fields.k, StarkedAir.Sha256.eval_col, wrap_zero hr]
   · simp only [siteMult, siteEval, siteLookup, hashSys, hL 14 (by decide)]
-    simp [Coin.coin, Coin.lookups, Expr.eval, Coin.k, StarkedAir.Sha256.eval_col, wrap_zero hr]
+    simp [Coin.coin, Coin.lookups_len, Coin.lk0, Coin.lk1, Coin.lk2, Coin.lk3, Coin.lk4, Coin.lk5, Coin.lk6, Coin.lg0, Coin.lg1, Coin.lg2, Coin.lg3, Coin.lg4, Coin.lg5, Coin.lg6, Expr.eval, Coin.k, StarkedAir.Sha256.eval_col, wrap_zero hr]
   · simp [siteVals, siteEval, siteLookup, hashSys, hL 1 (by decide), Fields.fields, Fields.lookups,
       Fields.chkLookups, Fields.k, Fields.lo16, Fields.le2, Fields.by4, Fields.c, Expr.eval,
       StarkedAir.Sha256.eval_col, StarkedAir.Sha256.eval_cst, wrap_zero hr]
-  · simp [siteVals, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups, Coin.k,
+  · simp [siteVals, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups_len, Coin.lk0, Coin.lk1, Coin.lk2, Coin.lk3, Coin.lk4, Coin.lk5, Coin.lk6, Coin.lg0, Coin.lg1, Coin.lg2, Coin.lg3, Coin.lg4, Coin.lg5, Coin.lg6, Coin.k,
       StarkedAir.Sha256.eval_col, wrap_zero hr]
 
 theorem fields_sat' : ∀ r < 2 ^ Ls 1, ∀ c ∈ Fields.constraints, c.eval (2 ^ Ls 1) Fields.preCols pub (inst 1).main r = 0 :=
@@ -259,7 +259,7 @@ theorem int_sum (g : List F → ℕ) :
 
 /-- **A coin range check is a byte.** If the coin component's lookup `k` is `r8 (col c) mexp` and `mexp`
 is 1 at row `r`, column `c` holds a byte there. -/
-theorem coin_r8 {k c : ℕ} {mexp : Expr} (hk : k < 97) (hk4 : k ≠ 4)
+theorem coin_r8 {k c : ℕ} {mexp : Expr} (hk : k < 104) (hk4 : k ≠ 4)
     (hlk : Coin.lookups.getD k ⟨0, .const 0, []⟩ = Coin.r8 (Coin.k c) mexp) {r : ℕ} (hr : r < 2 ^ Ls 14)
     (hm : mexp.eval (2 ^ Ls 14) Coin.preCols pub (inst 14).main r = 1) : ((inst 14).main c r).val < 256 := by
   have hlen : k < (hashSys.comp 14).lookups.length := by
@@ -610,11 +610,11 @@ theorem coin_txid (S : Setup inst pub (Ls 1)) {j t : ℕ} (hj : j < 2 ^ Ls 14) (
   have hN25 := S.hN25
   -- the coin's digest use: id `2·TXI + 1`, the txid limbs
   have hm : siteMult hashSys inst pub (14, j, 2) = -1 := by
-    simp [siteMult, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups, Expr.eval, Coin.k,
+    simp [siteMult, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups_len, Coin.lk0, Coin.lk1, Coin.lk2, Coin.lk3, Coin.lk4, Coin.lk5, Coin.lk6, Coin.lg0, Coin.lg1, Coin.lg2, Coin.lg3, Coin.lg4, Coin.lg5, Coin.lg6, Expr.eval, Coin.k,
       StarkedAir.Sha256.eval_col, wrap_zero hj, hko]
   have hv : siteVals hashSys inst pub (14, j, 2) =
       (2 * (inst 14).main Coin.TXI j + 1) :: (List.range 16).map (fun i => (inst 14).main (Coin.TLB i) j) := by
-    simp [siteVals, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups, Expr.eval, Coin.k,
+    simp [siteVals, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups_len, Coin.lk0, Coin.lk1, Coin.lk2, Coin.lk3, Coin.lk4, Coin.lk5, Coin.lk6, Coin.lg0, Coin.lg1, Coin.lg2, Coin.lg3, Coin.lg4, Coin.lg5, Coin.lg6, Expr.eval, Coin.k,
       Coin.one, StarkedAir.Sha256.eval_col, StarkedAir.Sha256.eval_cst, wrap_zero hj]
   have hid : ((2 * t + 1 : ℕ) : F) = 2 * (inst 14).main Coin.TXI j + 1 := by rw [ht]; push_cast; ring
   obtain ⟨q, hq, hd, hsv⟩ := digest_linked hL hsat hL24 (i := 14) (k := 2) (Or.inr (Or.inr ⟨rfl, rfl⟩)) hj hm (by
@@ -691,7 +691,7 @@ theorem seg_raw_start {s : ℕ} (hs : s < 2 ^ Ls 12) (hf : (inst 12).main FpWalk
     simp at hsv
   · have e : siteVals hashSys inst pub (14, r', 4) = [0, (inst 14).main Coin.START r', (inst 14).main Coin.START r',
         (inst 14).main Coin.LEN r'] := by
-      simp [siteVals, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups, Coin.k, Expr.eval,
+      simp [siteVals, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups_len, Coin.lk0, Coin.lk1, Coin.lk2, Coin.lk3, Coin.lk4, Coin.lk5, Coin.lk6, Coin.lg0, Coin.lg1, Coin.lg2, Coin.lg3, Coin.lg4, Coin.lg5, Coin.lg6, Coin.k, Expr.eval,
         StarkedAir.Sha256.eval_col, StarkedAir.Sha256.eval_cst, wrap_zero hr']
     rw [e] at hsv
     simp only [List.cons.injEq] at hsv
@@ -722,9 +722,9 @@ theorem coin_fp_out (S : Setup inst pub (Ls 1)) {j : ℕ} (hj : j < 2 ^ Ls 14) (
   have hki : (inst 14).main Coin.KI j = 0 := by
     rcases Coin.kinds cs hj with h | h | h | h <;> simp_all
   -- the coin's fingerprint use
-  have hsite := site_mem hL (i := 14) (by decide) hj (k := 5) (by simp [hashSys, Coin.coin, Coin.lookups])
+  have hsite := site_mem hL (i := 14) (by decide) hj (k := 5) (by simp [hashSys, Coin.coin, Coin.lookups_len, Coin.lk0, Coin.lk1, Coin.lk2, Coin.lk3, Coin.lk4, Coin.lk5, Coin.lk6, Coin.lg0, Coin.lg1, Coin.lg2, Coin.lg3, Coin.lg4, Coin.lg5, Coin.lg6])
   have hm : siteMult hashSys inst pub (14, j, 5) = -1 := by
-    simp [siteMult, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups, Expr.eval, Coin.k,
+    simp [siteMult, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups_len, Coin.lk0, Coin.lk1, Coin.lk2, Coin.lk3, Coin.lk4, Coin.lk5, Coin.lk6, Coin.lg0, Coin.lg1, Coin.lg2, Coin.lg3, Coin.lg4, Coin.lg5, Coin.lg6, Expr.eval, Coin.k,
       StarkedAir.Sha256.eval_col, wrap_zero hj, hko, hki]
   have hsidc := Coin.sidc_spec cs hj
   rw [hko, hki, one_mul, zero_mul, add_zero] at hsidc
@@ -732,7 +732,7 @@ theorem coin_fp_out (S : Setup inst pub (Ls 1)) {j : ℕ} (hj : j < 2 ^ Ls 14) (
   have hv : siteVals hashSys inst pub (14, j, 5) = [0, (inst 14).main Coin.START j, (inst 14).main Coin.SLEN j,
       (inst 14).main Coin.FH j, (inst 14).main (Coin.FH + 1) j, (inst 14).main (Coin.FH + 2) j,
       (inst 14).main (Coin.FH + 3) j] := by
-    simp [siteVals, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups, Coin.k,
+    simp [siteVals, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups_len, Coin.lk0, Coin.lk1, Coin.lk2, Coin.lk3, Coin.lk4, Coin.lk5, Coin.lk6, Coin.lg0, Coin.lg1, Coin.lg2, Coin.lg3, Coin.lg4, Coin.lg5, Coin.lg6, Coin.k,
       StarkedAir.Sha256.eval_col, wrap_zero hj, hki, hsidc]
   rw [hv] at htup
   simp only [List.cons.injEq, and_true] at htup
@@ -791,9 +791,9 @@ theorem coin_urec {j : ℕ} (hj : j < 2 ^ Ls 14) (hki : (inst 14).main Coin.KI j
         65536 * (inst 13).main (URec.V 5) rj + 16777216 * (inst 13).main (URec.V 6) rj ∧
       (inst 14).main Coin.CTX j = (inst 13).main (URec.X 0) rj + 256 * (inst 13).main (URec.X 1) rj +
         65536 * (inst 13).main (URec.X 2) rj := by
-  have hsite := site_mem hL (i := 14) (by decide) hj (k := 3) (by simp [hashSys, Coin.coin, Coin.lookups])
+  have hsite := site_mem hL (i := 14) (by decide) hj (k := 3) (by simp [hashSys, Coin.coin, Coin.lookups_len, Coin.lk0, Coin.lk1, Coin.lk2, Coin.lk3, Coin.lk4, Coin.lk5, Coin.lk6, Coin.lg0, Coin.lg1, Coin.lg2, Coin.lg3, Coin.lg4, Coin.lg5, Coin.lg6])
   have hm : siteMult hashSys inst pub (14, j, 3) = -1 := by
-    simp [siteMult, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups, Expr.eval, Coin.k,
+    simp [siteMult, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups_len, Coin.lk0, Coin.lk1, Coin.lk2, Coin.lk3, Coin.lk4, Coin.lk5, Coin.lk6, Coin.lg0, Coin.lg1, Coin.lg2, Coin.lg3, Coin.lg4, Coin.lg5, Coin.lg6, Expr.eval, Coin.k,
       StarkedAir.Sha256.eval_col, wrap_zero hj, hki]
   obtain ⟨i', r', k', hr', hy, hsm, hsv⟩ := link hL hsat hL24 hsite rfl hm
   rw [show siteRel hashSys (14, j, 3) = 23 from rfl, yt] at hy
@@ -813,18 +813,66 @@ theorem coin_urec {j : ℕ} (hj : j < 2 ^ Ls 14) (hki : (inst 14).main Coin.KI j
       (inst 13).main (URec.V 3) r' + 256 * (inst 13).main (URec.V 4) r' + 65536 * (inst 13).main (URec.V 5) r' +
         16777216 * (inst 13).main (URec.V 6) r',
       (inst 13).main (URec.X 0) r' + 256 * (inst 13).main (URec.X 1) r' + 65536 * (inst 13).main (URec.X 2) r',
-      (inst 13).main URec.CP r', (inst 13).main URec.C20 r', (inst 13).main URec.C32 r'] := by
+      (inst 13).main URec.CP r', (inst 13).main URec.C20 r', (inst 13).main URec.C32 r',
+      (inst 13).main (URec.MT 0) r' + 256 * (inst 13).main (URec.MT 1) r',
+      (inst 13).main (URec.MT 2) r' + 256 * (inst 13).main (URec.MT 3) r'] := by
     simp [siteVals, siteEval, siteLookup, hashSys, hL 13 (by decide), URec.urec, URec.lookups, URec.k, URec.limb,
       Expr.eval, StarkedAir.Sha256.eval_col, StarkedAir.Sha256.eval_cst, wrap_zero hr']
   have e2 : siteVals hashSys inst pub (14, j, 3) = [(inst 14).main Coin.J j, (inst 14).main Coin.CLO j,
       (inst 14).main Coin.CHI j, (inst 14).main Coin.VL j, (inst 14).main Coin.VH j, (inst 14).main Coin.CTX j,
-      (inst 14).main Coin.UP j, (inst 14).main Coin.U20 j, (inst 14).main Coin.U32 j] := by
-    simp [siteVals, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups, Coin.k,
+      (inst 14).main Coin.UP j, (inst 14).main Coin.U20 j, (inst 14).main Coin.U32 j,
+      (inst 14).main Coin.ML j, (inst 14).main Coin.MH j] := by
+    simp [siteVals, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups_len, Coin.lk0, Coin.lk1, Coin.lk2, Coin.lk3, Coin.lk4, Coin.lk5, Coin.lk6, Coin.lg0, Coin.lg1, Coin.lg2, Coin.lg3, Coin.lg4, Coin.lg5, Coin.lg6, Coin.k,
       StarkedAir.Sha256.eval_col, wrap_zero hj]
   rw [e1, e2] at hsv
   simp only [List.cons.injEq, and_true] at hsv
   obtain ⟨a, b, c, d, e, g, -⟩ := hsv
   exact ⟨a.symm, b.symm, c.symm, d.symm, e.symm, g.symm⟩
+
+/-- **An input's claimed median time past is its undo record's** (CONNECT-RULES step 4): the coin row's
+`ML`, `MH` are the 16-bit limbs of record `J`'s four claim bytes. -/
+theorem coin_urec_mtp {j : ℕ} (hj : j < 2 ^ Ls 14) (hki : (inst 14).main Coin.KI j = 1) :
+    ∃ rj < 2 ^ Ls 13, (inst 13).main URec.ON rj = 1 ∧ (inst 14).main Coin.J j = (inst 13).main URec.J rj ∧
+      (inst 14).main Coin.ML j = (inst 13).main (URec.MT 0) rj + 256 * (inst 13).main (URec.MT 1) rj ∧
+      (inst 14).main Coin.MH j = (inst 13).main (URec.MT 2) rj + 256 * (inst 13).main (URec.MT 3) rj := by
+  have hsite := site_mem hL (i := 14) (by decide) hj (k := 3) (by simp [hashSys, Coin.coin, Coin.lookups_len, Coin.lk0, Coin.lk1, Coin.lk2, Coin.lk3, Coin.lk4, Coin.lk5, Coin.lk6, Coin.lg0, Coin.lg1, Coin.lg2, Coin.lg3, Coin.lg4, Coin.lg5, Coin.lg6])
+  have hm : siteMult hashSys inst pub (14, j, 3) = -1 := by
+    simp [siteMult, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups_len, Coin.lk0, Coin.lk1, Coin.lk2, Coin.lk3, Coin.lk4, Coin.lk5, Coin.lk6, Coin.lg0, Coin.lg1, Coin.lg2, Coin.lg3, Coin.lg4, Coin.lg5, Coin.lg6, Expr.eval, Coin.k,
+      StarkedAir.Sha256.eval_col, wrap_zero hj, hki]
+  obtain ⟨i', r', k', hr', hy, hsm, hsv⟩ := link hL hsat hL24 hsite rfl hm
+  rw [show siteRel hashSys (14, j, 3) = 23 from rfl, yt] at hy
+  obtain ⟨rfl, rfl⟩ : i' = 13 ∧ k' = 19 := by omega
+  have us := urec_sat' hL hsat hL24
+  refine ⟨r', hr', ?_, ?_⟩
+  · have hm' : (inst 13).main URec.ON r' ≠ 0 := by
+      simpa [siteMult, siteEval, siteLookup, hashSys, hL 13 (by decide), URec.urec, URec.lookups, Expr.eval, URec.k,
+        StarkedAir.Sha256.eval_col, wrap_zero hr'] using hsm
+    rcases URec.on_bool us hr' with h | h
+    · exact absurd h hm'
+    · exact h
+  have e1 : siteVals hashSys inst pub (13, r', 19) = [(inst 13).main URec.J r',
+      (inst 13).main (URec.C 0) r' + 256 * (inst 13).main (URec.C 1) r',
+      (inst 13).main (URec.C 2) r' + 256 * (inst 13).main (URec.C 3) r',
+      (inst 13).main (URec.V 0) r' + 256 * (inst 13).main (URec.V 1) r' + 65536 * (inst 13).main (URec.V 2) r',
+      (inst 13).main (URec.V 3) r' + 256 * (inst 13).main (URec.V 4) r' + 65536 * (inst 13).main (URec.V 5) r' +
+        16777216 * (inst 13).main (URec.V 6) r',
+      (inst 13).main (URec.X 0) r' + 256 * (inst 13).main (URec.X 1) r' + 65536 * (inst 13).main (URec.X 2) r',
+      (inst 13).main URec.CP r', (inst 13).main URec.C20 r', (inst 13).main URec.C32 r',
+      (inst 13).main (URec.MT 0) r' + 256 * (inst 13).main (URec.MT 1) r',
+      (inst 13).main (URec.MT 2) r' + 256 * (inst 13).main (URec.MT 3) r'] := by
+    simp [siteVals, siteEval, siteLookup, hashSys, hL 13 (by decide), URec.urec, URec.lookups, URec.k, URec.limb,
+      Expr.eval, StarkedAir.Sha256.eval_col, StarkedAir.Sha256.eval_cst, wrap_zero hr']
+  have e2 : siteVals hashSys inst pub (14, j, 3) = [(inst 14).main Coin.J j, (inst 14).main Coin.CLO j,
+      (inst 14).main Coin.CHI j, (inst 14).main Coin.VL j, (inst 14).main Coin.VH j, (inst 14).main Coin.CTX j,
+      (inst 14).main Coin.UP j, (inst 14).main Coin.U20 j, (inst 14).main Coin.U32 j,
+      (inst 14).main Coin.ML j, (inst 14).main Coin.MH j] := by
+    simp [siteVals, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups_len, Coin.lk0, Coin.lk1, Coin.lk2, Coin.lk3, Coin.lk4, Coin.lk5, Coin.lk6, Coin.lg0, Coin.lg1, Coin.lg2, Coin.lg3, Coin.lg4, Coin.lg5, Coin.lg6, Coin.k,
+      StarkedAir.Sha256.eval_col, wrap_zero hj]
+  rw [e1, e2] at hsv
+  simp only [List.cons.injEq, and_true] at hsv
+  obtain ⟨a, -, -, -, -, -, -, -, -, m1, m2⟩ := hsv
+  exact ⟨a.symm, m1.symm, m2.symm⟩
+
 
 /-- A URec on row's `J` is its index. -/
 theorem urec_j {r : ℕ} (hr : r < 2 ^ Ls 13) (hon : (inst 13).main URec.ON r = 1) : (inst 13).main URec.J r = (r : F) := by
@@ -852,9 +900,9 @@ theorem coin_fp_in {j : ℕ} (hj : j < 2 ^ Ls 14) (hki : (inst 14).main Coin.KI 
   have fw := fpwalk_sat' hL hsat hL24
   have hko : (inst 14).main Coin.KO j = 0 := by
     rcases Coin.kinds cs hj with h | h | h | h <;> simp_all
-  have hsite := site_mem hL (i := 14) (by decide) hj (k := 5) (by simp [hashSys, Coin.coin, Coin.lookups])
+  have hsite := site_mem hL (i := 14) (by decide) hj (k := 5) (by simp [hashSys, Coin.coin, Coin.lookups_len, Coin.lk0, Coin.lk1, Coin.lk2, Coin.lk3, Coin.lk4, Coin.lk5, Coin.lk6, Coin.lg0, Coin.lg1, Coin.lg2, Coin.lg3, Coin.lg4, Coin.lg5, Coin.lg6])
   have hm : siteMult hashSys inst pub (14, j, 5) = -1 := by
-    simp [siteMult, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups, Expr.eval, Coin.k,
+    simp [siteMult, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups_len, Coin.lk0, Coin.lk1, Coin.lk2, Coin.lk3, Coin.lk4, Coin.lk5, Coin.lk6, Coin.lg0, Coin.lg1, Coin.lg2, Coin.lg3, Coin.lg4, Coin.lg5, Coin.lg6, Expr.eval, Coin.k,
       StarkedAir.Sha256.eval_col, wrap_zero hj, hko, hki]
   have hsidc := Coin.sidc_spec cs hj
   rw [hko, hki, one_mul, zero_mul, zero_add] at hsidc
@@ -862,7 +910,7 @@ theorem coin_fp_in {j : ℕ} (hj : j < 2 ^ Ls 14) (hki : (inst 14).main Coin.KI 
   have hv : siteVals hashSys inst pub (14, j, 5) = [1, (inst 14).main Coin.J j, (inst 14).main Coin.SLEN j,
       (inst 14).main Coin.FH j, (inst 14).main (Coin.FH + 1) j, (inst 14).main (Coin.FH + 2) j,
       (inst 14).main (Coin.FH + 3) j] := by
-    simp [siteVals, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups, Coin.k,
+    simp [siteVals, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups_len, Coin.lk0, Coin.lk1, Coin.lk2, Coin.lk3, Coin.lk4, Coin.lk5, Coin.lk6, Coin.lg0, Coin.lg1, Coin.lg2, Coin.lg3, Coin.lg4, Coin.lg5, Coin.lg6, Coin.k,
       StarkedAir.Sha256.eval_col, wrap_zero hj, hki, hsidc]
   rw [hv] at htup
   simp only [List.cons.injEq, and_true] at htup
@@ -887,7 +935,7 @@ theorem coin_fp_in {j : ℕ} (hj : j < 2 ^ Ls 14) (hki : (inst 14).main Coin.KI 
   · exfalso
     have e : siteVals hashSys inst pub (14, r'', 4) = [0, (inst 14).main Coin.START r'', (inst 14).main Coin.START r'',
         (inst 14).main Coin.LEN r''] := by
-      simp [siteVals, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups, Coin.k, Expr.eval,
+      simp [siteVals, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups_len, Coin.lk0, Coin.lk1, Coin.lk2, Coin.lk3, Coin.lk4, Coin.lk5, Coin.lk6, Coin.lg0, Coin.lg1, Coin.lg2, Coin.lg3, Coin.lg4, Coin.lg5, Coin.lg6, Coin.k, Expr.eval,
         StarkedAir.Sha256.eval_col, StarkedAir.Sha256.eval_cst, wrap_zero hr'']
     rw [e] at hsv; simp at hsv
   have e : siteVals hashSys inst pub (13, r'', 18) = [1, (inst 13).main URec.J r'', (inst 13).main URec.S r'' + 9,
@@ -977,11 +1025,11 @@ theorem coin_script_byte {j : ℕ} (hj : j < 2 ^ Ls 14) (hko : (inst 14).main Co
     (hzs : (inst 14).main Coin.ZS j = 0) :
     ((inst 14).main Coin.SSC j).val < (Rb inst pub).length ∧
       ((inst 14).main Coin.SB j).val = ((Rb inst pub).getD ((inst 14).main Coin.SSC j).val 0).toNat := by
-  have hsite := site_mem hL (i := 14) (by decide) hj (k := 6) (by simp [hashSys, Coin.coin, Coin.lookups])
+  have hsite := site_mem hL (i := 14) (by decide) hj (k := 6) (by simp [hashSys, Coin.coin, Coin.lookups_len, Coin.lk0, Coin.lk1, Coin.lk2, Coin.lk3, Coin.lk4, Coin.lk5, Coin.lk6, Coin.lg0, Coin.lg1, Coin.lg2, Coin.lg3, Coin.lg4, Coin.lg5, Coin.lg6])
   refine byte_read_R hL hsat hL24 hsite (by decide) rfl ?_ ?_
-  · simp [siteMult, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups, Expr.eval, Coin.k,
+  · simp [siteMult, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups_len, Coin.lk0, Coin.lk1, Coin.lk2, Coin.lk3, Coin.lk4, Coin.lk5, Coin.lk6, Coin.lg0, Coin.lg1, Coin.lg2, Coin.lg3, Coin.lg4, Coin.lg5, Coin.lg6, Expr.eval, Coin.k,
       Coin.om, Coin.one, StarkedAir.Sha256.eval_col, StarkedAir.Sha256.eval_cst, wrap_zero hj, hko, hzs]
-  · simp [siteVals, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups, Coin.k,
+  · simp [siteVals, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups_len, Coin.lk0, Coin.lk1, Coin.lk2, Coin.lk3, Coin.lk4, Coin.lk5, Coin.lk6, Coin.lg0, Coin.lg1, Coin.lg2, Coin.lg3, Coin.lg4, Coin.lg5, Coin.lg6, Coin.k,
       StarkedAir.Sha256.eval_col, wrap_zero hj]
 
 omit hL hsat hL24 in

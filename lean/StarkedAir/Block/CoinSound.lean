@@ -799,9 +799,45 @@ theorem lock_row {r : ℕ} (hr : r < n) (hki : M KI r = 1) (hl : M LKH r = 1) :
   simp only [height, Expr.eval, ev_k hr, ev_b3 hr, hki, hl, one_mul] at h
   linear_combination -h
 
+omit hsat in
+theorem mem_time {c : Expr} (h : c ∈ timeC) : c ∈ constraints := by simp [constraints, h]
+
+/-- The time-lock bits are bits, and `TM = KI · LKT`. -/
+theorem time_bits {r : ℕ} (hr : r < n) :
+    (M LKT r = 0 ∨ M LKT r = 1) ∧ (M SHB r = 0 ∨ M SHB r = 1) ∧ (M BW0 r = 0 ∨ M BW0 r = 1) ∧
+      (M BW1 r = 0 ∨ M BW1 r = 1) ∧ M TM r = M KI r * M LKT r := by
+  have q := fun (c : ℕ) (h : boolC (k c) ∈ timeC) => by
+    have := sat hsat (mem_time h) hr
+    simp only [boolC, Expr.eval, ev_k hr, eval_cst, Nat.cast_one] at this
+    exact (mul_eq_zero.mp this).imp id sub_eq_zero.mp
+  have h5 := sat hsat (mem_time (c := .sub (k TM) (.mul (k KI) (k LKT))) (by simp [timeC])) hr
+  simp only [Expr.eval, ev_k hr] at h5
+  exact ⟨q LKT (by simp [timeC]), q SHB (by simp [timeC]), q BW0 (by simp [timeC]), q BW1 (by simp [timeC]),
+    sub_eq_zero.mp h5⟩
+
+/-- **A time lock's row** (BIP68, CONNECT-RULES step 4). On a row whose time lock is enforced (`TM = 1`):
+the sequence's low 16 bits are `SA + 128·(SH0 + 256·SHB)`, and the previous median time past (public
+inputs 3 and 7) minus the claimed one (`ML`, `MH`) minus `512 ·` that lock is the four bytes `TQ`, with
+borrow `BW0 + BW1` between the limbs. -/
+theorem time_row {r : ℕ} (hr : r < n) (ht : M TM r = 1) :
+    M SQL r = M SA r + 128 * (M SH0 r + 256 * M SHB r) ∧
+      pub 3 - M ML r - 512 * M SA r + 65536 * (M BW0 r + M BW1 r) = M (TQ 0) r + 256 * M (TQ 1) r ∧
+      pub 7 - M MH r - (M SH0 r + 256 * M SHB r) - (M BW0 r + M BW1 r) = M (TQ 2) r + 256 * M (TQ 3) r := by
+  have h1 := sat hsat (mem_time (c := .mul tm (.sub (k SQL) (.add (k SA) (.mul (cst 128) (.add (k SH0) (.mul (cst 256) (k SHB)))))))
+    (by simp [timeC])) hr
+  have h2 := sat hsat (mem_time (c := .mul tm (.sub (.add (.sub (.sub (.pub 3) (k ML)) (.mul (cst 512) (k SA))) (.mul (cst 65536) (.add (k BW0) (k BW1))))
+      (pair (TQ 0) (TQ 1)))) (by simp [timeC])) hr
+  have h3 := sat hsat (mem_time (c := .mul tm (.sub (.sub (.sub (.sub (.pub 7) (k MH)) (.add (k SH0) (.mul (cst 256) (k SHB)))) (.add (k BW0) (k BW1)))
+      (pair (TQ 2) (TQ 3)))) (by simp [timeC])) hr
+  simp only [tm, pair, Expr.eval, ev_k hr, eval_cst, ht, one_mul] at h1 h2 h3
+  refine ⟨?_, ?_, ?_⟩
+  · linear_combination h1
+  · push_cast at h2 ⊢; linear_combination h2
+  · push_cast at h3 ⊢; linear_combination h3
+
 /-! ### The running sum -/
 
-open StarkedAir.Spec.QM31 (QM toQ emb toQ_mul toQ_add toQ_sub emb_zero)
+open StarkedAir.Spec.QM31 (QM toQ emb toQ_mul toQ_add toQ_sub emb_zero emb_one)
 open StarkedAir.Block.ExtSum (QE)
 open StarkedAir.Block.ExtSum.QE
 
@@ -811,15 +847,21 @@ omit hsat in
 theorem zeroC_eq : zeroC = RunSum.zeroC FC mE := rfl
 omit hsat in
 theorem accC_eq : accC = RunSum.accC FC ACC := rfl
-omit hsat in
-theorem lastC_eq : lastC = RunSum.lastC ACC PUB_S := rfl
-
-theorem runsum_sat : ∀ r < n, ∀ c ∈ RunSum.fracC FC PUB_Z phi mE ++ RunSum.zeroC FC mE ++ RunSum.accC FC ACC ++
-    RunSum.lastC ACC PUB_S, c.eval n RunSum.preCols pub M r = 0 := by
+theorem runsum_sat : ∀ r < n, ∀ c ∈ RunSum.fracC FC PUB_Z phi mE ++ RunSum.zeroC FC mE ++ RunSum.accC FC ACC,
+    c.eval n RunSum.preCols pub M r = 0 := by
   intro r hr c hc
   have : c ∈ constraints := by
-    rw [← fracC_eq, ← zeroC_eq, ← accC_eq, ← lastC_eq] at hc
+    rw [← fracC_eq, ← zeroC_eq, ← accC_eq] at hc
     simp only [constraints, List.mem_append] at hc ⊢
+    tauto
+  exact hsat r hr c this
+
+/-- The time claims' running sum (CONNECT-RULES step 4) is part of `timeC`. -/
+theorem runsum_sat2 : ∀ r < n, ∀ c ∈ RunSum.fracC FC2 PUB_Z phi2 tm ++ RunSum.zeroC FC2 tm ++ RunSum.accC FC2 ACC2,
+    c.eval n RunSum.preCols pub M r = 0 := by
+  intro r hr c hc
+  have : c ∈ constraints := by
+    simp only [constraints, timeC, List.mem_append] at hc ⊢
     tauto
   exact hsat r hr c this
 
@@ -843,19 +885,62 @@ theorem ev_phi (r : ℕ) : toQ (phi.ev n RunSum.preCols pub M r) = phiQ pub M n 
   rw [gen, toQ_ev_base]
   simp only [eval_cst, Nat.cast_zero, emb_zero, zero_add, phiQ]
 
-/-- **The coin events' running sum.** The public partial sum is the rows' fractions summed; each row's
-fraction `f` has `(z − φ)·f = MM`, and is zero when `MM = 0`. -/
+/-- A time claim's fingerprint `φ₂` of a row. -/
+noncomputable def phi2Q (pub : ℕ → F) (M : ℕ → ℕ → F) (n r : ℕ) : QM :=
+  ((List.range W).map fun j => RunSum.pQ pub (PUB_ALPHA j) * emb ((tuple2.getD j (cst 0)).eval n RunSum.preCols pub M r)).sum
+
+omit hsat in
+theorem ev_phi2 (r : ℕ) : toQ (phi2.ev n RunSum.preCols pub M r) = phi2Q pub M n r := by
+  have gen : ∀ (l : List ℕ) (a : QE), toQ ((l.foldl (fun acc j => acc.add ((pubQ (PUB_ALPHA j)).mul (base (tuple2.getD j (cst 0))))) a).ev
+      n RunSum.preCols pub M r) = toQ (a.ev n RunSum.preCols pub M r) +
+        (l.map fun j => RunSum.pQ pub (PUB_ALPHA j) * emb ((tuple2.getD j (cst 0)).eval n RunSum.preCols pub M r)).sum := by
+    intro l
+    induction l with
+    | nil => intro a; simp
+    | cons j l ih =>
+      intro a
+      rw [List.foldl_cons, ih, ev_add, toQ_add, ev_mul, toQ_mul, toQ_ev_base, RunSum.ev_pubQ, List.map_cons, List.sum_cons,
+        add_assoc]
+  show toQ (((List.range W).foldl _ (base (cst 0))).ev n RunSum.preCols pub M r) = _
+  rw [gen, toQ_ev_base]
+  simp only [eval_cst, Nat.cast_zero, emb_zero, zero_add, phi2Q]
+
+/-- **The block's running sums.** The public partial sum is the rows' coin fractions plus the rows' time
+claim fractions; a coin fraction `f` has `(z − φ)·f = MM` and is zero when `MM = 0`; a claim fraction `f₂`
+has `(z − φ₂)·f₂ = TM` and is zero when `TM = 0`. -/
 theorem coin_runsum (hn : 0 < n) :
-    RunSum.pQ pub PUB_S = ∑ r ∈ Finset.range n, RunSum.cQ M FC r ∧
-    ∀ r < n, (RunSum.pQ pub PUB_Z - phiQ pub M n r) * RunSum.cQ M FC r = emb (M MM r) ∧
-      (M MM r = 0 → RunSum.cQ M FC r = 0) := by
-  obtain ⟨hs, hrow⟩ := RunSum.runsum_sound (runsum_sat hsat) hn
-  refine ⟨hs, fun r hr => ?_⟩
-  have hm : mE.eval n RunSum.preCols pub M r = M MM r := by simp [mE, k, eval_col, wrap_zero hr]
-  obtain ⟨h1, h2⟩ := hrow r hr
-  rw [ev_phi, hm] at h1
-  rw [hm] at h2
-  exact ⟨h1, h2⟩
+    RunSum.pQ pub PUB_S = ∑ r ∈ Finset.range n, RunSum.cQ M FC r + ∑ r ∈ Finset.range n, RunSum.cQ M FC2 r ∧
+    (∀ r < n, (RunSum.pQ pub PUB_Z - phiQ pub M n r) * RunSum.cQ M FC r = emb (M MM r) ∧
+      (M MM r = 0 → RunSum.cQ M FC r = 0)) ∧
+    ∀ r < n, (RunSum.pQ pub PUB_Z - phi2Q pub M n r) * RunSum.cQ M FC2 r = emb (M TM r) ∧
+      (M TM r = 0 → RunSum.cQ M FC2 r = 0) := by
+  have s1 := runsum_sat hsat
+  have s2 := runsum_sat2 hsat
+  refine ⟨?_, fun r hr => ?_, fun r hr => ?_⟩
+  · have hl : n - 1 < n := by omega
+    have h : toQ (((base isLast).mul (((colQ ACC).add (colQ ACC2)).sub (pubQ PUB_S))).ev n RunSum.preCols pub M (n - 1)) = 0 :=
+      toQ_zero_of (fun e he => hsat (n - 1) hl e (by
+        simp only [constraints, List.mem_append]
+        left; left; left; right; exact he))
+    rw [ev_mul, toQ_mul, toQ_ev_base, ev_sub, toQ_sub, ev_add, toQ_add, RunSum.ev_colQ hl, RunSum.ev_colQ hl,
+      RunSum.ev_pubQ] at h
+    have hil : isLast.eval n RunSum.preCols pub M (n - 1) = 1 := by
+      simp [isLast, om, notLast, one, Expr.eval, eval_cst, RunSum.preCols, PreCol.eval, StarkedAir.Sha256.pre, eval_col,
+        wrap_zero hl, show n - 1 + 1 = n by omega]
+    rw [hil, emb_one, one_mul] at h
+    rw [← sub_eq_zero.mp h, RunSum.acc_sum' s1 (n - 1) hl, RunSum.acc_sum' s2 (n - 1) hl, show n - 1 + 1 = n by omega]
+  · have hm : mE.eval n RunSum.preCols pub M r = M MM r := by simp [mE, k, eval_col, wrap_zero hr]
+    have h1 := RunSum.frac_row' s1 hr
+    have h2 := RunSum.zero_row' s1 hr
+    rw [ev_phi, hm] at h1
+    rw [hm] at h2
+    exact ⟨h1, h2⟩
+  · have hm : tm.eval n RunSum.preCols pub M r = M TM r := by simp [tm, k, eval_col, wrap_zero hr]
+    have h1 := RunSum.frac_row' s2 hr
+    have h2 := RunSum.zero_row' s2 hr
+    rw [ev_phi2, hm] at h1
+    rw [hm] at h2
+    exact ⟨h1, h2⟩
 
 end Rows
 

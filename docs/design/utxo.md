@@ -225,7 +225,7 @@ scripts, **creating-transaction indices and lengths** (the undo commitment), and
 each input's `CTX` were chosen after the challenge, and so were the records' boundaries (URec's `TL`
 was only constrained to tile the stream); with hundreds of free choices a generalized-birthday search
 can balance a false epoch (*est.*: practical). The in-circuit undo record is now
-`code (4) ‖ index (3) ‖ length (2) ‖ serTxOut`; URec reads the index and length bytes, yields the index
+`code (4) ‖ index (3) ‖ length (2) ‖ serTxOut` (on branch `connect-rules`, since CONNECT-RULES step 4, followed by a 4-byte claimed median time past: [connect-rules.md](connect-rules.md) "Step 4"); URec reads the index and length bytes, yields the index
 in `urec` (the coin row's `CTX` must equal it: `coin_urec`, `coin_in_tuple`) and constrains `TL` to the
 length (`tl_bytes`). The index is below `2^24`, so it never wraps.
 

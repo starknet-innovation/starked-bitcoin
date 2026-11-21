@@ -136,7 +136,7 @@ pub fn main() !void {
         const m = try r.takeInt(u32, .little);
         const undo = try a.alloc(u8, m);
         try r.readSliceAll(undo);
-        const sh = sys.shape(a, raw, undo, null, height, false) catch |e| {
+        const sh = sys.shape(a, raw, undo, null, null, height, false) catch |e| {
             try w.print("{d},error,{s}\n", .{ height, @errorName(e) });
             try w.flush();
             continue;

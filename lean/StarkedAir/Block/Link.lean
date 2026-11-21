@@ -73,11 +73,11 @@ theorem yield_table : ∀ i < 15, ∀ k < (hashSys.comp i).lookups.length, isUse
 
 /-- The block system's lookup sites over all rows (per-component sizes, D-045): `Σᵢ kᵢ · 2^(Ls i)` with
 `kᵢ` the lookups per row — bytes 1, fields 40, messages 4, SHA 6, txid tree 11, tables 2, walker 5, context 12,
-witness tree 3, undo bytes 1, Blake2s words 6, Blake2s 11, fingerprints 4, undo records 20, coins 97 (223). -/
+witness tree 3, undo bytes 1, Blake2s words 6, Blake2s 11, fingerprints 4, undo records 28, coins 104 (245). -/
 def hashRows (Ls : ℕ → ℕ) : ℕ :=
   2 ^ Ls 0 + 46 * 2 ^ Ls 1 + 4 * 2 ^ Ls 2 + 6 * 2 ^ Ls 3 + 11 * 2 ^ Ls 4 + 2 * 2 ^ Ls 5 + 6 * 2 ^ Ls 6 +
-    12 * 2 ^ Ls 7 + 3 * 2 ^ Ls 8 + 2 ^ Ls 9 + 6 * 2 ^ Ls 10 + 11 * 2 ^ Ls 11 + 4 * 2 ^ Ls 12 + 24 * 2 ^ Ls 13 +
-    97 * 2 ^ Ls 14
+    12 * 2 ^ Ls 7 + 3 * 2 ^ Ls 8 + 2 ^ Ls 9 + 6 * 2 ^ Ls 10 + 11 * 2 ^ Ls 11 + 4 * 2 ^ Ls 12 + 28 * 2 ^ Ls 13 +
+    104 * 2 ^ Ls 14
 
 /-- **The block system's size condition** (D-045): every component has at most `2^24` rows and the site
 count `Σᵢ kᵢ·2^(Ls i)` is below `P`. One shared size satisfies it up to `2^23` (`SizeOk.of_le23`); a size
@@ -155,15 +155,15 @@ theorem hash_sites_len : (sites hashSys inst).length = hashRows Ls := by
     List.length_flatMap, bytes, Fields.fields, Fields.lookups, Fields.chkLookups, Msg.msg, Msg.lookups, Sha.sha,
     Sha.lookups, Merkle.merkle, Merkle.lookups, Tables.tablesB, Walk.walk, Walk.lookups, Ctx.ctx, Ctx.lookups,
     WMerkle.wmerkle, WMerkle.lookups, Undo.undo, B2Msg.b2msg, B2Msg.lookups, B2s.b2s, B2s.lookups,
-    FpWalk.fpwalk, FpWalk.lookups, URec.urec, URec.lookups, Coin.coin, Coin.lookups, List.sum_range_succ]
+    FpWalk.fpwalk, FpWalk.lookups, URec.urec, URec.lookups, Coin.coin, Coin.lookups_len, List.sum_range_succ]
   ring
 
 omit hL hsat in
 /-- At constant sizes the site count is `223 · 2^L`. -/
-theorem hashRows_const (L : ℕ) : hashRows (fun _ => L) = 234 * 2 ^ L := by unfold hashRows; ring
+theorem hashRows_const (L : ℕ) : hashRows (fun _ => L) = 245 * 2 ^ L := by unfold hashRows; ring
 
 omit hL hsat in
-/-- Sizes of at most `2^23` rows satisfy the size condition (`Σᵢ kᵢ·2^(Ls i) ≤ 234·2^23 < P`). -/
+/-- Sizes of at most `2^23` rows satisfy the size condition (`Σᵢ kᵢ·2^(Ls i) ≤ 245·2^23 < P`). -/
 theorem SizeOk.of_le23 (h23 : ∀ i < 15, Ls i ≤ 23) : SizeOk Ls := by
   refine ⟨fun i hi => le_trans (h23 i hi) (by norm_num), ?_⟩
   have h : ∀ i < 15, 2 ^ Ls i ≤ 2 ^ 23 := fun i hi => Nat.pow_le_pow_right (by norm_num) (h23 i hi)
@@ -467,7 +467,7 @@ theorem use_mult : ∀ s ∈ sites hashSys inst, isUse s.1 s.2.2 = true →
   · -- undo records: `−[row 0]`, `−ON`
     have us := hash_urec_sat hL hsat
     have hk13 : k < 18 ∨ 20 ≤ k := by simpa [isUse] using hu
-    have hk24 : k < 24 := by simpa [hashSys, URec.urec, URec.lookups] using hk
+    have hk24 : k < 28 := by simpa [hashSys, URec.urec, URec.lookups] using hk
     have zs := URec.zsum_bool us hr
     have pc := URec.pc_bool us hr
     have bON := URec.on_bool us hr
@@ -486,7 +486,8 @@ theorem use_mult : ∀ s ∈ sites hashSys inst, isUse s.1 s.2.2 = true →
           List.cons_append, List.nil_append, List.singleton_append, List.getD_cons_zero, List.getD_cons_succ, Expr.eval,
           URec.k, StarkedAir.Sha256.eval_col, wrap_zero hr]
         exact neg01 bON
-    · rcases (show k = 20 ∨ k = 21 ∨ k = 22 ∨ k = 23 by omega) with rfl | rfl | rfl | rfl <;>
+    · rcases (show k = 20 ∨ k = 21 ∨ k = 22 ∨ k = 23 ∨ k = 24 ∨ k = 25 ∨ k = 26 ∨ k = 27 by omega) with
+        rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl <;>
         simp only [URec.lookups, List.range_succ, List.range_zero, List.nil_append, List.map_cons, List.map_nil,
           List.cons_append, List.nil_append, List.singleton_append, List.getD_cons_zero, List.getD_cons_succ, Expr.eval,
           URec.k, StarkedAir.Sha256.eval_col, wrap_zero hr] <;>
@@ -542,11 +543,17 @@ theorem use_mult : ∀ s ∈ sites hashSys inst, isUse s.1 s.2.2 = true →
         ((Coin.notFirst).eval (2 ^ Ls 14) Coin.preCols pub (inst 14).main r) *
         ((inst 14).main Coin.KO r + (inst 14).main Coin.KI r + (inst 14).main Coin.CBI r) = 1 := mul01 bNF bon
     have bLKH := air_bool (air := Coin.coin.air) co (c := Coin.LKH) (by simp [Coin.coin, Coin.constraints, Coin.lockC, Coin.k]) hr
-    have hk64 : k < 97 := by rw [← Coin.lookups_len]; simpa [hashSys, Coin.coin] using hk
+    have bLKT := air_bool (air := Coin.coin.air) co (c := Coin.LKT) (by simp [Coin.coin, Coin.constraints, Coin.timeC, Coin.k]) hr
+    have bTM : (inst 14).main Coin.TM r = 0 ∨ (inst 14).main Coin.TM r = 1 := by
+      have := co r hr (.sub (Coin.k Coin.TM) (.mul (Coin.k Coin.KI) (Coin.k Coin.LKT))) (by
+        simp [Coin.coin, Coin.constraints, Coin.timeC])
+      simp only [Coin.k, Expr.eval, StarkedAir.Sha256.eval_col, wrap_zero hr] at this
+      rw [sub_eq_zero.mp this]; exact mul01 bKI bLKT
+    have hk64 : k < 104 := by rw [← Coin.lookups_len]; simpa [hashSys, Coin.coin] using hk
     have hm := Coin.mult_cases k hk64 hk4
     simp only [Coin.useMults, List.mem_cons, List.not_mem_nil, or_false] at hm
-    rcases hm with h | h | h | h | h | h | h | h | h | h | h | h <;> rw [h] <;>
-      simp only [Expr.eval, Coin.k, Coin.om, Coin.one, Coin.on, StarkedAir.Sha256.eval_col, StarkedAir.Sha256.eval_cst,
+    rcases hm with h | h | h | h | h | h | h | h | h | h | h | h | h <;> rw [h] <;>
+      simp only [Expr.eval, Coin.k, Coin.om, Coin.one, Coin.on, Coin.tm, StarkedAir.Sha256.eval_col, StarkedAir.Sha256.eval_cst,
         wrap_zero hr, Nat.cast_one]
     · exact neg01 bKO
     · exact neg01 bKICBI
@@ -560,6 +567,7 @@ theorem use_mult : ∀ s ∈ sites hashSys inst, isUse s.1 s.2.2 = true →
     · exact neg01 bon
     · exact neg01 bMLO
     · exact neg01 (mul01 bKI bLKH)
+    · exact neg01 bTM
 
 /-- **A use is matched by a yield.** A use site with multiplicity `−1` has a yield site (not a use) with
 nonzero multiplicity, the same relation and the same tuple. -/
@@ -744,7 +752,7 @@ theorem digest_linked (hL24 : SizeOk Ls) {i r k : ℕ} (hu : (i = 3 ∧ (k = 4 �
   have hs1 : ((i, r, k) : Site) ∈ sites hashSys inst := by
     rcases hu with ⟨rfl, h | h⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ <;> (try subst h) <;>
       exact site_mem hL (by decide) hr (by simp [hashSys, Sha.sha, Sha.lookups, Merkle.merkle, Merkle.lookups, Coin.coin,
-        Coin.lookups])
+        Coin.lookups_len])
   have huse : isUse i k = true := by rcases hu with ⟨rfl, h | h⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ <;> (try subst h) <;> rfl
   obtain ⟨i', r', k', hr', hy, hsm, hsv⟩ := link hL hsat hL24 hs1 huse hm
   have e : siteRel hashSys (i, r, k) = 7 := by
