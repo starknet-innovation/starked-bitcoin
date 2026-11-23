@@ -21,6 +21,22 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-11-23 · session 45b · CONNECT-RULES step 5: device parity of the R5 AIRs on an H100
+
+Who: Claude (agent, Fable 5.2); owner: "For GPU time you can do the first part. Don't reprove the whole thing yet."
+Roadmap: CONNECT-RULES in progress (step 5: device parity done; TIERS-2 and the re-prove not started)
+Done:
+- RunPod H100 SXM 80 GB (secure cloud, $4.39/h listed, sm_90, host CUDA 13.2, image `runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404`), commit a6531b8 shipped as a tarball. Pod deleted after the run (`list-pods` empty).
+Evidence (logs in `data/store/gpu/2026-11-23-r5-parity/`, local):
+- `cuda-prove`, device proof BYTE-IDENTICAL to the CPU proof made on the pod and `verifyExt: accepted`, AOT misses 0: block 0 (test and production, uniform and tiered; the test-uniform proof is the golden `299aeae0…794a`), block 170 (test uniform, production tiered), block 400000 tiered production (27.75 GiB device), block 970347 tiered production, 2^23 (55.48 GiB device, device proof 2.9 s; CPU proof 357 s).
+- `cuda-set` on the set after block 1000 (new format, 167 segments, production strength, test logs): all proved and verified on the device; 56 segments (every third) byte-identical to their CPU proofs.
+Problems / lessons:
+- `cuda-set --test-strength` fails at segment 7 of the set after block 1000 and segment 2 of the set after block 170 with `terminal decode failed: InvalidDecommitHeader`. **Not from this work:** `main` (c83ddb1) built on the same pod fails the same way on the old-format set. Production strength is not affected. Not investigated (backlog: CUDA-SET-TEST-DECODE).
+- Community capacity for H100 and A100 vanished between the capacity read and the create; the secure cloud worked.
+- 2^23 tiered now peaks at 55.5 GiB on the device (51.2 before steps 2–4).
+- Not done: timings in a tighter profile (TIERS-2 is not built), a block with a real time lock, the node's data.
+Next: TIERS-2 on the new needs, then the owner's choice between a re-prove of 935,001–972,500 and a run from genesis (after ANC-PRE-CSV).
+
 ## 2026-11-23 · session 45 · CONNECT-RULES step 4 under R5: the coin carries its time (built, tested, proven)
 
 Who: Claude (agent, Fable 5.2); owner: "Let's do R5"
