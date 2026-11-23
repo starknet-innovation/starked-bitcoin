@@ -165,8 +165,18 @@ pub const Coin = struct {
     height: u32,
     cb: bool,
     txi: u32,
-    /// `serTxOut`: amount and script.
+    /// The coin's bytes: `serTxOut` (amount and script), then its time, 4 bytes little-endian: the median
+    /// time past of the block before the coin's (`coin.coinTime`; D-058, R5).
     ser: []const u8,
+
+    /// `serTxOut`: what Core's coin has.
+    pub fn txout(c: Coin) []const u8 {
+        return c.ser[0 .. c.ser.len - 4];
+    }
+
+    pub fn mtp(c: Coin) u32 {
+        return std.mem.readInt(u32, c.ser[c.ser.len - 4 ..][0..4], .little);
+    }
 
     fn lessThan(_: void, x: Coin, y: Coin) bool {
         const o = std.mem.order(u8, &x.txid, &y.txid);
@@ -208,15 +218,17 @@ pub fn unspendable(script: []const u8) bool {
 
 /// The coin set after blocks `0 … blocks.len − 1` (Core's semantics with the spec's two deviations).
 pub fn coinSet(a: std.mem.Allocator, blocks: []const []const u8) ![]Coin {
-    return coinSetFrom(a, &.{}, 0, blocks);
+    return coinSetFrom(a, &.{}, 0, blocks, null);
 }
 
-/// The coin set after applying blocks `first, first + 1, …` to `init`.
-pub fn coinSetFrom(a: std.mem.Allocator, init: []const Coin, first: u32, blocks: []const []const u8) ![]Coin {
+/// The coin set after applying blocks `first, first + 1, …` to `init`. `headers` (the chain's, from
+/// genesis) give the created coins' times; they are needed from the CSV height on (`coin.coinTime`).
+pub fn coinSetFrom(a: std.mem.Allocator, init: []const Coin, first: u32, blocks: []const []const u8, headers: ?[]const [80]u8) ![]Coin {
     var set = std.AutoHashMap(Key, Coin).init(a);
     for (init) |c| try set.put(.{ .txid = c.txid, .vout = c.vout }, c);
     for (blocks, 0..) |raw, hh| {
         const height: u32 = first + @as(u32, @intCast(hh));
+        const time: u32 = if (headers) |hs| coin.coinTime(hs, height) else if (height < @import("connect_rules.zig").CSV_HEIGHT) 0 else return error.MissingHeaders;
         const rows = try fields.tokenize(a, raw);
         var txi: u32 = 0;
         var tx_start: usize = 0;
@@ -254,7 +266,7 @@ pub fn coinSetFrom(a: std.mem.Allocator, init: []const Coin, first: u32, blocks:
                         if (unspendable(script)) continue;
                         const k = Key{ .txid = id, .vout = o.vout };
                         if (set.contains(k)) return error.Overwrite;
-                        try set.put(k, .{ .txid = id, .vout = o.vout, .height = height, .cb = txi == 0, .txi = txi, .ser = o.ser });
+                        try set.put(k, .{ .txid = id, .vout = o.vout, .height = height, .cb = txi == 0, .txi = txi, .ser = try coin.coinBytes(a, o.ser, time) });
                     };
                     txi += 1;
                 },
@@ -292,7 +304,7 @@ pub fn hashSerialized(set: []const Coin) [32]u8 {
         std.mem.writeInt(u32, b[0..4], c.vout, .little);
         std.mem.writeInt(u32, b[4..8], 2 * c.height + @intFromBool(c.cb), .little);
         s.update(&b);
-        s.update(c.ser);
+        s.update(c.txout());
     }
     var h1: [32]u8 = undefined;
     s.final(&h1);
@@ -346,7 +358,8 @@ pub fn partialSum(pubs: []const M31) QM31 {
     return QM31.fromM31(pubs[coin.PUB_S], pubs[coin.PUB_S + 1], pubs[coin.PUB_S + 2], pubs[coin.PUB_S + 3]);
 }
 
-/// The coin set file: count, then per coin txid, vout, height, coinbase, tx index, `serTxOut`.
+/// The coin set file: count, then per coin txid, vout, height, coinbase, tx index, the length of its bytes
+/// and its bytes (`serTxOut ‖ time`, `Coin.ser`).
 pub fn encodeSet(a: std.mem.Allocator, set: []const Coin) ![]u8 {
     var out = std.ArrayList(u8).empty;
     const w = out.writer(a);
@@ -385,7 +398,8 @@ pub fn decodeSet(a: std.mem.Allocator, bytes: []const u8) ![]Coin {
         c.txi = try r.readInt(u32, .little);
         const l = try r.readInt(u32, .little);
         // `WFE` (CoinEpochSound.lean): the code `2·height + cb` below 2^32, the script length below P.
-        if (c.height >= 1 << 31 or l >= 0x7fffffff) return error.CoinOutOfRange;
+        // The bytes hold an amount (8) and the time (4): `SetFile.RecOk`.
+        if (c.height >= 1 << 31 or l >= 0x7fffffff or l < 12) return error.CoinOutOfRange;
         if (l > bytes.len - fbs.pos) return error.Truncated;
         c.ser = bytes[fbs.pos .. fbs.pos + l];
         fbs.pos += l;

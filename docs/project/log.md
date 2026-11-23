@@ -21,6 +21,27 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-11-23 · session 45 · CONNECT-RULES step 4 under R5: the coin carries its time (built, tested, proven)
+
+Who: Claude (agent, Fable 5.2); owner: "Let's do R5"
+Roadmap: CONNECT-RULES in progress (steps 1–4 built and proven; step 5 needs a GPU); ANC-PRE-CSV and SET-TIME added (backlog)
+Done:
+- Design as built: [connect-rules.md](../design/connect-rules.md) "Step 4"; D-058 decided (R5), D-059 records the form and its limits.
+- Lean: `Coin` (191 columns, 108 lookups: `TB`, `EX`, `extQ`; the claim sum of 2026-11-20 removed), `URec` (the four time bytes in the record tuple), `SetPass.TMsg` (`RLEN + 4`), `SetPass.Rec` (`len ≥ 12`), `Spec.CoinEpoch` (`coinBytes`, `serOf`, `Claim.mtp`, `BlockC.mtp`), `Spec.SetFile` (`txOutSer` without the time). Proofs: `coin_out_tuple`, `coin_in_tuple`, `in_time_lock`, `block_factsS`, `epoch_systems_coreS` (the time lock, and `c.mtp = B′.mtp` for the creating block), `SetPass.sha_side`. `Compat.lean`: five statements restated, 14 pins re-pinned, 9 added.
+- Zig: `coin.zig` (`coinTime`, `coinBytes`, `extend`, every record's time), `epoch.zig`/`set_file.zig`/`set_pass.zig`/`set_seg.zig`/`replay.zig` (the set file's records carry the time; Core's hash skips it), `snapshot.zig`, `set_tree.recordOutput` (returns the time), goldens re-pinned, `gpu/cuda_aot` regenerated (4 constraint, 4 LogUp sources).
+Evidence:
+- `lake build`: exit 0 (8,939 jobs). `#print axioms` of `epoch_systems_coreS`, `in_time_lock`, `coin_out_tuple`: `propext`, `Classical.choice`, `Quot.sound`.
+- `scripts/check_air_drift.sh`: 93 of 93 `ok`, exit 0.
+- `Spec/SetFile.lean` test vector: the file digest changes, Core's `hash_serialized` (`552bf925…8463`) does not, checked against Python `hashlib` independently.
+- `zig build cuda-test -Dcuda=true -Doptimize=ReleaseFast`: exit 0; `zig build cuda-check -Dcuda=true`: exit 0.
+- `zig build test -Doptimize=ReleaseFast --summary all`: 11 of 11 steps, 154 of 156 tests passed, 2 skipped, exit 0.
+Problems / lessons:
+- I recommended R5 without telling the owner what it does not cover for a snapshot start (the initial coins' times are not under `hash_serialized`). Found while building; recorded as a limit (D-059, SET-TIME) and told to the owner. Lesson: before a choice between designs, list what each leaves unproven for the proof actually published.
+- A block's public previous median time past is 0 below the CSV height (D-043), so a coin's time is 0 there: ANC-PRE-CSV.
+- The local test sets `data/epoch/set-170.bin` and `set-1000.bin` (gitignored) are in the old format on other machines: convert them (append 4 zero bytes per record, `len + 4`; all their coins are below the CSV height) or regenerate them. The old files here are kept as `*.bin.v1`.
+- Not run: any block with a real time lock; the node's data; a GPU.
+Next: step 5 on a GPU (owner's go), then TIERS-2 and the re-prove; see status.md.
+
 ## 2026-11-20 · session 44 · CONNECT-RULES step 4 (block side built and proven; resolving the claims is an open decision) and step 5's local part (walker device kernel)
 
 Who: Claude (agent, Fable 5.2); owner: "do step 4 and 5"

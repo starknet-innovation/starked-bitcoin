@@ -162,7 +162,8 @@ pub fn parse(a: std.mem.Allocator, seg: []const u8) ![]Rec {
         if (seg.len - at < HEAD) return error.EndOfStream;
         const head = seg[at..][0..HEAD];
         const l = std.mem.readInt(u32, head[45..49], .little);
-        if (l < 8 or l >= MAX_LEN) return error.CoinOutOfRange;
+        // A coin's bytes: `serTxOut` (an amount, a script length) then its time, 4 bytes (`Rec.fields`).
+        if (l < 12 or l >= MAX_LEN) return error.CoinOutOfRange;
         if (head[40] > 1) return error.BadCoinbaseFlag;
         if (std.mem.readInt(u32, head[36..40], .little) >= MAX_HEIGHT) return error.CoinOutOfRange;
         if (seg.len - at - HEAD < l) return error.EndOfStream;
@@ -174,12 +175,16 @@ pub fn parse(a: std.mem.Allocator, seg: []const u8) ![]Rec {
     return out.items;
 }
 
-/// The `TxOutSer` bytes of a record.
+/// The length of a coin's time, the last bytes of a record's `ser` (Lean `TMsg.TIME`).
+pub const TIME = 4;
+
+/// The `TxOutSer` bytes of a record: Core's, so without the coin's time.
 fn txOutSer(a: std.mem.Allocator, r: Rec) ![]u8 {
-    const out = try a.alloc(u8, 40 + r.ser.len);
+    const sl = r.ser.len - TIME;
+    const out = try a.alloc(u8, 40 + sl);
     @memcpy(out[0..36], r.head[0..36]);
     std.mem.writeInt(u32, out[36..40], r.code(), .little);
-    @memcpy(out[40..], r.ser);
+    @memcpy(out[40..], r.ser[0..sl]);
     return out;
 }
 
@@ -307,11 +312,12 @@ pub fn build(a: std.mem.Allocator, ch: coin.Challenge, in: State, seg: []const u
 }
 
 /// The component logs a segment needs (each at its floor or above), from its byte length, record
-/// count, `ser` bytes and the incoming pending lengths.
+/// count, `ser` bytes (the coins' bytes, times included) and the incoming pending lengths.
 pub fn minLogs(seg_len: usize, n_recs: usize, ser_len: usize, b2p: usize, shap: usize, leaf_blocks: usize) [N_COMP]u32 {
     const xs = b2p + seg_len;
     const m_b2 = if (xs > 64) (xs + 63) / 64 - 1 else 0;
-    const ys = shap + 40 * n_recs + ser_len;
+    // The `TxOutSer` stream leaves out each record's time bytes.
+    const ys = shap + 40 * n_recs + ser_len - TIME * n_recs;
     const m_sha = ys / 64;
     const rec_log = logFor(n_recs + 1, 6);
     return .{
@@ -603,9 +609,9 @@ fn recColumns(a: std.mem.Allocator, log_size: u32, ch: coin.Challenge, in: State
                 if (i < 3) cols[K + 1 + i][r] = f(carry);
             }
             for (0..3) |i| {
-                cols[D + i][r] = f(((len - 8) >> @intCast(8 * i)) & 0xff);
+                cols[D + i][r] = f(((len - 12) >> @intCast(8 * i)) & 0xff);
                 cols[SB + i][r] = f((rc.start >> @intCast(8 * i)) & 0xff);
-                try ranges.append(a, (len - 8) >> @intCast(8 * i) & 0xff);
+                try ranges.append(a, (len - 12) >> @intCast(8 * i) & 0xff);
                 try ranges.append(a, (rc.start >> @intCast(8 * i)) & 0xff);
                 try ranges.append(a, (code >> @intCast(8 * i)) & 0xff);
             }
@@ -798,14 +804,14 @@ fn tmsgColumns(a: std.mem.Allocator, log_size: u32, in: HashSt, recs: []const Re
         pr[2][y] += 1;
     }
     for (recs, 0..) |rc, ri| {
-        const tl = 40 + rc.ser.len;
+        const tl = 40 + rc.ser.len - TIME;
         for (0..tl) |o| {
             cols[ON][y] = M31.one();
             cols[B][y] = f(ys[y]);
             cols[R][y] = f(ri);
             cols[O][y] = f(o);
             cols[RST][y] = f(rc.start);
-            cols[RLEN][y] = f(rc.ser.len);
+            cols[RLEN][y] = f(rc.ser.len - TIME);
             if (o == 0) cols[NEW][y] = M31.one();
             if (o == 0 and ri == 0) cols[FR][y] = M31.one();
             if (o + 1 == tl) cols[ENDR][y] = M31.one();

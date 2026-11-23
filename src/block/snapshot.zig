@@ -278,6 +278,7 @@ fn putVarInt(w: *std.ArrayListUnmanaged(u8), gpa: std.mem.Allocator, n0: u64) !v
     while (i > 0) : (i -= 1) try w.append(gpa, tmp[i - 1]);
 }
 
+/// `ser` is the coin's `serTxOut` (Core's snapshot has no coin time).
 pub const TestCoin = struct { txid: [32]u8, vout: u32, height: u32, cb: bool, ser: []const u8 };
 
 /// A snapshot of `coins` (sorted by (txid, vout)), each script in Core's raw form (`nSize = len + 6`).
@@ -383,7 +384,7 @@ test "snapshot: a set file written as a snapshot scans to the set file's facts; 
     var coins: std.ArrayListUnmanaged(TestCoin) = .empty;
     var max_h: u32 = 0;
     while (try rd.next()) |c| {
-        try coins.append(aa, .{ .txid = c.txid, .vout = c.vout, .height = c.height, .cb = c.cb, .ser = try aa.dupe(u8, c.ser) });
+        try coins.append(aa, .{ .txid = c.txid, .vout = c.vout, .height = c.height, .cb = c.cb, .ser = try aa.dupe(u8, c.txout()) });
         max_h = @max(max_h, c.height);
     }
     const base: [32]u8 = @splat(7);

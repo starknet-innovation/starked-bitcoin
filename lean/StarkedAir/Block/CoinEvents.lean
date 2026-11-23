@@ -10,11 +10,13 @@ the index and code as two 16-bit limbs each, the four coordinates of `serTxOut`'
 -/
 import StarkedAir.Block.CoinLink
 import StarkedAir.Spec.Coins
+import StarkedAir.Spec.CoinEpoch
 
 namespace StarkedAir.Block
 
 open StarkedAir
 open StarkedAir.Spec.QM31 (QM toQ emb coordsOf toQ_coordsOf coordsOf_toQ)
+open StarkedAir.Spec.CoinEpoch (coinBytes coinBytes_length)
 
 /-- Limb `i` of a 32-byte txid: word `i / 2` big-endian, its low 16 bits for even `i`, high for odd. -/
 def txidLimb (b : Spec.Block.Bytes) (i : ℕ) : ℕ :=
@@ -125,12 +127,45 @@ def rowTuple (inst : ℕ → Inst) (pub : ℕ → F) (L j : ℕ) : List F :=
 theorem rowTuple_eq {j : ℕ} (hj : j < 2 ^ Ls 14) : rowTuple inst pub (Ls 14) j =
     (List.range 16).map (fun i => (inst 14).main (Coin.TLB i) j) ++
       [(inst 14).main Coin.VLO j, (inst 14).main Coin.VHI j, (inst 14).main Coin.CLO j, (inst 14).main Coin.CHI j,
-        (inst 14).main Coin.FH j, (inst 14).main (Coin.FH + 1) j, (inst 14).main (Coin.FH + 2) j,
-        (inst 14).main (Coin.FH + 3) j, (inst 14).main Coin.SLEN j, (inst 14).main Coin.CTX j] := by
-  simp [rowTuple, Coin.tuple, Coin.ev_k hj, List.map_append, Function.comp]
+        (inst 14).main Coin.EX j, (inst 14).main (Coin.EX + 1) j, (inst 14).main (Coin.EX + 2) j,
+        (inst 14).main (Coin.EX + 3) j, (inst 14).main Coin.SLEN j + 4, (inst 14).main Coin.CTX j] := by
+  simp [rowTuple, Coin.tuple, Coin.ev_k hj, List.map_append, Function.comp, Expr.eval, StarkedAir.Sha256.eval_cst,
+    Coin.TLEN]
+
+/-- The block's previous median time past, from its public inputs 3 and 7 (16-bit limbs). -/
+def pubMtp (pub : ℕ → F) : ℕ := (pub 3).val + 65536 * (pub 7).val
+
+/-- **The tuple's fingerprint covers the coin's time** (D-058, R5). When the segment's fingerprint `FH`
+is that of the bytes `bs` and the row's time bytes `TB` are `t` (four bytes), the tuple's fingerprint `EX`
+is that of `bs ++ t`. -/
+theorem ex_coords {j : ℕ} (hj : j < 2 ^ Ls 14) {bs t : Spec.Block.Bytes} (ht : t.length = 4)
+    (hfp : toQ ⟨(inst 14).main Coin.FH j, (inst 14).main (Coin.FH + 1) j, (inst 14).main (Coin.FH + 2) j,
+      (inst 14).main (Coin.FH + 3) j⟩ = FpWalk.horner (FpWalk.gQ pub) (bs.map fun b => emb ((b.toNat : ℕ) : F)))
+    (hb : ∀ i < 4, (inst 14).main (Coin.TB i) j = (((t.getD i 0).toNat : ℕ) : F)) :
+    (⟨(inst 14).main Coin.EX j, (inst 14).main (Coin.EX + 1) j, (inst 14).main (Coin.EX + 2) j,
+      (inst 14).main (Coin.EX + 3) j⟩ : Circuit.Q) =
+      coordsOf (FpWalk.horner (FpWalk.gQ pub) ((bs ++ t).map fun b => emb ((b.toNat : ℕ) : F))) := by
+  have h := Coin.ex_row (coin_sat hL hsat hL24) hj
+  obtain ⟨a, b, c, d, rfl⟩ : ∃ a b c d, t = [a, b, c, d] := by
+    match t, ht with
+    | [a, b, c, d], _ => exact ⟨a, b, c, d, rfl⟩
+  have h0 := hb 0 (by norm_num); have h1 := hb 1 (by norm_num)
+  have h2 := hb 2 (by norm_num); have h3 := hb 3 (by norm_num)
+  simp only [List.getD_cons_zero, List.getD_cons_succ] at h0 h1 h2 h3
+  rw [← coordsOf_toQ (⟨(inst 14).main Coin.EX j, (inst 14).main (Coin.EX + 1) j, (inst 14).main (Coin.EX + 2) j,
+    (inst 14).main (Coin.EX + 3) j⟩ : Circuit.Q)]
+  congr 1
+  have hE : toQ ⟨(inst 14).main Coin.EX j, (inst 14).main (Coin.EX + 1) j, (inst 14).main (Coin.EX + 2) j,
+      (inst 14).main (Coin.EX + 3) j⟩ = RunSum.cQ (inst 14).main Coin.EX j := rfl
+  have hF : RunSum.cQ (inst 14).main Coin.FH j = toQ ⟨(inst 14).main Coin.FH j, (inst 14).main (Coin.FH + 1) j,
+      (inst 14).main (Coin.FH + 2) j, (inst 14).main (Coin.FH + 3) j⟩ := rfl
+  have hG : RunSum.pQ pub FpWalk.PUB_G = FpWalk.gQ pub := rfl
+  rw [hE, h, hF, hfp, hG, h0, h1, h2, h3]
+  simp [FpWalk.horner, List.foldl_append]
 
 /-- **An output row's tuple is its coin's.** The created coin of output `q − |vin|` of transaction `t`:
-its txid, index, code `2·height + [t = 0]`, `serTxOut`, and creating transaction `t`. -/
+its txid, index, code `2·height + [t = 0]`, bytes `serTxOut ‖ time` (the time being the block's previous
+median time past, public inputs 3 and 7), and creating transaction `t`. -/
 theorem coin_out_tuple (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
     (hon : ∀ j < 2 ^ Ls 14, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
     (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
@@ -141,7 +176,7 @@ theorem coin_out_tuple (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14
     (htx : S.b.txs[t]? = some tx) (hjq : j = ((parts.take t).map List.length).sum + q)
     (hq : q < tx.vin.length + tx.vout.length) (ho : tx.vout[q - tx.vin.length]? = some o) :
     rowTuple inst pub (Ls 14) j = tupleOf (FpWalk.gQ pub) (Spec.Block.txid tx) (q - tx.vin.length)
-      (2 * h + if t = 0 then 1 else 0) (Spec.Block.serTxOut o) t := by
+      (2 * h + if t = 0 then 1 else 0) (coinBytes (Spec.Block.serTxOut o) (pubMtp pub)) t := by
   have cs := coin_sat hL hsat hL24
   have fs := fields_sat' hL hsat hL24
   have hj2 : j < 2 ^ Ls 14 := by omega
@@ -221,15 +256,45 @@ theorem coin_out_tuple (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14
       simp only [List.getElem_map, List.getElem_range, Fields.slice]
       rw [List.getElem_take, List.getElem_drop, ← List.getD_eq_getElem _ 0]
   rw [hlist] at hfp
-  have hFH : (⟨(inst 14).main Coin.FH j, (inst 14).main (Coin.FH + 1) j, (inst 14).main (Coin.FH + 2) j,
-      (inst 14).main (Coin.FH + 3) j⟩ : Circuit.Q) =
-      coordsOf (FpWalk.horner (FpWalk.gQ pub) ((Spec.Block.serTxOut o).map fun b => emb ((b.toNat : ℕ) : F))) := by
-    rw [← hfp, coordsOf_toQ]
-  have hslen' : (inst 14).main Coin.SLEN j = (((Spec.Block.serTxOut o).length : ℕ) : F) := by
-    rw [hser, Fields.slice_length hfit, ← hsl]
+  -- the time bytes: the limbs of public inputs 3 and 7
+  have ek : (Coin.k Coin.KO).eval (2 ^ Ls 14) Coin.preCols pub (inst 14).main j = 1 := by rw [Coin.ev_k hj2]; exact hko
+  have tb : ∀ i < 4, ((inst 14).main (Coin.TB i) j).val < 256 := by
+    intro i hi
+    interval_cases i
+    · exact coin_r8 hL hsat hL24 (k := 104) (by omega) (by omega) rfl hj2 ek
+    · exact coin_r8 hL hsat hL24 (k := 105) (by omega) (by omega) rfl hj2 ek
+    · exact coin_r8 hL hsat hL24 (k := 106) (by omega) (by omega) rfl hj2 ek
+    · exact coin_r8 hL hsat hL24 (k := 107) (by omega) (by omega) rfl hj2 ek
+  obtain ⟨t3, t7⟩ := Coin.time_out cs hj2 hko
+  have hPv : P = 2147483647 := rfl
+  have hlimb : ∀ (a b x : F), a.val < 256 → b.val < 256 → a + 256 * b = x → x.val = a.val + 256 * b.val := by
+    intro a b x ha hb' hx
+    have : x = ((a.val + 256 * b.val : ℕ) : F) := by rw [← hx]; push_cast; simp only [ZMod.natCast_zmod_val]
+    rw [this, ZMod.val_natCast_of_lt (by omega)]
+  have v3 := hlimb _ _ _ (tb 0 (by norm_num)) (tb 1 (by norm_num)) t3
+  have v7 := hlimb _ _ _ (tb 2 (by norm_num)) (tb 3 (by norm_num)) t7
+  set tbs : Spec.Block.Bytes := (List.range 4).map fun i => UInt8.ofNat ((inst 14).main (Coin.TB i) j).val with htbs
+  have htbl : tbs.length = 4 := by simp [htbs]
+  have htle : Spec.Block.le tbs = pubMtp pub := by
+    have m0 := Nat.mod_eq_of_lt (tb 0 (by norm_num)); have m1 := Nat.mod_eq_of_lt (tb 1 (by norm_num))
+    have m2 := Nat.mod_eq_of_lt (tb 2 (by norm_num)); have m3 := Nat.mod_eq_of_lt (tb 3 (by norm_num))
+    simp only [htbs, Spec.Block.le, List.range_succ, List.range_zero, List.nil_append, List.cons_append, List.map_cons,
+      List.map_nil, List.foldr_cons, List.foldr_nil, UInt8.toNat_ofNat', pubMtp, v3, v7]
+    omega
+  have hcb' : coinBytes (Spec.Block.serTxOut o) (pubMtp pub) = Spec.Block.serTxOut o ++ tbs := by
+    rw [coinBytes, ← htle, Spec.Block.leBytes_le' htbl]
+  have hEX := ex_coords hL hsat hL24 hj2 (bs := Spec.Block.serTxOut o) (t := tbs) htbl hfp (by
+    intro i hi
+    have hg : tbs.getD i 0 = UInt8.ofNat ((inst 14).main (Coin.TB i) j).val := by
+      interval_cases i <;> simp [htbs, List.range_succ]
+    rw [hg, UInt8.toNat_ofNat', Nat.mod_eq_of_lt (tb i hi), Coin.cast_val])
+  have hslen' : (inst 14).main Coin.SLEN j + 4 =
+      (((coinBytes (Spec.Block.serTxOut o) (pubMtp pub)).length : ℕ) : F) := by
+    rw [coinBytes_length, hser, Fields.slice_length hfit, hsl]; push_cast; ring
   -- assemble
-  rw [rowTuple_eq hL hsat hL24 hj2, tupleOf]
-  simp only [← hFH]
+  rw [rowTuple_eq hL hsat hL24 hj2, tupleOf, hcb']
+  simp only [← hEX]
+  rw [← hcb']
   congr 1
   · apply List.ext_getElem (by simp)
     intro i h1 h2
@@ -248,8 +313,8 @@ theorem slice_getD {R : Spec.Block.Bytes} {a l i : ℕ} (hi : i < l) (hal : a + 
 
 /-- **An input row's tuple is its claimed coin's.** For input `q` of transaction `t` (`t ≥ 1`): the
 prevout's hash and index, and the claim of undo record `J` (URec row `rj`): its code (four undo bytes,
-little-endian), its creating transaction's index (the next three), and its `serTxOut` (the record's undo
-bytes from `S + 9`). -/
+little-endian), its creating transaction's index (the next three), its `serTxOut` (the record's undo
+bytes from `S + 9`) and its time (the four undo bytes after the `serTxOut`, little-endian). -/
 theorem coin_in_tuple (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
     (hon : ∀ j < 2 ^ Ls 14, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
     (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
@@ -259,14 +324,16 @@ theorem coin_in_tuple (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
     (htx : S.b.txs[t]? = some tx) (hjq : j = ((parts.take t).map List.length).sum + q)
     (hq : q < tx.vin.length + tx.vout.length) (hi : tx.vin[q]? = some i) :
     ∃ rj < 2 ^ Ls 13, (inst 13).main URec.ON rj = 1 ∧ (inst 14).main Coin.J j = (inst 13).main URec.J rj ∧
-      ∃ (code : ℕ) (ser : Spec.Block.Bytes) (ctx : ℕ),
-        rowTuple inst pub (Ls 14) j = tupleOf (FpWalk.gQ pub) i.prevout.hash i.prevout.n code ser ctx ∧
+      ∃ (code : ℕ) (ser : Spec.Block.Bytes) (ctx mtp : ℕ),
+        rowTuple inst pub (Ls 14) j = tupleOf (FpWalk.gQ pub) i.prevout.hash i.prevout.n code (coinBytes ser mtp) ctx ∧
         (inst 14).main Coin.CLO j + 65536 * (inst 14).main Coin.CHI j = (code : F) ∧
         (inst 14).main Coin.CTX j = (ctx : F) ∧ (inst 13).main URec.TL rj = (ser.length : F) ∧
         (∃ u0 : ℕ, (inst 13).main URec.S rj + 9 = (u0 : F) ∧ 9 ≤ u0 ∧ u0 + ser.length ≤ (pub 8).val ∧
           ser = (List.range ser.length).map (fun k => (Ub inst pub).getD (u0 + k) 0) ∧
           code = Spec.Block.le ((List.range 4).map fun k => (Ub inst pub).getD (u0 - 9 + k) 0) ∧
-          ctx = Spec.Block.le ((List.range 3).map fun k => (Ub inst pub).getD (u0 - 5 + k) 0)) := by
+          ctx = Spec.Block.le ((List.range 3).map fun k => (Ub inst pub).getD (u0 - 5 + k) 0) ∧
+          mtp = Spec.Block.le ((List.range 4).map fun k => (Ub inst pub).getD (u0 + ser.length + k) 0) ∧
+          (∀ k < 4, (inst 14).main (Coin.TB k) j = ((((Ub inst pub).getD (u0 + ser.length + k) 0).toNat : ℕ) : F))) := by
   have cs := coin_sat hL hsat hL24
   have fs := fields_sat' hL hsat hL24
   have hj2 : j < 2 ^ Ls 14 := by omega
@@ -355,17 +422,39 @@ theorem coin_in_tuple (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
   -- the claimed bytes
   set ser : Spec.Block.Bytes := (List.range len).map fun k => (Ub inst pub).getD (u0 + k) 0 with hser
   have hserlen : ser.length = len := by simp [hser]
-  have hFH : (⟨(inst 14).main Coin.FH j, (inst 14).main (Coin.FH + 1) j, (inst 14).main (Coin.FH + 2) j,
-      (inst 14).main (Coin.FH + 3) j⟩ : Circuit.Q) =
-      coordsOf (FpWalk.horner (FpWalk.gQ pub) (ser.map fun b => emb ((b.toNat : ℕ) : F))) := by
+  have hfp' : toQ ⟨(inst 14).main Coin.FH j, (inst 14).main (Coin.FH + 1) j, (inst 14).main (Coin.FH + 2) j,
+      (inst 14).main (Coin.FH + 3) j⟩ =
+      FpWalk.horner (FpWalk.gQ pub) (ser.map fun b => emb ((b.toNat : ℕ) : F)) := by
     have hl : (ser.map fun b => emb ((b.toNat : ℕ) : F)) =
         (List.range len).map fun k => emb ((((Ub inst pub).getD (u0 + k) 0).toNat : ℕ) : F) := by
       simp [hser, List.map_map, Function.comp]
-    rw [hl, ← hfp, coordsOf_toQ]
-  refine ⟨rj, hrj, honj, hJ, code, ser, ctxv, ?_, ?_, hctxF, by rw [hserlen]; exact htl,
-    u0, hu0, hu04, by rw [hserlen]; exact hu0len, by rw [hserlen], rfl, rfl⟩
-  · rw [rowTuple_eq hL hsat hL24 hj2, tupleOf]
-    simp only [← hFH]
+    rw [hl, ← hfp]
+  -- the time bytes: the record's four bytes after its `serTxOut`
+  obtain ⟨rj', hrj', honj', hJ', hTB⟩ := coin_urec_mtp hL hsat hL24 hj2 hki
+  obtain rfl : rj' = rj := urec_j_inj hL hsat hL24 hrj' hrj honj' honj (hJ'.symm.trans hJ)
+  have htb : ∀ k < 4, u0 + len + k < (pub 8).val ∧
+      (inst 14).main (Coin.TB k) j = ((((Ub inst pub).getD (u0 + len + k) 0).toNat : ℕ) : F) := by
+    intro k hk
+    obtain ⟨u, hu, hp, hbv⟩ := urec_mt_bytes hL hsat hL24 hrj' honj hk
+    have hue : u = u0 + len + k := by
+      apply Coin.lift _ (lt_of_lt_of_le (show u < 2 ^ 25 by omega) (by unfold P; norm_num))
+        (lt_of_lt_of_le (show u0 + len + k < 2 ^ 25 by omega) (by unfold P; norm_num))
+      rw [← hp]; push_cast; rw [← hu0, htl]; simp only [URec.HDR]; push_cast; ring
+    subst hue
+    exact ⟨hu, by rw [hTB k hk, ← hbv, Coin.cast_val]⟩
+  set tbs : Spec.Block.Bytes := (List.range 4).map fun k => (Ub inst pub).getD (u0 + len + k) 0 with htbs
+  have htbl : tbs.length = 4 := by simp [htbs]
+  have hcb' : coinBytes ser (Spec.Block.le tbs) = ser ++ tbs := by rw [coinBytes, Spec.Block.leBytes_le' htbl]
+  have hEX := ex_coords hL hsat hL24 hj2 (bs := ser) (t := tbs) htbl hfp' (by
+    intro k hk
+    rw [(htb k hk).2]
+    interval_cases k <;> simp [htbs, List.range_succ])
+  refine ⟨rj', hrj', honj, hJ, code, ser, ctxv, Spec.Block.le tbs, ?_, ?_, hctxF, by rw [hserlen]; exact htl,
+    u0, hu0, hu04, by rw [hserlen]; exact hu0len, by rw [hserlen], rfl, rfl, by rw [hserlen],
+    fun k hk => by rw [hserlen]; exact (htb k hk).2⟩
+  · rw [rowTuple_eq hL hsat hL24 hj2, tupleOf, hcb']
+    simp only [← hEX]
+    rw [← hcb']
     rw [hprev]
     congr 1
     · apply List.ext_getElem (by simp)
@@ -421,7 +510,7 @@ theorem coin_in_tuple (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
         rw [show ub 0 + 256 * (ub 1 + 256 * (ub 2 + 256 * ub 3)) = (ub 0 + 256 * ub 1) + 65536 * (ub 2 + 256 * ub 3) by ring,
           Nat.add_mul_div_left _ _ (by norm_num), Nat.div_eq_of_lt (by omega), zero_add]
         simp only [hubdef]; push_cast; ring
-      · rw [hsl, hserlen]
+      · rw [coinBytes_length, hsl, hserlen]; push_cast; ring
       · exact hctxF
   · rw [hclo, hchi, hcb 0 (by norm_num), hcb 1 (by norm_num), hcb 2 (by norm_num), hcb 3 (by norm_num), hcodev]
     simp only [hubdef]; push_cast; ring
@@ -632,19 +721,13 @@ noncomputable def blockTerm (inst : ℕ → Inst) (pub : ℕ → F) (L : ℕ) (t
       match tx.vout[q - tx.vin.length]? with
       | some o => if (!Spec.Coins.unspendable o && !(t == 0 && lost)) then
           (z - phiOf pub (tupleOf (FpWalk.gQ pub) (Spec.Block.txid tx) (q - tx.vin.length)
-            (2 * h + if t = 0 then 1 else 0) (Spec.Block.serTxOut o) t))⁻¹ else 0
+            (2 * h + if t = 0 then 1 else 0) (coinBytes (Spec.Block.serTxOut o) (pubMtp pub)) t))⁻¹ else 0
       | none => 0
     else if 1 ≤ t then -(z - phiOf pub (rowTuple inst pub L (((parts.take t).map List.length).sum + q)))⁻¹ else 0
 
-/-- The block's time claims' fractions, summed (CONNECT-RULES step 4): the part of the public partial sum
-that is not coin events. -/
-noncomputable def claimSum (inst : ℕ → Inst) (L : ℕ) : QM :=
-  ∑ r ∈ Finset.range (2 ^ L), RunSum.cQ (inst 14).main Coin.FC2 r
-
 /-- **The block's partial sum, by its coin events.** The public partial sum is, over the block's
 transactions and their input/output positions: each created output's `1/(z − φ)` (with its coin's
-tuple), minus each non-coinbase input's `1/(z − φ)` (with its row's claimed tuple); plus the block's
-time claims (`claimSum`). -/
+tuple), minus each non-coinbase input's `1/(z − φ)` (with its row's claimed tuple). -/
 theorem coin_block_sum (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
     (hon : ∀ j < 2 ^ Ls 14, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
     (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
@@ -652,11 +735,10 @@ theorem coin_block_sum (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14
     (htg : Spec.Block.tagged 0 (Fields.toksFrom (inst 1).main (Rb inst pub) S.m 0) = Spec.Block.tagParts 0 parts)
     {h : ℕ} (hp2 : pub 2 = (h : F)) (hh : h < 2 ^ 23) {lost : Bool} (hlost : pub Coin.PUB_LOST = if lost then 1 else 0) :
     RunSum.pQ pub Coin.PUB_S = ∑ t ∈ Finset.range S.b.txs.length, ∑ q ∈ Finset.range ((parts.getD t []).length),
-      blockTerm inst pub (Ls 14) S.b.txs parts h lost t q + claimSum inst (Ls 14) := by
+      blockTerm inst pub (Ls 14) S.b.txs parts h lost t q := by
   have cs := coin_sat hL hsat hL24
-  obtain ⟨hS, hrow, -⟩ := Coin.coin_runsum cs (n := 2 ^ Ls 14) (by positivity)
-  rw [hS, claimSum]
-  congr 1
+  obtain ⟨hS, hrow⟩ := Coin.coin_runsum cs (n := 2 ^ Ls 14) (by positivity)
+  rw [hS]
   -- e is the total length
   have hft := fields_tagged hL hsat hL24 S
   rw [htg] at hft

@@ -128,7 +128,7 @@ pub fn main() !void {
         };
         if (h >= n_headers) return error.BeyondHeaders;
         const want = if (window) |w| h >= w[0] and h <= w[1] else false;
-        const u = set.apply(a, raw, headers[80 * h ..][0..80], h, want) catch |e| {
+        const u = set.apply(a, raw, headers[80 * h ..][0..80], h, sb.block.coin.coinTime(std.mem.bytesAsSlice([80]u8, headers), h), want) catch |e| {
             std.debug.print("replay: block {d}: {s}\n", .{ h, @errorName(e) });
             return e;
         };

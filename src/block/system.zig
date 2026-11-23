@@ -79,7 +79,7 @@ pub fn profileLogs(L: u32, profile: Profile) [N_COMP]u32 {
 }
 
 /// Lookup sites per row of the 15 hashed-system components (Lean `hashRows`, Link.lean).
-pub const SITES = [15]u64{ 1, 46, 4, 6, 11, 2, 6, 12, 3, 1, 6, 11, 4, 28, 104 };
+pub const SITES = [15]u64{ 1, 46, 4, 6, 11, 2, 6, 12, 3, 1, 6, 11, 4, 28, 108 };
 
 /// Lean's `SizeOk` (Link.lean): each hashed-system component has at most 2^24 rows and the lookup
 /// site count `Σ kᵢ·2^logsᵢ` is below P. The soundness theorems cover only such sizes: uniform up to
@@ -113,9 +113,6 @@ pub const Built = struct {
     reads: []u32,
     /// M3b: the block's partial LogUp sum and its non-coinbase input count.
     coin_sum: @import("stwo_core").fields.qm31.QM31 = @import("stwo_core").fields.qm31.QM31.zero(),
-    /// Step 4: the sum of the block's time claims' fractions (part of `coin_sum`), and their number.
-    claims_sum: @import("stwo_core").fields.qm31.QM31 = @import("stwo_core").fields.qm31.QM31.zero(),
-    nclaims: u32 = 0,
     nin: u32 = 0,
     /// The `block_sha` inputs (compressions and final per-period `Meta`, after the digest
     /// multiplicities) and the in-circuit undo stream (`block_b2s`'s message): what a device witness
@@ -219,10 +216,11 @@ fn txidsOf(a: std.mem.Allocator, ntx: u32, msgs: []const msg.Message, digests: a
 
 /// The in-circuit undo stream of a block (`coin.undoStream`): the fetched records with their creating
 /// transactions' indices. Its Blake2s is the block's public commitment.
-/// CONNECT-RULES step 4: the time claims of a block's undo records (`coin.timeClaims`), for `Opts.mtps`
-/// and `undoStreamOf`. `headers`: the chain's headers from genesis, at least up to the block.
-pub fn timeClaims(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, headers: []const [80]u8, height: u32) ![]u32 {
-    return coin.timeClaims(a, fetched, raw, try fields.tokenize(a, raw), headers, height);
+/// CONNECT-RULES step 4 (D-058, R5): the times of the coins a block's undo records spend
+/// (`coin.timeClaims`), for `Opts.mtps`. `headers` are the chain's from genesis, at least to the newest
+/// spent coin's block.
+pub fn timeClaims(a: std.mem.Allocator, fetched: []const u8, headers: []const [80]u8) ![]u32 {
+    return coin.timeClaims(a, fetched, headers);
 }
 
 pub fn undoStreamOf(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctxs: ?[]const u32, mtps: ?[]const u32, height: u32) ![]u8 {
@@ -427,8 +425,6 @@ pub fn buildFull(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctx
         .commitment = cx.hc,
         .reads = reads.items,
         .coin_sum = co.sum,
-        .claims_sum = co.claims,
-        .nclaims = co.nclaims,
         .nin = co.nin,
         .sha_plan = pl,
         .undo = undo,
@@ -696,12 +692,12 @@ test "block system: block 0's STWZEVA-composed proof is byte-identical and verif
 /// relative lock) step 3 (2026-11-20: the full sigop cost) and step 4 (2026-11-20: the time-based lock's claim). The values of m3a5 (2196ba3), which D-045 kept unchanged and with which the proofs
 /// of blocks 935,001-972,500 were made, are in `golden_small_m3a5`.
 pub const golden_small = [_][]const u8{
-    "c9bca23c32a9355cabc801d8cfb643804d19201a3cfcae712a43d17829102502", // 0
-    "530bf9d8f098935c457676dc549285012df1504cf0a054e0e8daab8d9106c712", // 170
-    "b768a9508cff2f40a97b994e5586b2d12e80e5136a5ac70c09d5710815251b94", // 91722
-    "8605a38362c5ea5e6fc371035455363a27b041dd7af5b90a87116c8fdeaa0a6b", // 91812
-    "af2f7c58028bcf49ab4468aeedf25e32c92e4edd5df49e32f1b0daddedfe77e3", // 91842
-    "28b2426efe315380121d7251abb28148b46b8359848b9bae4c3b5fa0dd568321", // 91880
+    "299aeae0c721b19e245be8fc078bd8f364feb9a658e1a214768f7c21b3f7794a", // 0
+    "c6c957ced3c8b17f0deda251e6baeee4087671e90ec52c3739f7a6e7ddf658db", // 170
+    "74b12e84ff6407a489e439f03d1020a983273ab8d123f8e0070ea5508c7a0218", // 91722
+    "32a2071e8141e42b53669b13c241ea807175b20d41d9213e87ecafa1a2aa2432", // 91812
+    "e7a1b666ce119ff57957367412a9970a67b616f3e5e6a09c57ee09abb64b70a4", // 91842
+    "8ab71ad0b3599f9e8ef2aa766ba732e9b3022ede889fc6ce09ccd54164cea2af", // 91880
 };
 
 /// The same hashes with the AIRs before CONNECT-RULES step 2 (m3a5, 2196ba3). Kept for reference only.

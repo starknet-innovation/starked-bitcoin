@@ -61,9 +61,10 @@ def I87 : ℕ := 35
 def CP : ℕ := 36
 def C20 : ℕ := 37
 def C32 : ℕ := 38
-/-! CONNECT-RULES step 4: the claimed median time past, 4 bytes after the record's `serTxOut` (`MT 0 … MT 3`
-at `S + 9 + TL …`): the median time past of the block before the spent coin's, for a time-based relative
-lock (zero when unused). It is under the block commitment like the rest of the record (D-054). -/
+/-! CONNECT-RULES step 4 (D-058, R5): the coin's time, 4 bytes after the record's `serTxOut` (`MT 0 … MT 3`
+at `S + 9 + TL …`): the median time past of the block before the spent coin's, little-endian. Every coin
+carries it from its creation (`block_coin`'s tuple fingerprints `serTxOut ‖ time`), so the coin balance
+makes a record's four bytes the creating block's. -/
 def MT (i : ℕ) : ℕ := 39 + i
 /-- The claim's length after the `serTxOut`. -/
 def MLEN : ℕ := 4
@@ -129,7 +130,7 @@ def lookups : List Lookup :=
       .add (.add (k (V 0)) (.mul (cst 256) (k (V 1)))) (.mul (cst 65536) (k (V 2))),
       .add (.add (.add (k (V 3)) (.mul (cst 256) (k (V 4)))) (.mul (cst 65536) (k (V 5)))) (.mul (cst 16777216) (k (V 6))),
       .add (.add (k (X 0)) (.mul (cst 256) (k (X 1)))) (.mul (cst 65536) (k (X 2))),
-      k CP, k C20, k C32, limb (MT 0) (MT 1), limb (MT 2) (MT 3)]⟩,
+      k CP, k C20, k C32, k (MT 0), k (MT 1), k (MT 2), k (MT 3)]⟩,
     ⟨Undo.REL_UBYTE, .neg (k ON), [.add (k S) (cst 17), k (U 0)]⟩,
     ⟨Undo.REL_UBYTE, .neg (.mul (k ON) (.add (k Z16) (.add (k Z17) (k Z22)))), [.add (k S) (cst 18), k (U 1)]⟩,
     ⟨Undo.REL_UBYTE, .neg (.mul (k ON) (.add (k Z16) (.add (k Z17) (k Z22)))), [.add (k S) (cst 19), k (U 2)]⟩,

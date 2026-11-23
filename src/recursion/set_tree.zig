@@ -1309,7 +1309,7 @@ fn memberIn(a: std.mem.Allocator, file: []const u8, logs: Logs, ends: []const us
 
 /// **Verifies a membership proof** against a pass's root (and, for `after_last`, the pass's last key).
 pub fn verifyMember(m: *const Member, root: [8]u32, last_key: ?[36]u8) !void {
-    if (m.record.len < SS.HEAD + 8 or m.record.len != SS.HEAD + std.mem.readInt(u32, m.record[45..49], .little))
+    if (m.record.len < SS.HEAD + 12 or m.record.len != SS.HEAD + std.mem.readInt(u32, m.record[45..49], .little))
         return error.BadRecord;
     const k = recKey(m.record);
     if (m.present) {
@@ -1406,10 +1406,12 @@ fn getMember(a: std.mem.Allocator, d: *store.Dec) !Member {
 
 /// A present record's amount (sat) and scriptPubKey (its `TxOut` after the head: amount, compact size,
 /// script).
-pub fn recordOutput(record: []const u8) !struct { amount: u64, script: []const u8 } {
-    if (record.len < SS.HEAD + 9) return error.BadRecord;
+/// A record's output: its amount and script, and the coin's time (the record's last four bytes: the median
+/// time past of the block before the coin's, 0 below the CSV height).
+pub fn recordOutput(record: []const u8) !struct { amount: u64, script: []const u8, time: u32 } {
+    if (record.len < SS.HEAD + 9 + SS.TIME) return error.BadRecord;
     const amount = std.mem.readInt(u64, record[SS.HEAD..][0..8], .little);
-    const t = record[SS.HEAD + 8 ..];
+    const t = record[SS.HEAD + 8 .. record.len - SS.TIME];
     const n: usize, const at: usize = switch (t[0]) {
         0xfd => if (t.len >= 3) .{ std.mem.readInt(u16, t[1..3], .little), 3 } else return error.BadRecord,
         0xfe => if (t.len >= 5) .{ std.mem.readInt(u32, t[1..5], .little), 5 } else return error.BadRecord,
@@ -1417,7 +1419,7 @@ pub fn recordOutput(record: []const u8) !struct { amount: u64, script: []const u
         else => .{ t[0], 1 },
     };
     if (t.len != at + n) return error.BadRecord;
-    return .{ .amount = amount, .script = t[at..] };
+    return .{ .amount = amount, .script = t[at..], .time = std.mem.readInt(u32, record[record.len - SS.TIME ..][0..4], .little) };
 }
 
 /// The P2WSH scriptPubKey of a witness script: `OP_0 <32> sha256(script)`.
@@ -1502,14 +1504,16 @@ test "set tree: several membership proofs in one file; P2WSH and multisig of a w
     try std.testing.expectEqual(@as(u8, 3), ms.m);
     try std.testing.expectEqual(@as(usize, 5), ms.keys.len);
     try std.testing.expect(try multisigOf(a, script[0 .. script.len - 1]) == null);
-    // A record's output: amount, compact size, script.
-    var r: [SS.HEAD + 8 + 1 + 34]u8 = @splat(0);
+    // A record's output: amount, compact size, script, then the coin's time.
+    var r: [SS.HEAD + 8 + 1 + 34 + SS.TIME]u8 = @splat(0);
     std.mem.writeInt(u64, r[SS.HEAD..][0..8], 120243798, .little);
     r[SS.HEAD + 8] = 34;
-    @memcpy(r[SS.HEAD + 9 ..], &want);
+    @memcpy(r[SS.HEAD + 9 ..][0..34], &want);
+    std.mem.writeInt(u32, r[SS.HEAD + 43 ..][0..4], 1700000000, .little);
     const o = try recordOutput(&r);
     try std.testing.expectEqual(@as(u64, 120243798), o.amount);
     try std.testing.expectEqualSlices(u8, &want, o.script);
+    try std.testing.expectEqual(@as(u32, 1700000000), o.time);
     try std.testing.expectError(error.BadRecord, recordOutput(r[0 .. r.len - 1]));
 
     const file = std.fs.cwd().readFileAlloc(a, "data/epoch/set-1000.bin", 1 << 30) catch return error.SkipZigTest;

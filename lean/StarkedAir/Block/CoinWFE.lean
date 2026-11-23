@@ -20,18 +20,23 @@ theorem txid_length (t : Tx) : (txid t).length = 32 := by
 theorem serCompact_length_le (n : ℕ) : (serCompact n).length ≤ 9 := by
   unfold serCompact; split_ifs <;> simp [leBytes]
 
-theorem serTxOut_length (o : TxOut) (h : o.scriptPubKey.length ≤ MAX_SIZE) : (serTxOut o).length < P := by
+theorem serTxOut_length (o : TxOut) (h : o.scriptPubKey.length ≤ MAX_SIZE) : (serTxOut o).length + 4 < P := by
   have := serCompact_length_le o.scriptPubKey.length
   simp only [serTxOut, serVarBytes, List.length_append, leBytes, List.length_map, List.length_range]
   unfold MAX_SIZE at h; unfold P; omega
 
+/-- A created coin's bytes (`serTxOut ‖ time`) are shorter than `P`. -/
+theorem coinBytes_length_lt (o : TxOut) (h : o.scriptPubKey.length ≤ MAX_SIZE) (m : ℕ) :
+    (coinBytes (serTxOut o) m).length < P := by
+  rw [coinBytes_length]; exact serTxOut_length o h
+
 /-- A created event of a block: transaction `t`, output `q`. -/
 theorem mem_created_block' (N : ℕ → ℕ) (B : BlockC) (g : ℕ) {e : CEv} (he : e ∈ created g (blockTxs N B)) :
     ∃ t < B.txs.length, ∃ tx, B.txs[t]? = some tx ∧ ∃ q < tx.vout.length, ∃ o, tx.vout[q]? = some o ∧
-      e = (⟨txid tx, q⟩, (codeOf B.h t, serTxOut o), g + t) := by
+      e = (⟨txid tx, q⟩, (codeOf B.h t, coinBytes (serTxOut o) B.mtp), g + t) := by
   have gen : ∀ (l : List (Tx × ℕ)) (g : ℕ), e ∈ created g (l.map fun p => (⟨txIns N B p.2 p.1, txOuts B p.2 p.1⟩ :
       Spec.Utxo.Tx OutPoint Val)) → ∃ k < l.length, ∃ p, l[k]? = some p ∧ ∃ q < p.1.vout.length, ∃ o, p.1.vout[q]? = some o ∧
-        e = (⟨txid p.1, q⟩, (codeOf B.h p.2, serTxOut o), g + k) := by
+        e = (⟨txid p.1, q⟩, (codeOf B.h p.2, coinBytes (serTxOut o) B.mtp), g + k) := by
     intro l
     induction l with
     | nil => intro g h; simp [created] at h
@@ -87,7 +92,7 @@ theorem created_wfe (N : ℕ → ℕ) (blocks : List BlockC) (g0 : ℕ)
   have hso : TxOut.WF o := hwo o (List.mem_of_getElem? ho)
   have hcode : codeOf B.h t / 2 = B.h := by unfold codeOf; split <;> omega
   have hcl : codeOf B.h t < 2 ^ 32 := by unfold codeOf; split <;> omega
-  refine ⟨txid_length tx, ?_, hcl, ?_, ?_, serTxOut_length o hso.2.2⟩
+  refine ⟨txid_length tx, ?_, hcl, ?_, ?_, coinBytes_length_lt o hso.2.2 _⟩
   · dsimp only; unfold MAX_SIZE at hvl; omega
   · dsimp only; rw [hcode, hN i B hBi]; omega
   · dsimp only; rw [hcode, hN i B hBi]; unfold MAX_SIZE at hlen; unfold P; omega
@@ -155,8 +160,8 @@ theorem mem_spent_blocks (N : ℕ → ℕ) : ∀ (blocks : List BlockC) {e : CEv
 theorem spent_wfe (N : ℕ → ℕ) (blocks : List BlockC)
     (hB : ∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → ∀ tx ∈ B.txs, Tx.WF tx)
     (hc : ∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → ∀ (t : ℕ) (tx : Tx), B.txs[t]? = some tx →
-      ∀ ev ∈ txIns N B t tx, ∃ c : Claim, ev = (ev.1, (c.code, c.ser), N (c.code / 2) + c.ctx) ∧
-        c.code < 2 ^ 32 ∧ c.ctx < 2 ^ 24 ∧ c.ser.length < P) :
+      ∀ ev ∈ txIns N B t tx, ∃ c : Claim, ev = (ev.1, (c.code, coinBytes c.ser c.mtp), N (c.code / 2) + c.ctx) ∧
+        c.code < 2 ^ 32 ∧ c.ctx < 2 ^ 24 ∧ c.ser.length + 4 < P) :
     ∀ e ∈ spent (allTxs N blocks), WFE N e := by
   intro e he
   obtain ⟨i, B, hBi, t, tx, htx, hin⟩ := mem_spent_blocks N blocks he
@@ -173,7 +178,8 @@ theorem spent_wfe (N : ℕ → ℕ) (blocks : List BlockC)
   obtain ⟨inp, hinp, hpo⟩ := hpv
   obtain ⟨hh32, hn32, -⟩ := hwi inp hinp
   rw [hce]
-  refine ⟨by rw [hpo]; exact hh32, by rw [hpo]; exact hn32, hcode, by simp, by simp; unfold P; omega, hser⟩
+  refine ⟨by rw [hpo]; exact hh32, by rw [hpo]; exact hn32, hcode, by simp, by simp; unfold P; omega,
+    by show (coinBytes c.ser c.mtp).length < P; rw [coinBytes_length]; exact hser⟩
 
 /-- **`epoch_systems_core` with `WFE` assumed for the initial and final sets only**: the created and spent
 events' well-formedness is proven (`created_wfe_systems`, `spent_wfe`). -/
@@ -191,14 +197,14 @@ theorem epoch_systems_wf (nb : ℕ) (inst : ℕ → ℕ → Inst) (pub : ℕ →
         (∀ e ∈ init ++ (created g0 (allTxs N blocks)).toList ++ ((spent (allTxs N blocks)).toList ++ fin),
           bytesF e ∈ Sb) →
         (∀ i < nb, N (h0 + i) = g0 + ∑ i' ∈ Finset.range i, (S i').b.txs.length) →
-        (∀ e ∈ init, e.2.2 < g0) → (∀ e ∈ init, RealVal e.2.1) →
+        (∀ e ∈ init, e.2.2 < g0) → (∀ e ∈ init, RealCoin e.2.1) →
         (((init : Multiset CEv) + created g0 (allTxs N blocks)).map Prod.fst).Nodup →
         ∃ Bad : Finset (QM × QM), Bad.card ≤ ((polys (epochPN N γ blocks g0 init fin)).card ^ 2 * 27 +
             2 * (polys (epochPN N γ blocks g0 init fin)).card) * Fintype.card QM ∧
           ((α, z) ∉ Bad →
             init.length + Multiset.card (created g0 (allTxs N blocks)) + Multiset.card (spent (allTxs N blocks)) +
               fin.length < P →
-            ∑ i ∈ Finset.range nb, (RunSum.pQ (pub i) Coin.PUB_S - claimSum (inst i) (L i 14)) + (init.map (efrac N γ α z)).sum =
+            ∑ i ∈ Finset.range nb, RunSum.pQ (pub i) Coin.PUB_S + (init.map (efrac N γ α z)).sum =
               (fin.map (efrac N γ α z)).sum →
             (∃ m, Spec.Coins.connectTxs (Spec.Coins.untag (vmap coinOfVal (viewOf init))) (allTxC N blocks) =
                 some (Spec.Coins.untag (vmap coinOfVal m), (allTxC N blocks).map Spec.Coins.claimFee) ∧

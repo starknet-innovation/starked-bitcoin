@@ -1,7 +1,7 @@
 /-
 **Input claims are the undo stream's records (D-041, steps 1–3 of utxo.md's plan).** The undo stream
-`Ub` (committed in `C_h`, `commit_sound`) is a sequence of records `code(4) ‖ ctx(3) ‖ tl(2) ‖ script(tl) ‖ mtp(4)`
-(the last field is the record's claimed median time past, CONNECT-RULES step 4) from offset 1. `recStart`/`recAt` parse it sequentially. `rec_starts`: URec's record starts are exactly
+`Ub` (committed in `C_h`, `commit_sound`) is a sequence of records `code(4) ‖ ctx(3) ‖ tl(2) ‖ script(tl) ‖ time(4)`
+(the last field is the coin's time, the median time past of the block before the coin's; D-058, R5) from offset 1. `recStart`/`recAt` parse it sequentially. `rec_starts`: URec's record starts are exactly
 that parse (`rows_sound`, `tl_bytes`, `urec_bytes`). `claim_is_record`: every input claim the coin
 component uses (`ClaimAt`) is the record at its URec row, so the claims are a function of the committed
 stream and the row index — no choice is left to the prover.
@@ -20,12 +20,13 @@ def recStart (u : Spec.Block.Bytes) : ℕ → ℕ
   | 0 => 1
   | r + 1 => recStart u r + 9 + tlAt u (recStart u r) + 4
 
-/-- Record `r` as a claim: its code, script and creating transaction's index. -/
+/-- Record `r` as a claim: its code, script, creating transaction's index and time. -/
 def recAt (u : Spec.Block.Bytes) (r : ℕ) : Claim :=
   let s := recStart u r
   ⟨Spec.Block.le ((List.range 4).map fun k => u.getD (s + k) 0),
    (List.range (tlAt u s)).map fun k => u.getD (s + 9 + k) 0,
-   Spec.Block.le ((List.range 3).map fun k => u.getD (s + 4 + k) 0)⟩
+   Spec.Block.le ((List.range 3).map fun k => u.getD (s + 4 + k) 0),
+   Spec.Block.le ((List.range 4).map fun k => u.getD (s + 9 + tlAt u s + k) 0)⟩
 
 theorem le2_lt (f : ℕ → UInt8) : Spec.Block.le ((List.range 2).map f) < 2 ^ 16 := by
   have := UInt8.toNat_lt (f 0); have := UInt8.toNat_lt (f 1)
@@ -117,7 +118,7 @@ URec row: code, script (of the record's length) and creating transaction's index
 theorem claim_is_record {j : ℕ} {c : Claim} (hc : ClaimAt inst pub (Ls 13) j c) :
     ∃ rj < 2 ^ Ls 13, (inst 13).main URec.ON rj = 1 ∧ (inst 14).main Coin.J j = (inst 13).main URec.J rj ∧
       c = recAt (Ub inst pub) rj := by
-  obtain ⟨-, -, rj, hrj, honj, hJ, htl, u0, hu0, h9, hlen, hser, hcodeb, hctxb⟩ := hc
+  obtain ⟨-, -, rj, hrj, honj, hJ, htl, u0, hu0, h9, hlen, hser, hcodeb, hctxb, hmtpb, -⟩ := hc
   obtain ⟨e, -, hon, hst⟩ := rec_starts hL hsat hL24
   have hs : ((inst 13).main URec.S rj).val = recStart (Ub inst pub) rj := hst rj ((hon rj hrj).mp honj)
   have hU := undo_len hL hsat hL24
@@ -145,13 +146,14 @@ theorem claim_is_record {j : ℕ} {c : Claim} (hc : ClaimAt inst pub (Ls 13) j c
     simp [Spec.Block.le, List.range_succ]
   refine ⟨rj, hrj, honj, hJ, ?_⟩
   cases c with
-  | mk code ser ctx =>
-    simp only at hser hcodeb hctxb hlenEq
+  | mk code ser ctx mtp =>
+    simp only at hser hcodeb hctxb hmtpb hlenEq
     simp only [recAt]
     congr 1
     · rw [hcodeb, hu, Nat.add_sub_cancel]
     · rw [hser, hlenEq, hu]
     · rw [hctxb, hu, show recStart (Ub inst pub) rj + 9 - 5 = recStart (Ub inst pub) rj + 4 by omega]
+    · rw [hmtpb, hlenEq, hu]
 
 /-- **The claim of the input at coin row `j` is the stream's record `J j`** (the number of inputs
 before it): no choice is left to the prover beyond the committed stream. -/

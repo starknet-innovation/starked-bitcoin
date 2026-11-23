@@ -1,11 +1,15 @@
 /-
-**Time-based relative locks (BIP68), block level (CONNECT-RULES step 4).** An input whose time lock is
-enforced carries, in its undo record, a claimed median time past `m` (4 bytes after the record's
-`serTxOut`, so under the block commitment). `in_time_lock`: the block system then has
-`m + 512 · lock ≤ MTP(h − 1)` (`Spec.Coins.timeLockOk`), with `MTP(h − 1)` the public inputs 3 and 7 that
-the ancestry component proves. That `m` is the chain's median time past of the block before the coin's is
-NOT proven here: the block adds the claim `(coin height, m)` to its public sum (`claimSum`,
-`claim_frac`), to be consumed by the epoch's resolver.
+**Time-based relative locks (BIP68), block level (CONNECT-RULES step 4; D-058, R5).** Every coin carries
+its time: the median time past of the block before its creating block, 4 bytes after its `serTxOut` in
+the bytes the coin tuple fingerprints (`Spec.CoinEpoch.coinBytes`). An output's time is the block's own
+previous median time past (public inputs 3 and 7, `coin_out_tuple`); an input's is its undo record's four
+time bytes (`coin_in_tuple`, `ClaimAt`), under the block commitment.
+
+`in_time_lock`: for an input whose time lock is enforced, the block system has
+`claim.mtp + 512 · lock ≤ MTP(h − 1)` (`Spec.Coins.timeLockOk`), with `MTP(h − 1)` the public inputs 3 and 7
+that the ancestry component proves. That the claim's time is the coin's own is the epoch's coin balance:
+the spent event `(prevout, (code, serTxOut ‖ time), index)` equals a created or an initial one
+(`SigEpoch.epoch_systems_coreS`).
 -/
 import StarkedAir.Block.CoinClaims
 
@@ -21,47 +25,23 @@ variable {inst : ℕ → Inst} {pub : ℕ → F} {Ls : ℕ → ℕ}
   (hL : ∀ i < 15, (inst i).logSize = Ls i) (hsat : hashSys.SatisfiedExt inst pub []) (hL24 : SizeOk Ls)
 include hL hsat hL24
 
-/-- **A record's claim bytes.** On URec row `r`, claim byte `i` is the undo byte at `S + 9 + i + TL`. -/
-theorem urec_mt_bytes {r : ℕ} (hr : r < 2 ^ Ls 13) (hon : (inst 13).main URec.ON r = 1) {i : ℕ} (hi : i < 4) :
-    ∃ u, u < (pub 8).val ∧ (inst 13).main URec.S r + ((URec.HDR + i : ℕ) : F) + (inst 13).main URec.TL r = (u : F) ∧
-      ((inst 13).main (URec.MT i) r).val = ((Ub inst pub).getD u 0).toNat := by
-  have hpre : (hashSys.comp 13).air.pre = URec.preCols := rfl
-  have hlen : 24 + i < (hashSys.comp 13).lookups.length := by
-    show 24 + i < URec.lookups.length
-    simp [URec.lookups]; omega
-  have hsite := site_mem hL (i := 13) (by decide) hr hlen
-  have hsl : siteLookup hashSys ((13, r, 24 + i) : Site) =
-      ⟨Undo.REL_UBYTE, .neg (URec.k URec.ON),
-        [.add (.add (URec.k URec.S) (cst (URec.HDR + i))) (URec.k URec.TL), URec.k (URec.MT i)]⟩ := by
-    interval_cases i <;> rfl
-  have huse : isUse 13 (24 + i) = true := by interval_cases i <;> rfl
-  obtain ⟨u, hu, hp, hb⟩ := undo_read hL hsat hL24 hsite huse (by simp [siteRel, hsl])
-    (p := (inst 13).main URec.S r + ((URec.HDR + i : ℕ) : F) + (inst 13).main URec.TL r)
-    (b := (inst 13).main (URec.MT i) r)
-    (by
-      show siteEval hashSys inst pub (13, r, 24 + i) (siteLookup hashSys (13, r, 24 + i)).mult = -1
-      rw [hsl]
-      simp [siteEval, hpre, hL 13 (by decide), Expr.eval, URec.k, StarkedAir.Sha256.eval_col, wrap_zero hr, hon])
-    (by
-      show (siteLookup hashSys (13, r, 24 + i)).vals.map (siteEval hashSys inst pub (13, r, 24 + i)) = _
-      rw [hsl]
-      simp [siteEval, hpre, hL 13 (by decide), Expr.eval, URec.k, StarkedAir.Sha256.eval_col,
-        StarkedAir.Sha256.eval_cst, wrap_zero hr])
-  exact ⟨u, hu, hp, hb⟩
-
-/-- An input row's claimed median time past: two 16-bit limbs. -/
-theorem coin_mtp_lt {j : ℕ} (hj : j < 2 ^ Ls 14) (hki : (inst 14).main Coin.KI j = 1) :
-    ((inst 14).main Coin.ML j).val < 65536 ∧ ((inst 14).main Coin.MH j).val < 65536 := by
-  obtain ⟨rj, hrj, hon, -, e1, e2⟩ := coin_urec_mtp hL hsat hL24 hj hki
-  have hb : ∀ i < 4, ((inst 13).main (URec.MT i) rj).val < 256 := fun i hi => by
-    obtain ⟨u, -, -, hb⟩ := urec_mt_bytes hL hsat hL24 hrj hon hi
-    rw [hb]; exact UInt8.toNat_lt _
+/-- **The public median time past is two 16-bit limbs** when the block has an output row: its time bytes
+are range-checked and are those limbs' bytes. -/
+theorem pub_mtp_lt {j : ℕ} (hj : j < 2 ^ Ls 14) (hko : (inst 14).main Coin.KO j = 1) :
+    (pub 3).val < 65536 ∧ (pub 7).val < 65536 := by
+  have cs := coin_sat hL hsat hL24
+  have ek : (Coin.k Coin.KO).eval (2 ^ Ls 14) Coin.preCols pub (inst 14).main j = 1 := by rw [Coin.ev_k hj]; exact hko
+  have t0 := coin_r8 hL hsat hL24 (k := 104) (c := Coin.TB 0) (by omega) (by omega) rfl hj ek
+  have t1 := coin_r8 hL hsat hL24 (k := 105) (c := Coin.TB 1) (by omega) (by omega) rfl hj ek
+  have t2 := coin_r8 hL hsat hL24 (k := 106) (c := Coin.TB 2) (by omega) (by omega) rfl hj ek
+  have t3 := coin_r8 hL hsat hL24 (k := 107) (c := Coin.TB 3) (by omega) (by omega) rfl hj ek
+  obtain ⟨e3, e7⟩ := Coin.time_out cs hj hko
   have hP : P = 2147483647 := rfl
-  have key : ∀ (a b x : F), a.val < 256 → b.val < 256 → x = a + 256 * b → x.val < 65536 := by
+  have key : ∀ (a b x : F), a.val < 256 → b.val < 256 → a + 256 * b = x → x.val < 65536 := by
     intro a b x ha hb' hx
-    have : x = ((a.val + 256 * b.val : ℕ) : F) := by rw [hx]; push_cast; simp only [ZMod.natCast_zmod_val]
+    have : x = ((a.val + 256 * b.val : ℕ) : F) := by rw [← hx]; push_cast; simp only [ZMod.natCast_zmod_val]
     rw [this, ZMod.val_natCast_of_lt (by omega)]; omega
-  exact ⟨key _ _ _ (hb 0 (by norm_num)) (hb 1 (by norm_num)) e1, key _ _ _ (hb 2 (by norm_num)) (hb 3 (by norm_num)) e2⟩
+  exact ⟨key _ _ _ t0 t1 e3, key _ _ _ t2 t3 e7⟩
 
 /-- The range check of `2 · SA` on a time-locked row. -/
 theorem coin_r8_2sa {r : ℕ} (hr : r < 2 ^ Ls 14)
@@ -83,12 +63,11 @@ theorem coin_r8_2sa {r : ℕ} (hr : r < 2 ^ Ls 14)
     simp [siteEval, Coin.r8, hpre, hL 14 (by decide), Coin.k, Expr.eval, StarkedAir.Sha256.eval_col,
       StarkedAir.Sha256.eval_cst, wrap_zero hr]
 
-/-- **An enforced time lock is met against the record's claim (BIP68, time-based).** For input `k` of
-transaction `t` (coin row `j`, a non-coinbase input): when CSV is active at the block's height, the
-transaction's version is at least 2, bit 31 of the input's sequence is clear and bit 22 is set, the claimed
-median time past of the row (`ML`, `MH`: its undo record's four claim bytes, `coin_urec_mtp`) plus
-`512 ·` the sequence's low 16 bits is at most the block's previous median time past (public inputs 3 and
-7, 16-bit limbs). `pub 5` is the CSV bit. -/
+/-- **An enforced time lock is met against the claim's time (BIP68, time-based).** For input `k` of
+transaction `t` (coin row `j`, a non-coinbase input) with claim `c` (its undo record, `ClaimAt`): when CSV
+is active at the block's height, the transaction's version is at least 2, bit 31 of the input's sequence
+is clear and bit 22 is set, the claim's time plus `512 ·` the sequence's low 16 bits is at most the block's
+previous median time past (`pubMtp`: public inputs 3 and 7). `pub 5` is the CSV bit. -/
 theorem in_time_lock (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
     (hon : ∀ j < 2 ^ Ls 14, Coin.onV (inst 14).main j = 1 ↔ j < e) (hlen : e = (ioRows inst S.m).length)
     (hst : ∀ j < e, (inst 14).main Coin.START j = (inst 1).main Fields.START ((ioRows inst S.m).getD j 0))
@@ -96,13 +75,26 @@ theorem in_time_lock (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
     (htg : Spec.Block.tagged 0 (Fields.toksFrom (inst 1).main (Rb inst pub) S.m 0) = Spec.Block.tagParts 0 parts)
     {h : ℕ} (hp2 : pub 2 = (h : F)) (hh : h < 2 ^ 23)
     (hp5 : pub 5 = if Spec.Block.CSV_HEIGHT ≤ h then 1 else 0)
-    (hp3 : (pub 3).val < 65536) (hp7 : (pub 7).val < 65536)
     {t k : ℕ} {tx : Spec.Block.Tx} {i : Spec.Block.TxIn} (htx : S.b.txs[t]? = some tx) (hi : tx.vin[k]? = some i)
+    (hvo : tx.vout ≠ [])
     {j : ℕ} (hjq : j = ((parts.take t).map List.length).sum + k) (hje : j < e)
-    (hki : (inst 14).main Coin.KI j = 1) :
-    Spec.Coins.timeLockOk h tx.version i.sequence
-      (((inst 14).main Coin.ML j).val + 65536 * ((inst 14).main Coin.MH j).val)
-      ((pub 3).val + 65536 * (pub 7).val) = true := by
+    {c : Claim} (hc : ClaimAt inst pub (Ls 13) j c) :
+    Spec.Coins.timeLockOk h tx.version i.sequence c.mtp (pubMtp pub) = true := by
+  have hki : (inst 14).main Coin.KI j = 1 := hc.1
+  -- the transaction's first output row: the public time's limbs are 16 bits
+  obtain ⟨hp3, hp7⟩ : (pub 3).val < 65536 ∧ (pub 7).val < 65536 := by
+    obtain ⟨hplx, hpex⟩ := part_len hf htx
+    have hvl : 0 < tx.vout.length := List.length_pos_iff.mpr hvo
+    have hkl' : k < tx.vin.length := (List.getElem?_eq_some_iff.mp hi).1
+    have hft := fields_tagged hL hsat hL24 S
+    rw [htg] at hft
+    have he' : e = (parts.map List.length).sum := by rw [hlen, ← Spec.Block.tagParts_length 0, hft, List.length_map]
+    have h1 := pre_succ parts hplx
+    have h2 := pre_mono parts (t := t + 1) (t' := parts.length) (by omega) le_rfl
+    have htot : ((parts.take parts.length).map List.length).sum = (parts.map List.length).sum := by rw [List.take_length]
+    have hjo : ((parts.take t).map List.length).sum + tx.vin.length < e := by omega
+    have hko := (coin_kind_pos hL hsat hL24 S he hon hlen hst hf htg hjo htx rfl (by omega)).1.mpr le_rfl
+    exact pub_mtp_lt hL hsat hL24 (by omega) hko
   unfold Spec.Coins.timeLockOk
   by_cases hen : (decide (Spec.Block.CSV_HEIGHT ≤ h) && decide (2 ≤ tx.version) &&
       decide (i.sequence / 2 ^ 31 % 2 = 0) && decide (i.sequence / 2 ^ 22 % 2 = 1)) = true
@@ -195,7 +187,18 @@ theorem in_time_lock (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
   have qa := coin_r8 hL hsat hL24 (k := 101) (c := Coin.SA) (by omega) (by omega) rfl hj2 ek
   have qh := coin_r8 hL hsat hL24 (k := 103) (c := Coin.SH0) (by omega) (by omega) rfl hj2 ek
   have qa2 := coin_r8_2sa hL hsat hL24 hj2 ek
-  obtain ⟨hml, hmh⟩ := coin_mtp_lt hL hsat hL24 hj2 hki
+  -- the claim's time: the row's four time bytes
+  obtain ⟨-, -, rjc, -, -, -, -, u0c, -, -, -, -, -, -, hmtp, htbc⟩ := hc
+  set tb := fun n => ((Ub inst pub).getD (u0c + c.ser.length + n) 0).toNat with htbdef
+  have tbl : ∀ n, tb n < 256 := fun n => UInt8.toNat_lt _
+  have htbv : ∀ n < 4, ((inst 14).main (Coin.TB n) j).val = tb n := by
+    intro n hn
+    rw [htbc n hn, ZMod.val_natCast_of_lt (lt_of_lt_of_le (tbl n) (by unfold P; norm_num))]
+  have hmtpv : c.mtp = tb 0 + 256 * (tb 1 + 256 * (tb 2 + 256 * tb 3)) := by
+    rw [hmtp]; simp [Spec.Block.le, List.range_succ, htbdef]
+  have b0 := htbv 0 (by norm_num); have b1 := htbv 1 (by norm_num)
+  have b2 := htbv 2 (by norm_num); have b3 := htbv 3 (by norm_num)
+  have l0' := tbl 0; have l1' := tbl 1; have l2' := tbl 2; have l3' := tbl 3
   obtain ⟨t1, t2, t3⟩ := Coin.time_row cs hj2 hTM
   have hP : P = 2147483647 := rfl
   have hsa2 : 2 * ((inst 14).main Coin.SA j).val < 256 := by
@@ -213,53 +216,19 @@ theorem in_time_lock (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
     apply Coin.lift _ (by omega) (by omega)
     rw [← hSQL, t1]; push_cast; simp only [ZMod.natCast_zmod_val]
   have hlo : (pub 3).val + 65536 * (((inst 14).main Coin.BW0 j).val + ((inst 14).main Coin.BW1 j).val) =
-      ((inst 14).main (Coin.TQ 0) j).val + 256 * ((inst 14).main (Coin.TQ 1) j).val + ((inst 14).main Coin.ML j).val + 512 * ((inst 14).main Coin.SA j).val := by
+      ((inst 14).main (Coin.TQ 0) j).val + 256 * ((inst 14).main (Coin.TQ 1) j).val +
+        (((inst 14).main (Coin.TB 0) j).val + 256 * ((inst 14).main (Coin.TB 1) j).val) + 512 * ((inst 14).main Coin.SA j).val := by
     apply Coin.lift _ (by omega) (by omega)
     push_cast; simp only [ZMod.natCast_zmod_val]
     linear_combination t2
-  have hhi : (pub 7).val = ((inst 14).main (Coin.TQ 2) j).val + 256 * ((inst 14).main (Coin.TQ 3) j).val + ((inst 14).main Coin.MH j).val +
+  have hhi : (pub 7).val = ((inst 14).main (Coin.TQ 2) j).val + 256 * ((inst 14).main (Coin.TQ 3) j).val +
+      (((inst 14).main (Coin.TB 2) j).val + 256 * ((inst 14).main (Coin.TB 3) j).val) +
       (((inst 14).main Coin.SH0 j).val + 256 * ((inst 14).main Coin.SHB j).val) + (((inst 14).main Coin.BW0 j).val + ((inst 14).main Coin.BW1 j).val) := by
     apply Coin.lift _ (by omega) (by omega)
     push_cast; simp only [ZMod.natCast_zmod_val]
     linear_combination t3
-  rw [show (2 : ℕ) ^ 16 = 65536 by norm_num, hlock]
+  rw [show (2 : ℕ) ^ 16 = 65536 by norm_num, hlock, hmtpv, pubMtp]
   omega
-
-open StarkedAir.Spec.QM31 (emb emb_one emb_zero) in
-/-- **The block's time claims, as fractions.** `claimSum` (the part of the public sum that is not coin
-events, `coin_block_sum`) is one fraction `1/(z − φ₂)` per row whose time lock is enforced, `φ₂` the
-weighted claim tuple of the row (`Coin.phi2Q`, `phi2Q_eq`). -/
-theorem claim_sum_eq :
-    claimSum inst (Ls 14) = ∑ r ∈ Finset.range (2 ^ Ls 14),
-      if (inst 14).main Coin.TM r = 1 then
-        (RunSum.pQ pub Coin.PUB_Z - Coin.phi2Q pub (inst 14).main (2 ^ Ls 14) r)⁻¹ else 0 := by
-  have cs := coin_sat hL hsat hL24
-  obtain ⟨-, -, h2⟩ := Coin.coin_runsum cs (by positivity)
-  unfold claimSum
-  refine Finset.sum_congr rfl fun r hr => ?_
-  have hr' := Finset.mem_range.mp hr
-  obtain ⟨e1, e0⟩ := h2 r hr'
-  obtain ⟨bL, -, -, -, hTM⟩ := Coin.time_bits cs hr'
-  have hb : (inst 14).main Coin.TM r = 0 ∨ (inst 14).main Coin.TM r = 1 := by
-    rcases Coin.bool_col cs (c := Coin.KI) (by simp) hr' with a | a <;> rcases bL with b | b <;> simp [hTM, a, b]
-  rcases hb with h0 | h1
-  · rw [if_neg (by rw [h0]; exact zero_ne_one), e0 h0]
-  · rw [if_pos h1]
-    rw [h1, emb_one] at e1
-    exact eq_inv_of_mul_eq_one_right e1
-
-omit hL hsat hL24 in
-open StarkedAir.Spec.QM31 (emb emb_zero) in
-/-- **A time claim's key**: the coin's height, the claimed time's two limbs, and the tag `65536` in slot 19
-(a slot that holds a 16-bit limb in every coin tuple), weighted by the epoch's `αᵏ`. -/
-theorem phi2Q_eq {n r : ℕ} (hr : r < n) {M : ℕ → ℕ → F} :
-    Coin.phi2Q pub M n r = RunSum.pQ pub (Coin.PUB_ALPHA 0) * emb (M Coin.HC r) +
-      RunSum.pQ pub (Coin.PUB_ALPHA 1) * emb (M Coin.ML r) + RunSum.pQ pub (Coin.PUB_ALPHA 2) * emb (M Coin.MH r) +
-      RunSum.pQ pub (Coin.PUB_ALPHA 19) * emb (65536 : F) := by
-  unfold Coin.phi2Q
-  simp [Coin.W, List.range_succ, Coin.tuple2, List.replicate, Coin.CLAIM_TAG, Coin.k, StarkedAir.Sha256.eval_col,
-    StarkedAir.Sha256.eval_cst, wrap_zero hr, emb_zero]
-  ring
 
 end System
 

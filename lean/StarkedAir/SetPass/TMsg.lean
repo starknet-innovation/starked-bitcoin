@@ -1,10 +1,11 @@
 /-
 **The `TxOutSer` stream (`set_tmsg`).** SHA-256's message, one byte per row from row 0 (the row is the
 stream position `Y`): the incoming pending bytes (public), then per record its `TxOutSer`:
-`txid ‖ vout` (36 file bytes from the record's start), the 4 code bytes (`set_rec`'s), `ser` (file bytes
-from the record's start + 49). Records come from `rec(r, start, len)`, in order from 0; a record's rows
-are its parts in order (`P0`: 36 rows, `PC`: 4, `PS`: `len`), counted by `O`, and it ends at
-`O = 39 + len`; the stream ends at a record's end.
+`txid ‖ vout` (36 file bytes from the record's start), the 4 code bytes (`set_rec`'s), `serTxOut` (the
+file bytes from the record's start + 49, without the record's last 4, the coin's time: `RLEN = len − 4`).
+Records come from `rec(r, start, len)`, in order from 0; a record's rows are its parts in order (`P0`: 36
+rows, `PC`: 4, `PS`: `RLEN`), counted by `O`, and it ends at `O = 39 + RLEN`; the stream ends at a record's
+end.
 
 The whole blocks (`m = nb_out − nb_in ≥ 1` of them) yield big-endian words `w(y − 3, lo, hi)` at rows
 `y ≡ 3 (mod 4)`; the rest (`TAIL`, fewer than 64 rows from a multiple of 64) are the outgoing pending
@@ -35,6 +36,9 @@ def R : ℕ := 10
 def O : ℕ := 11
 def RST : ℕ := 12
 def RLEN : ℕ := 13
+/-- A record's `ser` ends with the coin's four time bytes (D-058, R5), which Core's `TxOutSer` does not
+have: the stream walks `RLEN = len − 4` bytes of it. -/
+def TIME : ℕ := 4
 def TAIL : ℕ := 14
 /-- `ON · (1 − TAIL)`, and the stream's last row (on, the next off). -/
 def NT : ℕ := 15
@@ -120,7 +124,7 @@ def lookups : List Lookup :=
     ⟨Block.REL_BYTE, .neg (k P0), [.add (k RST) (k O), k B]⟩,
     ⟨REL_CODE, .neg (k PC), [k R, .sub (k O) (cst 36), k B]⟩,
     ⟨Block.REL_BYTE, .neg (k PS), [.add (.add (k RST) (k O)) (cst 9), k B]⟩,
-    ⟨REL_REC, .neg (k NEW), [k R, k RST, k RLEN]⟩,
+    ⟨REL_REC, .neg (k NEW), [k R, k RST, .add (k RLEN) (cst TIME)]⟩,
     ⟨REL_PSHO, .neg (k TAIL), [p P_K64, k B]⟩,
     ⟨REL_SW, .mul (k NT) (p P_IS3), [.sub (k Y) (cst 3), loW, hiW]⟩,
     ⟨REL_SHEND, .neg first, [.sub (.sub (.pub (H_NB SHA_OUT)) (.pub (H_NB SHA_IN))) one]⟩ ]

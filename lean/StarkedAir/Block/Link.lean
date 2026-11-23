@@ -73,11 +73,11 @@ theorem yield_table : ∀ i < 15, ∀ k < (hashSys.comp i).lookups.length, isUse
 
 /-- The block system's lookup sites over all rows (per-component sizes, D-045): `Σᵢ kᵢ · 2^(Ls i)` with
 `kᵢ` the lookups per row — bytes 1, fields 40, messages 4, SHA 6, txid tree 11, tables 2, walker 5, context 12,
-witness tree 3, undo bytes 1, Blake2s words 6, Blake2s 11, fingerprints 4, undo records 28, coins 104 (245). -/
+witness tree 3, undo bytes 1, Blake2s words 6, Blake2s 11, fingerprints 4, undo records 28, coins 108 (249). -/
 def hashRows (Ls : ℕ → ℕ) : ℕ :=
   2 ^ Ls 0 + 46 * 2 ^ Ls 1 + 4 * 2 ^ Ls 2 + 6 * 2 ^ Ls 3 + 11 * 2 ^ Ls 4 + 2 * 2 ^ Ls 5 + 6 * 2 ^ Ls 6 +
     12 * 2 ^ Ls 7 + 3 * 2 ^ Ls 8 + 2 ^ Ls 9 + 6 * 2 ^ Ls 10 + 11 * 2 ^ Ls 11 + 4 * 2 ^ Ls 12 + 28 * 2 ^ Ls 13 +
-    104 * 2 ^ Ls 14
+    108 * 2 ^ Ls 14
 
 /-- **The block system's size condition** (D-045): every component has at most `2^24` rows and the site
 count `Σᵢ kᵢ·2^(Ls i)` is below `P`. One shared size satisfies it up to `2^23` (`SizeOk.of_le23`); a size
@@ -159,11 +159,11 @@ theorem hash_sites_len : (sites hashSys inst).length = hashRows Ls := by
   ring
 
 omit hL hsat in
-/-- At constant sizes the site count is `223 · 2^L`. -/
-theorem hashRows_const (L : ℕ) : hashRows (fun _ => L) = 245 * 2 ^ L := by unfold hashRows; ring
+/-- At constant sizes the site count is `249 · 2^L`. -/
+theorem hashRows_const (L : ℕ) : hashRows (fun _ => L) = 249 * 2 ^ L := by unfold hashRows; ring
 
 omit hL hsat in
-/-- Sizes of at most `2^23` rows satisfy the size condition (`Σᵢ kᵢ·2^(Ls i) ≤ 245·2^23 < P`). -/
+/-- Sizes of at most `2^23` rows satisfy the size condition (`Σᵢ kᵢ·2^(Ls i) ≤ 249·2^23 < P`). -/
 theorem SizeOk.of_le23 (h23 : ∀ i < 15, Ls i ≤ 23) : SizeOk Ls := by
   refine ⟨fun i hi => le_trans (h23 i hi) (by norm_num), ?_⟩
   have h : ∀ i < 15, 2 ^ Ls i ≤ 2 ^ 23 := fun i hi => Nat.pow_le_pow_right (by norm_num) (h23 i hi)
@@ -549,7 +549,7 @@ theorem use_mult : ∀ s ∈ sites hashSys inst, isUse s.1 s.2.2 = true →
         simp [Coin.coin, Coin.constraints, Coin.timeC])
       simp only [Coin.k, Expr.eval, StarkedAir.Sha256.eval_col, wrap_zero hr] at this
       rw [sub_eq_zero.mp this]; exact mul01 bKI bLKT
-    have hk64 : k < 104 := by rw [← Coin.lookups_len]; simpa [hashSys, Coin.coin] using hk
+    have hk64 : k < 108 := by rw [← Coin.lookups_len]; simpa [hashSys, Coin.coin] using hk
     have hm := Coin.mult_cases k hk64 hk4
     simp only [Coin.useMults, List.mem_cons, List.not_mem_nil, or_false] at hm
     rcases hm with h | h | h | h | h | h | h | h | h | h | h | h | h <;> rw [h] <;>

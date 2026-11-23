@@ -75,13 +75,20 @@ pub const Set = struct {
         return self.heap.items[v.off..][0..v.len];
     }
 
-    fn put(self: *Set, k: Key, code: u32, txi: u32, s: []const u8) !void {
+    /// Stores a coin's bytes (`serTxOut ‖ time`, `epoch.Coin.ser`): `s` whole, or `s` then `time`.
+    fn put(self: *Set, k: Key, code: u32, txi: u32, s: []const u8, time: ?u32) !void {
         const off = self.heap.items.len;
         try self.heap.appendSlice(self.gpa, s);
+        if (time) |t| {
+            var b: [4]u8 = undefined;
+            std.mem.writeInt(u32, &b, t, .little);
+            try self.heap.appendSlice(self.gpa, &b);
+        }
+        const len = self.heap.items.len - off;
         const gop = try self.map.getOrPut(self.gpa, k);
         if (gop.found_existing) return error.Overwrite;
-        gop.value_ptr.* = .{ .code = code, .txi = txi, .off = off, .len = @intCast(s.len) };
-        self.live += s.len;
+        gop.value_ptr.* = .{ .code = code, .txi = txi, .off = off, .len = @intCast(len) };
+        self.live += len;
     }
 
     /// Rehashes the table in place once removals reach a quarter of its slots (the tombstones would
@@ -106,8 +113,9 @@ pub const Set = struct {
     }
 
     /// Applies block `height` (the semantics of `epoch.coinSetFrom`) after checking it against its
-    /// pinned header. With `want`, returns its undo stream and `.ctx`, allocated in `a`.
-    pub fn apply(self: *Set, a: std.mem.Allocator, raw: []const u8, header: *const [80]u8, height: u32, want: bool) !?Undo {
+    /// pinned header. `time` is its created coins' time (`coin.coinTime` of the height). With `want`,
+    /// returns its undo stream and `.ctx`, allocated in `a`.
+    pub fn apply(self: *Set, a: std.mem.Allocator, raw: []const u8, header: *const [80]u8, height: u32, time: u32, want: bool) !?Undo {
         if (raw.len < 80 or !std.mem.eql(u8, raw[0..80], header)) return error.HeaderMismatch;
         const rows = try fields.tokenize(a, raw);
         var undo = std.ArrayList(u8).empty;
@@ -172,7 +180,8 @@ pub const Set = struct {
                             var b: [4]u8 = undefined;
                             std.mem.writeInt(u32, &b, kv.value.code, .little);
                             try undo.appendSlice(a, &b);
-                            try undo.appendSlice(a, self.ser(kv.value));
+                            const cs = self.ser(kv.value);
+                            try undo.appendSlice(a, cs[0 .. cs.len - 4]);
                             std.mem.writeInt(u32, &b, kv.value.txi, .little);
                             try ctx.appendSlice(a, &b);
                         }
@@ -182,7 +191,7 @@ pub const Set = struct {
                         const sl = o.ser[8];
                         const hdr: usize = if (sl < 253) 1 else 3;
                         if (EP.unspendable(o.ser[8 + hdr ..])) continue;
-                        try self.put(.{ .txid = id, .vout = o.vout }, 2 * height + @intFromBool(txi == 0), txi, o.ser);
+                        try self.put(.{ .txid = id, .vout = o.vout }, 2 * height + @intFromBool(txi == 0), txi, o.ser, time);
                     };
                     txi += 1;
                     in_cb_witness = false;
@@ -238,7 +247,7 @@ pub const Set = struct {
             std.mem.writeInt(u32, b[0..4], e.k.vout, .little);
             std.mem.writeInt(u32, b[4..8], e.v.code, .little);
             hs.update(&b);
-            hs.update(s);
+            hs.update(s[0 .. s.len - 4]);
             amount += std.mem.readInt(u64, s[0..8], .little);
         }
         try fw.interface.flush();
@@ -264,15 +273,14 @@ pub const Set = struct {
         var amount: u64 = 0;
         while (try rd.next()) |c| {
             if (c.height >= from) return error.PrevSetTooNew;
-            if (c.ser.len < 8) return error.CoinOutOfRange;
             const code = 2 * c.height + @intFromBool(c.cb);
-            try self.put(.{ .txid = c.txid, .vout = c.vout }, code, c.txi, c.ser);
+            try self.put(.{ .txid = c.txid, .vout = c.vout }, code, c.txi, c.ser, null);
             var hb: [8]u8 = undefined;
             hs.update(&c.txid);
             std.mem.writeInt(u32, hb[0..4], c.vout, .little);
             std.mem.writeInt(u32, hb[4..8], code, .little);
             hs.update(&hb);
-            hs.update(c.ser);
+            hs.update(c.txout());
             amount += std.mem.readInt(u64, c.ser[0..8], .little);
         }
         var info = SetInfo{ .count = rd.n, .amount = amount, .hash = undefined, .digest = try rd.digest() };
@@ -376,16 +384,16 @@ test "replay: genesis; a wrong header or Merkle root is rejected" {
     var set = try Set.init(testing.allocator, 0);
     defer set.deinit();
     var header: [80]u8 = raw0[0..80].*;
-    const und0 = (try set.apply(a, raw0, &header, 0, true)).?;
+    const und0 = (try set.apply(a, raw0, &header, 0, 0, true)).?;
     try testing.expectEqualSlices(u8, &.{1}, und0.undo);
     try testing.expectEqual(@as(usize, 0), und0.ctx.len);
     try testing.expectEqual(@as(usize, 0), set.count());
     // A wrong header, a flipped Merkle root.
     header[5] ^= 1;
-    try testing.expectError(error.HeaderMismatch, set.apply(a, raw0, &header, 0, false));
+    try testing.expectError(error.HeaderMismatch, set.apply(a, raw0, &header, 0, 0, false));
     const bad = try a.dupe(u8, raw0);
     bad[40] ^= 1;
-    try testing.expectError(error.BadMerkleRoot, set.apply(a, bad, bad[0..80], 0, false));
+    try testing.expectError(error.BadMerkleRoot, set.apply(a, bad, bad[0..80], 0, 0, false));
 }
 
 test "replay: merkle mutation (CVE-2012-2459)" {

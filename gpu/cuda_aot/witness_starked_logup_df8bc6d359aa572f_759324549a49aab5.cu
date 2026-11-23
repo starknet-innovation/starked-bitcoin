@@ -1,5 +1,5 @@
-// starked-bitcoin LogUp fraction kernel v1 (src/gpu/cuda/logup.zig): AIR block_urec, digest 8d09e4ef561ecaec82db72dca70dce9de6aa9764fe9125c301af7c6867cd540e.
-// 28 lookups in 14 batches, 37 source columns, tuples up to 11 values.
+// starked-bitcoin LogUp fraction kernel v1 (src/gpu/cuda/logup.zig): AIR block_urec, digest 4d2bb2854421e71cf857e1b8d16e8cfbecaac2f352aa5b46b6aecb7f2dd9731a.
+// 28 lookups in 14 batches, 37 source columns, tuples up to 13 values.
 typedef unsigned long long u64;
 #define STARKED_P 2147483647u
 struct StarkedQm31 { unsigned a, b, c, d; };
@@ -56,7 +56,7 @@ __device__ __forceinline__ unsigned starked_natural_row(unsigned s, unsigned log
     const unsigned c = starked_brev(s, log_size);
     return c < (n >> 1u) ? c << 1u : ((n - c) << 1u) - 1u;
 }
-extern "C" __global__ void __launch_bounds__(256) starked_logup_v1_fd9d43fbc488fc00(
+extern "C" __global__ void __launch_bounds__(256) starked_logup_v1_df8bc6d359aa572f(
     const unsigned *sources, unsigned *const *outputs, const unsigned *pubs,
     const unsigned *powers, const unsigned *z, unsigned *denominators,
     unsigned *error, unsigned log_size) {
@@ -159,29 +159,25 @@ extern "C" __global__ void __launch_bounds__(256) starked_logup_v1_fd9d43fbc488f
     const unsigned v201 = starked_add(v199, v200);
     const unsigned v202 = sources[(u64)33u * rows + r_0];
     const unsigned v203 = sources[(u64)34u * rows + r_0];
-    const unsigned v204 = starked_mul(v48, v203);
-    const unsigned v205 = starked_add(v202, v204);
-    const unsigned v206 = sources[(u64)35u * rows + r_0];
-    const unsigned v207 = sources[(u64)36u * rows + r_0];
-    const unsigned v208 = starked_mul(v48, v207);
-    const unsigned v209 = starked_add(v206, v208);
-    const unsigned v210 = 17u;
-    const unsigned v211 = starked_add(v20, v210);
-    const unsigned v212 = starked_add(v66, v77);
-    const unsigned v213 = starked_add(v54, v212);
-    const unsigned v214 = starked_mul(v0, v213);
-    const unsigned v215 = starked_neg(v214);
-    const unsigned v216 = 18u;
-    const unsigned v217 = starked_add(v20, v216);
-    const unsigned v218 = 19u;
+    const unsigned v204 = sources[(u64)35u * rows + r_0];
+    const unsigned v205 = sources[(u64)36u * rows + r_0];
+    const unsigned v206 = 17u;
+    const unsigned v207 = starked_add(v20, v206);
+    const unsigned v208 = starked_add(v66, v77);
+    const unsigned v209 = starked_add(v54, v208);
+    const unsigned v210 = starked_mul(v0, v209);
+    const unsigned v211 = starked_neg(v210);
+    const unsigned v212 = 18u;
+    const unsigned v213 = starked_add(v20, v212);
+    const unsigned v214 = 19u;
+    const unsigned v215 = starked_add(v20, v214);
+    const unsigned v216 = starked_mul(v0, v111);
+    const unsigned v217 = starked_neg(v216);
+    const unsigned v218 = 40u;
     const unsigned v219 = starked_add(v20, v218);
-    const unsigned v220 = starked_mul(v0, v111);
-    const unsigned v221 = starked_neg(v220);
-    const unsigned v222 = 40u;
-    const unsigned v223 = starked_add(v20, v222);
-    const unsigned v224 = starked_add(v150, v37);
-    const unsigned v225 = starked_add(v153, v37);
-    const unsigned v226 = starked_add(v156, v37);
+    const unsigned v220 = starked_add(v150, v37);
+    const unsigned v221 = starked_add(v153, v37);
+    const unsigned v222 = starked_add(v156, v37);
     const StarkedQm31 minus_z = {starked_neg(z[0]), starked_neg(z[1]), starked_neg(z[2]), starked_neg(z[3])};
     const StarkedQm31 alpha1 = starked_q_load(powers + 4);
     const StarkedQm31 alpha2 = starked_q_load(powers + 8);
@@ -194,6 +190,8 @@ extern "C" __global__ void __launch_bounds__(256) starked_logup_v1_fd9d43fbc488f
     const StarkedQm31 alpha9 = starked_q_load(powers + 36);
     const StarkedQm31 alpha10 = starked_q_load(powers + 40);
     const StarkedQm31 alpha11 = starked_q_load(powers + 44);
+    const StarkedQm31 alpha12 = starked_q_load(powers + 48);
+    const StarkedQm31 alpha13 = starked_q_load(powers + 52);
     StarkedQm31 d0 = minus_z;
     d0.a = starked_add(d0.a, 17u);
     d0 = starked_q_add(d0, starked_q_mul_base(alpha1, v136));
@@ -283,23 +281,25 @@ extern "C" __global__ void __launch_bounds__(256) starked_logup_v1_fd9d43fbc488f
     d19 = starked_q_add(d19, starked_q_mul_base(alpha7, v126));
     d19 = starked_q_add(d19, starked_q_mul_base(alpha8, v129));
     d19 = starked_q_add(d19, starked_q_mul_base(alpha9, v132));
-    d19 = starked_q_add(d19, starked_q_mul_base(alpha10, v205));
-    d19 = starked_q_add(d19, starked_q_mul_base(alpha11, v209));
+    d19 = starked_q_add(d19, starked_q_mul_base(alpha10, v202));
+    d19 = starked_q_add(d19, starked_q_mul_base(alpha11, v203));
+    d19 = starked_q_add(d19, starked_q_mul_base(alpha12, v204));
+    d19 = starked_q_add(d19, starked_q_mul_base(alpha13, v205));
     StarkedQm31 d20 = minus_z;
     d20.a = starked_add(d20.a, 17u);
-    d20 = starked_q_add(d20, starked_q_mul_base(alpha1, v211));
+    d20 = starked_q_add(d20, starked_q_mul_base(alpha1, v207));
     d20 = starked_q_add(d20, starked_q_mul_base(alpha2, v57));
     StarkedQm31 d21 = minus_z;
     d21.a = starked_add(d21.a, 17u);
-    d21 = starked_q_add(d21, starked_q_mul_base(alpha1, v217));
+    d21 = starked_q_add(d21, starked_q_mul_base(alpha1, v213));
     d21 = starked_q_add(d21, starked_q_mul_base(alpha2, v91));
     StarkedQm31 d22 = minus_z;
     d22.a = starked_add(d22.a, 17u);
-    d22 = starked_q_add(d22, starked_q_mul_base(alpha1, v219));
+    d22 = starked_q_add(d22, starked_q_mul_base(alpha1, v215));
     d22 = starked_q_add(d22, starked_q_mul_base(alpha2, v95));
     StarkedQm31 d23 = minus_z;
     d23.a = starked_add(d23.a, 17u);
-    d23 = starked_q_add(d23, starked_q_mul_base(alpha1, v223));
+    d23 = starked_q_add(d23, starked_q_mul_base(alpha1, v219));
     d23 = starked_q_add(d23, starked_q_mul_base(alpha2, v117));
     StarkedQm31 d24 = minus_z;
     d24.a = starked_add(d24.a, 17u);
@@ -307,16 +307,16 @@ extern "C" __global__ void __launch_bounds__(256) starked_logup_v1_fd9d43fbc488f
     d24 = starked_q_add(d24, starked_q_mul_base(alpha2, v202));
     StarkedQm31 d25 = minus_z;
     d25.a = starked_add(d25.a, 17u);
-    d25 = starked_q_add(d25, starked_q_mul_base(alpha1, v224));
+    d25 = starked_q_add(d25, starked_q_mul_base(alpha1, v220));
     d25 = starked_q_add(d25, starked_q_mul_base(alpha2, v203));
     StarkedQm31 d26 = minus_z;
     d26.a = starked_add(d26.a, 17u);
-    d26 = starked_q_add(d26, starked_q_mul_base(alpha1, v225));
-    d26 = starked_q_add(d26, starked_q_mul_base(alpha2, v206));
+    d26 = starked_q_add(d26, starked_q_mul_base(alpha1, v221));
+    d26 = starked_q_add(d26, starked_q_mul_base(alpha2, v204));
     StarkedQm31 d27 = minus_z;
     d27.a = starked_add(d27.a, 17u);
-    d27 = starked_q_add(d27, starked_q_mul_base(alpha1, v226));
-    d27 = starked_q_add(d27, starked_q_mul_base(alpha2, v207));
+    d27 = starked_q_add(d27, starked_q_mul_base(alpha1, v222));
+    d27 = starked_q_add(d27, starked_q_mul_base(alpha2, v205));
     {
         const StarkedQm31 n = starked_q_add(starked_q_mul_base(d1, v135), starked_q_mul_base(d0, v137));
         const StarkedQm31 d = starked_q_mul(d0, d1);
@@ -428,7 +428,7 @@ extern "C" __global__ void __launch_bounds__(256) starked_logup_v1_fd9d43fbc488f
         slot[0] = d.a; slot[1] = d.b; slot[2] = d.c; slot[3] = d.d;
     }
     {
-        const StarkedQm31 n = starked_q_add(starked_q_mul_base(d21, v137), starked_q_mul_base(d20, v215));
+        const StarkedQm31 n = starked_q_add(starked_q_mul_base(d21, v137), starked_q_mul_base(d20, v211));
         const StarkedQm31 d = starked_q_mul(d20, d21);
         if ((d.a | d.b | d.c | d.d) == 0u) atomicOr(error, 2u);
         outputs[40][row] = n.a;
@@ -439,7 +439,7 @@ extern "C" __global__ void __launch_bounds__(256) starked_logup_v1_fd9d43fbc488f
         slot[0] = d.a; slot[1] = d.b; slot[2] = d.c; slot[3] = d.d;
     }
     {
-        const StarkedQm31 n = starked_q_add(starked_q_mul_base(d23, v215), starked_q_mul_base(d22, v221));
+        const StarkedQm31 n = starked_q_add(starked_q_mul_base(d23, v211), starked_q_mul_base(d22, v217));
         const StarkedQm31 d = starked_q_mul(d22, d23);
         if ((d.a | d.b | d.c | d.d) == 0u) atomicOr(error, 2u);
         outputs[44][row] = n.a;

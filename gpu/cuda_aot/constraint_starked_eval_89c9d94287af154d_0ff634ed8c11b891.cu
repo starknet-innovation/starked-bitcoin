@@ -149,7 +149,7 @@ __device__ __forceinline__ unsigned stwo_trace_value(
     const u64 address = (u64)arena[args.trace_offsets + 2u * global] | ((u64)arena[args.trace_offsets + 2u * global + 1u] << 32u); return arena[address + target];
 }
 // STWO_BOUNDED_AIR_SLICES_V1
-__device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_0(unsigned *arena, const StwoCairoEvalArgs *args, unsigned row) {
+__device__ __noinline__ StwoCairoQm31 stwo_air_slice_89c9d94287af154d_0(unsigned *arena, const StwoCairoEvalArgs *args, unsigned row) {
     StwoCairoQm31 part_acc = { 0u, 0u, 0u, 0u };
     unsigned b1 = stwo_trace_value(arena, *args, 1u, 0u, row, 0);
     unsigned b3 = stwo_trace_value(arena, *args, 1u, 1u, row, 0);
@@ -235,7 +235,7 @@ __device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_0(unsigned
     part_acc = stwo_qm31_add(part_acc, stwo_qm31_mul(e15, stwo_load_qm31(arena, args->random_coeffs + (args->rc_base + 15u) * 4u)));
     return part_acc;
 }
-__device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_16(unsigned *arena, const StwoCairoEvalArgs *args, unsigned row) {
+__device__ __noinline__ StwoCairoQm31 stwo_air_slice_89c9d94287af154d_16(unsigned *arena, const StwoCairoEvalArgs *args, unsigned row) {
     StwoCairoQm31 part_acc = { 0u, 0u, 0u, 0u };
     unsigned b162 = stwo_trace_value(arena, *args, 1u, 105u, row, 0);
     unsigned b170 = stwo_trace_value(arena, *args, 1u, 112u, row, 0);
@@ -321,7 +321,7 @@ __device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_16(unsigne
     part_acc = stwo_qm31_add(part_acc, stwo_qm31_mul(e31, stwo_load_qm31(arena, args->random_coeffs + (args->rc_base + 31u) * 4u)));
     return part_acc;
 }
-__device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_32(unsigned *arena, const StwoCairoEvalArgs *args, unsigned row) {
+__device__ __noinline__ StwoCairoQm31 stwo_air_slice_89c9d94287af154d_32(unsigned *arena, const StwoCairoEvalArgs *args, unsigned row) {
     StwoCairoQm31 part_acc = { 0u, 0u, 0u, 0u };
     unsigned b185 = stwo_trace_value(arena, *args, 1u, 127u, row, 0);
     unsigned b186 = stwo_trace_value(arena, *args, 1u, 128u, row, 0);
@@ -407,7 +407,7 @@ __device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_32(unsigne
     part_acc = stwo_qm31_add(part_acc, stwo_qm31_mul(e47, stwo_load_qm31(arena, args->random_coeffs + (args->rc_base + 47u) * 4u)));
     return part_acc;
 }
-__device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_48(unsigned *arena, const StwoCairoEvalArgs *args, unsigned row) {
+__device__ __noinline__ StwoCairoQm31 stwo_air_slice_89c9d94287af154d_48(unsigned *arena, const StwoCairoEvalArgs *args, unsigned row) {
     StwoCairoQm31 part_acc = { 0u, 0u, 0u, 0u };
     unsigned b0 = stwo_trace_value(arena, *args, 1u, 0u, row, -1);
     unsigned b1 = stwo_trace_value(arena, *args, 1u, 0u, row, 0);
@@ -517,7 +517,7 @@ __device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_48(unsigne
     part_acc = stwo_qm31_add(part_acc, stwo_qm31_mul(e63, stwo_load_qm31(arena, args->random_coeffs + (args->rc_base + 63u) * 4u)));
     return part_acc;
 }
-__device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_64(unsigned *arena, const StwoCairoEvalArgs *args, unsigned row) {
+__device__ __noinline__ StwoCairoQm31 stwo_air_slice_89c9d94287af154d_64(unsigned *arena, const StwoCairoEvalArgs *args, unsigned row) {
     StwoCairoQm31 part_acc = { 0u, 0u, 0u, 0u };
     unsigned b1 = stwo_trace_value(arena, *args, 1u, 0u, row, 0);
     unsigned b9 = stwo_trace_value(arena, *args, 1u, 4u, row, 0);
@@ -916,7 +916,7 @@ __device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_64(unsigne
     part_acc = stwo_qm31_add(part_acc, stwo_qm31_mul(e79, stwo_load_qm31(arena, args->random_coeffs + (args->rc_base + 79u) * 4u)));
     return part_acc;
 }
-__device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_80(unsigned *arena, const StwoCairoEvalArgs *args, unsigned row) {
+__device__ __noinline__ StwoCairoQm31 stwo_air_slice_89c9d94287af154d_80(unsigned *arena, const StwoCairoEvalArgs *args, unsigned row) {
     StwoCairoQm31 part_acc = { 0u, 0u, 0u, 0u };
     unsigned b8 = stwo_trace_value(arena, *args, 1u, 4u, row, -1);
     unsigned b10 = stwo_trace_value(arena, *args, 1u, 5u, row, -1);
@@ -1068,7 +1068,7 @@ __device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_80(unsigne
     part_acc = stwo_qm31_add(part_acc, stwo_qm31_mul(e95, stwo_load_qm31(arena, args->random_coeffs + (args->rc_base + 95u) * 4u)));
     return part_acc;
 }
-__device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_96(unsigned *arena, const StwoCairoEvalArgs *args, unsigned row) {
+__device__ __noinline__ StwoCairoQm31 stwo_air_slice_89c9d94287af154d_96(unsigned *arena, const StwoCairoEvalArgs *args, unsigned row) {
     StwoCairoQm31 part_acc = { 0u, 0u, 0u, 0u };
     unsigned b40 = stwo_trace_value(arena, *args, 1u, 20u, row, -1);
     unsigned b42 = stwo_trace_value(arena, *args, 1u, 21u, row, -1);
@@ -1220,7 +1220,7 @@ __device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_96(unsigne
     part_acc = stwo_qm31_add(part_acc, stwo_qm31_mul(e111, stwo_load_qm31(arena, args->random_coeffs + (args->rc_base + 111u) * 4u)));
     return part_acc;
 }
-__device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_112(unsigned *arena, const StwoCairoEvalArgs *args, unsigned row) {
+__device__ __noinline__ StwoCairoQm31 stwo_air_slice_89c9d94287af154d_112(unsigned *arena, const StwoCairoEvalArgs *args, unsigned row) {
     StwoCairoQm31 part_acc = { 0u, 0u, 0u, 0u };
     unsigned b1 = stwo_trace_value(arena, *args, 1u, 0u, row, 0);
     unsigned b9 = stwo_trace_value(arena, *args, 1u, 4u, row, 0);
@@ -1365,7 +1365,7 @@ __device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_112(unsign
     part_acc = stwo_qm31_add(part_acc, stwo_qm31_mul(e127, stwo_load_qm31(arena, args->random_coeffs + (args->rc_base + 127u) * 4u)));
     return part_acc;
 }
-__device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_128(unsigned *arena, const StwoCairoEvalArgs *args, unsigned row) {
+__device__ __noinline__ StwoCairoQm31 stwo_air_slice_89c9d94287af154d_128(unsigned *arena, const StwoCairoEvalArgs *args, unsigned row) {
     StwoCairoQm31 part_acc = { 0u, 0u, 0u, 0u };
     unsigned b1 = stwo_trace_value(arena, *args, 1u, 0u, row, 0);
     unsigned b33 = stwo_trace_value(arena, *args, 1u, 16u, row, 0);
@@ -1528,7 +1528,7 @@ __device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_128(unsign
     part_acc = stwo_qm31_add(part_acc, stwo_qm31_mul(e143, stwo_load_qm31(arena, args->random_coeffs + (args->rc_base + 143u) * 4u)));
     return part_acc;
 }
-__device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_144(unsigned *arena, const StwoCairoEvalArgs *args, unsigned row) {
+__device__ __noinline__ StwoCairoQm31 stwo_air_slice_89c9d94287af154d_144(unsigned *arena, const StwoCairoEvalArgs *args, unsigned row) {
     StwoCairoQm31 part_acc = { 0u, 0u, 0u, 0u };
     unsigned b1 = stwo_trace_value(arena, *args, 1u, 0u, row, 0);
     unsigned b3 = stwo_trace_value(arena, *args, 1u, 1u, row, 0);
@@ -1708,7 +1708,7 @@ __device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_144(unsign
     part_acc = stwo_qm31_add(part_acc, stwo_qm31_mul(e159, stwo_load_qm31(arena, args->random_coeffs + (args->rc_base + 159u) * 4u)));
     return part_acc;
 }
-__device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_160(unsigned *arena, const StwoCairoEvalArgs *args, unsigned row) {
+__device__ __noinline__ StwoCairoQm31 stwo_air_slice_89c9d94287af154d_160(unsigned *arena, const StwoCairoEvalArgs *args, unsigned row) {
     StwoCairoQm31 part_acc = { 0u, 0u, 0u, 0u };
     unsigned b3 = stwo_trace_value(arena, *args, 1u, 1u, row, 0);
     unsigned b25 = stwo_trace_value(arena, *args, 1u, 12u, row, 0);
@@ -1810,7 +1810,7 @@ __device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_160(unsign
     part_acc = stwo_qm31_add(part_acc, stwo_qm31_mul(e175, stwo_load_qm31(arena, args->random_coeffs + (args->rc_base + 175u) * 4u)));
     return part_acc;
 }
-__device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_176(unsigned *arena, const StwoCairoEvalArgs *args, unsigned row) {
+__device__ __noinline__ StwoCairoQm31 stwo_air_slice_89c9d94287af154d_176(unsigned *arena, const StwoCairoEvalArgs *args, unsigned row) {
     StwoCairoQm31 part_acc = { 0u, 0u, 0u, 0u };
     unsigned b1 = stwo_trace_value(arena, *args, 1u, 0u, row, 0);
     unsigned b3 = stwo_trace_value(arena, *args, 1u, 1u, row, 0);
@@ -1957,7 +1957,7 @@ __device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_176(unsign
     part_acc = stwo_qm31_add(part_acc, stwo_qm31_mul(e191, stwo_load_qm31(arena, args->random_coeffs + (args->rc_base + 191u) * 4u)));
     return part_acc;
 }
-__device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_192(unsigned *arena, const StwoCairoEvalArgs *args, unsigned row) {
+__device__ __noinline__ StwoCairoQm31 stwo_air_slice_89c9d94287af154d_192(unsigned *arena, const StwoCairoEvalArgs *args, unsigned row) {
     StwoCairoQm31 part_acc = { 0u, 0u, 0u, 0u };
     unsigned b1 = stwo_trace_value(arena, *args, 1u, 0u, row, 0);
     unsigned b97 = stwo_trace_value(arena, *args, 1u, 57u, row, 0);
@@ -2132,7 +2132,7 @@ __device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_192(unsign
     part_acc = stwo_qm31_add(part_acc, stwo_qm31_mul(e207, stwo_load_qm31(arena, args->random_coeffs + (args->rc_base + 207u) * 4u)));
     return part_acc;
 }
-__device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_208(unsigned *arena, const StwoCairoEvalArgs *args, unsigned row) {
+__device__ __noinline__ StwoCairoQm31 stwo_air_slice_89c9d94287af154d_208(unsigned *arena, const StwoCairoEvalArgs *args, unsigned row) {
     StwoCairoQm31 part_acc = { 0u, 0u, 0u, 0u };
     unsigned b1 = stwo_trace_value(arena, *args, 1u, 0u, row, 0);
     unsigned b9 = stwo_trace_value(arena, *args, 1u, 4u, row, 0);
@@ -3305,7 +3305,7 @@ __device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_208(unsign
     part_acc = stwo_qm31_add(part_acc, stwo_qm31_mul(e223, stwo_load_qm31(arena, args->random_coeffs + (args->rc_base + 223u) * 4u)));
     return part_acc;
 }
-__device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_224(unsigned *arena, const StwoCairoEvalArgs *args, unsigned row) {
+__device__ __noinline__ StwoCairoQm31 stwo_air_slice_89c9d94287af154d_224(unsigned *arena, const StwoCairoEvalArgs *args, unsigned row) {
     StwoCairoQm31 part_acc = { 0u, 0u, 0u, 0u };
     unsigned b1 = stwo_trace_value(arena, *args, 1u, 0u, row, 0);
     unsigned b7 = stwo_trace_value(arena, *args, 1u, 3u, row, 0);
@@ -3439,15 +3439,15 @@ __device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_224(unsign
     unsigned b2421 = stwo_m31_add(b7, b2420);
     unsigned b2422 = arena[args->base_params + 230u];
     unsigned b2423 = stwo_m31_add(b7, b2422);
-    unsigned b2424 = stwo_m31_add(b7, b604);
-    unsigned b2425 = arena[args->base_params + 231u];
-    unsigned b2426 = stwo_m31_add(b7, b2425);
-    unsigned b2427 = arena[args->base_params + 232u];
-    unsigned b2428 = stwo_m31_add(b7, b2427);
-    unsigned b2429 = arena[args->base_params + 233u];
-    unsigned b2430 = stwo_m31_add(b7, b2429);
-    unsigned b2431 = arena[args->base_params + 234u];
-    unsigned b2432 = stwo_m31_add(b7, b2431);
+    unsigned b2424 = arena[args->base_params + 231u];
+    unsigned b2425 = stwo_m31_add(b7, b2424);
+    unsigned b2426 = arena[args->base_params + 232u];
+    unsigned b2427 = stwo_m31_add(b7, b2426);
+    unsigned b2428 = arena[args->base_params + 233u];
+    unsigned b2429 = stwo_m31_add(b7, b2428);
+    unsigned b2430 = arena[args->base_params + 234u];
+    unsigned b2431 = stwo_m31_add(b7, b2430);
+    unsigned b2432 = stwo_m31_add(b7, b604);
     unsigned b2433 = arena[args->base_params + 235u];
     unsigned b2434 = stwo_m31_add(b7, b2433);
     unsigned b2435 = arena[args->base_params + 236u];
@@ -3569,7 +3569,7 @@ __device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_224(unsign
     StwoCairoQm31 e317 = stwo_qm31_sub(e316, e228);
     StwoCairoQm31 e318 = { b2410, b664, b664, b664 };
     StwoCairoQm31 e319 = { 3u, 0u, 0u, 0u };
-    StwoCairoQm31 e320 = { b2424, b664, b664, b664 };
+    StwoCairoQm31 e320 = { b2425, b664, b664, b664 };
     StwoCairoQm31 e321 = stwo_load_qm31(arena, args->ext_params + 1u * 4u);
     StwoCairoQm31 e322 = stwo_qm31_mul(e320, e321);
     StwoCairoQm31 e323 = stwo_qm31_add(e319, e322);
@@ -3580,7 +3580,7 @@ __device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_224(unsign
     StwoCairoQm31 e328 = stwo_qm31_sub(e327, e228);
     StwoCairoQm31 e329 = { b2410, b664, b664, b664 };
     StwoCairoQm31 e330 = { 3u, 0u, 0u, 0u };
-    StwoCairoQm31 e331 = { b2426, b664, b664, b664 };
+    StwoCairoQm31 e331 = { b2427, b664, b664, b664 };
     StwoCairoQm31 e332 = stwo_load_qm31(arena, args->ext_params + 1u * 4u);
     StwoCairoQm31 e333 = stwo_qm31_mul(e331, e332);
     StwoCairoQm31 e334 = stwo_qm31_add(e330, e333);
@@ -3591,7 +3591,7 @@ __device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_224(unsign
     StwoCairoQm31 e339 = stwo_qm31_sub(e338, e228);
     StwoCairoQm31 e340 = { b2410, b664, b664, b664 };
     StwoCairoQm31 e341 = { 3u, 0u, 0u, 0u };
-    StwoCairoQm31 e342 = { b2428, b664, b664, b664 };
+    StwoCairoQm31 e342 = { b2429, b664, b664, b664 };
     StwoCairoQm31 e343 = stwo_load_qm31(arena, args->ext_params + 1u * 4u);
     StwoCairoQm31 e344 = stwo_qm31_mul(e342, e343);
     StwoCairoQm31 e345 = stwo_qm31_add(e341, e344);
@@ -3602,7 +3602,7 @@ __device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_224(unsign
     StwoCairoQm31 e350 = stwo_qm31_sub(e349, e228);
     StwoCairoQm31 e351 = { b2410, b664, b664, b664 };
     StwoCairoQm31 e352 = { 3u, 0u, 0u, 0u };
-    StwoCairoQm31 e353 = { b2430, b664, b664, b664 };
+    StwoCairoQm31 e353 = { b2431, b664, b664, b664 };
     StwoCairoQm31 e354 = stwo_load_qm31(arena, args->ext_params + 1u * 4u);
     StwoCairoQm31 e355 = stwo_qm31_mul(e353, e354);
     StwoCairoQm31 e356 = stwo_qm31_add(e352, e355);
@@ -3852,7 +3852,7 @@ __device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_224(unsign
     part_acc = stwo_qm31_add(part_acc, stwo_qm31_mul(e1460, stwo_load_qm31(arena, args->random_coeffs + (args->rc_base + 239u) * 4u)));
     return part_acc;
 }
-__device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_240(unsigned *arena, const StwoCairoEvalArgs *args, unsigned row) {
+__device__ __noinline__ StwoCairoQm31 stwo_air_slice_89c9d94287af154d_240(unsigned *arena, const StwoCairoEvalArgs *args, unsigned row) {
     StwoCairoQm31 part_acc = { 0u, 0u, 0u, 0u };
     unsigned b1 = stwo_trace_value(arena, *args, 1u, 0u, row, 0);
     unsigned b7 = stwo_trace_value(arena, *args, 1u, 3u, row, 0);
@@ -4522,7 +4522,7 @@ __device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_240(unsign
     part_acc = stwo_qm31_add(part_acc, stwo_qm31_mul(e1572, stwo_load_qm31(arena, args->random_coeffs + (args->rc_base + 255u) * 4u)));
     return part_acc;
 }
-__device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_256(unsigned *arena, const StwoCairoEvalArgs *args, unsigned row) {
+__device__ __noinline__ StwoCairoQm31 stwo_air_slice_89c9d94287af154d_256(unsigned *arena, const StwoCairoEvalArgs *args, unsigned row) {
     StwoCairoQm31 part_acc = { 0u, 0u, 0u, 0u };
     unsigned b1 = stwo_trace_value(arena, *args, 1u, 0u, row, 0);
     unsigned b5 = stwo_trace_value(arena, *args, 1u, 2u, row, 0);
@@ -5089,7 +5089,7 @@ __device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_256(unsign
     part_acc = stwo_qm31_add(part_acc, stwo_qm31_mul(e1684, stwo_load_qm31(arena, args->random_coeffs + (args->rc_base + 271u) * 4u)));
     return part_acc;
 }
-__device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_272(unsigned *arena, const StwoCairoEvalArgs *args, unsigned row) {
+__device__ __noinline__ StwoCairoQm31 stwo_air_slice_89c9d94287af154d_272(unsigned *arena, const StwoCairoEvalArgs *args, unsigned row) {
     StwoCairoQm31 part_acc = { 0u, 0u, 0u, 0u };
     unsigned b1 = stwo_trace_value(arena, *args, 1u, 0u, row, 0);
     unsigned b5 = stwo_trace_value(arena, *args, 1u, 2u, row, 0);
@@ -5161,7 +5161,6 @@ __device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_272(unsign
     unsigned b448 = stwo_trace_value(arena, *args, 2u, 195u, row, 0);
     unsigned b449 = arena[args->base_params + 0u];
     unsigned b590 = arena[args->base_params + 5u];
-    unsigned b604 = arena[args->base_params + 7u];
     unsigned b616 = arena[args->base_params + 8u];
     unsigned b664 = arena[args->base_params + 11u];
     unsigned b701 = stwo_m31_sub(b1, b247);
@@ -5173,6 +5172,7 @@ __device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_272(unsign
     unsigned b2418 = arena[args->base_params + 228u];
     unsigned b2420 = arena[args->base_params + 229u];
     unsigned b2422 = arena[args->base_params + 230u];
+    unsigned b2424 = arena[args->base_params + 231u];
     unsigned b2521 = stwo_m31_neg(b704);
     unsigned b2522 = stwo_m31_mul(b590, b207);
     unsigned b2523 = stwo_m31_add(b206, b2522);
@@ -5377,7 +5377,7 @@ __device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_272(unsign
     StwoCairoQm31 e1312 = stwo_load_qm31(arena, args->ext_params + 1u * 4u);
     StwoCairoQm31 e1313 = stwo_qm31_mul(e1311, e1312);
     StwoCairoQm31 e1314 = stwo_qm31_add(e1310, e1313);
-    StwoCairoQm31 e1315 = { b604, b664, b664, b664 };
+    StwoCairoQm31 e1315 = { b2424, b664, b664, b664 };
     StwoCairoQm31 e1316 = stwo_load_qm31(arena, args->ext_params + 2u * 4u);
     StwoCairoQm31 e1317 = stwo_qm31_mul(e1315, e1316);
     StwoCairoQm31 e1318 = stwo_qm31_add(e1314, e1317);
@@ -5441,28 +5441,28 @@ __device__ __noinline__ StwoCairoQm31 stwo_air_slice_a7ac3dae165578d8_272(unsign
     part_acc = stwo_qm31_add(part_acc, stwo_qm31_mul(e1721, stwo_load_qm31(arena, args->random_coeffs + (args->rc_base + 276u) * 4u)));
     return part_acc;
 }
-extern "C" __global__ void __launch_bounds__(256) stwo_cairo_cuda_eval_v6_a7ac3dae165578d8(unsigned *arena, u64 arena_words, const StwoCairoEvalArgs *args) {
+extern "C" __global__ void __launch_bounds__(256) stwo_cairo_cuda_eval_v6_89c9d94287af154d(unsigned *arena, u64 arena_words, const StwoCairoEvalArgs *args) {
     const unsigned row = blockIdx.x * blockDim.x + threadIdx.x;
     if (arena == nullptr || args == nullptr || row >= args->row_count) return;
     StwoCairoQm31 part_acc = {0u, 0u, 0u, 0u};
-    part_acc = stwo_qm31_add(part_acc, stwo_air_slice_a7ac3dae165578d8_0(arena, args, row));
-    part_acc = stwo_qm31_add(part_acc, stwo_air_slice_a7ac3dae165578d8_16(arena, args, row));
-    part_acc = stwo_qm31_add(part_acc, stwo_air_slice_a7ac3dae165578d8_32(arena, args, row));
-    part_acc = stwo_qm31_add(part_acc, stwo_air_slice_a7ac3dae165578d8_48(arena, args, row));
-    part_acc = stwo_qm31_add(part_acc, stwo_air_slice_a7ac3dae165578d8_64(arena, args, row));
-    part_acc = stwo_qm31_add(part_acc, stwo_air_slice_a7ac3dae165578d8_80(arena, args, row));
-    part_acc = stwo_qm31_add(part_acc, stwo_air_slice_a7ac3dae165578d8_96(arena, args, row));
-    part_acc = stwo_qm31_add(part_acc, stwo_air_slice_a7ac3dae165578d8_112(arena, args, row));
-    part_acc = stwo_qm31_add(part_acc, stwo_air_slice_a7ac3dae165578d8_128(arena, args, row));
-    part_acc = stwo_qm31_add(part_acc, stwo_air_slice_a7ac3dae165578d8_144(arena, args, row));
-    part_acc = stwo_qm31_add(part_acc, stwo_air_slice_a7ac3dae165578d8_160(arena, args, row));
-    part_acc = stwo_qm31_add(part_acc, stwo_air_slice_a7ac3dae165578d8_176(arena, args, row));
-    part_acc = stwo_qm31_add(part_acc, stwo_air_slice_a7ac3dae165578d8_192(arena, args, row));
-    part_acc = stwo_qm31_add(part_acc, stwo_air_slice_a7ac3dae165578d8_208(arena, args, row));
-    part_acc = stwo_qm31_add(part_acc, stwo_air_slice_a7ac3dae165578d8_224(arena, args, row));
-    part_acc = stwo_qm31_add(part_acc, stwo_air_slice_a7ac3dae165578d8_240(arena, args, row));
-    part_acc = stwo_qm31_add(part_acc, stwo_air_slice_a7ac3dae165578d8_256(arena, args, row));
-    part_acc = stwo_qm31_add(part_acc, stwo_air_slice_a7ac3dae165578d8_272(arena, args, row));
+    part_acc = stwo_qm31_add(part_acc, stwo_air_slice_89c9d94287af154d_0(arena, args, row));
+    part_acc = stwo_qm31_add(part_acc, stwo_air_slice_89c9d94287af154d_16(arena, args, row));
+    part_acc = stwo_qm31_add(part_acc, stwo_air_slice_89c9d94287af154d_32(arena, args, row));
+    part_acc = stwo_qm31_add(part_acc, stwo_air_slice_89c9d94287af154d_48(arena, args, row));
+    part_acc = stwo_qm31_add(part_acc, stwo_air_slice_89c9d94287af154d_64(arena, args, row));
+    part_acc = stwo_qm31_add(part_acc, stwo_air_slice_89c9d94287af154d_80(arena, args, row));
+    part_acc = stwo_qm31_add(part_acc, stwo_air_slice_89c9d94287af154d_96(arena, args, row));
+    part_acc = stwo_qm31_add(part_acc, stwo_air_slice_89c9d94287af154d_112(arena, args, row));
+    part_acc = stwo_qm31_add(part_acc, stwo_air_slice_89c9d94287af154d_128(arena, args, row));
+    part_acc = stwo_qm31_add(part_acc, stwo_air_slice_89c9d94287af154d_144(arena, args, row));
+    part_acc = stwo_qm31_add(part_acc, stwo_air_slice_89c9d94287af154d_160(arena, args, row));
+    part_acc = stwo_qm31_add(part_acc, stwo_air_slice_89c9d94287af154d_176(arena, args, row));
+    part_acc = stwo_qm31_add(part_acc, stwo_air_slice_89c9d94287af154d_192(arena, args, row));
+    part_acc = stwo_qm31_add(part_acc, stwo_air_slice_89c9d94287af154d_208(arena, args, row));
+    part_acc = stwo_qm31_add(part_acc, stwo_air_slice_89c9d94287af154d_224(arena, args, row));
+    part_acc = stwo_qm31_add(part_acc, stwo_air_slice_89c9d94287af154d_240(arena, args, row));
+    part_acc = stwo_qm31_add(part_acc, stwo_air_slice_89c9d94287af154d_256(arena, args, row));
+    part_acc = stwo_qm31_add(part_acc, stwo_air_slice_89c9d94287af154d_272(arena, args, row));
     StwoCairoQm31 result = stwo_qm31_mul_base(
         part_acc,
         arena[args->denom_inv +

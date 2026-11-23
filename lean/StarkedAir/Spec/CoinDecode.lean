@@ -1,7 +1,8 @@
 /-
-**From the circuit's coin values to Core's coins (M3b, layer 5).** A coin value is `(code, serTxOut)`.
-`coinOfVal` decodes it: height `code / 2`, coinbase `code % 2`, the amount from the first 8 bytes, the
-script after the length prefix. `decSer_ser`: a real output's serialization decodes to its amount and
+**From the circuit's coin values to Core's coins (M3b, layer 5).** A coin value is
+`(code, serTxOut ‖ time)`. `coinOfVal` decodes it: height `code / 2`, coinbase `code % 2`, the amount from
+the first 8 bytes, the script after the length prefix and before the four time bytes (`serOf`; Core's
+coin has no time field). `decSer_ser`: a real output's serialization decodes to its amount and
 script (amount in `[0, 2^64)`).
 -/
 import StarkedAir.Spec.CoinEpoch
@@ -19,7 +20,7 @@ def compactLen (b : UInt8) : ℕ := if b.toNat < 253 then 1 else if b.toNat = 25
 def decSer (s : Bytes) : ℤ × Bytes := ((le (s.take 8) : ℕ), s.drop (8 + compactLen (s.getD 8 0)))
 
 /-- A coin value as Core's coin. -/
-def coinOfVal (v : Val) : Coins.Coin := ⟨v.1 / 2, v.1 % 2 == 1, (decSer v.2).1, (decSer v.2).2⟩
+def coinOfVal (v : Val) : Coins.Coin := ⟨v.1 / 2, v.1 % 2 == 1, (decSer (serOf v.2)).1, (decSer (serOf v.2)).2⟩
 
 theorem compactLen_ser (n : ℕ) : compactLen ((serCompact n).getD 0 0) = (serCompact n).length := by
   have hm : ∀ k, (UInt8.ofNat k).toNat = k % 256 := fun k => rfl
@@ -66,7 +67,7 @@ theorem decSer_script (o : TxOut) : (decSer (serTxOut o)).2 = o.scriptPubKey := 
 /-- Transaction `t` of block `B` in context, with its claims decoded. -/
 def txcOf (N : ℕ → ℕ) (B : BlockC) (t : ℕ) (tx : Tx) : Coins.TxC :=
   ⟨B.h, t == 0, txid tx, tx, if t = 0 then [] else
-    (tx.vin.zipIdx).map fun p => (coinOfVal ((B.claim t p.2).code, (B.claim t p.2).ser),
+    (tx.vin.zipIdx).map fun p => (coinOfVal ((B.claim t p.2).code, coinBytes (B.claim t p.2).ser (B.claim t p.2).mtp),
       N ((B.claim t p.2).code / 2) + (B.claim t p.2).ctx)⟩
 
 def blockTxC (N : ℕ → ℕ) (B : BlockC) : List Coins.TxC := (B.txs.zipIdx).map fun p => txcOf N B p.2 p.1
@@ -114,7 +115,7 @@ theorem tmap_txEvents (N : ℕ → ℕ) (B : BlockC) (hlost : B.lost = Coins.bip
       intro p hp
       have hmem : p.1 ∈ tx.vout := (List.mem_zipIdx' (List.mem_of_mem_filter hp)).2 ▸ List.getElem_mem _
       obtain ⟨h0, h1⟩ := hval p.1 hmem
-      simp only [Function.comp, coinOfVal, decSer_ser p.1 h0 h1, codeOf]
+      simp only [Function.comp, coinOfVal, serOf_coinBytes, decSer_ser p.1 h0 h1, codeOf]
       congr 2
       · split_ifs <;> omega
       · by_cases ht : t = 0 <;> simp [ht]

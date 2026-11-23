@@ -23,6 +23,9 @@ open StarkedAir.LogUpSZ
 def RealVal (v : Val) : Prop :=
   8 ≤ v.2.length ∧ Spec.Block.le (v.2.take 8) ≤ Fields.MAXHI * 2 ^ 24 + Fields.MAXLO ∧ v.1 < 2 ^ 30
 
+/-- A coin value (`serTxOut ‖ time`) whose `serTxOut` part has a real coin's shape. -/
+def RealCoin (v : Val) : Prop := RealVal (v.1, serOf v.2)
+
 theorem mem_created_outs {K V : Type} [DecidableEq K] [DecidableEq V] :
     ∀ (g : ℕ) (ts : List (Spec.Utxo.Tx K V)) {e : Ev K V}, e ∈ created g ts →
       ∃ T ∈ ts, ∃ o ∈ T.outs, e.1 = o.1 ∧ e.2.1 = o.2
@@ -55,7 +58,7 @@ theorem serTxOut_real {o : Spec.Block.TxOut} (h0 : 0 ≤ o.value) (hm : o.value 
 theorem created_real (N : ℕ → ℕ) (blocks : List BlockC) (g : ℕ)
     (hval : ∀ B ∈ blocks, ∀ tx ∈ B.txs, ∀ o ∈ tx.vout, 0 ≤ o.value ∧ o.value ≤ Spec.Block.MAX_MONEY)
     (hh : ∀ B ∈ blocks, B.h < 2 ^ 24) :
-    ∀ e ∈ created g (allTxs N blocks), RealVal e.2.1 := by
+    ∀ e ∈ created g (allTxs N blocks), RealCoin e.2.1 := by
   intro e he
   obtain ⟨T, hT, o, ho, -, he2⟩ := mem_created_outs g _ he
   unfold allTxs at hT
@@ -69,6 +72,8 @@ theorem created_real (N : ℕ → ℕ) (blocks : List BlockC) (g : ℕ)
   obtain ⟨h0, hm⟩ := hval B hB p.1 htx q.1 hout
   obtain ⟨r1, r2⟩ := serTxOut_real h0 hm
   rw [he2]
+  show RealVal (_, serOf (coinBytes _ _))
+  rw [serOf_coinBytes]
   refine ⟨r1, r2, ?_⟩
   have := hh B hB
   show codeOf B.h p.2 < 2 ^ 30
@@ -111,11 +116,11 @@ theorem epoch_core_run (N : ℕ → ℕ) (γ : QM) (blocks : List BlockC) (g0 : 
     (hpos : ∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → N B.h = g0 + ((blocks.take i).map (·.txs.length)).sum)
     (hinc : ∀ (i i' : ℕ) (B B' : BlockC), blocks[i]? = some B → blocks[i']? = some B' → (B.h < B'.h ↔ i < i'))
     (hbnd : ∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → B.h < 2 ^ 24 ∧ B.txs.length < 2 ^ 25)
-    (hinit : ∀ e ∈ init, e.2.2 < g0) (hinitR : ∀ e ∈ init, RealVal e.2.1)
+    (hinit : ∀ e ∈ init, e.2.2 < g0) (hinitR : ∀ e ∈ init, RealCoin e.2.1)
     (hnd : (((init : Multiset CEv) + created g0 (allTxs N blocks)).map Prod.fst).Nodup)
     (hval : ∀ B ∈ blocks, ∀ tx ∈ B.txs, ∀ o ∈ tx.vout, 0 ≤ o.value ∧ o.value ≤ Spec.Block.MAX_MONEY)
     (hlexB : ∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → ∀ (t : ℕ) (tx : Spec.Block.Tx), B.txs[t]? = some tx →
-      ∀ ev ∈ txIns N B t tx, ∃ c : Claim, ev = (ev.1, (c.code, c.ser), N (c.code / 2) + c.ctx) ∧
+      ∀ ev ∈ txIns N B t tx, ∃ c : Claim, ev = (ev.1, (c.code, coinBytes c.ser c.mtp), N (c.code / 2) + c.ctx) ∧
         (c.code < 2 ^ 26 → c.ctx < 2 ^ 25 → (c.code / 2 < B.h ∨ (c.code / 2 = B.h ∧ c.ctx < t)))) :
     ∃ Bad : Finset (QM × QM), Bad.card ≤ ((polys (epochPN N γ blocks g0 init fin)).card ^ 2 * 27 +
         2 * (polys (epochPN N γ blocks g0 init fin)).card) * Fintype.card QM ∧
@@ -125,7 +130,7 @@ theorem epoch_core_run (N : ℕ → ℕ) (γ : QM) (blocks : List BlockC) (g0 : 
         (blocks.map (blockSum N (efrac N γ az.1 az.2))).sum + (init.map (efrac N γ az.1 az.2)).sum =
           (fin.map (efrac N γ az.1 az.2)).sum →
         ∃ m, run g0 (viewOf init) (allTxs N blocks) = some m ∧ (∀ k v j, m k = some (v, j) ↔ (k, v, j) ∈ fin) ∧
-          ∀ e ∈ spent (allTxs N blocks), RealVal e.2.1 := by
+          ∀ e ∈ spent (allTxs N blocks), RealCoin e.2.1 := by
   obtain ⟨Bad, hcard, hb⟩ := epoch_balance N γ blocks g0 init fin
   refine ⟨Bad, hcard, fun az haz hlen hsum => ?_⟩
   have hbal := hb az haz (fun e he e' he' h =>
@@ -136,7 +141,7 @@ theorem epoch_core_run (N : ℕ → ℕ) (γ : QM) (blocks : List BlockC) (g0 : 
     obtain ⟨i, hi, rfl⟩ := List.getElem_of_mem hB
     exact (hbnd i _ (List.getElem?_eq_getElem hi)).1
   -- every spend's value is an initial or created coin's, so real
-  have hspR : ∀ e ∈ spent (allTxs N blocks), RealVal e.2.1 := by
+  have hspR : ∀ e ∈ spent (allTxs N blocks), RealCoin e.2.1 := by
     intro e he
     have : e ∈ (init : Multiset CEv) + created g0 (allTxs N blocks) := by
       rw [hbal]; exact Multiset.mem_add.mpr (Or.inl he)
@@ -160,13 +165,13 @@ theorem epoch_core (N : ℕ → ℕ) (γ : QM) (blocks : List BlockC) (g0 : ℕ)
     (hpos : ∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → N B.h = g0 + ((blocks.take i).map (·.txs.length)).sum)
     (hinc : ∀ (i i' : ℕ) (B B' : BlockC), blocks[i]? = some B → blocks[i']? = some B' → (B.h < B'.h ↔ i < i'))
     (hbnd : ∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → B.h < 2 ^ 24 ∧ B.txs.length < 2 ^ 25)
-    (hinit : ∀ e ∈ init, e.2.2 < g0) (hinitR : ∀ e ∈ init, RealVal e.2.1)
+    (hinit : ∀ e ∈ init, e.2.2 < g0) (hinitR : ∀ e ∈ init, RealCoin e.2.1)
     (hnd : (((init : Multiset CEv) + created g0 (allTxs N blocks)).map Prod.fst).Nodup)
     (hval : ∀ B ∈ blocks, ∀ tx ∈ B.txs, ∀ o ∈ tx.vout, 0 ≤ o.value ∧ o.value ≤ Spec.Block.MAX_MONEY)
     (hlost : ∀ B ∈ blocks, B.lost = Spec.Coins.bip30Lost B.h)
     (hout : ∀ B ∈ blocks, ∀ tx ∈ B.txs, Spec.Coins.outSum tx ≤ Spec.Block.MAX_MONEY)
     (hlexB : ∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → ∀ (t : ℕ) (tx : Spec.Block.Tx), B.txs[t]? = some tx →
-      ∀ ev ∈ txIns N B t tx, ∃ c : Claim, ev = (ev.1, (c.code, c.ser), N (c.code / 2) + c.ctx) ∧
+      ∀ ev ∈ txIns N B t tx, ∃ c : Claim, ev = (ev.1, (c.code, coinBytes c.ser c.mtp), N (c.code / 2) + c.ctx) ∧
         (c.code < 2 ^ 26 → c.ctx < 2 ^ 25 → (c.code / 2 < B.h ∨ (c.code / 2 = B.h ∧ c.ctx < t))))
     (hokB : ∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → ∀ (t : ℕ) (tx : Spec.Block.Tx), B.txs[t]? = some tx →
       1 ≤ t → (∀ k < tx.vin.length, RealVal ((B.claim t k).code, (B.claim t k).ser)) →
@@ -203,12 +208,14 @@ theorem epoch_core (N : ℕ → ℕ) (γ : QM) (blocks : List BlockC) (g0 : ℕ)
   · left; simp [txcOf, ht0]
   · refine hokB i _ hBi p.2 p.1 htx (by omega) (fun k hk => ?_)
       (hout _ hB p.1 (by rw [hpe]; exact List.getElem_mem _))
-    have hin : ((p.1.vin[k]).prevout, ((blocks[i].claim p.2 k).code, (blocks[i].claim p.2 k).ser),
+    have hin : ((p.1.vin[k]).prevout, ((blocks[i].claim p.2 k).code, coinBytes (blocks[i].claim p.2 k).ser (blocks[i].claim p.2 k).mtp),
         N ((blocks[i].claim p.2 k).code / 2) + (blocks[i].claim p.2 k).ctx) ∈ txIns N blocks[i] p.2 p.1 := by
       unfold txIns
       rw [if_neg ht0]
       exact List.mem_map.mpr ⟨(p.1.vin[k], k), List.mem_zipIdx_iff_getElem?.mpr (by simp), rfl⟩
-    exact hspR _ (mem_spent_all N blocks hBi htx hin)
+    have hrc := hspR _ (mem_spent_all N blocks hBi htx hin)
+    simp only [RealCoin, serOf_coinBytes] at hrc
+    exact hrc
 
 /-- **The epoch connects as Core does, with the relative locks** (`epoch_core` for `connectTxsL`, BIP68's
 height half). With, in addition, each non-coinbase transaction with real claims passing `ClaimsLockOK`:
@@ -221,13 +228,13 @@ theorem epoch_coreL (N : ℕ → ℕ) (γ : QM) (blocks : List BlockC) (g0 : ℕ
     (hpos : ∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → N B.h = g0 + ((blocks.take i).map (·.txs.length)).sum)
     (hinc : ∀ (i i' : ℕ) (B B' : BlockC), blocks[i]? = some B → blocks[i']? = some B' → (B.h < B'.h ↔ i < i'))
     (hbnd : ∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → B.h < 2 ^ 24 ∧ B.txs.length < 2 ^ 25)
-    (hinit : ∀ e ∈ init, e.2.2 < g0) (hinitR : ∀ e ∈ init, RealVal e.2.1)
+    (hinit : ∀ e ∈ init, e.2.2 < g0) (hinitR : ∀ e ∈ init, RealCoin e.2.1)
     (hnd : (((init : Multiset CEv) + created g0 (allTxs N blocks)).map Prod.fst).Nodup)
     (hval : ∀ B ∈ blocks, ∀ tx ∈ B.txs, ∀ o ∈ tx.vout, 0 ≤ o.value ∧ o.value ≤ Spec.Block.MAX_MONEY)
     (hlost : ∀ B ∈ blocks, B.lost = Spec.Coins.bip30Lost B.h)
     (hout : ∀ B ∈ blocks, ∀ tx ∈ B.txs, Spec.Coins.outSum tx ≤ Spec.Block.MAX_MONEY)
     (hlexB : ∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → ∀ (t : ℕ) (tx : Spec.Block.Tx), B.txs[t]? = some tx →
-      ∀ ev ∈ txIns N B t tx, ∃ c : Claim, ev = (ev.1, (c.code, c.ser), N (c.code / 2) + c.ctx) ∧
+      ∀ ev ∈ txIns N B t tx, ∃ c : Claim, ev = (ev.1, (c.code, coinBytes c.ser c.mtp), N (c.code / 2) + c.ctx) ∧
         (c.code < 2 ^ 26 → c.ctx < 2 ^ 25 → (c.code / 2 < B.h ∨ (c.code / 2 = B.h ∧ c.ctx < t))))
     (hokB : ∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → ∀ (t : ℕ) (tx : Spec.Block.Tx), B.txs[t]? = some tx →
       1 ≤ t → (∀ k < tx.vin.length, RealVal ((B.claim t k).code, (B.claim t k).ser)) →
@@ -267,12 +274,14 @@ theorem epoch_coreL (N : ℕ → ℕ) (γ : QM) (blocks : List BlockC) (g0 : ℕ
     · left; simp [txcOf, ht0]
     · refine hokB i _ hBi p.2 p.1 htx (by omega) (fun k hk => ?_)
         (hout _ hB p.1 (by rw [hpe]; exact List.getElem_mem _))
-      have hin : ((p.1.vin[k]).prevout, ((blocks[i].claim p.2 k).code, (blocks[i].claim p.2 k).ser),
+      have hin : ((p.1.vin[k]).prevout, ((blocks[i].claim p.2 k).code, coinBytes (blocks[i].claim p.2 k).ser (blocks[i].claim p.2 k).mtp),
           N ((blocks[i].claim p.2 k).code / 2) + (blocks[i].claim p.2 k).ctx) ∈ txIns N blocks[i] p.2 p.1 := by
         unfold txIns
         rw [if_neg ht0]
         exact List.mem_map.mpr ⟨(p.1.vin[k], k), List.mem_zipIdx_iff_getElem?.mpr (by simp), rfl⟩
-      exact hspR _ (mem_spent_all N blocks hBi htx hin)
+      have hrc := hspR _ (mem_spent_all N blocks hBi htx hin)
+      simp only [RealCoin, serOf_coinBytes] at hrc
+      exact hrc
 
   · intro x hx
     unfold allTxC at hx
@@ -286,12 +295,14 @@ theorem epoch_coreL (N : ℕ → ℕ) (γ : QM) (blocks : List BlockC) (g0 : ℕ
     by_cases ht0 : p.2 = 0
     · left; simp [txcOf, ht0]
     · refine hokLB i _ hBi p.2 p.1 htx (by omega) (fun k hk => ?_)
-      have hin : ((p.1.vin[k]).prevout, ((blocks[i].claim p.2 k).code, (blocks[i].claim p.2 k).ser),
+      have hin : ((p.1.vin[k]).prevout, ((blocks[i].claim p.2 k).code, coinBytes (blocks[i].claim p.2 k).ser (blocks[i].claim p.2 k).mtp),
           N ((blocks[i].claim p.2 k).code / 2) + (blocks[i].claim p.2 k).ctx) ∈ txIns N blocks[i] p.2 p.1 := by
         unfold txIns
         rw [if_neg ht0]
         exact List.mem_map.mpr ⟨(p.1.vin[k], k), List.mem_zipIdx_iff_getElem?.mpr (by simp), rfl⟩
-      exact hspR _ (mem_spent_all N blocks hBi htx hin)
+      have hrc := hspR _ (mem_spent_all N blocks hBi htx hin)
+      simp only [RealCoin, serOf_coinBytes] at hrc
+      exact hrc
 
 /-- **An epoch's block systems, with the relative locks.** Block systems `i < nb` (component `c` of block `i` with `2^(L i c)` rows) at heights `h0 + i` sharing the epoch's
 challenge (`γ`, `z`, weights `αᵏ`) give the epoch's blocks: their public partial sums add up to the
@@ -309,11 +320,11 @@ theorem epoch_blocksL (nb : ℕ) (inst : ℕ → ℕ → Inst) (pub : ℕ → �
       (∀ B ∈ blocks, ∀ tx ∈ B.txs, (∀ o ∈ tx.vout, 0 ≤ o.value ∧ o.value ≤ Spec.Block.MAX_MONEY) ∧
         Spec.Coins.outSum tx ≤ Spec.Block.MAX_MONEY) ∧
       ∀ N : ℕ → ℕ,
-        ∑ i ∈ Finset.range nb, (RunSum.pQ (pub i) Coin.PUB_S - claimSum (inst i) (L i 14)) = (blocks.map (blockSum N (efrac N γ α z))).sum ∧
+        ∑ i ∈ Finset.range nb, RunSum.pQ (pub i) Coin.PUB_S = (blocks.map (blockSum N (efrac N γ α z))).sum ∧
         (∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → ∀ (t : ℕ) (tx : Spec.Block.Tx), B.txs[t]? = some tx →
-          ∀ ev ∈ txIns N B t tx, ∃ c : Claim, ev = (ev.1, (c.code, c.ser), N (c.code / 2) + c.ctx) ∧
+          ∀ ev ∈ txIns N B t tx, ∃ c : Claim, ev = (ev.1, (c.code, coinBytes c.ser c.mtp), N (c.code / 2) + c.ctx) ∧
             (c.code < 2 ^ 26 → c.ctx < 2 ^ 25 → (c.code / 2 < B.h ∨ (c.code / 2 = B.h ∧ c.ctx < t))) ∧
-            c.code < 2 ^ 32 ∧ c.ctx < 2 ^ 24 ∧ c.ser.length < P) ∧
+            c.code < 2 ^ 32 ∧ c.ctx < 2 ^ 24 ∧ c.ser.length + 4 < P) ∧
         (∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → ∀ (t : ℕ) (tx : Spec.Block.Tx), B.txs[t]? = some tx →
           1 ≤ t → (∀ k < tx.vin.length, RealVal ((B.claim t k).code, (B.claim t k).ser)) →
           Spec.Coins.outSum tx ≤ Spec.Block.MAX_MONEY → Spec.Coins.ClaimsOK (txcOf N B t tx)) ∧
@@ -327,22 +338,22 @@ theorem epoch_blocksL (nb : ℕ) (inst : ℕ → ℕ → Inst) (pub : ℕ → �
       obtain ⟨h1, h2, -, -⟩ := txs_basic (hL i hi) (hsat i hi) (hL24 i hi) (S i) tx (List.mem_of_getElem? htx)
       exact ⟨h1, h2⟩
   have key : ∀ i, ∃ claim : ℕ → ℕ → Claim, i < nb →
-      (∀ N : ℕ → ℕ, RunSum.pQ (pub i) Coin.PUB_S - claimSum (inst i) (L i 14) =
-        blockSum N (efrac N γ α z) ⟨h0 + i, (S i).b.txs, lost i, claim⟩) ∧
+      (∀ N : ℕ → ℕ, RunSum.pQ (pub i) Coin.PUB_S =
+        blockSum N (efrac N γ α z) ⟨h0 + i, (S i).b.txs, lost i, claim, pubMtp (pub i)⟩) ∧
       (∀ (N : ℕ → ℕ) (t : ℕ) (tx : Spec.Block.Tx), (S i).b.txs[t]? = some tx →
-        ∀ ev ∈ txIns N ⟨h0 + i, (S i).b.txs, lost i, claim⟩ t tx, ∃ c : Claim,
-          ev = (ev.1, (c.code, c.ser), N (c.code / 2) + c.ctx) ∧
+        ∀ ev ∈ txIns N ⟨h0 + i, (S i).b.txs, lost i, claim, pubMtp (pub i)⟩ t tx, ∃ c : Claim,
+          ev = (ev.1, (c.code, coinBytes c.ser c.mtp), N (c.code / 2) + c.ctx) ∧
           (c.code < 2 ^ 26 → c.ctx < 2 ^ 25 → (c.code / 2 < h0 + i ∨ (c.code / 2 = h0 + i ∧ c.ctx < t))) ∧
-          c.code < 2 ^ 32 ∧ c.ctx < 2 ^ 24 ∧ c.ser.length < P) ∧
+          c.code < 2 ^ 32 ∧ c.ctx < 2 ^ 24 ∧ c.ser.length + 4 < P) ∧
       (∀ (N : ℕ → ℕ) (t : ℕ) (tx : Spec.Block.Tx), (S i).b.txs[t]? = some tx → 1 ≤ t →
         (∀ k < tx.vin.length, 8 ≤ (claim t k).ser.length ∧
           Spec.Block.le ((claim t k).ser.take 8) ≤ Fields.MAXHI * 2 ^ 24 + Fields.MAXLO ∧ (claim t k).code < 2 ^ 30) →
         Spec.Coins.outSum tx ≤ Spec.Block.MAX_MONEY →
-        Spec.Coins.ClaimsOK (txcOf N ⟨h0 + i, (S i).b.txs, lost i, claim⟩ t tx)) ∧
+        Spec.Coins.ClaimsOK (txcOf N ⟨h0 + i, (S i).b.txs, lost i, claim, pubMtp (pub i)⟩ t tx)) ∧
       (pub i 5 = (if Spec.Block.CSV_HEIGHT ≤ h0 + i then 1 else 0) →
         ∀ (N : ℕ → ℕ) (t : ℕ) (tx : Spec.Block.Tx), (S i).b.txs[t]? = some tx → 1 ≤ t →
           (∀ k < tx.vin.length, (claim t k).code < 2 ^ 30) →
-          Spec.Coins.ClaimsLockOK (txcOf N ⟨h0 + i, (S i).b.txs, lost i, claim⟩ t tx)) := by
+          Spec.Coins.ClaimsLockOK (txcOf N ⟨h0 + i, (S i).b.txs, lost i, claim, pubMtp (pub i)⟩ t tx)) := by
     intro i
     by_cases hi : i < nb
     · obtain ⟨claim, h1, h2, h3, h4⟩ := block_factsL (hL i hi) (hsat i hi) (hL24 i hi) (S i) (hp2 i hi) (by omega)
@@ -351,8 +362,8 @@ theorem epoch_blocksL (nb : ℕ) (inst : ℕ → ℕ → Inst) (pub : ℕ → �
       rw [h1 N, hγ i hi, hz i hi]
     · exact ⟨fun _ _ => default, fun h => absurd h hi⟩
   choose claim hclaim using key
-  refine ⟨(List.range nb).map fun i => ⟨h0 + i, (S i).b.txs, lost i, claim i⟩, by simp,
-    fun i hi => ⟨⟨h0 + i, (S i).b.txs, lost i, claim i⟩, by rw [List.getElem?_map, List.getElem?_range hi]; rfl,
+  refine ⟨(List.range nb).map fun i => ⟨h0 + i, (S i).b.txs, lost i, claim i, pubMtp (pub i)⟩, by simp,
+    fun i hi => ⟨⟨h0 + i, (S i).b.txs, lost i, claim i, pubMtp (pub i)⟩, by rw [List.getElem?_map, List.getElem?_range hi]; rfl,
       rfl, rfl, rfl⟩, ?_, fun N => ⟨?_, ?_, ?_, ?_⟩⟩
   · intro B hB tx htx
     obtain ⟨i, hi, rfl⟩ := List.mem_map.mp hB
@@ -390,11 +401,11 @@ theorem epoch_blocks (nb : ℕ) (inst : ℕ → ℕ → Inst) (pub : ℕ → ℕ
       (∀ B ∈ blocks, ∀ tx ∈ B.txs, (∀ o ∈ tx.vout, 0 ≤ o.value ∧ o.value ≤ Spec.Block.MAX_MONEY) ∧
         Spec.Coins.outSum tx ≤ Spec.Block.MAX_MONEY) ∧
       ∀ N : ℕ → ℕ,
-        ∑ i ∈ Finset.range nb, (RunSum.pQ (pub i) Coin.PUB_S - claimSum (inst i) (L i 14)) = (blocks.map (blockSum N (efrac N γ α z))).sum ∧
+        ∑ i ∈ Finset.range nb, RunSum.pQ (pub i) Coin.PUB_S = (blocks.map (blockSum N (efrac N γ α z))).sum ∧
         (∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → ∀ (t : ℕ) (tx : Spec.Block.Tx), B.txs[t]? = some tx →
-          ∀ ev ∈ txIns N B t tx, ∃ c : Claim, ev = (ev.1, (c.code, c.ser), N (c.code / 2) + c.ctx) ∧
+          ∀ ev ∈ txIns N B t tx, ∃ c : Claim, ev = (ev.1, (c.code, coinBytes c.ser c.mtp), N (c.code / 2) + c.ctx) ∧
             (c.code < 2 ^ 26 → c.ctx < 2 ^ 25 → (c.code / 2 < B.h ∨ (c.code / 2 = B.h ∧ c.ctx < t))) ∧
-            c.code < 2 ^ 32 ∧ c.ctx < 2 ^ 24 ∧ c.ser.length < P) ∧
+            c.code < 2 ^ 32 ∧ c.ctx < 2 ^ 24 ∧ c.ser.length + 4 < P) ∧
         (∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → ∀ (t : ℕ) (tx : Spec.Block.Tx), B.txs[t]? = some tx →
           1 ≤ t → (∀ k < tx.vin.length, RealVal ((B.claim t k).code, (B.claim t k).ser)) →
           Spec.Coins.outSum tx ≤ Spec.Block.MAX_MONEY → Spec.Coins.ClaimsOK (txcOf N B t tx)) := by
@@ -418,20 +429,20 @@ theorem epoch_systems_core (nb : ℕ) (inst : ℕ → ℕ → Inst) (pub : ℕ �
     ∃ blocks : List BlockC, blocks.length = nb ∧
       (∀ i < nb, ∃ B, blocks[i]? = some B ∧ B.h = h0 + i ∧ B.txs = (S i).b.txs) ∧
       (∀ (N : ℕ → ℕ) (i : ℕ) (B : BlockC), blocks[i]? = some B → ∀ (t : ℕ) (tx : Spec.Block.Tx), B.txs[t]? = some tx →
-        ∀ ev ∈ txIns N B t tx, ∃ c : Claim, ev = (ev.1, (c.code, c.ser), N (c.code / 2) + c.ctx) ∧
-          c.code < 2 ^ 32 ∧ c.ctx < 2 ^ 24 ∧ c.ser.length < P) ∧
+        ∀ ev ∈ txIns N B t tx, ∃ c : Claim, ev = (ev.1, (c.code, coinBytes c.ser c.mtp), N (c.code / 2) + c.ctx) ∧
+          c.code < 2 ^ 32 ∧ c.ctx < 2 ^ 24 ∧ c.ser.length + 4 < P) ∧
       ∀ (N : ℕ → ℕ) (g0 : ℕ) (init fin : List CEv) (Sb : Finset (List F)), γ ∉ fpBad (𝕂 := QM) Sb →
         (∀ e ∈ init ++ (created g0 (allTxs N blocks)).toList ++ ((spent (allTxs N blocks)).toList ++ fin),
           WFE N e ∧ bytesF e ∈ Sb) →
         (∀ i < nb, N (h0 + i) = g0 + ∑ i' ∈ Finset.range i, (S i').b.txs.length) →
-        (∀ e ∈ init, e.2.2 < g0) → (∀ e ∈ init, RealVal e.2.1) →
+        (∀ e ∈ init, e.2.2 < g0) → (∀ e ∈ init, RealCoin e.2.1) →
         (((init : Multiset CEv) + created g0 (allTxs N blocks)).map Prod.fst).Nodup →
         ∃ Bad : Finset (QM × QM), Bad.card ≤ ((polys (epochPN N γ blocks g0 init fin)).card ^ 2 * 27 +
             2 * (polys (epochPN N γ blocks g0 init fin)).card) * Fintype.card QM ∧
           ((α, z) ∉ Bad →
             init.length + Multiset.card (created g0 (allTxs N blocks)) + Multiset.card (spent (allTxs N blocks)) +
               fin.length < P →
-            ∑ i ∈ Finset.range nb, (RunSum.pQ (pub i) Coin.PUB_S - claimSum (inst i) (L i 14)) + (init.map (efrac N γ α z)).sum =
+            ∑ i ∈ Finset.range nb, RunSum.pQ (pub i) Coin.PUB_S + (init.map (efrac N γ α z)).sum =
               (fin.map (efrac N γ α z)).sum →
             (∃ m, Spec.Coins.connectTxs (Spec.Coins.untag (vmap coinOfVal (viewOf init))) (allTxC N blocks) =
                 some (Spec.Coins.untag (vmap coinOfVal m), (allTxC N blocks).map Spec.Coins.claimFee) ∧
@@ -508,20 +519,20 @@ theorem epoch_systems_coreL (nb : ℕ) (inst : ℕ → ℕ → Inst) (pub : ℕ 
     ∃ blocks : List BlockC, blocks.length = nb ∧
       (∀ i < nb, ∃ B, blocks[i]? = some B ∧ B.h = h0 + i ∧ B.txs = (S i).b.txs) ∧
       (∀ (N : ℕ → ℕ) (i : ℕ) (B : BlockC), blocks[i]? = some B → ∀ (t : ℕ) (tx : Spec.Block.Tx), B.txs[t]? = some tx →
-        ∀ ev ∈ txIns N B t tx, ∃ c : Claim, ev = (ev.1, (c.code, c.ser), N (c.code / 2) + c.ctx) ∧
-          c.code < 2 ^ 32 ∧ c.ctx < 2 ^ 24 ∧ c.ser.length < P) ∧
+        ∀ ev ∈ txIns N B t tx, ∃ c : Claim, ev = (ev.1, (c.code, coinBytes c.ser c.mtp), N (c.code / 2) + c.ctx) ∧
+          c.code < 2 ^ 32 ∧ c.ctx < 2 ^ 24 ∧ c.ser.length + 4 < P) ∧
       ∀ (N : ℕ → ℕ) (g0 : ℕ) (init fin : List CEv) (Sb : Finset (List F)), γ ∉ fpBad (𝕂 := QM) Sb →
         (∀ e ∈ init ++ (created g0 (allTxs N blocks)).toList ++ ((spent (allTxs N blocks)).toList ++ fin),
           WFE N e ∧ bytesF e ∈ Sb) →
         (∀ i < nb, N (h0 + i) = g0 + ∑ i' ∈ Finset.range i, (S i').b.txs.length) →
-        (∀ e ∈ init, e.2.2 < g0) → (∀ e ∈ init, RealVal e.2.1) →
+        (∀ e ∈ init, e.2.2 < g0) → (∀ e ∈ init, RealCoin e.2.1) →
         (((init : Multiset CEv) + created g0 (allTxs N blocks)).map Prod.fst).Nodup →
         ∃ Bad : Finset (QM × QM), Bad.card ≤ ((polys (epochPN N γ blocks g0 init fin)).card ^ 2 * 27 +
             2 * (polys (epochPN N γ blocks g0 init fin)).card) * Fintype.card QM ∧
           ((α, z) ∉ Bad →
             init.length + Multiset.card (created g0 (allTxs N blocks)) + Multiset.card (spent (allTxs N blocks)) +
               fin.length < P →
-            ∑ i ∈ Finset.range nb, (RunSum.pQ (pub i) Coin.PUB_S - claimSum (inst i) (L i 14)) + (init.map (efrac N γ α z)).sum =
+            ∑ i ∈ Finset.range nb, RunSum.pQ (pub i) Coin.PUB_S + (init.map (efrac N γ α z)).sum =
               (fin.map (efrac N γ α z)).sum →
             (∃ m, Spec.Coins.connectTxsL (Spec.Coins.untag (vmap coinOfVal (viewOf init))) (allTxC N blocks) =
                 some (Spec.Coins.untag (vmap coinOfVal m), (allTxC N blocks).map Spec.Coins.claimFee) ∧

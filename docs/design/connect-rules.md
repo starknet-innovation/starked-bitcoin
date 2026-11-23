@@ -1,14 +1,15 @@
 # CONNECT-RULES: BIP68 relative locktimes and the full sigop cost (design)
 
-Status: current · Updated: 2026-11-20 · Owner files: `lean/StarkedAir/Block/TimeLock.lean`, `lean/StarkedAir/Spec/ConnectRules.lean`, `src/block/connect_rules.zig`, `tools/specfuzz/core_connect_cases.cpp`, `lean/StarkedAir/Block/Coin.lean`, `lean/StarkedAir/Block/Walk.lean`, `src/block/coin.zig`, `src/block/walk.zig`, `src/block/anc.zig`
+Status: current · Updated: 2026-11-23 · Owner files: `lean/StarkedAir/Block/TimeLock.lean`, `lean/StarkedAir/Spec/ConnectRules.lean`, `src/block/connect_rules.zig`, `tools/specfuzz/core_connect_cases.cpp`, `lean/StarkedAir/Block/Coin.lean`, `lean/StarkedAir/Block/Walk.lean`, `src/block/coin.zig`, `src/block/walk.zig`, `src/block/anc.zig`
 
 Answers: which `ConnectBlock` rules outside scripts the block proof does not enforce, what Core
 checks exactly, how to add them, and how far that is. The design is accepted (D-054). Steps 1–3 of 5 are
 done: the rules are specified and checked natively; the height-based half of BIP68 and the full sigop
-cost are enforced by the block AIRs and proven in Lean. Step 4 (time-based BIP68) is half done: the block
-checks the lock against a committed claim (proven), but the claim is not yet resolved against the chain,
-and how to resolve it is an open decision (D-058, "Step 4" below). No proof has been made with the new
-AIRs: the proofs of 935,001–972,500 use the AIRs before step 2. Roadmap item CONNECT-RULES.
+cost are enforced by the block AIRs and proven in Lean. Step 4 (time-based BIP68) is built and proven
+too: every coin carries the median time past of the block before its creating block, and the coin balance
+makes the time a lock is checked against the coin's own (D-058, resolution R5; "Step 4" below, with its
+limits). No proof has been made with the new AIRs: the proofs of 935,001–972,500 use the AIRs before
+step 2. Roadmap item CONNECT-RULES.
 
 ## The gap
 
@@ -19,7 +20,7 @@ validation, and that Core enforces even under assumevalid:
 | Rule | Core (`consensus/tx_verify.cpp`, `validation.cpp ConnectBlock`) | 2026-11-19 |
 |---|---|---|
 | BIP68, height-based locks | `SequenceLocks`: reject `bad-txns-nonfinal` | enforced by the AIRs of step 2 (no proof made with them yet) |
-| BIP68, time-based locks | same | not checked |
+| BIP68, time-based locks | same | enforced by the AIRs of step 4 (no proof made with them yet) |
 | Sigop cost | `GetTransactionSigOpCost` summed ≤ 80,000: `bad-blk-sigops` | legacy sigops only (`Spec/BlockFlat.lean:149`) |
 
 Until both are proven the guarantee is weaker than assumevalid (said on the site and on Delving t/3070).
@@ -57,7 +58,10 @@ An input row of `block_coin` already holds the spent coin's code (`2·c + coinba
 Sizes: `block_fields` 190 → 203 main columns and 36 → 40 lookups; `block_coin` 164 → 170 and 94 → 97;
 the block system's lookup sites per row 216 → 223 (the bound for 2^23 rows is 255). Lean: next section.
 
-### Time-based: a claim per input, resolved by one small proof per epoch
+### Time-based: a claim per input, resolved by one small proof per epoch (superseded)
+
+**Superseded 2026-11-23** by "Step 4" below (D-058, R5: the coin carries its time). Kept as the record
+of option A and of why a claim must be committed.
 
 `MTP(h − 1)` is in the block proof already (`block_anc`, public 3 and 7). `MTP(k)` for an old `k` is
 not: the block proof does not see old headers, and linking by previous hash across thousands of
@@ -337,105 +341,104 @@ zig build test -Doptimize=ReleaseFast -Dtest-filter="sigop cost"  # ~1 min
 (cd lean && lake build StarkedAir.Block.SigEpoch)   # block_sigop_cost, epoch_systems_coreS
 ```
 
-## Step 4 (2026-11-20): time-based BIP68 — the block side is built and proven; the resolver is open
+## Step 4 (2026-11-23): time-based BIP68 — the coin carries its time (D-058, R5)
 
-Status: the block AIRs carry and check the claim (below), tested and **proven in Lean at block level**
-(`Block.in_time_lock`). The claim is **not yet resolved**: nothing proves that a claimed time is the
-chain's. Until then a prover can satisfy any time lock with a false claim (for example 0). Not in the
-published proofs (branch `connect-rules`). D-058 records the choices and the open decision.
+Status: built, tested on the host and **proven in Lean** for the block AIRs and the epoch
+(`Block.in_time_lock`, `Block.epoch_systems_coreS`). Not in the published proofs (branch `connect-rules`),
+not run on the node's blocks, GPU parity of the changed AIRs not run. The design of 2026-11-20 (a claim
+per time-locked input in the block's public sum, resolved by a per-epoch proof) is replaced: the owner
+chose R5 (D-058), and the claim sum, its tuple and the "net of claims" statements are gone.
 
-**As built (block side).**
+**The rule.** `MTP(h − 1) ≥ MTP(c − 1) + 512·lock`, with `c` the spent coin's height. The block proof has
+`MTP(h − 1)` (public inputs 3 and 7, `block_anc`). It does not see block `c − 1`.
 
-- **Undo stream, in-circuit format v2.** Every record is `code(4) ‖ ctx(3) ‖ tl(2) ‖ serTxOut(tl) ‖
-  mtp(4)`: the claimed median time past of the block before the coin's, little-endian, 0 where no time
-  lock is enforced. One format for every record (no flag), so `S_{j+1} = S_j + 9 + tl_j + 4`. The stream
-  is under `C_h`, so claims are fixed before the epoch challenge. `coin.undoStream(…, mtps, …)`,
-  `system.Opts.mtps`.
-- **`block_urec`** (43 columns, 28 lookups): reads the four bytes at `S + 9 + tl + i` (`MT 0..3`) and
-  carries their two 16-bit limbs in the record tuple (`REL_UREC`, 11 entries).
-- **`block_coin`** (193 columns, 104 lookups), `Coin.timeC`: on an input row with `TM = KI·LKT = 1`
-  (`LKT` from `block_fields`: CSV active, version ≥ 2, bit 31 clear, bit 22 set):
-  - the lock: `SQL = SA + 128·(SH0 + 256·SHB)` (`SA < 128` by range checks of `SA` and `2·SA`);
-  - `MTP(h−1) − m − 512·lock ≥ 0` as a two-limb subtraction (public inputs 3 and 7 minus `ML`, `MH`,
-    borrow `BW0 + BW1 ∈ {0, 1, 2}`, four result bytes `TQ` range-checked);
-  - the claim's fraction `1/(z − φ₂)` in a second running sum (`FC2`, `ACC2`); the public sum is
-    `ACC + ACC2`. `φ₂` is the weighted tuple `(coin height, ML, MH, 0 …, 65536 at slot 19, 0 …)`: slot 19
-    holds a 16-bit limb in every coin-event tuple, so a claim can never equal an event.
-  - **The public input layout and the recursion do not change**: the claims ride in the same partial sum.
-- **A zero time lock is enforced like any other** (the open point above): `m ≤ MTP(h−1)` holds for every
-  true claim, since the median time past never decreases. It costs one claim.
-- **Key of the claim:** the coin's height `c`, with `m = MTP(c − 1)` (this section's earlier text says
-  `(k, m)` with `k = c − 1`; same content).
-- Site counts: `urec` 24 → 28, `coin` 97 → 104; `Link.hashRows` 234 → 245 sites per row.
+**The idea.** A coin's **time** is `MTP(c − 1)`: what the block that creates the coin has as *its own*
+previous median time past. So the creating block writes it into the coin, and the spending block reads
+it from the coin:
 
-**Tests** (`zig build test -Doptimize=ReleaseFast -Dtest-filter="BIP68"`, exit 0): 17 time-lock cases
-against the claimed time (`negative.zig`, "BIP68 time-based relative locks against the claimed MTP"):
-met exactly at `claim = prev − 512·lock`, rejected one second later, both limbs, lock 1, 2 and 65,535,
-claim above the previous MTP, the unused sequence bits set, a zero lock, and the disabled cases (bit 31,
-version 1, height lock); the witness builder refuses an unmet lock (`error.TimeLockNotMet`) without
-`force`. The step 2 cases still pass (a time lock with claim 0 is accepted by the block: resolving the
-claim is not the block's job).
+| Where | What |
+|---|---|
+| A coin's bytes | `serTxOut ‖ time`, the time 4 bytes little-endian (`Spec.CoinEpoch.coinBytes`, `coin.coinBytes`) |
+| The coin tuple (26 entries, unchanged layout) | the fingerprint slots hold the fingerprint of `serTxOut ‖ time`; the length slot is `|serTxOut| + 4` |
+| An output row of `block_coin` | time bytes `TB` = the bytes of public inputs 3 and 7 (range-checked); fingerprint `EX = (((FH·γ + TB0)·γ + TB1)·γ + TB2)·γ + TB3` |
+| An undo record (in-circuit format v2) | `code(4) ‖ ctx(3) ‖ tl(2) ‖ serTxOut(tl) ‖ time(4)`: every record carries the spent coin's time |
+| An input row of `block_coin` | `TB` = the record's four time bytes (through `block_urec`); the same `EX`; for an enforced time lock, `pub(3,7) − TB − 512·lock ≥ 0` as a two-limb subtraction |
+| The set file | a record's `ser` is `serTxOut ‖ time`, `len = |serTxOut| + 4` (at least 12) |
+| The set pass | fingerprints `ser` whole (no change), hashes it whole into the file digest and the Merkle leaf; Core's `hash_serialized` stream leaves the 4 time bytes out (`set_tmsg`: `RLEN = len − 4`) |
+
+**Why it is sound.** The coin balance already forces every spent tuple to equal a created or an initial
+one (`epoch_sound`: fixed before the challenge by the commitments, D-041). The time is now inside the
+tuple, so the time an input checks its lock against **is** the time its coin was created with. No new
+relation, no new public input, no change to the seed or to the recursion's logic.
+
+**As built.**
+
+- **`block_urec`** (43 columns, 28 lookups): reads the four time bytes at `S + 9 + tl + i` and passes them
+  in the record tuple (`REL_UREC`, 13 entries).
+- **`block_coin`** (191 columns, 108 lookups), `Coin.timeC`:
+  - `EX` (4 columns) is the segment's fingerprint `FH` extended by `TB 0..3`, on every row (`Coin.extQ`);
+    the tuple uses `EX` and `SLEN + 4`;
+  - output rows: `TB0 + 256·TB1 = pub 3`, `TB2 + 256·TB3 = pub 7`, four range lookups;
+  - time-locked input rows (`TM = KI·LKT`): the lock `SQL = SA + 128·(SH0 + 256·SHB)` and the two-limb
+    subtraction with borrow `BW0 + BW1` and result bytes `TQ` (as on 2026-11-20, against `TB`).
+  - A zero time lock is enforced like any other.
+- **`set_rec`**: `len ≥ 12`. **`set_tmsg`**: looks its record up with `RLEN + 4`.
+- Site counts: `urec` 28, `coin` 108; `Link.hashRows` 249 sites per row (the bound for 2^23 rows is 255).
+- **The public input layout and the recursion circuits do not change.**
+
+**Below the CSV height** a block's previous median time past is not proven and its public limbs are 0
+(D-043 part 3), so a coin created below height 419,328 has time 0 (`coin.coinTime`). For the proven range
+(935,001 on) this gives Core's verdict: such a coin is more than 9 years old and a time lock is at most
+388 days. For a run from genesis it does not, for spends between the CSV height and about a year later:
+`block_anc` must then run below the CSV height too (roadmap).
+
+**The honest times** come from the header file the provers already load: `system.timeClaims`
+(`coin.timeClaims`) gives every undo record its coin's time. `prove-epoch`/`cuda-epoch`
+(`epoch_run.zig`), `chainproof prove-block` and the replay (`replay.Set.apply`, which stores the time
+with the coin and writes it to the set file) use it.
+
+**Tests** (`zig build test -Doptimize=ReleaseFast`): 17 time-lock cases against the record's time
+(`negative.zig`: met exactly at `time = prev − 512·lock`, rejected one second later, both limbs, locks 1,
+2, 65,535 and 0, the unused sequence bits, the disabled cases); every record's honest time on a
+synthetic chain, 0 below the CSV height; blocks 9 and 170 balance across blocks with the times in the
+tuples; the set pass and the set file on the regenerated test sets (Core's `hash_serialized`
+unchanged).
 
 **Lean** (`lake build` passes; axioms `propext`, `Classical.choice`, `Quot.sound`):
 
 | Statement | File | Says |
 |---|---|---|
-| `Spec.Coins.timeLockOk` | `Spec/Coins.lean` | the time half of `SequenceLocks` for one input: enforced ⇒ `coinMtp + 512·(seq mod 2^16) ≤ prevMtp` |
-| `Block.in_time_lock` | `Block/TimeLock.lean` | for every non-coinbase input of a block system: `timeLockOk h version sequence (ML + 65536·MH) (pub 3 + 65536·pub 7)`, given `pub 5` is the CSV bit and public inputs 3 and 7 are 16-bit limbs |
-| `Block.coin_urec_mtp`, `Block.urec_mt_bytes` | `Block/CoinLink.lean`, `Block/TimeLock.lean` | `ML`, `MH` are the limbs of the record's four claim bytes, read from the committed undo stream at `S + 9 + tl + i` |
-| `Block.claim_sum_eq`, `Block.phi2Q_eq` | `Block/TimeLock.lean` | the block's claims in the public sum: one `1/(z − φ₂)` per enforced time lock, `φ₂` as above |
-| `Block.coin_block_sum`, `block_event_sum` | `Block/CoinEvents.lean`, `Block/CoinEpochSound.lean` | public sum = the events' sum + `claimSum` |
+| `Spec.CoinEpoch.coinBytes`, `serOf`, `coinBytes_inj` | `Spec/CoinEpoch.lean` | a coin's bytes are `serTxOut ‖ le4(time)`; they determine both |
+| `Spec.Coins.timeLockOk` | `Spec/Coins.lean` | the time half of `SequenceLocks` for one input |
+| `Block.coin_out_tuple` | `Block/CoinEvents.lean` | an output row's tuple is the created coin's, its bytes `coinBytes (serTxOut o) (pubMtp pub)` |
+| `Block.coin_in_tuple`, `ClaimAt` | `Block/CoinEvents.lean`, `CoinEpochSound.lean` | an input row's tuple is its claim's: code, `serTxOut`, index and time are the undo record's committed bytes |
+| `Block.in_time_lock` | `Block/TimeLock.lean` | for a non-coinbase input with claim `c`: `timeLockOk h version sequence c.mtp (pubMtp pub)` |
+| `Block.epoch_systems_coreS` | `Block/SigEpoch.lean` | for a balanced epoch, outside the bad set: every non-coinbase input has `timeLockOk B.h version sequence c.mtp B.mtp`, and its spent coin is an initial one or was created by a block `B′` of the epoch with `B′.h = c.code / 2` and **`c.mtp = B′.mtp`** |
+| `SetFile.txOutSer`, `SetPass.sha_side` | `Spec/SetFile.lean`, `SetPass/Sound.lean` | Core's `TxOutSer` is the record without its time; the pass hashes exactly that |
 
 Limits of what is proven:
-- `in_time_lock` is about the **claimed** time. Nothing yet says the claim is `MTP(c − 1)`.
-- The epoch statements (`epoch_blocks`, `epoch_systems_core`, `…L`, `…S`, `…wf`) now take the blocks'
-  sums **net of the claims** (`pQ (pub i) PUB_S − claimSum …`). That is the honest intermediate form: the
-  verifier's balance over the public sums implies it only once a resolver's sum cancels the claims.
-  **Four statements of the `Compat.lean` gate changed** for this (D-058); none had changed before.
-- Public inputs 3 and 7 being 16-bit limbs is a hypothesis here (the leaf and `block_anc` pin them).
-- Not in the recursion's guarantee, like steps 2 and 3.
+- `B.mtp` is `pubMtp (pub i)`, the block's public inputs 3 and 7. That they are the chain's `MTP(h − 1)` is
+  `block_anc`'s statement (D-043), for blocks at or above the CSV height only (above).
+- **A coin of the initial set** has the time its set file gives it. Core's `hash_serialized` does not
+  cover the time, so for a proof that starts from a snapshot the times of the coins older than the start
+  are an input, not a proven fact. A run from genesis has no initial coins. *(A security limit; to be
+  checked by the owner. R2, the resolver, would not have had it, at the cost of a proof system inside the
+  recursion.)*
+- Not in the recursion's guarantee, like steps 2 and 3 (`BlockOK′` is not `BlockOK`; the circuits are
+  unchanged and still attest the block system's satisfiability).
+- The gate (`Compat.lean`): five statements change (`URec.rows_sound`, `epoch_coin_run`, `epoch_blocks`,
+  `epoch_systems_core`, `epoch_systems_wf`: a spent value is `(code, coinBytes ser mtp)`, the length bound
+  is `+ 4`, an initial coin is `RealCoin`), 14 pins are re-pinned and 9 added (D-058).
 
-**Finding: the resolver as designed above is not sound unless its claim list is fixed before the
-challenge.** *(A security claim; to be checked by the owner.)* The block proofs' claims are committed
-(under `C_h`, in the seed). The resolver's rows are not: a prover who sees `z` could choose **which true
-`(c, MTP(c−1))` pairs, and how many of each,** the resolver consumes, so that their fractions cancel a
-false claim's. With about 10^6 true pairs to combine, that is the generalized-birthday problem the design
-already excludes for the claims ("`LogUpSZ` only covers tuples fixed before the challenge"). So the
-resolver's list (or its multiplicities) must enter the epoch seed (`epoch.seedOfRoots`, the root
-circuit's step 5), which the design above does not say.
-
-**Options for resolving the claims** (owner's decision, D-058):
-
-| | What | Changes | Does not change |
-|---|---|---|---|
-| R2 | The resolver proof of option A, with its list's digest in the seed. A new AIR system per epoch (headers hashed and linked as `block_anc`, the list's Blake2s digest, the fractions), verified in the epoch root; each claim's header bound to `T` by a path in a circuit | seed and root circuit; a new system inside the recursion (the largest piece); paths per claim (about 16 Blake2s each; a full chain has too many for the seal alone) | block AIRs as built today; coin encoding; set passes |
-| R5 | **No resolver: the coin carries its time.** A created coin's event includes `MTP(c − 1)` (the creating block's public inputs 3 and 7); the spend's event includes the claimed `m`; the existing coin balance then forces them equal | the coin-event encoding (three 11-bit parts packed into slots that hold 16-bit limbs, so the challenge layout stays), its Lean (`encE`, `encE_inj`, the epoch chain); the set-pass AIR and set file (4 bytes per coin, under the file digest); `block_anc` active below the CSV height for a run from genesis | seed, root and seal circuits; no new proof system; no paths |
-| D | Leave time-based locks unproven (the rejected-as-final option D above) | nothing | everything |
-
-Recommended: **R5**. It needs no new proof system, no change to the seed or the recursion logic, and the
-guarantee is the one the coin's height already has (fixed at creation, checked at spend by the balance).
-Its cost is in the proven core (the event encoding and the set pass). Under R5 today's time check and the
-committed claim stay; the claim's own fraction (`FC2`, `ACC2`, `φ₂`) is replaced by the three packed
-parts in the spent event, and the four gate statements return to their old form. 6,988 time locks in
-37,500 blocks (0.0025 % of inputs) is what any of this protects.
-
-**The honest claims** come from the header file the provers already load: `system.timeClaims`
-(`coin.timeClaims`) gives, per undo record, `MTP(c − 1)` for an enforced time lock and 0 elsewhere.
-`prove-epoch`/`cuda-epoch` (`epoch_run.zig`: the commitment and the witness) and `chainproof prove-block`
-use it; the test-sample paths that have only a 12-header window pass no claims (0). Tested on a synthetic
-chain ("BIP68 time claims: the honest claim is the median time past before the coin's block"). Not run on
-real blocks with time locks yet (none among the test samples is known to have one).
-
-**Not done in step 4:** the resolver or R5 (D-058); a run over the node's blocks with time locks; GPU
-parity (step 5).
+**Not done in step 4:** a run over the node's blocks with time locks; `block_anc` below the CSV height;
+binding the initial set's times for a snapshot start; GPU parity on a device (step 5).
 
 ## Order of work
 
 1. **Spec first, no proving cost.** Done, above.
 2. Height-based BIP68 (AIR, witness, Lean, negative tests). Done, above.
 3. Sigop cost (walker mode, classification, negative tests): built, tested and proven, above.
-4. Time-based BIP68 (the committed claim, the resolver, the balance; the epoch root and seal take one
-   more child). **Block side built and proven 2026-11-20; resolving the claims awaits D-058.**
+4. Time-based BIP68: the coin carries its time (D-058, R5). **Built and proven 2026-11-23**, above.
 5. GPU witness kernels for the changed components (`gpu-cuda.md`), new VKs, one re-prove.
 
 Each of 2–4 changes the block AIRs, hence every block VK. Nothing is re-proven until all are in,

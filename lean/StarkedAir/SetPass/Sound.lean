@@ -294,10 +294,17 @@ theorem ofNat_mod256 (x : ℕ) : UInt8.ofNat (x % 256) = UInt8.ofNat x := by
   apply UInt8.toNat_inj.mp; simp [UInt8.toNat_ofNat]
 
 omit hL hsat hsz in
-/-- A record's stream bytes are its `TxOutSer`. -/
+/-- A record's `serTxOut`: its bytes without the last four (the coin's time). -/
+theorem serOf_bytesAt (S : ℕ → ℕ) (a ln : ℕ) :
+    Spec.CoinEpoch.serOf (Rec.bytesAt S a ln) = Rec.bytesAt S a (ln - 4) := by
+  simp only [Spec.CoinEpoch.serOf, Rec.bytesAt_length]
+  simp only [Rec.bytesAt, ← List.map_take, List.take_range, Nat.min_eq_left (Nat.sub_le ln 4)]
+
+omit hL hsat hsz in
+/-- A record's stream bytes (its outpoint, code and `ser` without the four time bytes) are its `TxOutSer`. -/
 theorem recSer_bytes {S : ℕ → ℕ} {cb : ℕ → ℕ → ℕ} {st ln : ℕ → ℕ} {ρ : ℕ}
     (hcb : ∀ i < 4, cb ρ i = Spec.SetFile.code (Rec.recAt S (st ρ) (ln ρ)) / 256 ^ i % 256) :
-    (TMsg.recSer S cb st ln ρ).map UInt8.ofNat = Spec.SetFile.txOutSer (Rec.recAt S (st ρ) (ln ρ)) := by
+    (TMsg.recSer S cb st (fun ρ => ln ρ - 4) ρ).map UInt8.ofNat = Spec.SetFile.txOutSer (Rec.recAt S (st ρ) (ln ρ)) := by
   have h36 : (List.range 36).map (fun j => UInt8.ofNat (S (st ρ + j))) =
       Rec.bytesAt S (st ρ) 32 ++ Rec.bytesAt S (st ρ + 32) 4 := by
     rw [← Rec.bytesAt_add]; rfl
@@ -309,7 +316,7 @@ theorem recSer_bytes {S : ℕ → ℕ} {cb : ℕ → ℕ → ℕ} {st ln : ℕ �
     rw [hcb i (List.mem_range.mp hi), ofNat_mod256, pow_mul]; norm_num
   simp only [TMsg.recSer, List.map_append, List.map_map, Function.comp_def, h36, h4]
   simp only [Spec.SetFile.txOutSer, Spec.SetFile.txid, Spec.SetFile.vout, Spec.SetFile.ser, Rec.recAt,
-    Rec.leBytes_bytesAt, List.append_assoc]
+    Rec.leBytes_bytesAt, List.append_assoc, serOf_bytesAt]
   rfl
 
 omit hL hsat hsz in
@@ -358,10 +365,12 @@ theorem sha_side (hHL : pub PUB_HASLAST = 0 ∨ pub PUB_HASLAST = 1) {sh : Spec.
   have h7 : 2 ^ Ls 7 ≤ 2 ^ 24 := Nat.pow_le_pow_right (by norm_num) (hsz.1 7 (by decide))
   have T := TMsg.tmsg_sound ts (by positivity) (by omega) (S := Sb inst pub)
     (cb := fun ρ i => ((inst 3).main (Rec.C i) ρ).val) (LEN := (pub PUB_LEN).val)
-    (st := fun ρ => ((inst 3).main Rec.START ρ).val) (ln := fun ρ => ((inst 3).main Rec.LENC ρ).val) (by omega)
+    (st := fun ρ => ((inst 3).main Rec.START ρ).val) (ln := fun ρ => ((inst 3).main Rec.LENC ρ).val - 4) (by omega)
     (by
       intro ρ hρ; rw [hcv] at hρ
-      exact ⟨by have := (Rec.fields rs E H hρ).2.2.1; omega, hend (e - 1 - ρ) ρ (by omega)⟩)
+      have h12 := (Rec.fields rs E H hρ).2.2.1
+      have := hend (e - 1 - ρ) ρ (by omega)
+      exact ⟨by omega, by omega⟩)
     (fun r hr h => tmsg_pnd hL hsat hHL hsz hr h)
     (fun r hr h => by
       obtain ⟨q, hq, hp, hb⟩ := tmsg_byte hL hsat hHL hsz hr (k := 1) (Or.inl ⟨rfl, rfl⟩) h
@@ -378,19 +387,21 @@ theorem sha_side (hHL : pub PUB_HASLAST = 0 ∨ pub PUB_HASLAST = 1) {sh : Spec.
     (fun r hr h => by
       obtain ⟨ρ, hρ, hon, hR, hS, hN⟩ := tmsg_rec hL hsat hHL hsz hr h
       have hρe := rec_on_lt hL hsat hsz E hρ hon
-      exact ⟨ρ, by rw [hcv]; exact hρe, by rw [hR, hidx ρ hρe], by rw [hS, Rec.cast_val], by rw [hN, Rec.cast_val]⟩)
+      have h12 := (Rec.fields rs E H hρe).2.2.1
+      exact ⟨ρ, by rw [hcv]; exact hρe, by rw [hR, hidx ρ hρe], by rw [hS, Rec.cast_val], by
+        rw [eq_sub_of_add_eq hN, Nat.cast_sub (by omega), Rec.cast_val]; norm_num⟩)
     (fun r hr h => ⟨r % 64, Nat.mod_lt _ (by norm_num), rfl, tmsg_tail hL hsat hHL hsz hr h⟩)
   simp only [hcv] at T
   set seg := (Rec.recs (inst 3).main (Sb inst pub) e).flatMap Spec.SetFile.txOutSer with hseg
   set x := TMsg.stream (fun q => (pub (H_PEND SHA_IN q)).val) (pub (H_PLEN SHA_IN)).val e (Sb inst pub)
     (fun ρ i => ((inst 3).main (Rec.C i) ρ).val) (fun ρ => ((inst 3).main Rec.START ρ).val)
-    (fun ρ => ((inst 3).main Rec.LENC ρ).val) with hx
+    (fun ρ => ((inst 3).main Rec.LENC ρ).val - 4) with hx
   obtain ⟨-, hxn, hnbD, hplO, hpoB, hsw⟩ := T
   set Xb := sh.pend ++ seg with hXb
   have hql : (pub (H_PLEN SHA_IN)).val = sh.pend.length := by rw [hplI, hpendL]
   -- the stream's bytes are the state's pending bytes, then the records' `TxOutSer`
   have hrecser : ∀ ρ < e, (TMsg.recSer (Sb inst pub) (fun ρ i => ((inst 3).main (Rec.C i) ρ).val)
-      (fun ρ => ((inst 3).main Rec.START ρ).val) (fun ρ => ((inst 3).main Rec.LENC ρ).val) ρ).map UInt8.ofNat =
+      (fun ρ => ((inst 3).main Rec.START ρ).val) (fun ρ => ((inst 3).main Rec.LENC ρ).val - 4) ρ).map UInt8.ofNat =
       Spec.SetFile.txOutSer (Rec.recR (inst 3).main (Sb inst pub) ρ) := fun ρ hρ =>
     recSer_bytes (fun i hi => Rec.code_bytes rs E H hρ hi)
   have hX : x.map UInt8.ofNat = Xb := by

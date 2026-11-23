@@ -67,7 +67,8 @@ pub const Reader = struct {
         c.txi = std.mem.readInt(u32, head[41..45], .little);
         const l = std.mem.readInt(u32, head[45..49], .little);
         // `WFE` (CoinEpochSound.lean): the code `2·height + cb` below 2^32, the script length below P.
-        if (c.height >= 1 << 31 or l >= 0x7fffffff) return error.CoinOutOfRange;
+        // The bytes hold an amount (8) and the coin's time (4): `SetFile.RecOk`.
+        if (c.height >= 1 << 31 or l >= 0x7fffffff or l < 12) return error.CoinOutOfRange;
         if (self.prev) |p| {
             const o = std.mem.order(u8, &p.txid, &c.txid);
             if (!(o == .lt or (o == .eq and p.vout < c.vout))) return error.SetNotSorted;
@@ -99,13 +100,12 @@ pub fn scan(gpa: std.mem.Allocator, path: []const u8, before: ?u32) !Info {
     var amount: u64 = 0;
     while (try rd.next()) |c| {
         if (before) |b| if (c.height >= b) return error.PrevSetTooNew;
-        if (c.ser.len < 8) return error.CoinOutOfRange;
         var b: [8]u8 = undefined;
         hs.update(&c.txid);
         std.mem.writeInt(u32, b[0..4], c.vout, .little);
         std.mem.writeInt(u32, b[4..8], 2 * c.height + @intFromBool(c.cb), .little);
         hs.update(&b);
-        hs.update(c.ser);
+        hs.update(c.txout());
         amount += std.mem.readInt(u64, c.ser[0..8], .little);
     }
     var info = Info{ .count = rd.n, .amount = amount, .hash = undefined, .digest = try rd.digest() };

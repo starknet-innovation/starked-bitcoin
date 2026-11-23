@@ -273,10 +273,11 @@ theorem tmsg_use {y k c : ℕ} (hy : y < 2 ^ Ls 7) (hk : k < 8) (hk6 : k ≠ 6)
   show e.eval (2 ^ (inst 7).logSize) (segSys.comp 7).air.pre pub (inst 7).main y = _
   rw [hpre, hL 7 (by decide)]
 
-/-- **A record's first stream row reads its record**: `(R, RST, RLEN)` is a record row's `(IDX, START, LENC)`. -/
+/-- **A record's first stream row reads its record**: `(R, RST, RLEN + 4)` is a record row's
+`(IDX, START, LENC)` (the stream leaves out the record's last four bytes, the coin's time). -/
 theorem tmsg_rec {y : ℕ} (hy : y < 2 ^ Ls 7) (hn : (inst 7).main TMsg.NEW y = 1) :
     ∃ ρ < 2 ^ Ls 3, (inst 3).main Rec.ON ρ = 1 ∧ (inst 7).main TMsg.R y = (inst 3).main Rec.IDX ρ ∧
-      (inst 7).main TMsg.RST y = (inst 3).main Rec.START ρ ∧ (inst 7).main TMsg.RLEN y = (inst 3).main Rec.LENC ρ := by
+      (inst 7).main TMsg.RST y = (inst 3).main Rec.START ρ ∧ (inst 7).main TMsg.RLEN y + 4 = (inst 3).main Rec.LENC ρ := by
   obtain ⟨i, ρ, k', hρ, hyt, hsm, hsv⟩ := tmsg_use hL hsat hHL hsz hy (k := 4) (c := TMsg.NEW) (by norm_num)
     (by norm_num) rfl hn
   rw [show (TMsg.lookups.getD 4 ⟨0, .const 0, []⟩).rel = 32 from rfl] at hyt
@@ -299,7 +300,7 @@ theorem tmsg_rec {y : ℕ} (hy : y < 2 ^ Ls 7) (hn : (inst 7).main TMsg.NEW y = 
     simp [siteVals, hl57, siteEval, hpre3, hL 3 (by decide), Rec.k, StarkedAir.Sha256.eval_col, wrap_zero hρ]
   rw [e1] at hsv
   simp only [TMsg.lookups, List.getD_cons_zero, List.getD_cons_succ, List.map_cons, List.map_nil,
-    tmsg_ev hy, List.cons.injEq, and_true] at hsv
+    tmsg_ev hy, List.cons.injEq, and_true, Expr.eval, StarkedAir.Sha256.eval_cst, TMsg.TIME, Nat.cast_ofNat] at hsv
   exact ⟨ρ, hρ, hon, hsv.1.symm, hsv.2.1.symm, hsv.2.2.symm⟩
 
 /-- **A code row reads its record's code byte**: `(R, O − 36, B)` is a record row's `(IDX, i, C i)`. -/

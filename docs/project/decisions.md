@@ -665,3 +665,36 @@ To undo: (1) drop `Coin.timeC`, the seven range lookups and columns 173–192, `
 (2) revert the four statements and the eight hashes. Under R5, the fraction of (1) and all of (2) are
 undone by the design itself.
 
+Decided by the owner, 2026-11-23 ("Let's do R5"): part (3) is **R5**; parts (1) and (2) are superseded by D-059.
+
+### D-059 — CONNECT-RULES step 4, as built under R5: the coin carries its time; what changes in the gate
+Date: 2026-11-23 · By: owner (the choice of R5, D-058) and agent (Claude) (the form below) · Status: applied on branch `connect-rules`; the agent's choices (2)–(5) are **to confirm by the owner**
+Decision: (1) **A coin's time** is the median time past of the block before its creating block. It is part
+of the coin: 4 bytes little-endian after its `serTxOut`, in the bytes the coin tuple fingerprints, in every
+undo record and in the set file's records. A time-based relative lock is checked against the undo record's
+time; the existing coin balance makes it the creating block's public previous median time past.
+(2) **The tuple keeps its 26 entries.** The time goes into the fingerprint (`EX`: the segment's fingerprint
+extended by the four bytes at `γ`) and the length slot (`+ 4`), not into packed limbs as D-058 sketched.
+(3) **The set file**: a record's `len` counts the time (`ser = serTxOut ‖ time`, at least 12 bytes). The
+file digest and the Merkle leaf cover the record whole; Core's `hash_serialized` stream leaves the time out.
+(4) **Below the CSV height the time is 0**, because a block's public previous median time past is 0 there
+(D-043 part 3).
+(5) **The gate**: `URec.rows_sound`, `epoch_coin_run`, `epoch_blocks`, `epoch_systems_core`,
+`epoch_systems_wf` change (a spent value is `(code, coinBytes ser mtp)`; the length bound is `+ 4`; an
+initial coin is `RealCoin`); 14 pins re-pinned, 9 added (2,227). The claim sum of D-058 (1), its tuple and
+"net of claims" are removed.
+Why: (2) fingerprinting `serTxOut ‖ time` needs no range decomposition on input rows (the bytes come from
+the committed undo stream), leaves the set-pass record AIR as it is (it already fingerprints `ser` whole)
+and keeps the challenge layout, hence the recursion circuits. (3) keeps the leaf "the previous key and the
+record as the file has it", so the leaf AIRs and their proofs do not change; only the SHA stream skips 4
+bytes. (4) is forced by what the creating block's proof states today.
+Limits accepted with this form (to be checked by the owner; both are security statements):
+- a proof that starts from a snapshot takes the times of the coins older than its start from the set file,
+  and Core's `hash_serialized` does not cover them. R2 would not have had this limit;
+- for a run from genesis, time locks on coins created below the CSV height are checked against time 0,
+  which differs from Core for spends within about a year after the CSV height, until `block_anc` runs
+  below it.
+Rejected: three 11-bit parts packed into 16-bit-limb slots (D-058's sketch: three columns and their range
+checks on every row, and a change of the tuple in the set pass); leaving the time out of the Merkle leaf
+(two record lengths under one relation, or a changed leaf format).
+To undo: revert the commit; the proofs of 935,001–972,500 on `main` do not depend on it.

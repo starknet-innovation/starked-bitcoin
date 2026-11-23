@@ -318,8 +318,8 @@ theorem compat_Block_epoch_systems_core : ∀ (nb : ℕ) (inst : ℕ → ℕ →
                                       B.txs[t]? = Option.some tx →
                                         ∀ ev ∈ StarkedAir.Spec.CoinEpoch.txIns N B t tx,
                                           ∃ (c : StarkedAir.Spec.CoinEpoch.Claim),
-                                            ev = (ev.1, (c.code, c.ser), N (c.code / 2) + c.ctx) ∧
-                                              c.code < 2 ^ 32 ∧ c.ctx < 2 ^ 24 ∧ List.length c.ser < StarkedAir.P) ∧
+                                            ev = (ev.1, (c.code, StarkedAir.Spec.CoinEpoch.coinBytes c.ser c.mtp), N (c.code / 2) + c.ctx) ∧
+                                              c.code < 2 ^ 32 ∧ c.ctx < 2 ^ 24 ∧ List.length c.ser + 4 < StarkedAir.P) ∧
                                 ∀ (N : ℕ → ℕ) (g0 : ℕ) (init fin : List StarkedAir.Spec.CoinEpoch.CEv)
                                   (Sb : Finset (List StarkedAir.F)),
                                   γ ∉ StarkedAir.Spec.Utxo.fpBad Sb →
@@ -334,7 +334,7 @@ theorem compat_Block_epoch_systems_core : ∀ (nb : ℕ) (inst : ℕ → ℕ →
                                         StarkedAir.Block.WFE N e ∧ StarkedAir.Block.bytesF e ∈ Sb) →
                                       (∀ i < nb, N (h0 + i) = g0 + ∑ i' ∈ Finset.range i, (S i').b.txs.length) →
                                         (∀ e ∈ init, e.2.2 < g0) →
-                                          (∀ e ∈ init, StarkedAir.Block.RealVal e.2.1) →
+                                          (∀ e ∈ init, StarkedAir.Block.RealCoin e.2.1) →
                                             (Multiset.map Prod.fst
                                                   ((↑init : Multiset StarkedAir.Spec.CoinEpoch.CEv) +
                                                     StarkedAir.Spec.Utxo.created g0
@@ -359,9 +359,8 @@ theorem compat_Block_epoch_systems_core : ∀ (nb : ℕ) (inst : ℕ → ℕ →
                                                           fin.length <
                                                         StarkedAir.P →
                                                       ∑ i ∈ Finset.range nb,
-                                                              (StarkedAir.Block.RunSum.pQ (pub i)
-                                                                StarkedAir.Block.Coin.PUB_S -
-                                                                StarkedAir.Block.claimSum (inst i) (L i)) +
+                                                              StarkedAir.Block.RunSum.pQ (pub i)
+                                                                StarkedAir.Block.Coin.PUB_S +
                                                             (List.map (StarkedAir.Block.efrac N γ α z) init).sum =
                                                           (List.map (StarkedAir.Block.efrac N γ α z) fin).sum →
                                                         (∃ (m :
@@ -1510,7 +1509,7 @@ theorem compat_Block_epoch_coin_run : ∀ (N : ℕ → ℕ) (γ : StarkedAir.Spe
                     B.txs[t]? = Option.some tx →
                       ∀ e ∈ StarkedAir.Spec.CoinEpoch.txIns N B t tx,
                         ∃ (c : StarkedAir.Spec.CoinEpoch.Claim),
-                          e = (e.1, (c.code, c.ser), N (c.code / 2) + c.ctx) ∧
+                          e = (e.1, (c.code, StarkedAir.Spec.CoinEpoch.coinBytes c.ser c.mtp), N (c.code / 2) + c.ctx) ∧
                             (c.code < 2 ^ 26 → c.ctx < 2 ^ 25 → c.code / 2 < B.h ∨ c.code / 2 = B.h ∧ c.ctx < t)) →
               (∀ e ∈ init, e.2.2 < g0) →
                 (Multiset.map Prod.fst
@@ -1624,7 +1623,7 @@ theorem compat_Block_epoch_systems_wf : ∀ (nb : ℕ) (inst : ℕ → ℕ → S
                                         StarkedAir.Block.bytesF e ∈ Sb) →
                                       (∀ i < nb, N (h0 + i) = g0 + ∑ i' ∈ Finset.range i, (S i').b.txs.length) →
                                         (∀ e ∈ init, e.2.2 < g0) →
-                                          (∀ e ∈ init, StarkedAir.Block.RealVal e.2.1) →
+                                          (∀ e ∈ init, StarkedAir.Block.RealCoin e.2.1) →
                                             (Multiset.map Prod.fst
                                                   ((↑init : Multiset StarkedAir.Spec.CoinEpoch.CEv) +
                                                     StarkedAir.Spec.Utxo.created g0
@@ -1649,9 +1648,8 @@ theorem compat_Block_epoch_systems_wf : ∀ (nb : ℕ) (inst : ℕ → ℕ → S
                                                           fin.length <
                                                         StarkedAir.P →
                                                       ∑ i ∈ Finset.range nb,
-                                                              (StarkedAir.Block.RunSum.pQ (pub i)
-                                                                StarkedAir.Block.Coin.PUB_S -
-                                                                StarkedAir.Block.claimSum (inst i) (L i)) +
+                                                              StarkedAir.Block.RunSum.pQ (pub i)
+                                                                StarkedAir.Block.Coin.PUB_S +
                                                             (List.map (StarkedAir.Block.efrac N γ α z) init).sum =
                                                           (List.map (StarkedAir.Block.efrac N γ α z) fin).sum →
                                                         (∃ (m :
@@ -1756,7 +1754,7 @@ theorem compat_Block_epoch_core : ∀ (N : ℕ → ℕ) (γ : StarkedAir.Spec.QM
           (∀ (i : ℕ) (B : StarkedAir.Spec.CoinEpoch.BlockC),
               blocks[i]? = Option.some B → B.h < 2 ^ 24 ∧ B.txs.length < 2 ^ 25) →
             (∀ e ∈ init, e.2.2 < g0) →
-              (∀ e ∈ init, StarkedAir.Block.RealVal e.2.1) →
+              (∀ e ∈ init, StarkedAir.Block.RealCoin e.2.1) →
                 (Multiset.map Prod.fst
                       ((↑init : Multiset StarkedAir.Spec.CoinEpoch.CEv) +
                         StarkedAir.Spec.Utxo.created g0 (StarkedAir.Spec.CoinEpoch.allTxs N blocks))).Nodup →
@@ -1769,7 +1767,7 @@ theorem compat_Block_epoch_core : ∀ (N : ℕ → ℕ) (γ : StarkedAir.Spec.QM
                                 B.txs[t]? = Option.some tx →
                                   ∀ ev ∈ StarkedAir.Spec.CoinEpoch.txIns N B t tx,
                                     ∃ (c : StarkedAir.Spec.CoinEpoch.Claim),
-                                      ev = (ev.1, (c.code, c.ser), N (c.code / 2) + c.ctx) ∧
+                                      ev = (ev.1, (c.code, StarkedAir.Spec.CoinEpoch.coinBytes c.ser c.mtp), N (c.code / 2) + c.ctx) ∧
                                         (c.code < 2 ^ 26 →
                                           c.ctx < 2 ^ 25 → c.code / 2 < B.h ∨ c.code / 2 = B.h ∧ c.ctx < t)) →
                           (∀ (i : ℕ) (B : StarkedAir.Spec.CoinEpoch.BlockC),
@@ -1854,8 +1852,7 @@ theorem compat_Block_epoch_blocks : ∀ (nb : ℕ) (inst : ℕ → ℕ → Stark
                                         StarkedAir.Spec.Coins.outSum tx ≤ StarkedAir.Spec.Block.MAX_MONEY) ∧
                                   ∀ (N : ℕ → ℕ),
                                     ∑ i ∈ Finset.range nb,
-                                          (StarkedAir.Block.RunSum.pQ (pub i) StarkedAir.Block.Coin.PUB_S -
-                                            StarkedAir.Block.claimSum (inst i) (L i)) =
+                                          StarkedAir.Block.RunSum.pQ (pub i) StarkedAir.Block.Coin.PUB_S =
                                         (List.map (StarkedAir.Block.blockSum N (StarkedAir.Block.efrac N γ α z))
                                             blocks).sum ∧
                                       (∀ (i : ℕ) (B : StarkedAir.Spec.CoinEpoch.BlockC),
@@ -1864,12 +1861,12 @@ theorem compat_Block_epoch_blocks : ∀ (nb : ℕ) (inst : ℕ → ℕ → Stark
                                               B.txs[t]? = Option.some tx →
                                                 ∀ ev ∈ StarkedAir.Spec.CoinEpoch.txIns N B t tx,
                                                   ∃ (c : StarkedAir.Spec.CoinEpoch.Claim),
-                                                    ev = (ev.1, (c.code, c.ser), N (c.code / 2) + c.ctx) ∧
+                                                    ev = (ev.1, (c.code, StarkedAir.Spec.CoinEpoch.coinBytes c.ser c.mtp), N (c.code / 2) + c.ctx) ∧
                                                       (c.code < 2 ^ 26 →
                                                           c.ctx < 2 ^ 25 →
                                                             c.code / 2 < B.h ∨ c.code / 2 = B.h ∧ c.ctx < t) ∧
                                                         c.code < 2 ^ 32 ∧
-                                                          c.ctx < 2 ^ 24 ∧ List.length c.ser < StarkedAir.P) ∧
+                                                          c.ctx < 2 ^ 24 ∧ List.length c.ser + 4 < StarkedAir.P) ∧
                                         ∀ (i : ℕ) (B : StarkedAir.Spec.CoinEpoch.BlockC),
                                           blocks[i]? = Option.some B →
                                             ∀ (t : ℕ) (tx : StarkedAir.Spec.Block.Tx),
@@ -2011,19 +2008,33 @@ the old ones and are re-pinned as a recorded exception. No `compat_*` statement 
 - `Block.hashSys`: component 5 is `Tables.tablesB` (the tables with three more opcode columns); the
   set-pass system keeps `Tables.tables`, whose pin is unchanged.
 
-**CONNECT-RULES step 4 (2026-11-20, D-058).** The block AIRs gained the time-based relative lock: a claimed
-median time past per undo record and, per enforced time lock, a claim fraction in the block's public sum.
-Eight pins are re-pinned, and — for the first time — four `compat_*` statements change, because the facts
-they state changed:
+**CONNECT-RULES step 4 (2026-11-23, D-058 with resolution R5).** Every coin carries its time (the median
+time past of the block before its creating block): 4 bytes after its `serTxOut` in the bytes the coin
+tuple fingerprints, in the undo record and in the set file. A time-based relative lock is checked against
+the undo record's time, and the coin balance makes that time the creating block's. The definitions and
+statements below change for that reason; nothing else does.
 
+Statements that change (`compat_*`, restated above):
 - `Block.URec.rows_sound`: a record is 4 bytes longer (`S (r+1) = S r + 9 + TL r + 4`);
-- `Block.epoch_blocks`, `Block.epoch_systems_core`, `Block.epoch_systems_wf`: the blocks' public sums are
-  taken net of their time claims (`pQ (pub i) PUB_S − claimSum (inst i) (L i)`), since the public sum is now
-  the events' sum plus the claims';
-- `Block.URec.constraints`/`endE`/`lookups`/`N_MAIN` (43): the claim's four bytes, read at `S + 9 + TL + i`,
-  and its two limbs in the record tuple; `Block.Coin.constraints`: the old list followed by `timeC`
-  (`repin_coin_constraints`); `Block.Coin.lastC`: the public sum is `ACC + ACC2`; `Block.Coin.lookups`: the
-  record tuple carries the claim, seven range lookups follow; `Block.Coin.N_MAIN`: 193.
+- `Block.epoch_coin_run`, `Block.epoch_blocks`, `Block.epoch_systems_core`, `Block.epoch_systems_wf`: a
+  spent event's value is `(c.code, coinBytes c.ser c.mtp)` (was `(c.code, c.ser)`), the claim's length
+  bound is `c.ser.length + 4 < P`, and an initial coin is `RealCoin` (`RealVal` of its bytes without the
+  time). The blocks' public sums are the events' sums again (the intermediate `− claimSum` of 2026-11-20
+  is gone).
+
+Pins re-pinned:
+- `Spec.CoinEpoch.Claim` (a `mtp` field), `BlockC` (a `mtp` field: the block's previous median time past),
+  `txOuts` and `txIns` (the coin's bytes are `coinBytes ser mtp`), `coinOfVal` and `txcOf` (Core's coin is
+  decoded from the bytes without the time, `serOf`);
+- `Block.ClaimAt`: the claim's time is the record's four time bytes, which are the coin row's `TB`;
+- `Block.URec.constraints`/`endE`/`N_MAIN` (43) (2026-11-20) and `lookups`: the four time bytes, read at
+  `S + 9 + TL + i` and passed in the record tuple;
+- `Block.Coin.tuple`: the fingerprint slots are `EX` (the segment's fingerprint extended by the four time
+  bytes, `extQ`) and the length slot is `SLEN + 4`; `Block.Coin.constraints`: the old list followed by
+  `timeC` (`repin_coin_constraints`); `Block.Coin.lookups`: the record tuple carries the time bytes, eleven
+  range lookups follow; `Block.Coin.N_MAIN`: 191. `Block.Coin.lastC` is the original again.
+Nine new definitions these reach are pinned (`coinBytes`, `serOf`, `RealCoin`, `pubMtp`, `Coin.extQ`, `TB`,
+`EX`, `TLEN`, `timeC`): 2,227 pins.
 -/
 
 theorem repin_walk_constraints : StarkedAir.Block.Walk.constraints =
@@ -2045,7 +2056,7 @@ theorem repin_fields_constraints : StarkedAir.Block.Fields.constraints =
       StarkedAir.Block.Fields.pubC ++ StarkedAir.Block.Fields.chkC ++ StarkedAir.Block.Fields.lockC ++
       StarkedAir.Block.Fields.sigC := rfl
 
-theorem repin_lookup_counts : StarkedAir.Block.Coin.lookups.length = 104 ∧
+theorem repin_lookup_counts : StarkedAir.Block.Coin.lookups.length = 108 ∧
     StarkedAir.Block.Fields.chkLookups.length = 38 := ⟨StarkedAir.Block.Coin.lookups_len, rfl⟩
 
 open Lean in
@@ -2221,7 +2232,7 @@ StarkedAir.Block.BYTE 17101530479978464024
 StarkedAir.Block.BlockAt 1954791157267639417
 StarkedAir.Block.BlockPubOk 10210431950510644760
 StarkedAir.Block.BlockPubs 5207504306574123012
-StarkedAir.Block.ClaimAt 6696442704788940435
+StarkedAir.Block.ClaimAt 18337176288343970587
 StarkedAir.Block.Coin.ACC 8897190996565932596
 StarkedAir.Block.Coin.BIG 9562720865119475955
 StarkedAir.Block.Coin.BR1 10674809079763322373
@@ -2267,7 +2278,7 @@ StarkedAir.Block.Coin.MLO 8020736631586362313
 StarkedAir.Block.Coin.MM 5580780264887204875
 StarkedAir.Block.Coin.MNB 12456454333311047599
 StarkedAir.Block.Coin.NB 8646764002683721668
-StarkedAir.Block.Coin.N_MAIN 16069434714160302114
+StarkedAir.Block.Coin.N_MAIN 6744830979538781013
 StarkedAir.Block.Coin.OB 721389358932291958
 StarkedAir.Block.Coin.ORD 5454922851969046533
 StarkedAir.Block.Coin.OUH 8076550275599354812
@@ -2320,10 +2331,10 @@ StarkedAir.Block.Coin.isLast 9524697876664787951
 StarkedAir.Block.Coin.k 4215733963973134624
 StarkedAir.Block.Coin.kn 10932140884916001105
 StarkedAir.Block.Coin.kp 14591804336548626625
-StarkedAir.Block.Coin.lastC 8689450972456219816
+StarkedAir.Block.Coin.lastC 4686876359968818310
 StarkedAir.Block.Coin.lastOn 11618261464159590984
 StarkedAir.Block.Coin.localC 11861545920249534897
-StarkedAir.Block.Coin.lookups 7224839732372409983
+StarkedAir.Block.Coin.lookups 200404821741836808
 StarkedAir.Block.Coin.mE 16749810043131797124
 StarkedAir.Block.Coin.notFirst 1322236294483047389
 StarkedAir.Block.Coin.notLast 17856571357075250639
@@ -2339,7 +2350,7 @@ StarkedAir.Block.Coin.preCols 2484850527752626642
 StarkedAir.Block.Coin.prevLimb 11129681111510200445
 StarkedAir.Block.Coin.r8 11503876311102383167
 StarkedAir.Block.Coin.tf 15374759760975450968
-StarkedAir.Block.Coin.tuple 10058641763961070265
+StarkedAir.Block.Coin.tuple 13545837529107839078
 StarkedAir.Block.Coin.two24 9233243156309046089
 StarkedAir.Block.Coin.zeroC 7231081858608859870
 StarkedAir.Block.Ctx.A0 15021439758854435811
@@ -2895,7 +2906,7 @@ StarkedAir.Block.URec.kn 10932140884916001105
 StarkedAir.Block.URec.kp 14591804336548626625
 StarkedAir.Block.URec.lastOn 18115899815943002436
 StarkedAir.Block.URec.limb 7512756407812944505
-StarkedAir.Block.URec.lookups 15438654745573876420
+StarkedAir.Block.URec.lookups 3721843254652305458
 StarkedAir.Block.URec.notFirst 14162281473066790946
 StarkedAir.Block.URec.notLast 17856571357075250639
 StarkedAir.Block.URec.om 15132569984123850130
@@ -4098,17 +4109,17 @@ StarkedAir.Spec.Block.witsT._sparseCasesOn_3 9563657014395001693
 StarkedAir.Spec.Block.witsT.match_1 11550372025146627108
 StarkedAir.Spec.Block.witsT.match_3 13199725484731363174
 StarkedAir.Spec.Block.wtxid 3921214279696907971
-StarkedAir.Spec.CoinEpoch.BlockC 14456338635063368187
+StarkedAir.Spec.CoinEpoch.BlockC 12250943225781567242
 StarkedAir.Spec.CoinEpoch.BlockC.claim 8712803750282361312
 StarkedAir.Spec.CoinEpoch.BlockC.h 16121615897971219088
 StarkedAir.Spec.CoinEpoch.BlockC.lost 17423502278169921658
-StarkedAir.Spec.CoinEpoch.BlockC.mk 514753636
+StarkedAir.Spec.CoinEpoch.BlockC.mk 3063948336
 StarkedAir.Spec.CoinEpoch.BlockC.txs 15214066778408889559
 StarkedAir.Spec.CoinEpoch.CEv 12601228195261765465
-StarkedAir.Spec.CoinEpoch.Claim 10709958432023055810
+StarkedAir.Spec.CoinEpoch.Claim 8983957810223277892
 StarkedAir.Spec.CoinEpoch.Claim.code 13943299332030891543
 StarkedAir.Spec.CoinEpoch.Claim.ctx 3906829304436646342
-StarkedAir.Spec.CoinEpoch.Claim.mk 2219967719
+StarkedAir.Spec.CoinEpoch.Claim.mk 1211430889
 StarkedAir.Spec.CoinEpoch.Claim.ser 16411239572079229379
 StarkedAir.Spec.CoinEpoch.Val 11336213409295540382
 StarkedAir.Spec.CoinEpoch.allTxC 11255003056290846752
@@ -4116,13 +4127,13 @@ StarkedAir.Spec.CoinEpoch.allTxs 16504709450879607639
 StarkedAir.Spec.CoinEpoch.blockTxC 14052776608636638335
 StarkedAir.Spec.CoinEpoch.blockTxs 7677209196994226452
 StarkedAir.Spec.CoinEpoch.codeOf 15444137173859708007
-StarkedAir.Spec.CoinEpoch.coinOfVal 1554094844980709378
+StarkedAir.Spec.CoinEpoch.coinOfVal 12870512644578222638
 StarkedAir.Spec.CoinEpoch.compactLen 5283425639208309142
 StarkedAir.Spec.CoinEpoch.decSer 2392128966968142838
 StarkedAir.Spec.CoinEpoch.live 8518839352653915113
-StarkedAir.Spec.CoinEpoch.txIns 14552301860936822765
-StarkedAir.Spec.CoinEpoch.txOuts 3806217855556997208
-StarkedAir.Spec.CoinEpoch.txcOf 15880558919097651423
+StarkedAir.Spec.CoinEpoch.txIns 3950020516228722825
+StarkedAir.Spec.CoinEpoch.txOuts 1082516699277559928
+StarkedAir.Spec.CoinEpoch.txcOf 2253287205897678765
 StarkedAir.Spec.Coins.COINBASE_MATURITY 1750718438119926672
 StarkedAir.Spec.Coins.CView 14422048259023082422
 StarkedAir.Spec.Coins.ClaimsOK 16732427554837290106
@@ -4282,6 +4293,15 @@ StarkedAir.siteVals 17892783906530037613
 StarkedAir.sites 11656917440478074565
 StarkedAir.total 12178251136757035804
 StarkedAir.wrap 4289096975738175335
+StarkedAir.Spec.CoinEpoch.coinBytes 7313453749133629850
+StarkedAir.Spec.CoinEpoch.serOf 5221937199614420958
+StarkedAir.Block.RealCoin 11840471281694800373
+StarkedAir.Block.pubMtp 3966687556267633076
+StarkedAir.Block.Coin.extQ 10154759031170682345
+StarkedAir.Block.Coin.TB 581510623458879900
+StarkedAir.Block.Coin.EX 17617332127936783150
+StarkedAir.Block.Coin.TLEN 110532540116317034
+StarkedAir.Block.Coin.timeC 3724477292705353912
 "
 
 open Lean Elab Command in
@@ -4299,6 +4319,6 @@ run_cmd do
     | some h' => if h' != h then bad := bad.push s!"{c} changed"
     | none => bad := bad.push s!"{c} missing"
   unless bad.isEmpty do throwError "Compat pins: {bad.size} definitions changed:\n{"\n".intercalate bad.toList}"
-  if n != 2218 then throwError "Compat pins: expected 2218 pins, read {n}"
+  if n != 2227 then throwError "Compat pins: expected 2227 pins, read {n}"
 
 end StarkedAir.Compat

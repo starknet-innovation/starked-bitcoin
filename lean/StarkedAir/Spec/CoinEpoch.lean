@@ -1,22 +1,25 @@
 /-
 **An epoch's coin events, at the spec level (M3b, layer 5).** A block at height `h` creates, per
 transaction `t` and live output `v` (spendable, and not a BIP30-lost coinbase output), the coin
-`(⟨txid, v⟩, (2h + [t = 0], serTxOut))` with creation index `N h + t`, where `N h` counts the chain's
-transactions before height `h` (so indices are the transactions' global positions, as `Utxo.run`
-numbers them). Each non-coinbase input spends its claim: the record's `(code, serTxOut)` and the claimed
-creating transaction `ctx`, with index `N (code / 2) + ctx`.
+`(⟨txid, v⟩, (2h + [t = 0], serTxOut ‖ time))` with creation index `N h + t`, where `N h` counts the
+chain's transactions before height `h` (so indices are the transactions' global positions, as `Utxo.run`
+numbers them) and `time` is the block's previous median time past, 4 bytes little-endian (D-058, R5: what
+a time-based relative lock on the coin is measured from). Each non-coinbase input spends its claim: the
+record's `(code, serTxOut ‖ time)` and the claimed creating transaction `ctx`, with index
+`N (code / 2) + ctx`.
 
-Coin values are `(code, serTxOut)` pairs here, the coin component's tuple fields; Core's `Coin`s are
-recovered once the balance shows every claim is a created coin.
+Coin values are `(code, serTxOut ‖ time)` pairs here, the coin component's tuple fields; Core's `Coin`s
+are recovered once the balance shows every claim is a created coin.
 -/
 import StarkedAir.Spec.UtxoBalance
 import StarkedAir.Spec.Coins
+import StarkedAir.Spec.BlockSer
 
 namespace StarkedAir.Spec.CoinEpoch
 
 open StarkedAir.Spec.Block StarkedAir.Spec.Utxo
 
-/-- A coin value: `code = 2·height + coinbase` and `serTxOut`. -/
+/-- A coin value: `code = 2·height + coinbase` and the coin's bytes, `serTxOut ‖ time` (`coinBytes`). -/
 abbrev Val := ℕ × Bytes
 abbrev CEv := Ev OutPoint Val
 
@@ -25,7 +28,35 @@ structure Claim where
   code : ℕ
   ser : Bytes
   ctx : ℕ
+  /-- The claimed time of the coin: the median time past of the block before its creating block. -/
+  mtp : ℕ
   deriving DecidableEq, Inhabited
+
+/-- A coin's bytes: its `serTxOut`, then its time (the median time past of the block before the coin's),
+4 bytes little-endian. -/
+def coinBytes (ser : Bytes) (mtp : ℕ) : Bytes := ser ++ leBytes 4 mtp
+
+theorem coinBytes_length (ser : Bytes) (mtp : ℕ) : (coinBytes ser mtp).length = ser.length + 4 := by
+  simp [coinBytes, leBytes_length]
+
+/-- A coin's `serTxOut`: its bytes without the four time bytes. -/
+def serOf (b : Bytes) : Bytes := b.take (b.length - 4)
+
+theorem serOf_coinBytes (ser : Bytes) (mtp : ℕ) : serOf (coinBytes ser mtp) = ser := by
+  unfold serOf
+  rw [coinBytes_length, Nat.add_sub_cancel]
+  exact List.take_left' rfl
+
+/-- The coin's bytes determine its `serTxOut` and its time. -/
+theorem coinBytes_inj {s s' : Bytes} {m m' : ℕ} (hm : m < 2 ^ 32) (hm' : m' < 2 ^ 32)
+    (h : coinBytes s m = coinBytes s' m') : s = s' ∧ m = m' := by
+  have hl : s.length = s'.length := by
+    have := congrArg List.length h
+    rw [coinBytes_length, coinBytes_length] at this; omega
+  obtain ⟨h1, h2⟩ := List.append_inj h hl
+  refine ⟨h1, ?_⟩
+  have := congrArg le h2
+  rwa [le_leBytes, le_leBytes, Nat.mod_eq_of_lt (by norm_num; omega), Nat.mod_eq_of_lt (by norm_num; omega)] at this
 
 /-- A block's coin data: height, transactions, the BIP30-lost bit, and the claim of each non-coinbase
 input (by transaction and input index). -/
@@ -34,6 +65,8 @@ structure BlockC where
   txs : List Tx
   lost : Bool
   claim : ℕ → ℕ → Claim
+  /-- The median time past of the previous block (0 at genesis). -/
+  mtp : ℕ
 
 def codeOf (h t : ℕ) : ℕ := 2 * h + if t = 0 then 1 else 0
 
@@ -45,14 +78,14 @@ def insBefore (txs : List Tx) (t : ℕ) : ℕ :=
 
 /-- A transaction's created coins. -/
 def txOuts (B : BlockC) (t : ℕ) (tx : Tx) : List (OutPoint × Val) :=
-  ((tx.vout.zipIdx).filter fun p => live B.lost t p.1).map fun p => (⟨txid tx, p.2⟩, (codeOf B.h t, serTxOut p.1))
+  ((tx.vout.zipIdx).filter fun p => live B.lost t p.1).map fun p => (⟨txid tx, p.2⟩, (codeOf B.h t, coinBytes (serTxOut p.1) B.mtp))
 
 /-- A transaction's spends: its inputs with their claims (none for the coinbase). -/
 def txIns (N : ℕ → ℕ) (B : BlockC) (t : ℕ) (tx : Tx) : List CEv :=
   if t = 0 then [] else
   (tx.vin.zipIdx).map fun p =>
     let c := B.claim t p.2
-    (p.1.prevout, (c.code, c.ser), N (c.code / 2) + c.ctx)
+    (p.1.prevout, (c.code, coinBytes c.ser c.mtp), N (c.code / 2) + c.ctx)
 
 /-- A block's transactions as multiset-argument transactions. -/
 def blockTxs (N : ℕ → ℕ) (B : BlockC) : List (Utxo.Tx OutPoint Val) :=
@@ -157,7 +190,7 @@ theorem ordered_of_balance (N : ℕ → ℕ) (blocks : List BlockC) (g0 : ℕ) (
     (hinc : ∀ (i i' : ℕ) (B B' : BlockC), blocks[i]? = some B → blocks[i']? = some B' → (B.h < B'.h ↔ i < i'))
     (hbnd : ∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → B.h < 2 ^ 24 ∧ B.txs.length < 2 ^ 25)
     (hlex : ∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → ∀ (t : ℕ) (tx : Tx), B.txs[t]? = some tx → ∀ e ∈ txIns N B t tx,
-      ∃ c : Claim, e = (e.1, (c.code, c.ser), N (c.code / 2) + c.ctx) ∧
+      ∃ c : Claim, e = (e.1, (c.code, coinBytes c.ser c.mtp), N (c.code / 2) + c.ctx) ∧
         (c.code < 2 ^ 26 → c.ctx < 2 ^ 25 → (c.code / 2 < B.h ∨ (c.code / 2 = B.h ∧ c.ctx < t))))
     (hinit : ∀ e ∈ init, e.2.2 < g0)
     (hbal : (init : Multiset CEv) + created g0 (allTxs N blocks) = spent (allTxs N blocks) + fin) :
@@ -245,7 +278,7 @@ theorem epoch_run (N : ℕ → ℕ) (blocks : List BlockC) (g0 : ℕ) (init fin 
     (hinc : ∀ (i i' : ℕ) (B B' : BlockC), blocks[i]? = some B → blocks[i']? = some B' → (B.h < B'.h ↔ i < i'))
     (hbnd : ∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → B.h < 2 ^ 24 ∧ B.txs.length < 2 ^ 25)
     (hlex : ∀ (i : ℕ) (B : BlockC), blocks[i]? = some B → ∀ (t : ℕ) (tx : Tx), B.txs[t]? = some tx → ∀ e ∈ txIns N B t tx,
-      ∃ c : Claim, e = (e.1, (c.code, c.ser), N (c.code / 2) + c.ctx) ∧
+      ∃ c : Claim, e = (e.1, (c.code, coinBytes c.ser c.mtp), N (c.code / 2) + c.ctx) ∧
         (c.code < 2 ^ 26 → c.ctx < 2 ^ 25 → (c.code / 2 < B.h ∨ (c.code / 2 = B.h ∧ c.ctx < t))))
     (hinit : ∀ e ∈ init, e.2.2 < g0)
     (hnd : (((init : Multiset CEv) + created g0 (allTxs N blocks)).map Prod.fst).Nodup)

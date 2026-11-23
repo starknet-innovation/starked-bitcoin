@@ -259,7 +259,7 @@ theorem int_sum (g : List F → ℕ) :
 
 /-- **A coin range check is a byte.** If the coin component's lookup `k` is `r8 (col c) mexp` and `mexp`
 is 1 at row `r`, column `c` holds a byte there. -/
-theorem coin_r8 {k c : ℕ} {mexp : Expr} (hk : k < 104) (hk4 : k ≠ 4)
+theorem coin_r8 {k c : ℕ} {mexp : Expr} (hk : k < 108) (hk4 : k ≠ 4)
     (hlk : Coin.lookups.getD k ⟨0, .const 0, []⟩ = Coin.r8 (Coin.k c) mexp) {r : ℕ} (hr : r < 2 ^ Ls 14)
     (hm : mexp.eval (2 ^ Ls 14) Coin.preCols pub (inst 14).main r = 1) : ((inst 14).main c r).val < 256 := by
   have hlen : k < (hashSys.comp 14).lookups.length := by
@@ -814,14 +814,15 @@ theorem coin_urec {j : ℕ} (hj : j < 2 ^ Ls 14) (hki : (inst 14).main Coin.KI j
         16777216 * (inst 13).main (URec.V 6) r',
       (inst 13).main (URec.X 0) r' + 256 * (inst 13).main (URec.X 1) r' + 65536 * (inst 13).main (URec.X 2) r',
       (inst 13).main URec.CP r', (inst 13).main URec.C20 r', (inst 13).main URec.C32 r',
-      (inst 13).main (URec.MT 0) r' + 256 * (inst 13).main (URec.MT 1) r',
-      (inst 13).main (URec.MT 2) r' + 256 * (inst 13).main (URec.MT 3) r'] := by
+      (inst 13).main (URec.MT 0) r', (inst 13).main (URec.MT 1) r', (inst 13).main (URec.MT 2) r',
+      (inst 13).main (URec.MT 3) r'] := by
     simp [siteVals, siteEval, siteLookup, hashSys, hL 13 (by decide), URec.urec, URec.lookups, URec.k, URec.limb,
       Expr.eval, StarkedAir.Sha256.eval_col, StarkedAir.Sha256.eval_cst, wrap_zero hr']
   have e2 : siteVals hashSys inst pub (14, j, 3) = [(inst 14).main Coin.J j, (inst 14).main Coin.CLO j,
       (inst 14).main Coin.CHI j, (inst 14).main Coin.VL j, (inst 14).main Coin.VH j, (inst 14).main Coin.CTX j,
       (inst 14).main Coin.UP j, (inst 14).main Coin.U20 j, (inst 14).main Coin.U32 j,
-      (inst 14).main Coin.ML j, (inst 14).main Coin.MH j] := by
+      (inst 14).main (Coin.TB 0) j, (inst 14).main (Coin.TB 1) j, (inst 14).main (Coin.TB 2) j,
+      (inst 14).main (Coin.TB 3) j] := by
     simp [siteVals, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups_len, Coin.lk0, Coin.lk1, Coin.lk2, Coin.lk3, Coin.lk4, Coin.lk5, Coin.lk6, Coin.lg0, Coin.lg1, Coin.lg2, Coin.lg3, Coin.lg4, Coin.lg5, Coin.lg6, Coin.k,
       StarkedAir.Sha256.eval_col, wrap_zero hj]
   rw [e1, e2] at hsv
@@ -829,12 +830,11 @@ theorem coin_urec {j : ℕ} (hj : j < 2 ^ Ls 14) (hki : (inst 14).main Coin.KI j
   obtain ⟨a, b, c, d, e, g, -⟩ := hsv
   exact ⟨a.symm, b.symm, c.symm, d.symm, e.symm, g.symm⟩
 
-/-- **An input's claimed median time past is its undo record's** (CONNECT-RULES step 4): the coin row's
-`ML`, `MH` are the 16-bit limbs of record `J`'s four claim bytes. -/
+/-- **An input's time is its undo record's** (CONNECT-RULES step 4): the coin row's time bytes `TB` are
+record `J`'s four time bytes. -/
 theorem coin_urec_mtp {j : ℕ} (hj : j < 2 ^ Ls 14) (hki : (inst 14).main Coin.KI j = 1) :
     ∃ rj < 2 ^ Ls 13, (inst 13).main URec.ON rj = 1 ∧ (inst 14).main Coin.J j = (inst 13).main URec.J rj ∧
-      (inst 14).main Coin.ML j = (inst 13).main (URec.MT 0) rj + 256 * (inst 13).main (URec.MT 1) rj ∧
-      (inst 14).main Coin.MH j = (inst 13).main (URec.MT 2) rj + 256 * (inst 13).main (URec.MT 3) rj := by
+      ∀ i < 4, (inst 14).main (Coin.TB i) j = (inst 13).main (URec.MT i) rj := by
   have hsite := site_mem hL (i := 14) (by decide) hj (k := 3) (by simp [hashSys, Coin.coin, Coin.lookups_len, Coin.lk0, Coin.lk1, Coin.lk2, Coin.lk3, Coin.lk4, Coin.lk5, Coin.lk6, Coin.lg0, Coin.lg1, Coin.lg2, Coin.lg3, Coin.lg4, Coin.lg5, Coin.lg6])
   have hm : siteMult hashSys inst pub (14, j, 3) = -1 := by
     simp [siteMult, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups_len, Coin.lk0, Coin.lk1, Coin.lk2, Coin.lk3, Coin.lk4, Coin.lk5, Coin.lk6, Coin.lg0, Coin.lg1, Coin.lg2, Coin.lg3, Coin.lg4, Coin.lg5, Coin.lg6, Expr.eval, Coin.k,
@@ -858,20 +858,26 @@ theorem coin_urec_mtp {j : ℕ} (hj : j < 2 ^ Ls 14) (hki : (inst 14).main Coin.
         16777216 * (inst 13).main (URec.V 6) r',
       (inst 13).main (URec.X 0) r' + 256 * (inst 13).main (URec.X 1) r' + 65536 * (inst 13).main (URec.X 2) r',
       (inst 13).main URec.CP r', (inst 13).main URec.C20 r', (inst 13).main URec.C32 r',
-      (inst 13).main (URec.MT 0) r' + 256 * (inst 13).main (URec.MT 1) r',
-      (inst 13).main (URec.MT 2) r' + 256 * (inst 13).main (URec.MT 3) r'] := by
+      (inst 13).main (URec.MT 0) r', (inst 13).main (URec.MT 1) r', (inst 13).main (URec.MT 2) r',
+      (inst 13).main (URec.MT 3) r'] := by
     simp [siteVals, siteEval, siteLookup, hashSys, hL 13 (by decide), URec.urec, URec.lookups, URec.k, URec.limb,
       Expr.eval, StarkedAir.Sha256.eval_col, StarkedAir.Sha256.eval_cst, wrap_zero hr']
   have e2 : siteVals hashSys inst pub (14, j, 3) = [(inst 14).main Coin.J j, (inst 14).main Coin.CLO j,
       (inst 14).main Coin.CHI j, (inst 14).main Coin.VL j, (inst 14).main Coin.VH j, (inst 14).main Coin.CTX j,
       (inst 14).main Coin.UP j, (inst 14).main Coin.U20 j, (inst 14).main Coin.U32 j,
-      (inst 14).main Coin.ML j, (inst 14).main Coin.MH j] := by
+      (inst 14).main (Coin.TB 0) j, (inst 14).main (Coin.TB 1) j, (inst 14).main (Coin.TB 2) j,
+      (inst 14).main (Coin.TB 3) j] := by
     simp [siteVals, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups_len, Coin.lk0, Coin.lk1, Coin.lk2, Coin.lk3, Coin.lk4, Coin.lk5, Coin.lk6, Coin.lg0, Coin.lg1, Coin.lg2, Coin.lg3, Coin.lg4, Coin.lg5, Coin.lg6, Coin.k,
       StarkedAir.Sha256.eval_col, wrap_zero hj]
   rw [e1, e2] at hsv
   simp only [List.cons.injEq, and_true] at hsv
-  obtain ⟨a, -, -, -, -, -, -, -, -, m1, m2⟩ := hsv
-  exact ⟨a.symm, m1.symm, m2.symm⟩
+  obtain ⟨a, -, -, -, -, -, -, -, -, m0, m1, m2, m3⟩ := hsv
+  refine ⟨a.symm, fun i hi => ?_⟩
+  interval_cases i
+  · exact m0.symm
+  · exact m1.symm
+  · exact m2.symm
+  · exact m3.symm
 
 
 /-- A URec on row's `J` is its index. -/
@@ -1103,6 +1109,34 @@ theorem urec_bytes {r : ℕ} (hr : r < 2 ^ Ls 13) (hon : (inst 13).main URec.ON 
   exact ⟨u, hu, hp, hb⟩
 
 /-! ### Tokens and transactions -/
+
+/-- **A record's time bytes.** On URec row `r`, time byte `i` is the undo byte at `S + 9 + i + TL`. -/
+theorem urec_mt_bytes {r : ℕ} (hr : r < 2 ^ Ls 13) (hon : (inst 13).main URec.ON r = 1) {i : ℕ} (hi : i < 4) :
+    ∃ u, u < (pub 8).val ∧ (inst 13).main URec.S r + ((URec.HDR + i : ℕ) : F) + (inst 13).main URec.TL r = (u : F) ∧
+      ((inst 13).main (URec.MT i) r).val = ((Ub inst pub).getD u 0).toNat := by
+  have hpre : (hashSys.comp 13).air.pre = URec.preCols := rfl
+  have hlen : 24 + i < (hashSys.comp 13).lookups.length := by
+    show 24 + i < URec.lookups.length
+    simp [URec.lookups]; omega
+  have hsite := site_mem hL (i := 13) (by decide) hr hlen
+  have hsl : siteLookup hashSys ((13, r, 24 + i) : Site) =
+      ⟨Undo.REL_UBYTE, .neg (URec.k URec.ON),
+        [.add (.add (URec.k URec.S) (cst (URec.HDR + i))) (URec.k URec.TL), URec.k (URec.MT i)]⟩ := by
+    interval_cases i <;> rfl
+  have huse : isUse 13 (24 + i) = true := by interval_cases i <;> rfl
+  obtain ⟨u, hu, hp, hb⟩ := undo_read hL hsat hL24 hsite huse (by simp [siteRel, hsl])
+    (p := (inst 13).main URec.S r + ((URec.HDR + i : ℕ) : F) + (inst 13).main URec.TL r)
+    (b := (inst 13).main (URec.MT i) r)
+    (by
+      show siteEval hashSys inst pub (13, r, 24 + i) (siteLookup hashSys (13, r, 24 + i)).mult = -1
+      rw [hsl]
+      simp [siteEval, hpre, hL 13 (by decide), Expr.eval, URec.k, StarkedAir.Sha256.eval_col, wrap_zero hr, hon])
+    (by
+      show (siteLookup hashSys (13, r, 24 + i)).vals.map (siteEval hashSys inst pub (13, r, 24 + i)) = _
+      rw [hsl]
+      simp [siteEval, hpre, hL 13 (by decide), Expr.eval, URec.k, StarkedAir.Sha256.eval_col,
+        StarkedAir.Sha256.eval_cst, wrap_zero hr])
+  exact ⟨u, hu, hp, hb⟩
 
 /-- A row before the padding is an input or output token exactly when it is of kind `K_IN` or `K_OUT`,
 and a lock-time token exactly when it is of kind `K_LOCK`. -/

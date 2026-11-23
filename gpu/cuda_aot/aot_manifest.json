@@ -43,27 +43,6 @@
   },
   {
     "kind": "constraint",
-    "label": "starked_eval_2032ed8e023f082f",
-    "abi_schema": "cairo_eval_part_v1",
-    "kernel_name": "stwo_cairo_cuda_eval_v6_2032ed8e023f082f",
-    "cache_key": "daeeffd58c4fdef9",
-    "semantic_hash": "2032ed8e023f082f",
-    "program_identity": "57621cd689387a5768a5073bab1f13dd263a87a4995a421bf067a02b47509ab5",
-    "file": "constraint_starked_eval_2032ed8e023f082f_daeeffd58c4fdef9.cu",
-    "module_globals": "none",
-    "catalog_identity": "550200479d03f3cc5df12d3795cfe4645824bd96368f3cd6e70c0df8669c62ec",
-    "codegen_version": 6,
-    "identity_scheme": "sha256-cairo-eval-parametric-source-v6",
-    "occurrences": [
-      {
-        "component_index": 13,
-        "part_index": 0
-      }
-    ],
-    "source_sha256": "59a7e470e975c21274925908fdb1884421ce2983a8e3786f18d3086ea720253c"
-  },
-  {
-    "kind": "constraint",
     "label": "starked_eval_3c1261e47e09016a",
     "abi_schema": "cairo_eval_part_v1",
     "kernel_name": "stwo_cairo_cuda_eval_v6_3c1261e47e09016a",
@@ -85,24 +64,24 @@
   },
   {
     "kind": "constraint",
-    "label": "starked_eval_47b5335e1365a69d",
+    "label": "starked_eval_4442c9387f054e15",
     "abi_schema": "cairo_eval_part_v1",
-    "kernel_name": "stwo_cairo_cuda_eval_v6_47b5335e1365a69d",
-    "cache_key": "417be526fa84964a",
-    "semantic_hash": "47b5335e1365a69d",
-    "program_identity": "79011e887e9483424977f9c8ae0bf2332aa11d49d9fea0b40a97ba9ecace8601",
-    "file": "constraint_starked_eval_47b5335e1365a69d_417be526fa84964a.cu",
+    "kernel_name": "stwo_cairo_cuda_eval_v6_4442c9387f054e15",
+    "cache_key": "576d1b4de8e6d67d",
+    "semantic_hash": "4442c9387f054e15",
+    "program_identity": "850e903b5b8b99eba5f0389b76bdc6dc386f61c763f292e23b143f00298c5895",
+    "file": "constraint_starked_eval_4442c9387f054e15_576d1b4de8e6d67d.cu",
     "module_globals": "none",
     "catalog_identity": "550200479d03f3cc5df12d3795cfe4645824bd96368f3cd6e70c0df8669c62ec",
     "codegen_version": 6,
     "identity_scheme": "sha256-cairo-eval-parametric-source-v6",
     "occurrences": [
       {
-        "component_index": 23,
+        "component_index": 14,
         "part_index": 0
       }
     ],
-    "source_sha256": "459e5288fc8c5e16a6aca4fc93e25f41ae4ddb564027c69fd8bdfeb7a8dfa6af"
+    "source_sha256": "05301448d06661d965648fca4835afa5bc403bbf18c645fe062fabfc1bfb9d91"
   },
   {
     "kind": "constraint",
@@ -215,6 +194,27 @@
   },
   {
     "kind": "constraint",
+    "label": "starked_eval_71621221647699e8",
+    "abi_schema": "cairo_eval_part_v1",
+    "kernel_name": "stwo_cairo_cuda_eval_v6_71621221647699e8",
+    "cache_key": "776844e8f30374fc",
+    "semantic_hash": "71621221647699e8",
+    "program_identity": "61ba4dfa88e519a56bad629b7105f50df5bade645448b9f642ff870552dc530f",
+    "file": "constraint_starked_eval_71621221647699e8_776844e8f30374fc.cu",
+    "module_globals": "none",
+    "catalog_identity": "550200479d03f3cc5df12d3795cfe4645824bd96368f3cd6e70c0df8669c62ec",
+    "codegen_version": 6,
+    "identity_scheme": "sha256-cairo-eval-parametric-source-v6",
+    "occurrences": [
+      {
+        "component_index": 13,
+        "part_index": 0
+      }
+    ],
+    "source_sha256": "55c38c4243c154f37b92383e93314921eba83df8ad49e6846b4d5c5a4427f0ce"
+  },
+  {
+    "kind": "constraint",
     "label": "starked_eval_7d2a9cc8fd7f242c",
     "abi_schema": "cairo_eval_part_v1",
     "kernel_name": "stwo_cairo_cuda_eval_v6_7d2a9cc8fd7f242c",
@@ -278,6 +278,27 @@
   },
   {
     "kind": "constraint",
+    "label": "starked_eval_89c9d94287af154d",
+    "abi_schema": "cairo_eval_part_v1",
+    "kernel_name": "stwo_cairo_cuda_eval_v6_89c9d94287af154d",
+    "cache_key": "0ff634ed8c11b891",
+    "semantic_hash": "89c9d94287af154d",
+    "program_identity": "0f027eb31cd7025782cffad3c28865d6bb0bed782f39292de890b277f55c943f",
+    "file": "constraint_starked_eval_89c9d94287af154d_0ff634ed8c11b891.cu",
+    "module_globals": "none",
+    "catalog_identity": "550200479d03f3cc5df12d3795cfe4645824bd96368f3cd6e70c0df8669c62ec",
+    "codegen_version": 6,
+    "identity_scheme": "sha256-cairo-eval-parametric-source-v6",
+    "occurrences": [
+      {
+        "component_index": 19,
+        "part_index": 0
+      }
+    ],
+    "source_sha256": "4326ca8d482c0365dfa04c43fa9852d5e2cbbb93e5ba759743580d62a67aa795"
+  },
+  {
+    "kind": "constraint",
     "label": "starked_eval_8f2a210bfd12daa6",
     "abi_schema": "cairo_eval_part_v1",
     "kernel_name": "stwo_cairo_cuda_eval_v6_8f2a210bfd12daa6",
@@ -317,27 +338,6 @@
       }
     ],
     "source_sha256": "c2e102af2b9e985031a92c7df0b236014611829e185b17dae6e39df0f5b97d08"
-  },
-  {
-    "kind": "constraint",
-    "label": "starked_eval_a7ac3dae165578d8",
-    "abi_schema": "cairo_eval_part_v1",
-    "kernel_name": "stwo_cairo_cuda_eval_v6_a7ac3dae165578d8",
-    "cache_key": "fc408acf9fde9826",
-    "semantic_hash": "a7ac3dae165578d8",
-    "program_identity": "e00bc0769326ae849fe406c369d79e914ee6f5e6510f8014caa0a84ddc859429",
-    "file": "constraint_starked_eval_a7ac3dae165578d8_fc408acf9fde9826.cu",
-    "module_globals": "none",
-    "catalog_identity": "550200479d03f3cc5df12d3795cfe4645824bd96368f3cd6e70c0df8669c62ec",
-    "codegen_version": 6,
-    "identity_scheme": "sha256-cairo-eval-parametric-source-v6",
-    "occurrences": [
-      {
-        "component_index": 19,
-        "part_index": 0
-      }
-    ],
-    "source_sha256": "ba5956bcefc743a54c4d3add48a41fbab4f1e6e3a25f7fd23e21ce88edbb3f8e"
   },
   {
     "kind": "constraint",
@@ -405,27 +405,6 @@
       }
     ],
     "source_sha256": "d93b05001e1c2920e84029cd5b9c78301de7216a1610da072a4bf2dfc8a20ff5"
-  },
-  {
-    "kind": "constraint",
-    "label": "starked_eval_c8a8e187b0e274ec",
-    "abi_schema": "cairo_eval_part_v1",
-    "kernel_name": "stwo_cairo_cuda_eval_v6_c8a8e187b0e274ec",
-    "cache_key": "a9d8e25ceff04a31",
-    "semantic_hash": "c8a8e187b0e274ec",
-    "program_identity": "a8f0657a334ce83bb026fc8a107ab28178fe08cf1c46533bf3cc8c7faceb9c20",
-    "file": "constraint_starked_eval_c8a8e187b0e274ec_a9d8e25ceff04a31.cu",
-    "module_globals": "none",
-    "catalog_identity": "550200479d03f3cc5df12d3795cfe4645824bd96368f3cd6e70c0df8669c62ec",
-    "codegen_version": 6,
-    "identity_scheme": "sha256-cairo-eval-parametric-source-v6",
-    "occurrences": [
-      {
-        "component_index": 14,
-        "part_index": 0
-      }
-    ],
-    "source_sha256": "6c79f620e3fa289ad5f976d73773719800944e9ac9fc3de52a21df58fd6e08d1"
   },
   {
     "kind": "constraint",
@@ -513,6 +492,27 @@
   },
   {
     "kind": "constraint",
+    "label": "starked_eval_fbad7ee005efc012",
+    "abi_schema": "cairo_eval_part_v1",
+    "kernel_name": "stwo_cairo_cuda_eval_v6_fbad7ee005efc012",
+    "cache_key": "b2573120e76ae635",
+    "semantic_hash": "fbad7ee005efc012",
+    "program_identity": "e3c52eb9b1ade207602d94e4d0c3fd7a49a751607c618a27c192b00f353b6aa4",
+    "file": "constraint_starked_eval_fbad7ee005efc012_b2573120e76ae635.cu",
+    "module_globals": "none",
+    "catalog_identity": "550200479d03f3cc5df12d3795cfe4645824bd96368f3cd6e70c0df8669c62ec",
+    "codegen_version": 6,
+    "identity_scheme": "sha256-cairo-eval-parametric-source-v6",
+    "occurrences": [
+      {
+        "component_index": 23,
+        "part_index": 0
+      }
+    ],
+    "source_sha256": "93a2825782bd368ef8e041691d97c03f8bda22357a90e8f7c45219f474f7b6da"
+  },
+  {
+    "kind": "constraint",
     "label": "starked_eval_fe7e9855cdfa1ccf",
     "abi_schema": "cairo_eval_part_v1",
     "kernel_name": "stwo_cairo_cuda_eval_v6_fe7e9855cdfa1ccf",
@@ -581,6 +581,19 @@
   },
   {
     "kind": "witness",
+    "label": "starked_logup_265c8d0085a1c973",
+    "abi_schema": "native_blake_exact_interaction_v1",
+    "kernel_name": "starked_logup_v1_265c8d0085a1c973",
+    "cache_key": "eaf6d19d7c87d5ab",
+    "semantic_hash": "265c8d0085a1c973",
+    "program_identity": "ab0aa84073c51437070b900ed21a6879ff254c1fa8dbb9616d820893e5422ab5",
+    "file": "witness_starked_logup_265c8d0085a1c973_eaf6d19d7c87d5ab.cu",
+    "module_globals": "none",
+    "identity_scheme": "sha256-source-and-contract-v1",
+    "semantic_contract": "starked-bitcoin/logup-fractions/v1;air=set_tmsg;digest=18b651401fe77892bb0caab46d71ada5ac26f962124d3be1f35d1fbe3d1fe073;args=sources,outputs,pubs,powers,z,denominators,error,log_size;rows=storage;threads=256"
+  },
+  {
+    "kind": "witness",
     "label": "starked_logup_2d69bd1ba3f58f33",
     "abi_schema": "native_blake_exact_interaction_v1",
     "kernel_name": "starked_logup_v1_2d69bd1ba3f58f33",
@@ -591,6 +604,19 @@
     "module_globals": "none",
     "identity_scheme": "sha256-source-and-contract-v1",
     "semantic_contract": "starked-bitcoin/logup-fractions/v1;air=block_fields;digest=f880c048c535d3f5114a94792e4305d97481404b3e60c96dbba74b6cd0fa6fcc;args=sources,outputs,pubs,powers,z,denominators,error,log_size;rows=storage;threads=256"
+  },
+  {
+    "kind": "witness",
+    "label": "starked_logup_4525161bef8c67ef",
+    "abi_schema": "native_blake_exact_interaction_v1",
+    "kernel_name": "starked_logup_v1_4525161bef8c67ef",
+    "cache_key": "ccd2c456647116ce",
+    "semantic_hash": "4525161bef8c67ef",
+    "program_identity": "26d07816faf6d258446d352f79cca99259097a3dd50a6f68d6e21b5bbf504e1a",
+    "file": "witness_starked_logup_4525161bef8c67ef_ccd2c456647116ce.cu",
+    "module_globals": "none",
+    "identity_scheme": "sha256-source-and-contract-v1",
+    "semantic_contract": "starked-bitcoin/logup-fractions/v1;air=block_coin;digest=469ded29ae2fd7bc3c3f14c584f2ea844ba4d3c8579383cfab5c528239d5087c;args=sources,outputs,pubs,powers,z,denominators,error,log_size;rows=storage;threads=256"
   },
   {
     "kind": "witness",
@@ -633,19 +659,6 @@
   },
   {
     "kind": "witness",
-    "label": "starked_logup_6ce5361c1ab293e7",
-    "abi_schema": "native_blake_exact_interaction_v1",
-    "kernel_name": "starked_logup_v1_6ce5361c1ab293e7",
-    "cache_key": "1cb4382b64b81a90",
-    "semantic_hash": "6ce5361c1ab293e7",
-    "program_identity": "f8f7a84e5e91d41782527aa7de81cd10132a4da8fd5ee7fba43db71f74b9227c",
-    "file": "witness_starked_logup_6ce5361c1ab293e7_1cb4382b64b81a90.cu",
-    "module_globals": "none",
-    "identity_scheme": "sha256-source-and-contract-v1",
-    "semantic_contract": "starked-bitcoin/logup-fractions/v1;air=set_rec;digest=0a4f4753a445adeea838db289c4841c008e4b3c087f44a7198f4b06d70f49a55;args=sources,outputs,pubs,powers,z,denominators,error,log_size;rows=storage;threads=256"
-  },
-  {
-    "kind": "witness",
     "label": "starked_logup_7babb6a867ad510b",
     "abi_schema": "native_blake_exact_interaction_v1",
     "kernel_name": "starked_logup_v1_7babb6a867ad510b",
@@ -656,6 +669,19 @@
     "module_globals": "none",
     "identity_scheme": "sha256-source-and-contract-v1",
     "semantic_contract": "starked-bitcoin/logup-fractions/v1;air=set_b2c;digest=e38af0e5ec36439582abe5641e804d4ef2225d09d168b1f3e0bb7cb786825a74;args=sources,outputs,pubs,powers,z,denominators,error,log_size;rows=storage;threads=256"
+  },
+  {
+    "kind": "witness",
+    "label": "starked_logup_8a7980a2e42910f2",
+    "abi_schema": "native_blake_exact_interaction_v1",
+    "kernel_name": "starked_logup_v1_8a7980a2e42910f2",
+    "cache_key": "e258b73dc7bd060f",
+    "semantic_hash": "8a7980a2e42910f2",
+    "program_identity": "4da8a2a5fe9f8356c467ffffbe6e407311365bfdc59237b16279dbf76443e6e3",
+    "file": "witness_starked_logup_8a7980a2e42910f2_e258b73dc7bd060f.cu",
+    "module_globals": "none",
+    "identity_scheme": "sha256-source-and-contract-v1",
+    "semantic_contract": "starked-bitcoin/logup-fractions/v1;air=set_rec;digest=6a787371f240748fcaa165e28fea1d894cc397b886d2bf6943cab4bb2fbb2495;args=sources,outputs,pubs,powers,z,denominators,error,log_size;rows=storage;threads=256"
   },
   {
     "kind": "witness",
@@ -708,19 +734,6 @@
     "module_globals": "none",
     "identity_scheme": "sha256-source-and-contract-v1",
     "semantic_contract": "starked-bitcoin/logup-fractions/v1;air=block_bytes;digest=69ae5c33e3a391925b0c23c431db457fdba9a020f27339eab4f19f63cd769a17;args=sources,outputs,pubs,powers,z,denominators,error,log_size;rows=storage;threads=256"
-  },
-  {
-    "kind": "witness",
-    "label": "starked_logup_ae0c8ba59a984c40",
-    "abi_schema": "native_blake_exact_interaction_v1",
-    "kernel_name": "starked_logup_v1_ae0c8ba59a984c40",
-    "cache_key": "faa126b9738776d5",
-    "semantic_hash": "ae0c8ba59a984c40",
-    "program_identity": "3738821656646a6b27ff00538c204ede7b4df46483e9b322ffb65af70c04a3e4",
-    "file": "witness_starked_logup_ae0c8ba59a984c40_faa126b9738776d5.cu",
-    "module_globals": "none",
-    "identity_scheme": "sha256-source-and-contract-v1",
-    "semantic_contract": "starked-bitcoin/logup-fractions/v1;air=set_tmsg;digest=037f8922078d48ced14ab12dbbc470084a5cfef06c1d44afe05722ae94561d1d;args=sources,outputs,pubs,powers,z,denominators,error,log_size;rows=storage;threads=256"
   },
   {
     "kind": "witness",
@@ -815,16 +828,16 @@
   },
   {
     "kind": "witness",
-    "label": "starked_logup_dfcdc2f61371b201",
+    "label": "starked_logup_df8bc6d359aa572f",
     "abi_schema": "native_blake_exact_interaction_v1",
-    "kernel_name": "starked_logup_v1_dfcdc2f61371b201",
-    "cache_key": "6565f1ddef9c6940",
-    "semantic_hash": "dfcdc2f61371b201",
-    "program_identity": "e089af00a406c27d038b68acbdafa52030e9a9f0ecf6055295eaf0fb277abcbc",
-    "file": "witness_starked_logup_dfcdc2f61371b201_6565f1ddef9c6940.cu",
+    "kernel_name": "starked_logup_v1_df8bc6d359aa572f",
+    "cache_key": "759324549a49aab5",
+    "semantic_hash": "df8bc6d359aa572f",
+    "program_identity": "19eadd79e89dea93ab775127e66d72a051814c7c005ba8525a94fef472752d4b",
+    "file": "witness_starked_logup_df8bc6d359aa572f_759324549a49aab5.cu",
     "module_globals": "none",
     "identity_scheme": "sha256-source-and-contract-v1",
-    "semantic_contract": "starked-bitcoin/logup-fractions/v1;air=block_coin;digest=682beb1805721a2beff94a960f339552371911fd585405b0348fbde81de73cf7;args=sources,outputs,pubs,powers,z,denominators,error,log_size;rows=storage;threads=256"
+    "semantic_contract": "starked-bitcoin/logup-fractions/v1;air=block_urec;digest=4d2bb2854421e71cf857e1b8d16e8cfbecaac2f352aa5b46b6aecb7f2dd9731a;args=sources,outputs,pubs,powers,z,denominators,error,log_size;rows=storage;threads=256"
   },
   {
     "kind": "witness",
@@ -864,19 +877,6 @@
     "module_globals": "none",
     "identity_scheme": "sha256-source-and-contract-v1",
     "semantic_contract": "starked-bitcoin/logup-fractions/v1;air=set_lw;digest=2bb94628a1ca6ed077d33d76852dfae15cedbb3b78b1ddf115747f420c32f1df;args=sources,outputs,pubs,powers,z,denominators,error,log_size;rows=storage;threads=256"
-  },
-  {
-    "kind": "witness",
-    "label": "starked_logup_fd9d43fbc488fc00",
-    "abi_schema": "native_blake_exact_interaction_v1",
-    "kernel_name": "starked_logup_v1_fd9d43fbc488fc00",
-    "cache_key": "53d517c6e65ff340",
-    "semantic_hash": "fd9d43fbc488fc00",
-    "program_identity": "0e811068f610266f885f01dec721ffc636a8c3768d4c5725d606133049e690f0",
-    "file": "witness_starked_logup_fd9d43fbc488fc00_53d517c6e65ff340.cu",
-    "module_globals": "none",
-    "identity_scheme": "sha256-source-and-contract-v1",
-    "semantic_contract": "starked-bitcoin/logup-fractions/v1;air=block_urec;digest=8d09e4ef561ecaec82db72dca70dce9de6aa9764fe9125c301af7c6867cd540e;args=sources,outputs,pubs,powers,z,denominators,error,log_size;rows=storage;threads=256"
   },
   {
     "kind": "witness",

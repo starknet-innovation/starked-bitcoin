@@ -747,7 +747,7 @@ fn proveBlock(gpa: std.mem.Allocator, a: std.mem.Allocator, block_path: []const 
     const ctx = sb.block.checks.Ctx{ .height = height, .prev_mtp = PF.prevMtp(all, height), .anc = PF.ancestors(all, height) };
     var timer = try std.time.Timer.start();
     const airs = try BS.parseAirs(a);
-    const b = try BS.buildFull(a, raw, undo, ctx, .{ .auto = true, .mtps = try BS.timeClaims(a, raw, undo, all, height) });
+    const b = try BS.buildFull(a, raw, undo, ctx, .{ .auto = true, .mtps = try BS.timeClaims(a, undo, all) });
     if (b.ntx > 1 and undo.len == 1) {
         std.debug.print("REJECTED: the block spends outputs; pass its undo stream (scripts/fetch_undo.py), not `-`\n", .{});
         return error.UndoRequired;
@@ -2188,7 +2188,7 @@ fn setToSnapshot(gpa: std.mem.Allocator, a: std.mem.Allocator, set_path: []const
     try rd.init(gpa, set_path);
     defer rd.deinit();
     var coins: std.ArrayListUnmanaged(SNAP.TestCoin) = .empty;
-    while (try rd.next()) |c| try coins.append(a, .{ .txid = c.txid, .vout = c.vout, .height = c.height, .cb = c.cb, .ser = try a.dupe(u8, c.ser) });
+    while (try rd.next()) |c| try coins.append(a, .{ .txid = c.txid, .vout = c.vout, .height = c.height, .cb = c.cb, .ser = try a.dupe(u8, c.txout()) });
     const bytes = try SNAP.encode(a, network, sha256d(&all[height]), coins.items);
     try std.fs.cwd().writeFile(.{ .sub_path = out_path, .data = bytes });
     std.debug.print("wrote {s}: {d} coins after block {d}, {d} bytes\n", .{ out_path, coins.items.len, height, bytes.len });

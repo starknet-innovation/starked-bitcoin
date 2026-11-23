@@ -6,7 +6,7 @@ position `START` (`Spec/SetFile.encRec`):
 * the first record starts at 0, each next one after the previous one's `49 + len` bytes, and the last
   one ends at the segment length (`pub 0`); `START < 2^24`;
 * the 49 head bytes and `ser`'s first 8 (the amount) are read from the byte table;
-* `cb ≤ 1`, `height < 2^24`, `8 ≤ len < 2^24`; the code bytes `2·height + cb` (carries);
+* `cb ≤ 1`, `height < 2^24`, `12 ≤ len < 2^24`; the code bytes `2·height + cb` (carries);
 * the key (txid bytes, then `vout` big-endian) is above the previous record's, the first record's above
   the public incoming key when there is one (one differing byte, equal before it);
 * the coin tuple (`block_coin`'s 26 terms, the fingerprint from `block_fpwalk`) and the fraction
@@ -40,7 +40,7 @@ def LENC : ℕ := 61
 /-- Code bytes and their carries `K 1 … K 3` (`K 0` is `cb`). -/
 def C (i : ℕ) : ℕ := 62 + i
 def K (i : ℕ) : ℕ := 65 + i
-/-- `len − 8` and `START`, as three bytes each. -/
+/-- `len − 12` and `START`, as three bytes each (`ser` is `serTxOut ‖ time`: at least 8 + 4 bytes). -/
 def D (i : ℕ) : ℕ := 69 + i
 def SB (i : ℕ) : ℕ := 72 + i
 def FC : ℕ := 75
@@ -115,7 +115,7 @@ def localC : List Expr :=
     .mul (k LST) (.sub (.add (.add (k START) (cst 49)) (k LENC)) (.pub PUB_LEN)),
     .mul (k ON) (.sub (k START) (b3 SB)),
     -- the fields
-    .sub (k LENC) lenOf, .mul (k ON) (hb 48), .mul (k ON) (.sub (.sub (k LENC) (cst 8)) (b3 D)),
+    .sub (k LENC) lenOf, .mul (k ON) (hb 48), .mul (k ON) (.sub (.sub (k LENC) (cst 12)) (b3 D)),
     .mul (k ON) (boolC (hb 40)), .mul (k ON) (hb 39),
     .sub (k (C 0)) (.sub (.add (.mul (cst 2) (hb 36)) (hb 40)) (.mul (cst 256) (k (K 1)))),
     .sub (k (C 1)) (.sub (.add (.mul (cst 2) (hb 37)) (k (K 1))) (.mul (cst 256) (k (K 2)))),

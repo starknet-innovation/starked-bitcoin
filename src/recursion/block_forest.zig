@@ -409,7 +409,7 @@ test "block VK round trip; expected keys fold as the nodes do" {
 /// Since CONNECT-RULES step 4 (2026-11-20: the time-based lock's claim; step 3 gave `6f40f98f…9292`, step 2 `95cda9e5…f426`). With the AIRs of m3a5
 /// (2196ba3), which D-045 kept unchanged and the proofs of blocks 935,001-972,500 use, it was
 /// `golden_vk_0_170_m3a5`.
-pub const golden_vk_0_170 = "6a1508994399ed79bb7a8493991b800385be8e146973a87f955b525a43c08b82";
+pub const golden_vk_0_170 = "b63cfaf3bb76cf0c0b4ac2f7260b05bdeeabba7dcc6c55cf11255e5a62633dd5";
 pub const golden_vk_0_170_m3a5 = "dc0661443658274e9d278072f5118a5c7a1d91d04616c2ce02650a3090c695f8";
 
 test "block VK golden: the uniform key of blocks 0 and 170" {

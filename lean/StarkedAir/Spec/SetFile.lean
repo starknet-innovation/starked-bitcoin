@@ -2,7 +2,9 @@
 **The coin-set file and the set pass (D-048; docs/design/set-pass.md, step 2).** A set file is the
 4-byte count, then per coin `txid(32) ‖ vout(4) ‖ height(4) ‖ cb(1) ‖ txi(4) ‖ len(4) ‖ ser(len)`,
 strictly sorted by outpoint (`set_file.zig`'s `Reader`). A record is a coin event
-`(⟨txid, vout⟩, (2·height + cb, ser), txi)` (`CoinEpoch.CEv`).
+`(⟨txid, vout⟩, (2·height + cb, ser), txi)` (`CoinEpoch.CEv`), `ser` the coin's bytes: `serTxOut`, then the
+coin's time, 4 bytes (`CoinEpoch.coinBytes`; D-058, R5). Core's `TxOutSer` has the `serTxOut` only
+(`txOutSer`, `serOf`).
 
 - `parseSet`: the reader's parse and range checks; `parseSet_encSet` and `encSet_of_parseSet`: it
   accepts exactly the encodings of well-formed record lists, so a file's bytes (hence its Blake2s
@@ -43,7 +45,7 @@ def encSet (es : List CEv) : Bytes := leBytes 4 es.length ++ es.flatMap encRec
 /-- The reader's range checks (`CoinEpochSound.WFE`: the code below 2^32, the length below P), and the
 8-byte amount the pass reads. -/
 def RecOk (e : CEv) : Prop :=
-  (txid e).length = 32 ∧ vout e < 2 ^ 32 ∧ code e < 2 ^ 32 ∧ txi e < 2 ^ 32 ∧ 8 ≤ (ser e).length ∧
+  (txid e).length = 32 ∧ vout e < 2 ^ 32 ∧ code e < 2 ^ 32 ∧ txi e < 2 ^ 32 ∧ 12 ≤ (ser e).length ∧
     (ser e).length < 2 ^ 31 - 1
 
 instance (e : CEv) : Decidable (RecOk e) := by unfold RecOk; infer_instance
@@ -66,7 +68,7 @@ def parseRecs : ℕ → Bytes → Option (List CEv)
     let l := le ((b.drop 45).take 4)
     let cb := le ((b.drop 40).take 1)
     let h := le ((b.drop 36).take 4)
-    if b.length < 49 + l ∨ 1 < cb ∨ 2 ^ 31 ≤ h ∨ 2 ^ 31 - 1 ≤ l ∨ l < 8 then none
+    if b.length < 49 + l ∨ 1 < cb ∨ 2 ^ 31 ≤ h ∨ 2 ^ 31 - 1 ≤ l ∨ l < 12 then none
     else
       let e : CEv := (⟨b.take 32, le ((b.drop 32).take 4)⟩, (2 * h + cb, (b.drop 49).take l), le ((b.drop 41).take 4))
       (parseRecs k (b.drop (49 + l))).map (e :: ·)
@@ -225,7 +227,7 @@ theorem encSet_inj {es es' : List CEv} (h : ∀ e ∈ es, RecOk e) (h' : ∀ e �
 /-! ### What the pass proves -/
 
 /-- Core's `TxOutSer` (`kernel/coinstats.cpp`): outpoint, `2·height + cb` as u32, the output. -/
-def txOutSer (e : CEv) : Bytes := txid e ++ leBytes 4 (vout e) ++ leBytes 4 (code e) ++ ser e
+def txOutSer (e : CEv) : Bytes := txid e ++ leBytes 4 (vout e) ++ leBytes 4 (code e) ++ serOf (ser e)
 
 def amountOf (e : CEv) : ℕ := le ((ser e).take 8)
 
@@ -500,15 +502,17 @@ theorem pass_sound (fr : List (CEv → 𝕂)) (n : ℕ) (es : List CEv) (F : Fac
 
 /-! ### A two-coin file, against Python's `hashlib` and `chainproof set-pass-model` -/
 
-/-- Coins `(00 01 … 1f):1` at height 5, coinbase, 50 BTC; `(01 … 20):0` at height 6, 1,234 sat. -/
+/-- Coins `(00 01 … 1f):1` at height 5, coinbase, 50 BTC, time `0x44332211`; `(01 … 20):0` at height 6,
+1,234 sat, time `0x04030201`. The hash (Core's `hash_serialized`) does not cover the times. -/
 def ex2 : Bytes := [
   2, 0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
-  27, 28, 29, 30, 31, 1, 0, 0, 0, 5, 0, 0, 0, 1, 7, 0, 0, 0, 10, 0, 0, 0, 0, 242, 5, 42, 1, 0, 0, 0, 1, 81, 1,
-  2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
-  31, 32, 0, 0, 0, 0, 6, 0, 0, 0, 0, 8, 0, 0, 0, 9, 0, 0, 0, 210, 4, 0, 0, 0, 0, 0, 0, 0]
+  27, 28, 29, 30, 31, 1, 0, 0, 0, 5, 0, 0, 0, 1, 7, 0, 0, 0, 14, 0, 0, 0, 0, 242, 5, 42, 1, 0, 0, 0, 1, 81, 17,
+  34, 51, 68, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
+  27, 28, 29, 30, 31, 32, 0, 0, 0, 0, 6, 0, 0, 0, 0, 8, 0, 0, 0, 13, 0, 0, 0, 210, 4, 0, 0, 0, 0, 0, 0, 0, 1,
+  2, 3, 4]
 
 #guard (parseSet ex2).map (fun es => (Blake2s.hex (facts (𝕂 := ℕ) [] es).digest, Blake2s.hex (facts (𝕂 := ℕ) [] es).hash)) =
-  some ("073a759f588e2877fd827e4a1c495930268b59999eebb025e0aeb1c597529a05",
+  some ("799fa4bab3691c811e73b5c9ed9ee2f4ce60e131e096c172f89b499462773fd1",
     "552bf9252379ea7f7271a758f92852cf6cc3e088fa6b1a9f977454c6d0a38463")
 
 -- The pass over `ex2`'s records, one segment per record, the amount as a "fraction".
@@ -516,7 +520,7 @@ def ex2 : Bytes := [
     | [a, b] => finish ([[a], [b]].foldl (fun s seg => seg.foldl (step (𝕂 := ℕ) [amountOf]) s) (begin 1 2))
     | _ => none).map
       (fun F => (F.count, F.amount, F.maxHeight, Blake2s.hex F.digest, Blake2s.hex F.hash, F.sums)) ==
-  some (2, 5000001234, 6, "073a759f588e2877fd827e4a1c495930268b59999eebb025e0aeb1c597529a05",
+  some (2, 5000001234, 6, "799fa4bab3691c811e73b5c9ed9ee2f4ce60e131e096c172f89b499462773fd1",
     "552bf9252379ea7f7271a758f92852cf6cc3e088fa6b1a9f977454c6d0a38463", [5000001234])
 
 -- Out of order: the pass rejects the records swapped.

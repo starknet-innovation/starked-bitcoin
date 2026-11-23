@@ -27,7 +27,9 @@ The owner's rule: anything proven stays proven. The block proofs and epoch roots
 
 - **the digest:** Blake2s-256 of the whole set file (`epoch.setDigest`, `SF.Reader`): one sequential
   hash over the 4-byte count, then each record `txid(32) ‖ vout(4) ‖ height(4) ‖ cb(1) ‖ txi(4) ‖
-  len(4) ‖ ser(len)`;
+  len(4) ‖ ser(len)`; on branch `connect-rules` (D-059, not in the published proofs) `ser` is
+  `serTxOut ‖ time(4)`: the coin's time is in the file digest, the fingerprint and the Merkle leaf, and is
+  left out of Core's `hash_serialized` stream ([connect-rules.md](connect-rules.md) "Step 4");
 - **the fraction:** `coinFrac(ch, …) = 1/(z − φ)`, `φ = Σ αᵢ·tᵢ` over 26 terms: the txid's 16 limbs,
   `vout` and `2·height + cb` as u16 limbs, the script bytes folded by Horner at `γ` (4 M31), `len`,
   `txi` (`coin.coinFrac`).

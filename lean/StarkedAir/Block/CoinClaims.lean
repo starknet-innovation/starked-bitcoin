@@ -709,13 +709,13 @@ theorem tx_claims_ok (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
       exact_mod_cast this)
     htot
   have hclaim : Spec.Coins.claimSum ⟨B.h, t == 0, Spec.Block.txid tx, tx, (tx.vin.zipIdx).map fun p =>
-      (coinOfVal ((B.claim t p.2).code, (B.claim t p.2).ser), N ((B.claim t p.2).code / 2) + (B.claim t p.2).ctx)⟩ =
+      (coinOfVal ((B.claim t p.2).code, coinBytes (B.claim t p.2).ser (B.claim t p.2).mtp), N ((B.claim t p.2).code / 2) + (B.claim t p.2).ctx)⟩ =
       ∑ k ∈ Finset.range tx.vin.length, ((a k : ℕ) : ℤ) := by
     unfold Spec.Coins.claimSum
     simp only [List.map_map]
     rw [show ((fun x : Spec.Coins.Coin × ℕ => x.1.value) ∘ fun p : Spec.Block.TxIn × ℕ =>
-        (coinOfVal ((B.claim t p.2).code, (B.claim t p.2).ser), N ((B.claim t p.2).code / 2) + (B.claim t p.2).ctx)) =
-        fun p => ((a p.2 : ℕ) : ℤ) from rfl, sumZ_zipIdx (fun k => ((a k : ℕ) : ℤ)) tx.vin 0]
+        (coinOfVal ((B.claim t p.2).code, coinBytes (B.claim t p.2).ser (B.claim t p.2).mtp), N ((B.claim t p.2).code / 2) + (B.claim t p.2).ctx)) =
+        fun p => ((a p.2 : ℕ) : ℤ) from by funext p; simp only [Function.comp, coinOfVal, serOf_coinBytes]; rfl, sumZ_zipIdx (fun k => ((a k : ℕ) : ℤ)) tx.vin 0]
     simp
   refine ⟨by simp, ?_, ?_, ?_⟩
   · intro c hc
@@ -725,7 +725,7 @@ theorem tx_claims_ok (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
     obtain ⟨hki, hcode, -⟩ := hcl p.2 hk
     have hm := in_maturity hL hsat hL24 (by have := (hrows p.2 (by omega)).1; omega) hki hp2 hh hcode
       (hcv p.2 hk).2.2
-    simp only [coinOfVal, beq_iff_eq, hBh]
+    simp only [coinOfVal, serOf_coinBytes, beq_iff_eq, hBh]
     exact hm
   · rw [hclaim, ← hout']; exact_mod_cast hle
   · rw [hclaim, max_money_eq]; exact_mod_cast hmax
@@ -753,7 +753,7 @@ theorem tx_locks_ok (S : Setup inst pub (Ls 1)) {e : ℕ} (he : e < 2 ^ Ls 14)
   intro p hp
   obtain ⟨k, hk, rfl⟩ := List.getElem_of_mem hp
   have hkv : k < tx.vin.length := by simpa using hk
-  simp only [List.getElem_zip, List.getElem_map, List.getElem_zipIdx, Nat.zero_add, coinOfVal, hBh]
+  simp only [List.getElem_zip, List.getElem_map, List.getElem_zipIdx, Nat.zero_add, coinOfVal, serOf_coinBytes, hBh]
   obtain ⟨hki, hcode, -⟩ := hcl k hkv
   exact in_lock hL hsat hL24 S he hon hlen hst hf htg hp2 hh hp5 htx (List.getElem?_eq_getElem hkv) rfl
     (hrows k (by omega)).1 hki hcode (hcv k hkv)
@@ -769,21 +769,21 @@ theorem block_factsL (S : Setup inst pub (Ls 1)) {h : ℕ} (hp2 : pub 2 = (h : F
     (hα : ∀ k < Coin.W, RunSum.pQ pub (Coin.PUB_ALPHA k) = α ^ k)
     (hne : ∀ (t' : ℕ) (tx' : Spec.Block.Tx), S.b.txs[t']? = some tx' → tx'.vin ≠ [] ∧ tx'.vout ≠ []) :
     ∃ claim : ℕ → ℕ → Claim,
-      (∀ N : ℕ → ℕ, RunSum.pQ pub Coin.PUB_S - claimSum inst (Ls 14) =
-        blockSum N (efrac N (FpWalk.gQ pub) α (RunSum.pQ pub Coin.PUB_Z)) ⟨h, S.b.txs, lost, claim⟩) ∧
+      (∀ N : ℕ → ℕ, RunSum.pQ pub Coin.PUB_S =
+        blockSum N (efrac N (FpWalk.gQ pub) α (RunSum.pQ pub Coin.PUB_Z)) ⟨h, S.b.txs, lost, claim, pubMtp pub⟩) ∧
       (∀ (N : ℕ → ℕ) (t : ℕ) (tx : Spec.Block.Tx), S.b.txs[t]? = some tx →
-        ∀ ev ∈ txIns N ⟨h, S.b.txs, lost, claim⟩ t tx, ∃ c : Claim, ev = (ev.1, (c.code, c.ser), N (c.code / 2) + c.ctx) ∧
+        ∀ ev ∈ txIns N ⟨h, S.b.txs, lost, claim, pubMtp pub⟩ t tx, ∃ c : Claim, ev = (ev.1, (c.code, coinBytes c.ser c.mtp), N (c.code / 2) + c.ctx) ∧
           (c.code < 2 ^ 26 → c.ctx < 2 ^ 25 → (c.code / 2 < h ∨ (c.code / 2 = h ∧ c.ctx < t))) ∧
-          c.code < 2 ^ 32 ∧ c.ctx < 2 ^ 24 ∧ c.ser.length < P) ∧
+          c.code < 2 ^ 32 ∧ c.ctx < 2 ^ 24 ∧ c.ser.length + 4 < P) ∧
       (∀ (N : ℕ → ℕ) (t : ℕ) (tx : Spec.Block.Tx), S.b.txs[t]? = some tx → 1 ≤ t →
         (∀ k < tx.vin.length, 8 ≤ (claim t k).ser.length ∧
           Spec.Block.le ((claim t k).ser.take 8) ≤ Fields.MAXHI * 2 ^ 24 + Fields.MAXLO ∧ (claim t k).code < 2 ^ 30) →
         Spec.Coins.outSum tx ≤ Spec.Block.MAX_MONEY →
-        Spec.Coins.ClaimsOK (txcOf N ⟨h, S.b.txs, lost, claim⟩ t tx)) ∧
+        Spec.Coins.ClaimsOK (txcOf N ⟨h, S.b.txs, lost, claim, pubMtp pub⟩ t tx)) ∧
       (pub 5 = (if Spec.Block.CSV_HEIGHT ≤ h then 1 else 0) →
         ∀ (N : ℕ → ℕ) (t : ℕ) (tx : Spec.Block.Tx), S.b.txs[t]? = some tx → 1 ≤ t →
           (∀ k < tx.vin.length, (claim t k).code < 2 ^ 30) →
-          Spec.Coins.ClaimsLockOK (txcOf N ⟨h, S.b.txs, lost, claim⟩ t tx)) := by
+          Spec.Coins.ClaimsLockOK (txcOf N ⟨h, S.b.txs, lost, claim, pubMtp pub⟩ t tx)) := by
   obtain ⟨e, he, hon, hlen, hst⟩ := coin_align hL hsat hL24 S
   obtain ⟨parts, hf, htg⟩ := Spec.Block.io_toksBlock_tag S.htok
   obtain ⟨claim, hcl⟩ := block_claims hL hsat hL24 S he hon hlen hst hf htg hp2 hh
@@ -791,7 +791,7 @@ theorem block_factsL (S : Setup inst pub (Ls 1)) {h : ℕ} (hp2 : pub 2 = (h : F
     fun hp5 N t tx htx ht1 hcv => ?_⟩
   · have hs := block_event_sum hL hsat hL24 S he hon hlen hst hf htg hp2 hh hlost N claim
       (fun t tx htx ht1 k i hi => (hcl t tx htx ht1 k i hi).1)
-    rw [hs, add_sub_cancel_right]
+    rw [hs]
     unfold blockSum efrac
     congr 1 <;> congr 1 <;> apply Multiset.map_congr rfl <;> intro ev _ <;>
       rw [phiOf_poly pub α hα _ (by rw [encE_length]; rfl)]
@@ -807,12 +807,12 @@ theorem block_factsL (S : Setup inst pub (Ls 1)) {h : ℕ} (hp2 : pub 2 = (h : F
       · rw [hcode]; exact le4_lt' _
       · have hv : (pub 8).val < P := ZMod.val_lt _
         omega
-  · exact tx_claims_ok hL hsat hL24 S he hon hlen hst hf htg hne hp2 hh N ⟨h, S.b.txs, lost, claim⟩ rfl htx ht1
+  · exact tx_claims_ok hL hsat hL24 S he hon hlen hst hf htg hne hp2 hh N ⟨h, S.b.txs, lost, claim, pubMtp pub⟩ rfl htx ht1
       (fun k hk => by
         obtain ⟨i, hi⟩ : ∃ i, tx.vin[k]? = some i := ⟨_, List.getElem?_eq_getElem hk⟩
         exact (hcl t tx htx ht1 k i hi).2.2.2)
       hcv hout
-  · exact tx_locks_ok hL hsat hL24 S he hon hlen hst hf htg hne hp2 hh hp5 N ⟨h, S.b.txs, lost, claim⟩ rfl htx ht1
+  · exact tx_locks_ok hL hsat hL24 S he hon hlen hst hf htg hne hp2 hh hp5 N ⟨h, S.b.txs, lost, claim, pubMtp pub⟩ rfl htx ht1
       (fun k hk => by
         obtain ⟨i, hi⟩ : ∃ i, tx.vin[k]? = some i := ⟨_, List.getElem?_eq_getElem hk⟩
         exact (hcl t tx htx ht1 k i hi).2.2.2)
@@ -824,17 +824,17 @@ theorem block_facts (S : Setup inst pub (Ls 1)) {h : ℕ} (hp2 : pub 2 = (h : F)
     (hα : ∀ k < Coin.W, RunSum.pQ pub (Coin.PUB_ALPHA k) = α ^ k)
     (hne : ∀ (t' : ℕ) (tx' : Spec.Block.Tx), S.b.txs[t']? = some tx' → tx'.vin ≠ [] ∧ tx'.vout ≠ []) :
     ∃ claim : ℕ → ℕ → Claim,
-      (∀ N : ℕ → ℕ, RunSum.pQ pub Coin.PUB_S - claimSum inst (Ls 14) =
-        blockSum N (efrac N (FpWalk.gQ pub) α (RunSum.pQ pub Coin.PUB_Z)) ⟨h, S.b.txs, lost, claim⟩) ∧
+      (∀ N : ℕ → ℕ, RunSum.pQ pub Coin.PUB_S =
+        blockSum N (efrac N (FpWalk.gQ pub) α (RunSum.pQ pub Coin.PUB_Z)) ⟨h, S.b.txs, lost, claim, pubMtp pub⟩) ∧
       (∀ (N : ℕ → ℕ) (t : ℕ) (tx : Spec.Block.Tx), S.b.txs[t]? = some tx →
-        ∀ ev ∈ txIns N ⟨h, S.b.txs, lost, claim⟩ t tx, ∃ c : Claim, ev = (ev.1, (c.code, c.ser), N (c.code / 2) + c.ctx) ∧
+        ∀ ev ∈ txIns N ⟨h, S.b.txs, lost, claim, pubMtp pub⟩ t tx, ∃ c : Claim, ev = (ev.1, (c.code, coinBytes c.ser c.mtp), N (c.code / 2) + c.ctx) ∧
           (c.code < 2 ^ 26 → c.ctx < 2 ^ 25 → (c.code / 2 < h ∨ (c.code / 2 = h ∧ c.ctx < t))) ∧
-          c.code < 2 ^ 32 ∧ c.ctx < 2 ^ 24 ∧ c.ser.length < P) ∧
+          c.code < 2 ^ 32 ∧ c.ctx < 2 ^ 24 ∧ c.ser.length + 4 < P) ∧
       (∀ (N : ℕ → ℕ) (t : ℕ) (tx : Spec.Block.Tx), S.b.txs[t]? = some tx → 1 ≤ t →
         (∀ k < tx.vin.length, 8 ≤ (claim t k).ser.length ∧
           Spec.Block.le ((claim t k).ser.take 8) ≤ Fields.MAXHI * 2 ^ 24 + Fields.MAXLO ∧ (claim t k).code < 2 ^ 30) →
         Spec.Coins.outSum tx ≤ Spec.Block.MAX_MONEY →
-        Spec.Coins.ClaimsOK (txcOf N ⟨h, S.b.txs, lost, claim⟩ t tx)) := by
+        Spec.Coins.ClaimsOK (txcOf N ⟨h, S.b.txs, lost, claim, pubMtp pub⟩ t tx)) := by
   obtain ⟨claim, h1, h2, h3, -⟩ := block_factsL hL hsat hL24 S hp2 hh hlost hα hne
   exact ⟨claim, h1, h2, h3⟩
 

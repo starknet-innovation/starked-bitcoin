@@ -241,14 +241,15 @@ theorem coin_urec_class {j : ℕ} (hj : j < 2 ^ Ls 14) (hki : (inst 14).main Coi
         16777216 * (inst 13).main (URec.V 6) r',
       (inst 13).main (URec.X 0) r' + 256 * (inst 13).main (URec.X 1) r' + 65536 * (inst 13).main (URec.X 2) r',
       (inst 13).main URec.CP r', (inst 13).main URec.C20 r', (inst 13).main URec.C32 r',
-      (inst 13).main (URec.MT 0) r' + 256 * (inst 13).main (URec.MT 1) r',
-      (inst 13).main (URec.MT 2) r' + 256 * (inst 13).main (URec.MT 3) r'] := by
+      (inst 13).main (URec.MT 0) r', (inst 13).main (URec.MT 1) r', (inst 13).main (URec.MT 2) r',
+      (inst 13).main (URec.MT 3) r'] := by
     simp [siteVals, siteEval, siteLookup, hashSys, hL 13 (by decide), URec.urec, URec.lookups, URec.k, URec.limb,
       Expr.eval, StarkedAir.Sha256.eval_col, StarkedAir.Sha256.eval_cst, wrap_zero hr']
   have e2 : siteVals hashSys inst pub (14, j, 3) = [(inst 14).main Coin.J j, (inst 14).main Coin.CLO j,
       (inst 14).main Coin.CHI j, (inst 14).main Coin.VL j, (inst 14).main Coin.VH j, (inst 14).main Coin.CTX j,
       (inst 14).main Coin.UP j, (inst 14).main Coin.U20 j, (inst 14).main Coin.U32 j,
-      (inst 14).main Coin.ML j, (inst 14).main Coin.MH j] := by
+      (inst 14).main (Coin.TB 0) j, (inst 14).main (Coin.TB 1) j, (inst 14).main (Coin.TB 2) j,
+      (inst 14).main (Coin.TB 3) j] := by
     simp [siteVals, siteEval, siteLookup, hashSys, hL 14 (by decide), Coin.coin, Coin.lookups_len, Coin.lk0, Coin.lk1, Coin.lk2, Coin.lk3, Coin.lk4, Coin.lk5, Coin.lk6, Coin.lg0, Coin.lg1, Coin.lg2, Coin.lg3, Coin.lg4, Coin.lg5, Coin.lg6, Coin.k,
       StarkedAir.Sha256.eval_col, wrap_zero hj]
   rw [e1, e2] at hsv

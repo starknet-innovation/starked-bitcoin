@@ -86,14 +86,15 @@ pub fn step(st: *State, chs: []const coin.Challenge, bytes: []const u8) !usize {
     st.last = .{ .txid = txid, .vout = vout };
     st.b2.update(bytes[0 .. HEAD + l]);
     // TxOutSer: the outpoint, 2·height + cb, the output.
-    if (l < 8) return error.CoinOutOfRange;
+    if (l < 12) return error.CoinOutOfRange;
     var b: [8]u8 = undefined;
     st.sha.update(&txid);
     std.mem.writeInt(u32, b[0..4], vout, .little);
     std.mem.writeInt(u32, b[4..8], 2 * height + cb, .little);
     st.sha.update(&b);
-    st.sha.update(ser);
-    st.sha_bytes += 40 + l;
+    // Core's `TxOutSer` has the `serTxOut` only: not the coin's time, the record's last 4 bytes.
+    st.sha.update(ser[0 .. l - 4]);
+    st.sha_bytes += 40 + l - 4;
     st.amount += std.mem.readInt(u64, ser[0..8], .little);
     st.max_height = @max(st.max_height, height);
     for (chs, st.sums[0..st.k]) |ch, *s| s.* = s.add(try coin.coinFrac(ch, txid, vout, height, cb == 1, ser, txi));

@@ -315,7 +315,7 @@ theorem memE {c : Expr} (h : c ∈ ([ -- rows: a nonempty prefix; the last recor
         .mul (k LST) (.sub (.add (.add (k START) (cst 49)) (k LENC)) (.pub PUB_LEN)),
         .mul (k ON) (.sub (k START) (b3 SB)),
         -- the fields
-        .sub (k LENC) lenOf, .mul (k ON) (hb 48), .mul (k ON) (.sub (.sub (k LENC) (cst 8)) (b3 D)),
+        .sub (k LENC) lenOf, .mul (k ON) (hb 48), .mul (k ON) (.sub (.sub (k LENC) (cst 12)) (b3 D)),
         .mul (k ON) (boolC (hb 40)), .mul (k ON) (hb 39),
         .sub (k (C 0)) (.sub (.add (.mul (cst 2) (hb 36)) (hb 40)) (.mul (cst 256) (k (K 1)))),
         .sub (k (C 1)) (.sub (.add (.mul (cst 2) (hb 37)) (k (K 1))) (.mul (cst 256) (k (K 2)))),
@@ -483,11 +483,12 @@ theorem ab_val {r j : ℕ} (hr : r < e) (hj : j < 8) :
     push_cast; rw [cast_val]; rw [← hpos]; push_cast; ring
   rw [hv, this]; exact ⟨rfl, hq⟩
 
-/-- The record's fields: the length (three bytes, the fourth zero, at least 8), the coinbase flag,
+/-- The record's fields: the length (three bytes, the fourth zero, at least 12: an amount and the coin's
+time), the coinbase flag,
 height's top byte zero. -/
 theorem fields {r : ℕ} (hr : r < e) :
     (M LENC r).val = S ((M START r).val + 45) + 256 * S ((M START r).val + 46) + 65536 * S ((M START r).val + 47) ∧
-    S ((M START r).val + 48) = 0 ∧ 8 ≤ (M LENC r).val ∧ (M LENC r).val < 2 ^ 24 ∧
+    S ((M START r).val + 48) = 0 ∧ 12 ≤ (M LENC r).val ∧ (M LENC r).val < 2 ^ 24 ∧
     S ((M START r).val + 40) ≤ 1 ∧ S ((M START r).val + 39) = 0 := by
   have hrn : r < n := by have := E.lt; omega
   have hon := on_of E hr
@@ -495,7 +496,7 @@ theorem fields {r : ℕ} (hr : r < e) :
   have hbv := fun j (hj : j < 49) => (hb_val hsat E H hr hj).1
   have c1 := lc hsat hrn (c := .sub (k LENC) lenOf) (memE (by simp))
   have c2 := lc hsat hrn (c := .mul (k ON) (hb 48)) (memE (by simp))
-  have c3 := lc hsat hrn (c := .mul (k ON) (.sub (.sub (k LENC) (cst 8)) (b3 D))) (memE (by simp))
+  have c3 := lc hsat hrn (c := .mul (k ON) (.sub (.sub (k LENC) (cst 12)) (b3 D))) (memE (by simp))
   have c4 := lc hsat hrn (c := .mul (k ON) (boolC (hb 40))) (memE (by simp))
   have c5 := lc hsat hrn (c := .mul (k ON) (hb 39)) (memE (by simp))
   simp only [lenOf, Expr.eval, ev_k hrn, ev_hb hrn, ev_pair, ev_b3 hrn, eval_cst, hon, one_mul, sub_eq_zero, boolC,
@@ -511,7 +512,7 @@ theorem fields {r : ℕ} (hr : r < e) :
   obtain ⟨-, d0, -, -⟩ := H.r8 r hrn hon 0 (by norm_num)
   obtain ⟨-, d1, -, -⟩ := H.r8 r hrn hon 1 (by norm_num)
   obtain ⟨-, d2, -, -⟩ := H.r8 r hrn hon 2 (by norm_num)
-  have h8 : L = (M (D 0) r).val + 256 * (M (D 1) r).val + 65536 * (M (D 2) r).val + 8 := by
+  have h8 : L = (M (D 0) r).val + 256 * (M (D 1) r).val + 65536 * (M (D 2) r).val + 12 := by
     apply lift _ (by have := P_big; omega) (by have := P_big; omega)
     rw [← hL]; push_cast; simp only [cast_val]; linear_combination c3
   refine ⟨hLv.trans hLd, ?_, by omega, by omega, ?_, ?_⟩
