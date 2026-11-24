@@ -45,6 +45,9 @@ pub const Profile = enum(u8) {
     /// tables at 8; anc at 12. Requires L ≥ 12. Offsets from `scripts/tier_search.py` on blocks
     /// 935,001–972,500 (2026-11-23): 39 % fewer proven cells than `tiered` there.
     tight = 2,
+    /// TIERS-GEN (D-062): `tight` with msg at L and walk at L−2, for blocks before the witness-heavy
+    /// era (fitted on heights 100,000–700,000: about 30 % fewer proven cells than `tiered` there).
+    early = 3,
 };
 
 /// `tight`'s offsets below L, per component (ctx, tables and anc are fixed sizes).
@@ -59,6 +62,14 @@ pub const TIGHT_OFF = blk: {
     o[C.urec] = 9;
     o[C.merkle] = 10;
     o[C.wmerkle] = 10;
+    break :blk o;
+};
+
+/// `early`'s offsets below L: `tight`'s, but msg at L and walk at L−2.
+pub const EARLY_OFF = blk: {
+    var o = TIGHT_OFF;
+    o[C.msg] = 0;
+    o[C.walk] = 2;
     break :blk o;
 };
 
@@ -89,8 +100,8 @@ pub fn profileLogs(L: u32, profile: Profile) [N_COMP]u32 {
     var out: [N_COMP]u32 = @splat(L);
     if (profile == .uniform) return out;
     std.debug.assert(L >= TIERED_MIN_L);
-    if (profile == .tight) {
-        for (&out, TIGHT_OFF) |*o, off| o.* = @max(L -| off, 8);
+    if (profile == .tight or profile == .early) {
+        for (&out, if (profile == .tight) TIGHT_OFF else EARLY_OFF) |*o, off| o.* = @max(L -| off, 8);
         out[C.ctx] = 8;
         out[C.tables] = 8;
         out[C.anc] = 12;
@@ -502,12 +513,15 @@ pub fn partsAt(airs: *const [N_COMP]ir.Air, logs: [N_COMP]u32, pubs: *const [N_P
 pub const Sized = struct { L: u32, profile: Profile };
 
 /// The production choice: for blocks of uniform size 2^12 and more, `tight` when the block fits it, else
+/// `early`, else
 /// `tiered`, else `uniform`; uniform below.
 pub fn sizesAuto(needs: [N_COMP]usize, min_log: u32) Sized {
     const u = sizesFor(needs, .uniform, min_log);
     if (u.L < TIERED_MIN_L) return u;
     const t = sizesFor(needs, .tight, min_log);
     if (t.profile == .tight) return t;
+    const e = sizesFor(needs, .early, min_log);
+    if (e.profile == .early) return e;
     return sizesFor(needs, .tiered, min_log);
 }
 
@@ -549,7 +563,7 @@ pub fn sizeReport(needs: [N_COMP]usize) SizeReport {
     var best: usize = 0;
     for (needs, 0..) |n, i| {
         if (sized.profile == .tiered and i != C.sha and i != C.msg and i != C.bytes and i != C.walk) continue;
-        if (sized.profile == .tight and i != C.sha and i != C.msg and i != C.bytes and i != C.walk) continue;
+        if ((sized.profile == .tight or sized.profile == .early) and i != C.sha and i != C.msg and i != C.bytes and i != C.walk) continue;
         if (n > best) {
             best = n;
             binding = i;
@@ -791,17 +805,17 @@ test "block system: tiered profile (D-045): the small samples satisfy every comp
     }
 }
 
-test "block system: tight profile (TIERS-2, D-061): the small samples satisfy every component, prove and verify through a proof file" {
+test "block system: tight and early profiles (D-061, D-062): the small samples satisfy every component, prove and verify through a proof file" {
     const pf = @import("proof_file.zig");
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const a = arena.allocator();
     const airs = try parseAirs(a);
-    for (checks.samples_small) |s| {
+    for ([_]Profile{ .tight, .early }) |want| for (checks.samples_small) |s| {
         // 2^15: room for every tier of these small blocks (walk is at L − 4, fields at L − 7).
-        const b = try buildFull(a, s.raw, s.undo, s.ctx, .{ .profile = .tight, .min_log = 15 });
-        try std.testing.expectEqual(Profile.tight, b.profile);
-        try std.testing.expectEqualSlices(u32, &profileLogs(15, .tight), &b.logs);
+        const b = try buildFull(a, s.raw, s.undo, s.ctx, .{ .profile = want, .min_log = 15 });
+        try std.testing.expectEqual(want, b.profile);
+        try std.testing.expectEqualSlices(u32, &profileLogs(15, want), &b.logs);
         if (try firstViolation(a, &airs, &b)) |v| {
             std.debug.print("height {d}: {s} row {d} violates constraint {d}\n", .{ s.ctx.height, names[v.comp], v.row, v.constraint });
             return error.TestUnexpectedResult;
@@ -813,19 +827,23 @@ test "block system: tight profile (TIERS-2, D-061): the small samples satisfy ev
         const proof = try pf.prove(a, &airs, &b, pf.testFri());
         const bytes_ = try pf.encode(a, &.{ .log_size = b.log_size, .profile = b.profile, .pubs = b.pubs, .proof = proof, .provenance = "test" });
         const f = try pf.decode(a, bytes_);
-        try std.testing.expectEqual(Profile.tight, f.profile);
+        try std.testing.expectEqual(want, f.profile);
         try pf.verifyStark(a, &airs, &f, pf.testFri());
         // The same proof read under another profile fails.
-        for ([_]Profile{ .uniform, .tiered }) |other| {
+        for ([_]Profile{ .uniform, .tiered, .tight, .early }) |other| {
+            if (other == want) continue;
             var g = try pf.decode(a, bytes_);
             g.profile = other;
             try std.testing.expect(std.meta.isError(pf.verifyStark(a, &airs, &g, pf.testFri())));
         }
-        std.debug.print("height {d}: tight L={d} sizes {any}: proved, verified ({d} bytes)\n", .{ s.ctx.height, b.log_size, b.logs, bytes_.len });
-    }
+        std.debug.print("height {d}: {s} L={d} sizes {any}: proved, verified ({d} bytes)\n", .{ s.ctx.height, @tagName(want), b.log_size, b.logs, bytes_.len });
+    };
 }
 
-test "block system: sizesAuto prefers tight, then tiered, then uniform; tight's sizes are covered to L = 24" {
+test "block system: sizesAuto prefers tight, then early, then tiered, then uniform; their sizes are covered to L = 24" {
+    try std.testing.expectEqualSlices(u32, &.{ 21, 15, 22, 22, 12, 8, 20, 8, 12, 19, 19, 19, 19, 13, 14, 12 }, &profileLogs(22, .early));
+    try std.testing.expect(sizeOk(profileLogs(24, .early)));
+    try std.testing.expect(!sizeOk(profileLogs(25, .early)));
     try std.testing.expectEqualSlices(u32, &.{ 21, 15, 21, 22, 12, 8, 18, 8, 12, 19, 19, 19, 19, 13, 14, 12 }, &profileLogs(22, .tight));
     try std.testing.expectEqualSlices(u32, &.{ 11, 8, 11, 12, 8, 8, 8, 8, 8, 9, 9, 9, 9, 8, 8, 12 }, &profileLogs(12, .tight));
     try std.testing.expect(sizeOk(profileLogs(24, .tight)));
@@ -841,15 +859,19 @@ test "block system: sizesAuto prefers tight, then tiered, then uniform; tight's 
     const t = sizesAuto(needs, 0);
     try std.testing.expectEqual(Profile.tight, t.profile);
     try std.testing.expectEqual(@as(u32, 22), t.L);
-    // The walk above its tight tier (2^18): tiered at the same L.
+    // The walk above its tight tier (2^18), within early's (2^20): early at the same L.
     needs[C.walk] = 300_000;
     const u = sizesAuto(needs, 0);
-    try std.testing.expectEqual(Profile.tiered, u.profile);
+    try std.testing.expectEqual(Profile.early, u.profile);
     try std.testing.expectEqual(@as(u32, 22), u.L);
-    // msg above L − 1: tiered.
+    // msg above L − 1: early.
     needs[C.walk] = 200_000;
     needs[C.msg] = 2_200_000;
+    try std.testing.expectEqual(Profile.early, sizesAuto(needs, 0).profile);
+    // The walk above early's tier too: tiered.
+    needs[C.walk] = 1_100_000;
     try std.testing.expectEqual(Profile.tiered, sizesAuto(needs, 0).profile);
+    needs[C.walk] = 200_000;
     // The coin above tiered's L − 5 too: uniform.
     needs[C.coin] = 200_000;
     try std.testing.expectEqual(Profile.uniform, sizesAuto(needs, 0).profile);
@@ -901,7 +923,7 @@ test "block sizes: auto is uniform below 2^12; from 2^12 tight, else tiered, els
     const big = sizesAuto(needs, 0);
     try std.testing.expectEqual(Profile.tight, big.profile);
     try std.testing.expectEqual(@as(u32, 22), big.L);
-    needs[C.coin] = 1 << 15; // above tight's L − 8, within tiered's L − 5
+    needs[C.coin] = 1 << 15; // above tight's and early's L − 8, within tiered's L − 5
     const mid = sizesAuto(needs, 0);
     try std.testing.expectEqual(Profile.tiered, mid.profile);
     try std.testing.expectEqual(@as(u32, 22), mid.L);

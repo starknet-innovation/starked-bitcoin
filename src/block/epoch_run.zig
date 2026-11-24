@@ -89,6 +89,7 @@ pub const Epoch = struct {
             .profile = switch (size) {
                 .tiered => .tiered,
                 .tight => .tight,
+                .early => .early,
                 else => .uniform,
             },
             .auto = size == .auto,
@@ -108,7 +109,7 @@ pub const Epoch = struct {
     }
 };
 
-pub const Size = enum { auto, uniform, tiered, tight };
+pub const Size = enum { auto, uniform, tiered, tight, early };
 
 /// Block `hh`'s files: the raw block (checked against the header), its fetched undo stream and the
 /// creating transactions' indices.

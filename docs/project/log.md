@@ -21,6 +21,42 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-11-24 · session 47 · TIERS-GEN: needs of the whole chain, the `early` profile (D-062)
+
+Who: Claude (agent, Fable 5.2); owner: "Yes, rent the CPU machine on runpod. D060: Ok. DO61: ok"
+Roadmap: TIERS-GEN done except a GPU timing of `early` and the owner's confirmation of D-062; D-060 and D-061 accepted
+Done:
+- D-060 and D-061 marked accepted.
+- **No pod was rented.** The node measures needs without a coin set: `scripts/survey_driver.py` (session 39's) takes each block and its prevouts from Core (`getblock` 3) and feeds `survey`. Run with `STARKED_SURVEY_NEEDS=1` on heights 492,993–935,000, 1 in 10 (44,201 blocks, 58 minutes, 0 errors); the pass over every height continues on the node (`/data/replay/needsrun/drv.sh`, about 9 hours, low priority).
+- `scripts/tier_eras.py`: proven cells per era under each set of profiles, and a profile fitted to each era by coordinate search.
+- Profile `early` (D-062): `tight` with msg at L and walk at L−2; `sizesAuto` tries tight, early, tiered, uniform; forest key bits `11`, `Vk.leaf_early`; `--early`; arena table (2^23: 39.4 GiB).
+Evidence:
+- Cells, `tiered`-or-uniform against tight + early + tiered (every block to 492,992 and from 935,001; the sample × 10 between):
+
+  | heights | tiered only | fewer with `tight` | fewer with `tight` and `early` | blocks taking tight / early / tiered |
+  |---|---|---|---|---|
+  | 0–99,999 | 3.92e11 | 15.8 % | 24.0 % | 84 / 14 / 1 % |
+  | 100,000–199,999 | 8.25e12 | 0.1 % | 31.1 % | 6 / 91 / 3 % |
+  | 200,000–299,999 | 3.86e13 | 0.0 % | 31.2 % | 1 / 97 / 2 % |
+  | 300,000–399,999 | 1.02e14 | 0.0 % | 30.2 % | 3 / 93 / 4 % |
+  | 400,000–499,999 | 1.90e14 | 0.0 % | 31.0 % | 1 / 96 / 3 % |
+  | 500,000–599,999 | 2.23e14 | 0.1 % | 30.0 % | 1 / 92 / 7 % |
+  | 600,000–699,999 | 2.54e14 | 0.1 % | 27.5 % | 1 / 82 / 18 % |
+  | 700,000–799,999 | 2.74e14 | 14.0 % | 29.3 % | 25 / 48 / 27 % |
+  | 800,000–899,999 | 3.72e14 | 34.4 % | 36.6 % | 77 / 9 / 14 % |
+  | 900,000–972,500 | 2.69e14 | 37.9 % | 38.6 % | 87 / 4 / 9 % |
+  | **all** | **1.731e15** | **15.5 %** | **32.4 %** | |
+
+  A fifth profile (walk L−3, msg L−1) would reach 34.2 %.
+- Device time, from the H100 timings of block 970,347 (0.83–0.97 s per 10^9 cells): about 400–470 GPU-hours of device proving for the chain under `tiered` alone, about 270–320 with the two profiles. Not in these figures: the per-block fixed cost (972,500 blocks; a tiny block takes about 0.6 s of device time), the witness and host time, the trees, joins, set passes and seal.
+- `zig build test -Doptimize=ReleaseFast --summary all`: "11/11 steps succeeded; 157/159 tests passed; 2 skipped", exit 0; `zig build cuda-test -Dcuda=true` and `cuda-check`: exit 0. No AIR or Lean file changed in this session.
+Problems / lessons:
+- I had asked the owner for a 64 GB machine (and the answer was yes) before remembering that the survey driver gets a block's spent coins from Core. A replay was never needed for needs. Lesson: before asking for money, look for the tool that already exists (`scripts/`, the node's `~/snap`).
+- The replay's `--needs` (session 46) stays: it gave blocks 0–492,992, and is the way when no node with undo data is at hand.
+Next: owner's confirmation of D-062; a cost estimate and an epoch plan for the run from genesis; see status.md.
+
+---
+
 ## 2026-11-24 · session 46b · `tight` timed on an H100; device parity after D-060
 
 Who: Claude (agent, Fable 5.2); owner: "2 and 3: Yes" (push of a2e1454; the GPU run)

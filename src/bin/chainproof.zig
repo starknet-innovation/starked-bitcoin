@@ -192,6 +192,9 @@ pub fn main() !void {
             } else if (std.mem.eql(u8, args[i], "--tight")) {
                 from.size = .tight;
                 i += 1;
+            } else if (std.mem.eql(u8, args[i], "--early")) {
+                from.size = .early;
+                i += 1;
             } else if (std.mem.eql(u8, args[i], "--uniform")) {
                 from.size = .uniform;
                 i += 1;

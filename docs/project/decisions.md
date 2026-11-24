@@ -749,3 +749,18 @@ Open: the offsets come from 37,500 recent blocks. For a run from genesis they sh
 the whole chain (`replay --needs`, added for this); the CUDA arena table has no `tight` row yet; one GPU
 timing must confirm that cells predict time.
 To undo: remove the enum value; `auto` then chooses as before.
+
+### D-062 — TIERS-GEN: the `early` size profile for blocks before the witness-heavy era
+Date: 2026-11-24 · By: agent (Claude), on the owner's direction (a run from genesis; D-061 accepted "as the profile for recent blocks") · Status: applied on branch `connect-rules`; **to confirm by the owner**
+Decision: a fourth profile, `early` (`system.Profile`, value 3): `tight`'s sizes with msg at L (not L−1)
+and walk at L−2 (not L−4). `sizesAuto` tries `tight`, then `early`, then `tiered`, then `uniform`.
+Why: measured needs (every block 0–492,992; a 1-in-10 sample of 492,993–935,000; every block
+935,001–972,500). `tight` saves nothing on heights 100,000–700,000: there the message schedule fills its
+power of two and the script walk needs L−2 or L−3. `early` fits 82–97 % of those blocks and proves about
+30 % fewer cells than `tiered`. Figures per era in the log (session 47).
+Format: forest size key bits 7 and 6 are the profile (uniform 00, tiered 10, tight 01, early 11);
+`Vk.leaf_early` is encoded after the tight table, only when set.
+Cost: a fourth family of leaf circuits and VKs. No Lean change (`SizeOk` covers any size vector).
+Rejected: a fifth profile (walk at L−3, msg at L−1): about 2 more points.
+Not done: a GPU timing of `early`.
+To undo: remove the enum value; `auto` then chooses as before.

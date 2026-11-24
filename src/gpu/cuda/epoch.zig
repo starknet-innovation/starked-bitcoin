@@ -173,7 +173,7 @@ pub fn main() !void {
     var i: usize = 5;
     while (i < args.len) : (i += 1) {
         const x = args[i];
-        if (std.mem.eql(u8, x, "--test-strength")) weak = true else if (std.mem.eql(u8, x, "--tiered")) size = .tiered else if (std.mem.eql(u8, x, "--tight")) size = .tight else if (std.mem.eql(u8, x, "--uniform")) size = .uniform else if (std.mem.eql(u8, x, "--verify")) verify = true else if (std.mem.eql(u8, x, "--mock")) mock = true else if (std.mem.eql(u8, x, "--from") and i + 2 < args.len) {
+        if (std.mem.eql(u8, x, "--test-strength")) weak = true else if (std.mem.eql(u8, x, "--tiered")) size = .tiered else if (std.mem.eql(u8, x, "--tight")) size = .tight else if (std.mem.eql(u8, x, "--early")) size = .early else if (std.mem.eql(u8, x, "--uniform")) size = .uniform else if (std.mem.eql(u8, x, "--verify")) verify = true else if (std.mem.eql(u8, x, "--mock")) mock = true else if (std.mem.eql(u8, x, "--from") and i + 2 < args.len) {
             from = .{ .height = try std.fmt.parseInt(u32, args[i + 1], 10), .prev_set = args[i + 2] };
             i += 2;
         } else if (std.mem.eql(u8, x, "--only") and i + 1 < args.len) {

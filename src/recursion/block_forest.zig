@@ -50,16 +50,17 @@ pub fn sizeKey(log_size: u32, profile: bs.Profile) u8 {
         .uniform => @as(u8, 0),
         .tiered => 0x80,
         .tight => 0x40,
+        .early => 0xc0,
     };
 }
 
-/// The profile of a size key; null for a key with both profile bits.
-pub fn keyProfile(key: u8) ?bs.Profile {
+/// The profile of a size key (bits 7 and 6: uniform 00, tiered 10, tight 01, early 11).
+pub fn keyProfile(key: u8) bs.Profile {
     return switch (key & 0xc0) {
         0 => .uniform,
         0x80 => .tiered,
         0x40 => .tight,
-        else => null,
+        else => .early,
     };
 }
 
@@ -68,7 +69,7 @@ pub fn keyProfile(key: u8) ?bs.Profile {
 pub fn keyOk(key: u8) bool {
     const log: u32 = key & 0x3f;
     if (log >= 25) return false;
-    const profile = keyProfile(key) orelse return false;
+    const profile = keyProfile(key);
     if (profile != .uniform and log < bs.TIERED_MIN_L) return false;
     return bs.sizeOk(bs.profileLogs(log, profile));
 }
@@ -86,6 +87,8 @@ pub const Vk = struct {
     leaf_tiered: [25]?Id = @splat(null),
     /// The tight profile's (TIERS-2). Encoded after the tiered table, only when one is set.
     leaf_tight: [25]?Id = @splat(null),
+    /// The early profile's (TIERS-GEN). Encoded after the tight table, only when one is set.
+    leaf_early: [25]?Id = @splat(null),
 
     fn tableOf(self: anytype, profile: bs.Profile) switch (@TypeOf(self)) {
         *Vk => *[25]?Id,
@@ -95,17 +98,23 @@ pub const Vk = struct {
             .uniform => &self.leaf,
             .tiered => &self.leaf_tiered,
             .tight => &self.leaf_tight,
+            .early => &self.leaf_early,
         };
     }
 
     /// The leaf identity for a forest `logs` entry.
     pub fn leafFor(self: *const Vk, key: u8) !Id {
         if (!keyOk(key)) return error.BadLogs;
-        return self.tableOf(keyProfile(key).?)[key & 0x3f] orelse error.LeafSizeNotSetUp;
+        return self.tableOf(keyProfile(key))[key & 0x3f] orelse error.LeafSizeNotSetUp;
     }
 
     fn hasTight(self: *const Vk) bool {
         for (self.leaf_tight) |l| if (l != null) return true;
+        return false;
+    }
+
+    fn hasEarly(self: *const Vk) bool {
+        for (self.leaf_early) |l| if (l != null) return true;
         return false;
     }
 
@@ -129,7 +138,8 @@ pub const Vk = struct {
         }
         try e.words(&self.node.root);
         try e.words(&self.node.hash);
-        const tight = self.hasTight();
+        const early = self.hasEarly();
+        const tight = self.hasTight() or early;
         if (self.hasTiered() or tight) for (self.leaf_tiered) |l| {
             try e.int(u8, @intFromBool(l != null));
             if (l) |id| {
@@ -138,6 +148,13 @@ pub const Vk = struct {
             }
         };
         if (tight) for (self.leaf_tight) |l| {
+            try e.int(u8, @intFromBool(l != null));
+            if (l) |id| {
+                try e.words(&id.root);
+                try e.words(&id.hash);
+            }
+        };
+        if (early) for (self.leaf_early) |l| {
             try e.int(u8, @intFromBool(l != null));
             if (l) |id| {
                 try e.words(&id.root);
@@ -169,6 +186,14 @@ pub const Vk = struct {
         };
         vk.leaf_tight = @splat(null);
         if (d.pos != d.bytes.len) for (&vk.leaf_tight) |*l| {
+            l.* = switch (try d.int(u8)) {
+                0 => null,
+                1 => .{ .root = try d.words(8), .hash = try d.words(8) },
+                else => return error.BadVk,
+            };
+        };
+        vk.leaf_early = @splat(null);
+        if (d.pos != d.bytes.len) for (&vk.leaf_early) |*l| {
             l.* = switch (try d.int(u8)) {
                 0 => null,
                 1 => .{ .root = try d.words(8), .hash = try d.words(8) },
@@ -225,7 +250,7 @@ pub fn setup(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const leaf.T
         var ctx = try br.leafCircuitOf(gpa, a, airs, &files[i], bfri);
         defer ctx.deinit();
         const r = try identityOf(gpa, QM31, &ctx, shape.target, fri.log_blowup_factor);
-        vk.tableOf(keyProfile(@intCast(key)).?)[key & 0x3f] = r.id;
+        vk.tableOf(keyProfile(@intCast(key)))[key & 0x3f] = r.id;
         vk.trace_log = r.trace_log;
     };
     var topo = try br.topology(gpa, &tables.table, &shape.shared);
@@ -436,8 +461,11 @@ test "block VK round trip; expected keys fold as the nodes do" {
     try std.testing.expectEqual(@as(u32, 22), sizeKey(22, .uniform));
     try std.testing.expectEqual(@as(u32, 0x80 | 22), sizeKey(22, .tiered));
     try std.testing.expectEqual(@as(u32, 0x40 | 22), sizeKey(22, .tight));
-    try std.testing.expect(keyOk(sizeKey(24, .tight)) and !keyOk(sizeKey(11, .tight)) and !keyOk(0xc0 | 22));
-    try std.testing.expectEqual(bs.Profile.tight, keyProfile(sizeKey(13, .tight)).?);
+    try std.testing.expect(keyOk(sizeKey(24, .tight)) and !keyOk(sizeKey(11, .tight)));
+    try std.testing.expectEqual(bs.Profile.tight, keyProfile(sizeKey(13, .tight)));
+    try std.testing.expectEqual(@as(u32, 0xc0 | 22), sizeKey(22, .early));
+    try std.testing.expect(keyOk(sizeKey(24, .early)) and !keyOk(sizeKey(11, .early)));
+    try std.testing.expectEqual(bs.Profile.early, keyProfile(sizeKey(13, .early)));
     try std.testing.expect(keyOk(sizeKey(23, .uniform)) and !keyOk(sizeKey(24, .uniform)));
     try std.testing.expect(keyOk(sizeKey(24, .tiered)) and !keyOk(sizeKey(11, .tiered)));
     try std.testing.expectError(error.BadLogs, vk.leafFor(sizeKey(24, .uniform)));

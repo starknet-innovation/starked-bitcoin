@@ -41,7 +41,7 @@ const Opts = struct {
     large: ?u32 = null,
     production: bool = false,
     /// Size profile: by size (tiered from 2^12, uniform below; the default), or forced.
-    size: enum { auto, uniform, tiered, tight } = .auto,
+    size: enum { auto, uniform, tiered, tight, early } = .auto,
     min_log: u32 = 0,
     skip_cpu: bool = false,
     cpu_sha: ?[]const u8 = null,
@@ -210,6 +210,7 @@ pub fn main() !void {
     built.* = try bs.buildFull(a, sample.raw, sample.undo, sample.ctx, .{ .min_log = opts.min_log, .profile = switch (opts.size) {
         .tiered => .tiered,
         .tight => .tight,
+        .early => .early,
         else => .uniform,
     }, .auto = opts.size == .auto, .skip_device_columns = lean });
     const parts = try a.create([bs.N_COMP]system.Part);
