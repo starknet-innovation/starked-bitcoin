@@ -4,7 +4,7 @@ Rewritten at the end of every session; see [README.md](README.md#ending-a-sessio
 If `HEAD at last update` doesn't match `git log -1`, this file is stale:
 follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work).
 
-- **Updated:** 2026-11-24 (sessions 46, 46b and 47 (TIERS-GEN, the `early` profile, D-062): what a run from genesis needs. A real time lock proved; ANC-PRE-CSV (D-060); the recursion delivers `epoch_systems_coreS`'s hypotheses (`Circuit/RecCtx.lean`); the `tight` size profile (D-061))
+- **Updated:** 2026-11-24 (sessions 46 to 48 (TIERS-GEN, the `early` profile, the costed plan of the run from genesis): what a run from genesis needs. A real time lock proved; ANC-PRE-CSV (D-060); the recursion delivers `epoch_systems_coreS`'s hypotheses (`Circuit/RecCtx.lean`); the `tight` size profile (D-061))
 - **HEAD at last update:** this session's commit on branch `connect-rules` (after b319bfb, which is `main` and pushed)
 - **Branches:** `main` = c83ddb1 (pushed): the AIRs of the published proofs. `connect-rules` (pushed to b95fe45; this session's commit is local): CONNECT-RULES steps 2–5, ANC-PRE-CSV, `tight`; its AIRs give other block VKs; merge it when the re-prove is made (or when the owner says).
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
@@ -28,7 +28,7 @@ including the seal's composed statement (`seal_soundW`); trusted items in [verif
 
 **Owner's order (2026-11-19): A–D below come before items 0–3.**
 
-A. CONNECT-RULES ([connect-rules.md](../design/connect-rules.md)), on branch `connect-rules`. Steps 1–5 are built, proven in Lean and device-checked. Session 46 added what a run from genesis needs (connect-rules.md, "After step 4"): three real time-locked blocks proved (test on block 947,544); `block_anc` from height 11 (D-060); `RecCR.forest_epochCW` (`lean/StarkedAir/Circuit/RecCtx.lean`): the recursion delivers every block hypothesis of `epoch_systems_coreS`. **Owner's direction (2026-11-23): the goal is a proof from genesis; no re-prove yet.** **Next step:** GENESIS-PLAN ([roadmap.md](roadmap.md)): a costed plan for the run from genesis. Inputs at hand: cells per era under the four profiles (log session 47: 1.17e15 cells for the chain, about 270–320 H100-hours of device proving alone), the H100 timings of session 46b, [gpu-cuda.md](../design/gpu-cuda.md). Missing: the per-block fixed cost for small blocks (time an epoch of early blocks with `cuda-epoch`), the tree, join, set-pass and seal costs at chain scale, and the choice of epoch boundaries. Also: a GPU timing of `early` (it has only run on the CPU). Open limits: SET-TIME (snapshot starts only), heights 0–10 (D-060), REC-CORE (one theorem from the seal to the rules).
+A. CONNECT-RULES ([connect-rules.md](../design/connect-rules.md)), on branch `connect-rules`. Steps 1–5 are built, proven in Lean and device-checked. Session 46 added what a run from genesis needs (connect-rules.md, "After step 4"): three real time-locked blocks proved (test on block 947,544); `block_anc` from height 11 (D-060); `RecCR.forest_epochCW` (`lean/StarkedAir/Circuit/RecCtx.lean`): the recursion delivers every block hypothesis of `epoch_systems_coreS`. **Owner's direction (2026-11-23): the goal is a proof from genesis; no re-prove yet.** **Next step:** the owner's decisions on [genesis-run.md](../design/genesis-run.md) (the costed plan: about $1,650–2,650, 262 H100-hours of block proofs). If go: the rehearsal first (one small epoch end to end on the new AIRs: leaf circuits for the four profiles, tree, root, join, set pass in the new format, seal), which also re-times the trees. Open limits: SET-TIME (snapshot starts only), heights 0–10 (D-060), REC-CORE (one theorem from the seal to the rules).
 B. SNAP-HASH: [snapshot-hash.md](../design/snapshot-hash.md) is drafted. The Delving follow-up, posted by the owner on 2026-11-20 (draft: `~/Workshop/prove-any-chain/delving-3070-reply3.md`: cost split, the SHA-256/Blake2s correction, the hash proposal). No circuit work before a reaction.
 C. TIERS-2 and TIERS-GEN (D-055, D-061, D-062): four profiles (uniform, tiered, tight, early); the chain proves 32.4 % fewer cells than under tiered alone. `tight`: built. `tight` proves 39.1 % fewer cells than `tiered` on 935,001–972,500 and plans 34.9 GiB for a 2^23 block (tiered: 55.5). GPU-timed 2026-11-24 (31 % less device time on a 2^23 block). Open: the offsets on the whole chain (TIERS-GEN).
 D. The proof run: the owner wants the run from genesis (2026-11-23), not started. Before it: TIERS-GEN, the GPU timing, a cost estimate for the owner, and the choice of epochs. Re-proving 935,001–972,500 alone would keep the snapshot limit of D-059 on time locks.
@@ -51,8 +51,8 @@ D. The proof run: the owner wants the run from genesis (2026-11-23), not started
 
 ## Needs owner
 
-- Nothing to decide now: D-059 to D-062 are accepted (2026-11-23, 2026-11-24). Next for the owner: the costed plan of the run from genesis (GENESIS-PLAN).
-- **Push:** `connect-rules` is pushed up to a2e1454; the docs commit of session 46b is local.
+- **genesis-run.md**: go or no go on the rehearsal (about $40–60); the data route (R2 with a one-time AWS egress charge of about $70, or a Core sync on a pod); a budget for the run. D-059 to D-062 are accepted.
+- **Push:** the commit of session 48 is local (`connect-rules` is pushed to ea93af2).
 - **STWO-225-FU:** follow up on stwo-zig#225 upstream? Outward-facing.
 
 ## Verify the current state

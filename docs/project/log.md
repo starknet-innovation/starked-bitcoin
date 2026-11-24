@@ -21,6 +21,29 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-11-24 · session 48 · GENESIS-PLAN: a sample of every era timed on an H100; the costed plan
+
+Who: Claude (agent, Fable 5.2); owner: "Go ahead on all 3" (D-062; the push; the GPU run and the costed plan)
+Roadmap: GENESIS-PLAN written, awaits the owner; D-062 accepted; TIERS-GEN done
+Done:
+- D-062 marked accepted; `connect-rules` pushed to ea93af2.
+- [genesis-run.md](../design/genesis-run.md): the plan and cost of the run from genesis.
+- A sample of 591 blocks over every era (60 per 100,000 heights, 37 apart; blocks, undo and `.ctx` from the node with `scripts/fetch_undo.py`; `data/gen-sample/`, local), proved on an H100.
+- RunPod H100 SXM 80 GB (secure cloud, $4.39/h; no community stock), pod `tjfeoe0p51cllh`, created 18:42 UTC, deleted about 19:42 UTC (`list-pods` empty): about an hour, about $4.4 (estimate, not from billing). Commit ea93af2 as a tarball.
+Evidence (logs in `data/store/gpu/2026-11-24-genesis-sample/`, local):
+- `cuda-epoch … --heights` (automatic profile, production strength): "590 block proofs (658.6 MB) … 458.6 s, 0.777 s/block", mean GPU utilization 84 %, host peak 15.1 GB. Per class, mean seconds per block: L 12 tight 0.112; L 16–19 early 0.131, 0.148, 0.173, 0.232; L 20 early 0.354; L 21 early 0.587; L 22 early 1.080 (144 blocks), tight 0.980, tiered 1.718; L 23 early 1.955, tight 1.890 (93 blocks), tiered 3.283.
+- One block deferred: 931,776 needs uniform at 2^22 (`InsufficientDeviceMemory` on 80 GB).
+- `epoch.sh sample-check`: "BYTE-IDENTICAL: 188 sample proofs (L <= 19) = device" (CPU against device; tight, early and tiered among them). The first device run of `early`.
+- Fit over the 590 rows: seconds per block = 0.082 + 0.738 per 10^9 cells (rms residual 0.29 s). Over every measured block: 262 H100-hours with the four profiles, 377 with `tiered` only.
+Problems / lessons:
+- `cuda-epoch --tiered` (forced) on the same sample stopped at its first block, 50,000: "plan: component 12 (block_fpwalk) not admitted: CudaCatalogBodyMismatch", "component 13 (block_urec) not admitted: ParameterOutOfBounds". The automatic run proved two `tiered` blocks at L 12, so it is a size combination the forced path reaches. Not investigated (pod time); listed in genesis-run.md. So there is no measured A/B against `tiered` on this sample: the 377 hours come from the fit.
+- Since D-060 every block from height 11 has a 4,096-row ancestry, so no block is below L 12 and `sizesAuto`'s "uniform below 2^12" branch only serves blocks 0–10.
+- `fetch_undo.py --ctx` takes about 6 s per recent block (it looks up each spent coin's creating block): I stopped it at 591 of 660 heights. For the run itself the data must come from a replay.
+- The Mac slept again while I waited for the pod (12 minutes of billed idle). Start `caffeinate` before creating a pod, not after.
+Next: the owner's decisions in genesis-run.md (rehearsal, data route, budget).
+
+---
+
 ## 2026-11-24 · session 47 · TIERS-GEN: needs of the whole chain, the `early` profile (D-062)
 
 Who: Claude (agent, Fable 5.2); owner: "Yes, rent the CPU machine on runpod. D060: Ok. DO61: ok"
