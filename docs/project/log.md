@@ -21,6 +21,25 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-11-24 · session 46b · `tight` timed on an H100; device parity after D-060
+
+Who: Claude (agent, Fable 5.2); owner: "2 and 3: Yes" (push of a2e1454; the GPU run)
+Roadmap: TIERS-2 done except the whole-chain offsets (TIERS-GEN); CONNECT-RULES unchanged (no re-prove)
+Done:
+- a2e1454 pushed to `origin/connect-rules`.
+- RunPod H100 SXM 80 GB (secure cloud, $4.39/h; the community cloud had no stock), pod `9i5f1wwtvpc0hv`, created 15:07 UTC, deleted about 15:52 UTC (`list-pods` empty): about 45 minutes, about $3.3 (estimate, not from billing). Commit a2e1454 shipped as a tarball.
+Evidence (logs in `data/store/gpu/2026-11-24-tight-timing/`, local); every device proof BYTE-IDENTICAL to the CPU proof made on the pod, `verifyExt: accepted`, AOT misses 0:
+- Block 0, test strength, uniform: the device proof is the new golden `1a40ae84…b018`.
+- Block 170, production: `tiered` (L 12) and `tight` (L 15).
+- Block 970,347 (2^23), production: `tiered` device proof 3.46 s, CPU proof 350 s, witness 16.5 s, device peak 55.48 GiB (nvidia-smi 57.6 GB), host RSS 58.6 GB; `tight` device proof 2.40 s, CPU proof 238 s, witness 11.8 s, device peak 34.94 GiB (36.6 GB), host RSS 33.8 GB. So 31 % less device time and 32 % less CPU time for this block; the planned arena was exact.
+- Block 400,000 (below the CSV height, ancestry now on), production, `tiered`: device proof 1.84 s, 27.75 GiB.
+Problems / lessons:
+- `--size tight` on block 400,000 fell back to `uniform` (a 107.8 GiB arena, which no 80 GB card holds; exit 1 after the CPU proof). The block does not fit `tight`, as the needs of old blocks predicted, and a forced `tight` or `tiered` falls back to `uniform`, not to the next profile. `auto` (what an epoch run uses) tries tight, then tiered, then uniform. Left as is; worth making the forced fallback the same.
+- Not run: an epoch with `auto` on the device; the set pass (unchanged since session 45b).
+Next: TIERS-GEN (the needs of 492,993–935,000 on a machine with more memory, then profiles per era); see status.md.
+
+---
+
 ## 2026-11-23 · session 46 · What a run from genesis needs: a real time lock proved, ANC-PRE-CSV, the recursion's guarantee, the `tight` profile
 
 Who: Claude (agent, Fable 5.2); owner: "I'm ok with 1 and 2" (D-059 confirmed; push of b95fe45), "I'll eventually want to go the full hog and prove from genesis, so build whatever is needed for that", "do 1. Do 2, 3 and 4 as well"
