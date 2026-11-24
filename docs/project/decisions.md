@@ -700,7 +700,7 @@ checks on every row, and a change of the tuple in the set pass); leaving the tim
 To undo: revert the commit; the proofs of 935,001–972,500 on `main` do not depend on it.
 
 ### D-060 — ANC-PRE-CSV: the previous median time past is proven from height 11, keyed on the public height
-Date: 2026-11-23 · By: owner ("I'll eventually want to … prove from genesis, so build whatever is needed for that"; "Do 2") and agent (Claude) (the form below) · Status: applied on branch `connect-rules`; the form is **to confirm by the owner**
+Date: 2026-11-23 · By: owner ("I'll eventually want to … prove from genesis, so build whatever is needed for that"; "Do 2") and agent (Claude) (the form below) · Status: **accepted** (owner, 2026-11-24: "D060: Ok"); applied on branch `connect-rules`
 Decision: (1) `block_anc` proves a block's previous median time past (public inputs 3 and 7) at every
 height from 11 on, the first block with 11 predecessors. Before, it did so from the CSV height (419,328)
 only (D-043 part 3), so coins created below it carried time 0 (D-059, limit 2).
@@ -733,7 +733,7 @@ passed (it does not prove completeness); the Zig tests caught it.
 To undo: revert the commit.
 
 ### D-061 — TIERS-2: the `tight` size profile, as built
-Date: 2026-11-23 · By: owner (D-055; "Do … 4 as well") and agent (Claude) (the offsets and the rule) · Status: applied on branch `connect-rules`; not yet timed on a GPU
+Date: 2026-11-23 · By: owner (D-055; "Do … 4 as well") and agent (Claude) (the offsets and the rule) · Status: **accepted** (owner, 2026-11-24: "DO61: ok") as the profile for recent blocks; applied on branch `connect-rules`; timed on an H100 on 2026-11-24 (log session 46b)
 Decision: a third profile, `tight` (`system.Profile`, value 2): sha at L; msg and bytes at L−1; fpwalk,
 b2s, undo, b2msg at L−3; walk at L−4; fields L−7; coin L−8; urec L−9; merkle and wmerkle L−10 (floor 8);
 ctx and tables 8; anc 12. L is what `tiered` uses (the largest of sha, msg, bytes, walk). `sizesAuto`
