@@ -751,7 +751,7 @@ timing must confirm that cells predict time.
 To undo: remove the enum value; `auto` then chooses as before.
 
 ### D-062 — TIERS-GEN: the `early` size profile for blocks before the witness-heavy era
-Date: 2026-11-24 · By: agent (Claude), on the owner's direction (a run from genesis; D-061 accepted "as the profile for recent blocks") · Status: applied on branch `connect-rules`; **to confirm by the owner**
+Date: 2026-11-24 · By: agent (Claude), on the owner's direction (a run from genesis; D-061 accepted "as the profile for recent blocks") · Status: **accepted** (owner, 2026-11-24: "Go ahead on all 3"); applied on branch `connect-rules`
 Decision: a fourth profile, `early` (`system.Profile`, value 3): `tight`'s sizes with msg at L (not L−1)
 and walk at L−2 (not L−4). `sizesAuto` tries `tight`, then `early`, then `tiered`, then `uniform`.
 Why: measured needs (every block 0–492,992; a 1-in-10 sample of 492,993–935,000; every block

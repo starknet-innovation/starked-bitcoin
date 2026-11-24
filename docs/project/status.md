@@ -51,7 +51,7 @@ D. The proof run: the owner wants the run from genesis (2026-11-23), not started
 
 ## Needs owner
 
-- **D-062** ([decisions.md](decisions.md)): confirm the `early` profile (a fourth family of leaf circuits and VKs for 30 % fewer cells on heights 100,000–700,000). D-059, D-060 and D-061 are accepted (2026-11-23, 2026-11-24).
+- Nothing to decide now: D-059 to D-062 are accepted (2026-11-23, 2026-11-24). Next for the owner: the costed plan of the run from genesis (GENESIS-PLAN).
 - **Push:** `connect-rules` is pushed up to a2e1454; the docs commit of session 46b is local.
 - **STWO-225-FU:** follow up on stwo-zig#225 upstream? Outward-facing.
 
