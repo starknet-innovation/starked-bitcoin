@@ -123,7 +123,7 @@ pub fn verifyStark(a: std.mem.Allocator, airs: *const [bs.N_COMP]ir.Air, f: *con
 
 fn checkShape(f: *const File, fri: FriConfigV2) !void {
     if (f.log_size < 8 or f.log_size > 24) return error.LogSizeOutOfRange;
-    if (f.profile == .tiered and f.log_size < bs.TIERED_MIN_L) return error.LogSizeOutOfRange;
+    if (f.profile != .uniform and f.log_size < bs.TIERED_MIN_L) return error.LogSizeOutOfRange;
     const c = f.proof.stark.commitment_scheme_proof.config;
     if (c.pow_bits != fri.pow_bits or c.fri_config.log_blowup_factor != fri.log_blowup_factor or
         c.fri_config.n_queries != fri.n_queries or c.fri_config.log_last_layer_degree_bound != fri.log_last_layer_degree_bound)
@@ -252,10 +252,10 @@ pub fn decode(a: std.mem.Allocator, bytes: []const u8) !File {
 
 /// Median time past of the 11 headers below `height` (Core's `GetMedianTimePast` of the previous
 /// block); `headers[i]` is the 80-byte header at height `i`.
-/// The 11 predecessors' headers (oldest first), when the block is at or above the CSV height (D-043
-/// part 3: the block proof derives the previous MTP from them).
+/// The 11 predecessors' headers (oldest first), when the block has them (D-043 part 3, D-060: the block
+/// proof derives the previous MTP from them).
 pub fn ancestors(headers: []const [80]u8, height: usize) ?*const [11][80]u8 {
-    if (height < checks.CSV_HEIGHT) return null;
+    if (height < checks.ANC_HEIGHT) return null;
     return headers[height - 11 ..][0..11];
 }
 

@@ -198,6 +198,7 @@ python3 check_time_locks.py                                         # scripts/, 
   the leaf's guarantee carried through the recursion (`LeafOut`, `BlockAt`) names the BIP30 flag only,
   not the CSV bit, so `forest_epoch` does not hand it to the epoch theorem. The finality rule's cutoff
   has the same dependency (`final_ok`). To close: add the bit to `LeafOut` and `BlockAt`.
+  **Closed 2026-11-23** (`Circuit/RecCtx.lean`, below: "The recursion's guarantee").
 - **Tests** (`src/block/negative.zig`, synthetic blocks at height 500,000, coins from 499,999):
 
 | Case | Verdict |
@@ -328,9 +329,9 @@ All of it is additive (D-056): no earlier statement changed, `Compat.lean` is un
 - The two hypotheses of `epoch_systems_coreS` beyond `epoch_systems_coreL`'s: the context component has
   at least 2^8 rows (true of every size profile in use), and the epoch's initial coins are serialized
   outputs (true of a set built from Core's coins; not yet derived from the set proof in Lean).
-- Like the CSV bit of step 2, the new epoch theorem is not yet carried into the recursion's guarantee
-  (`LeafOut`, `BlockAt`, `forest_epoch`): the chain proof's composed Lean statement still ends in
-  `epoch_systems_core`.
+- Like the CSV bit of step 2, the new epoch theorem was not carried into the recursion's guarantee
+  (`LeafOut`, `BlockAt`, `forest_epoch`) when this step was written. Since 2026-11-23 it is
+  (`forest_epochCW`, below).
 
 **Not done here:** the GPU walker kernel (`src/gpu/cuda/witness.zig`) builds the old 51 columns; the
 CPU path is the reference until step 5.
@@ -386,11 +387,11 @@ relation, no new public input, no change to the seed or to the recursion's logic
 - Site counts: `urec` 28, `coin` 108; `Link.hashRows` 249 sites per row (the bound for 2^23 rows is 255).
 - **The public input layout and the recursion circuits do not change.**
 
-**Below the CSV height** a block's previous median time past is not proven and its public limbs are 0
-(D-043 part 3), so a coin created below height 419,328 has time 0 (`coin.coinTime`). For the proven range
-(935,001 on) this gives Core's verdict: such a coin is more than 9 years old and a time lock is at most
-388 days. For a run from genesis it does not, for spends between the CSV height and about a year later:
-`block_anc` must then run below the CSV height too (roadmap).
+**Below the CSV height** (as first built) a block's previous median time past was not proven and its
+public limbs were 0 (D-043 part 3), so a coin created below height 419,328 had time 0. That is wrong for a
+run from genesis, for spends between the CSV height and about a year later. **Since 2026-11-23 (D-060)**
+`block_anc` runs from height 11 and a coin's time is 0 only when it was created at heights 0–10 (below:
+"The ancestry from height 11").
 
 **The honest times** come from the header file the provers already load: `system.timeClaims`
 (`coin.timeClaims`) gives every undo record its coin's time. `prove-epoch`/`cuda-epoch`
@@ -418,20 +419,59 @@ unchanged).
 
 Limits of what is proven:
 - `B.mtp` is `pubMtp (pub i)`, the block's public inputs 3 and 7. That they are the chain's `MTP(h − 1)` is
-  `block_anc`'s statement (D-043), for blocks at or above the CSV height only (above).
+  `block_anc`'s statement (D-043; D-060), for every block from height 11.
 - **A coin of the initial set** has the time its set file gives it. Core's `hash_serialized` does not
   cover the time, so for a proof that starts from a snapshot the times of the coins older than the start
   are an input, not a proven fact. A run from genesis has no initial coins. *(A security limit; to be
   checked by the owner. R2, the resolver, would not have had it, at the cost of a proof system inside the
   recursion.)*
-- Not in the recursion's guarantee, like steps 2 and 3 (`BlockOK′` is not `BlockOK`; the circuits are
-  unchanged and still attest the block system's satisfiability).
+- When this step was written it was not in the recursion's guarantee, like steps 2 and 3. Since
+  2026-11-23 the recursion delivers `epoch_systems_coreS`'s hypotheses (`forest_epochCW`, below).
 - The gate (`Compat.lean`): five statements change (`URec.rows_sound`, `epoch_coin_run`, `epoch_blocks`,
   `epoch_systems_core`, `epoch_systems_wf`: a spent value is `(code, coinBytes ser mtp)`, the length bound
   is `+ 4`, an initial coin is `RealCoin`), 14 pins are re-pinned and 9 added (D-058).
 
 **Not done in step 4:** a run over the node's blocks with time locks; `block_anc` below the CSV height;
 binding the initial set's times for a snapshot start; GPU parity on a device (step 5).
+
+## After step 4 (2026-11-23): what a run from genesis needs
+
+### A real time lock, proved
+
+Blocks 947,544, 968,708 and 937,433 from the node (each has time-based locks) proved at production
+strength on the Mac and verified (`data/store/timelock/`, local). Block 937,433's three locks are met
+with 0 s to spare: Core's median time of block 937,432 is 1,771,521,254, of block 933,115 it is
+1,768,928,998, and the difference is 512 × 5,063 exactly.
+A regression test holds block 947,544 (`testdata/`, 55 kB): accepted as is, accepted with the coin's time
+1,140 s later (the lock exactly met), rejected one second past that (`block_coin` constraint 122;
+`error.TimeLockNotMet` without `force`).
+
+### The ancestry from height 11 (ANC-PRE-CSV, D-060)
+
+`block_anc` is switched on by the public height (input 2), not the CSV bit: `act = ∏_{j<11} (H − j)`
+multiplies the hash and count constraints, and a new column holds `act⁻¹` (the limbs are 0 unless
+`act · inv = 1`). So public inputs 3 and 7 are the proven `MTP(h − 1)` for every block from height 11, and
+0 at heights 0–10. `coin.coinTime` follows. Lean: `Anc.anc_sound`, `block_mtp`, `BlockPubOk.mtp` restated
+with the cases `height < 11` and `11 ≤ height`.
+Limit: coins created at heights 0–10 carry time 0 (D-060).
+
+### The recursion's guarantee (`Circuit/RecCtx.lean`)
+
+- `CtxOk p`: public inputs 4, 5, 6 are the BIP34, CSV and segwit bits of the height and 159, 160 its
+  subsidy's limbs. `ctxOk_of_ctx`: the leaf's context program gives it (`BlockCtx.ctx_sound`).
+- `BlockPubOkC p := BlockPubOk' p ∧ CtxOk p`: what a block leaf proves, with its context.
+- `epoch_hyps_of_rngC`, `RecCR.forest_epochCW`: with leaves guaranteeing `LeafAt BlockPubOkC`, a verified
+  forest below height 2^30 gives **every block hypothesis of `epoch_systems_coreS`** (the CSV bit and the
+  context component's 2^8 rows were the two missing), and `MtpOk` of every block: its previous median time
+  past is the median of 11 hash-chained predecessors (heights ≥ 11).
+- The seal's theorem (`seal_soundW`) is stated for any per-block statement, so it holds at
+  `BlockPubOkC` as it is.
+
+What this does not do: it is stated as hypotheses delivered, as `forest_epochVW` was; no single theorem
+yet runs from the seal's acceptance to "every relative lock holds". The trust statement changes with it:
+the leaf is now trusted to guarantee `LeafAt BlockPubOkC` (the circuit already runs the context program;
+`verification.md`). `MtpOk`'s predecessors are hash-chained to the block's own header; that they are the
+chain's blocks follows from the header chain's binding of the block hash, which is not composed here.
 
 ## Order of work
 

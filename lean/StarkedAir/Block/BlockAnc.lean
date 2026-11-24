@@ -4,7 +4,7 @@ ancestry component (`Anc.lean`) appended. The ancestry has no lookups, so a sati
 satisfied `hashSys` (every block theorem applies unchanged) plus a satisfied ancestry trace
 (`blockSys_sat`).
 
-`block_mtp`: below the CSV height the previous MTP's public limbs (inputs 3, 7) are 0; at and above it,
+`block_mtp`: below height 11 the previous MTP's public limbs (inputs 3, 7) are 0; from there on,
 they are the median time past of 11 headers that hash-chain, in order, to a header whose SHA256d is the
 block's (`HashPub.hash_pub`). Under SHA256d collision resistance those are the chain's 11 headers before
 the block, so the MTP is Core's `GetMedianTimePast` of the previous block.
@@ -79,8 +79,8 @@ theorem hL15 : ∀ i < 15, (inst i).logSize = Ls i := fun i hi => hL i (by omega
 
 /-- **The previous MTP** (the ancestry component has `2^(Ls 15) ≥ 2^8` rows). -/
 theorem block_mtp (hL8 : 8 ≤ Ls 15) :
-    (pub Anc.PUB_CSV = 0 ∧ pub Anc.PUB_MLO = 0 ∧ pub Anc.PUB_MHI = 0) ∨
-    (pub Anc.PUB_CSV = 1 ∧ ∃ (b : Spec.Block.Blk) (hw : ℕ → ℕ → Spec.Sha256.Word),
+    ((pub Anc.PUB_H).val < Anc.NANC ∧ pub Anc.PUB_MLO = 0 ∧ pub Anc.PUB_MHI = 0) ∨
+    (Anc.NANC ≤ (pub Anc.PUB_H).val ∧ ∃ (b : Spec.Block.Blk) (hw : ℕ → ℕ → Spec.Sha256.Word),
       Spec.Block.parseBlock (Rb inst pub) = some b ∧
       Spec.Block.stateBytes (Spec.Bitcoin.sha256d (hw Anc.NANC)) = Spec.Block.sha256d b.header ∧
       (∀ j, 1 ≤ j → j ≤ Anc.NANC → Spec.Bitcoin.prevHash (hw j) = Spec.Bitcoin.sha256d (hw (j - 1))) ∧

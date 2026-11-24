@@ -4,9 +4,9 @@ Rewritten at the end of every session; see [README.md](README.md#ending-a-sessio
 If `HEAD at last update` doesn't match `git log -1`, this file is stale:
 follow step 5 of [starting a session](README.md#starting-a-session-pick-up-work).
 
-- **Updated:** 2026-11-23 (session 45: CONNECT-RULES step 4 built and proven under the owner's choice R5 (D-058, D-059): the coin carries its time; `epoch_systems_coreS` proves the time lock against the creating block's time)
+- **Updated:** 2026-11-23 (session 46: what a run from genesis needs. A real time lock proved; ANC-PRE-CSV (D-060); the recursion delivers `epoch_systems_coreS`'s hypotheses (`Circuit/RecCtx.lean`); the `tight` size profile (D-061))
 - **HEAD at last update:** this session's commit on branch `connect-rules` (after b319bfb, which is `main` and pushed)
-- **Branches:** `main` = b319bfb (pushed): the AIRs of the published proofs. `connect-rules` (local): step 2, whose AIRs give other block VKs; merge it when the re-prove is made (or when the owner says).
+- **Branches:** `main` = c83ddb1 (pushed): the AIRs of the published proofs. `connect-rules` (pushed to b95fe45; this session's commit is local): CONNECT-RULES steps 2–5, ANC-PRE-CSV, `tight`; its AIRs give other block VKs; merge it when the re-prove is made (or when the owner says).
 - **Current milestone:** M3 (block data and UTXO set). M1 and M2 done.
 - **Current item:** WEB-MEMBER is live as an unannounced preview at https://starknet-innovation.github.io/starked-bitcoin/ (set file and index on Cloudflare R2, r2.dev URL; [web/README.md](../../web/README.md) "Live deployment"). Open: custom domain for the bucket, external review before announcing. TIP-ITER not started. NODE-BOOT step 1 done: `chainproof verify-snapshot` ([node-boot.md](../guides/node-boot.md)); Core's `dumptxoutset` at 972,500 VERIFIED against the seal on the node.
   SEAL-T (D-052, accepted) is proved on mainnet and the test chain, pinned, and composed in Lean
@@ -28,10 +28,10 @@ including the seal's composed statement (`seal_soundW`); trusted items in [verif
 
 **Owner's order (2026-11-19): A–D below come before items 0–3.**
 
-A. CONNECT-RULES ([connect-rules.md](../design/connect-rules.md)), on branch `connect-rules`. Steps 1–4 are built and proven in Lean. Step 4 (2026-11-23, R5): a coin's bytes are `serTxOut ‖ time` (`Spec.CoinEpoch.coinBytes`, `coin.coinBytes`), in the coin tuple's fingerprint (`Coin.EX`), in every undo record and in the set file; `Block.in_time_lock` and `Block.epoch_systems_coreS` (`lean/StarkedAir/Block/SigEpoch.lean`). Step 5's device parity is done (H100, 2026-11-23, log session 45b). **Next step:** C (TIERS-2): run `survey` with `STARKED_SURVEY_NEEDS=1` on the node with this branch, then `scripts/tier_search.py`. Also open: a native witness run on node blocks that have time locks (none of the local samples has one). The owner said not to re-prove yet. Open limits: SET-TIME and ANC-PRE-CSV ([roadmap.md](roadmap.md)); none of steps 2–4 is in the recursion's composed statement.
+A. CONNECT-RULES ([connect-rules.md](../design/connect-rules.md)), on branch `connect-rules`. Steps 1–5 are built, proven in Lean and device-checked. Session 46 added what a run from genesis needs (connect-rules.md, "After step 4"): three real time-locked blocks proved (test on block 947,544); `block_anc` from height 11 (D-060); `RecCR.forest_epochCW` (`lean/StarkedAir/Circuit/RecCtx.lean`): the recursion delivers every block hypothesis of `epoch_systems_coreS`. **Owner's direction (2026-11-23): the goal is a proof from genesis; no re-prove yet.** **Next step:** (1) TIERS-GEN: the needs of blocks 0–492,992 are in `data/survey/needs-0-492992.csv` (local; the node's run was killed there by its 16 GB). On them `tight` saves nothing from height 100,000 on (taken by 1–6 % of blocks): blocks before segwit want their own offsets. Get the needs of 492,993–935,000 on a machine with more memory (a CPU pod, as the replay of 945,001–972,500 was; owner's go, cost), then search profiles per era with `scripts/tier_search.py`. (2) one GPU run timing a 2^23 block under `tiered` and `tight` and checking device parity of the changed `block_anc` (owner's go: cost). Open limits: SET-TIME (snapshot starts only), heights 0–10 (D-060), REC-CORE (one theorem from the seal to the rules).
 B. SNAP-HASH: [snapshot-hash.md](../design/snapshot-hash.md) is drafted. The Delving follow-up, posted by the owner on 2026-11-20 (draft: `~/Workshop/prove-any-chain/delving-3070-reply3.md`: cost split, the SHA-256/Blake2s correction, the hash proposal). No circuit work before a reaction.
-C. TIERS-2 (D-055): after A's steps 2–4, rerun `scripts/tier_search.py` on new needs (`survey`, `STARKED_SURVEY_NEEDS=1`), add the profile in `src/block/system.zig` (`Profile`, `profileLogs`, `sizesAuto`), time one 2^23 block on a GPU in both profiles.
-D. Re-prove once, after A–C: blocks 935,001–972,500, trees, join, set passes, seal. A from-genesis run is approved in principle (owner), after A.
+C. TIERS-2 (D-055, D-061): built. `tight` proves 39.1 % fewer cells than `tiered` on 935,001–972,500 and plans 34.9 GiB for a 2^23 block (tiered: 55.5). Open: the GPU timing, and the offsets on the whole chain (TIERS-GEN).
+D. The proof run: the owner wants the run from genesis (2026-11-23), not started. Before it: TIERS-GEN, the GPU timing, a cost estimate for the owner, and the choice of epochs. Re-proving 935,001–972,500 alone would keep the snapshot limit of D-059 on time locks.
 
 0. WEB-MEMBER: move the bucket to a custom domain (owner) and update `SET_URL`/`INDEX_URL`; external review before announcing. Upstream: fix stwo-zig `composition_aot_build.zig` (host codegen imports the target `stwo_core`), then move CI back to x86.
 1. TIP-ITER ([roadmap.md](roadmap.md), "Now"): design the repeatable extension of the seal past 972,500:
@@ -43,7 +43,7 @@ D. Re-prove once, after A–C: blocks 935,001–972,500, trees, join, set passes
 
 ## In flight
 
-- Nothing uncommitted after this session's commit except `AGENTS.md` (not the agent's change). No pod is running. The work tree is on branch `connect-rules`.
+- Nothing uncommitted after this session's commit except `AGENTS.md` (not the agent's change). No pod is running. The work tree is on branch `connect-rules`. Nothing is running on the node; `/data/replay/needsrun/` (the needs csv, logs) and `/data/replay/{replay-needs,needs_run.sh}` can be deleted.
 - On the node: `/data/bitcoin/utxo-972500.dat` (Core snapshot, 9.4 GB), `~/snap/` (arm64 `chainproof`, seal inputs, `dump.sh`, `dump.log`); keep for NODE-BOOT step 2, delete after. Also in `~/snap/`: `survey`, `survey2`, `survey3`, `pack.py`, `needs.csv`, `bip68.csv`, `rules.csv`, `tlcheck.py`, `tlcheck.out` (sessions 39 and 40's measurements; can be deleted, `needs.csv` is the input of `scripts/tier_search.py`).
 - Mainnet seal inputs and outputs on the Mac under `data/seal972/` (gitignored `data/`): `out/` (D-051
   seal), `outT/` (SEAL-T seal, `sealvk.bin`, copies of the chain file and join VK), `outTamper/` (tamper
@@ -51,9 +51,9 @@ D. Re-prove once, after A–C: blocks 935,001–972,500, trees, join, set passes
 
 ## Needs owner
 
-- **D-059** ([decisions.md](decisions.md)): confirm the form R5 was built in (the time inside the fingerprint; the set file's `len` counts it; the Merkle leaf covers it; five changed `Compat.lean` statements) and its two limits, both security statements to check: a snapshot-start proof takes old coins' times from the set file (R2 would not have had this); below the CSV height the time is 0.
-- **Re-prove or genesis:** after TIERS-2, choose between re-proving 935,001–972,500 (keeps the snapshot limit of D-059 on time locks) and a run from genesis (needs ANC-PRE-CSV first). The owner said not to re-prove yet (2026-11-23).
-- **Push:** `main` has one local commit (c83ddb1, the stwo-zig URL; it changes the site's "in Zig" link when pushed). Branch `connect-rules` is local.
+- **D-060** ([decisions.md](decisions.md)): confirm the form of ANC-PRE-CSV: on from height 11, keyed on the public height; coins created at heights 0–10 keep time 0 (a security statement to check: harmless only because of the chain's timestamps); three `Compat.lean` statements restated. D-059 was confirmed by the owner on 2026-11-23 ("I'm ok with 1").
+- **D-061**: the `tight` profile's offsets and rule; and the go for one GPU run (about an hour of one H100) to time `tight` against `tiered` and check device parity after D-060.
+- **Push:** this session's commit on `connect-rules` is local (the branch is pushed up to b95fe45).
 - **STWO-225-FU:** follow up on stwo-zig#225 upstream? Outward-facing.
 
 ## Verify the current state

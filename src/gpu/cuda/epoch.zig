@@ -173,7 +173,7 @@ pub fn main() !void {
     var i: usize = 5;
     while (i < args.len) : (i += 1) {
         const x = args[i];
-        if (std.mem.eql(u8, x, "--test-strength")) weak = true else if (std.mem.eql(u8, x, "--tiered")) size = .tiered else if (std.mem.eql(u8, x, "--uniform")) size = .uniform else if (std.mem.eql(u8, x, "--verify")) verify = true else if (std.mem.eql(u8, x, "--mock")) mock = true else if (std.mem.eql(u8, x, "--from") and i + 2 < args.len) {
+        if (std.mem.eql(u8, x, "--test-strength")) weak = true else if (std.mem.eql(u8, x, "--tiered")) size = .tiered else if (std.mem.eql(u8, x, "--tight")) size = .tight else if (std.mem.eql(u8, x, "--uniform")) size = .uniform else if (std.mem.eql(u8, x, "--verify")) verify = true else if (std.mem.eql(u8, x, "--mock")) mock = true else if (std.mem.eql(u8, x, "--from") and i + 2 < args.len) {
             from = .{ .height = try std.fmt.parseInt(u32, args[i + 1], 10), .prev_set = args[i + 2] };
             i += 2;
         } else if (std.mem.eql(u8, x, "--only") and i + 1 < args.len) {
@@ -307,7 +307,7 @@ pub fn main() !void {
         const t_total = job.t_witness + job.t_plans + t_device + lap.lap();
         proof_bytes += bytes.len;
         proved += 1;
-        const key = @as(u64, b.log_size) << 1 | @intFromEnum(b.profile);
+        const key = @as(u64, b.log_size) << 2 | @intFromEnum(b.profile);
         const c = try classes.getOrPut(key);
         if (!c.found_existing) c.value_ptr.* = .{};
         c.value_ptr.n += 1;
@@ -328,6 +328,6 @@ pub fn main() !void {
     var it = classes.iterator();
     while (it.next()) |e| {
         const v = e.value_ptr.*;
-        std.debug.print("  L {d} {s}: {d} blocks, mean {d:.3} s (device {d:.3} s)\n", .{ e.key_ptr.* >> 1, @tagName(@as(bs.Profile, @enumFromInt(e.key_ptr.* & 1))), v.n, v.total / @as(f64, @floatFromInt(v.n)), v.device / @as(f64, @floatFromInt(v.n)) });
+        std.debug.print("  L {d} {s}: {d} blocks, mean {d:.3} s (device {d:.3} s)\n", .{ e.key_ptr.* >> 2, @tagName(@as(bs.Profile, @enumFromInt(e.key_ptr.* & 3))), v.n, v.total / @as(f64, @floatFromInt(v.n)), v.device / @as(f64, @floatFromInt(v.n)) });
     }
 }

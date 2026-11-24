@@ -63,8 +63,8 @@ namespace StarkedAir.Compat
 /-- StarkedAir.Block.BlockPubOk.mtp -/
 theorem compat_Block_BlockPubOk_mtp : ∀ {p : ℕ → StarkedAir.F},
   StarkedAir.Block.BlockPubOk p →
-    p StarkedAir.Block.Anc.PUB_CSV = 0 ∧ p StarkedAir.Block.Anc.PUB_MLO = 0 ∧ p StarkedAir.Block.Anc.PUB_MHI = 0 ∨
-      p StarkedAir.Block.Anc.PUB_CSV = 1 ∧
+    ZMod.val (p StarkedAir.Block.Anc.PUB_H) < StarkedAir.Block.Anc.NANC ∧ p StarkedAir.Block.Anc.PUB_MLO = 0 ∧ p StarkedAir.Block.Anc.PUB_MHI = 0 ∨
+      StarkedAir.Block.Anc.NANC ≤ ZMod.val (p StarkedAir.Block.Anc.PUB_H) ∧
         ∃ (inst : ℕ → StarkedAir.Inst) (b : StarkedAir.Spec.Block.Blk) (hw : ℕ → ℕ → StarkedAir.Spec.Sha256.Word),
           StarkedAir.Spec.Block.parseBlock (StarkedAir.Block.Rb inst p) = Option.some b ∧
             StarkedAir.Spec.Block.stateBytes (StarkedAir.Spec.Bitcoin.sha256d (hw StarkedAir.Block.Anc.NANC)) =
@@ -85,9 +85,9 @@ theorem compat_Block_BlockPubOk_mtp : ∀ {p : ℕ → StarkedAir.F},
 theorem compat_Block_Anc_anc_sound : ∀ {L : ℕ} {pub : ℕ → StarkedAir.F} {main : ℕ → ℕ → StarkedAir.F},
   StarkedAir.Block.Anc.anc.air.Satisfied L pub main →
     8 ≤ L →
-      pub StarkedAir.Block.Anc.PUB_CSV = 0 ∧
+      ZMod.val (pub StarkedAir.Block.Anc.PUB_H) < StarkedAir.Block.Anc.NANC ∧
           pub StarkedAir.Block.Anc.PUB_MLO = 0 ∧ pub StarkedAir.Block.Anc.PUB_MHI = 0 ∨
-        pub StarkedAir.Block.Anc.PUB_CSV = 1 ∧
+        StarkedAir.Block.Anc.NANC ≤ ZMod.val (pub StarkedAir.Block.Anc.PUB_H) ∧
           12 ≤ L ∧
             (∀ j ≤ StarkedAir.Block.Anc.NANC,
                 StarkedAir.Spec.Bitcoin.sha256d (StarkedAir.HeaderChain.headerWord main j) =
@@ -173,9 +173,9 @@ theorem compat_Block_block_mtp : ∀ {inst : ℕ → StarkedAir.Inst} {pub : ℕ
     StarkedAir.Block.blockSys.SatisfiedExt inst pub [] →
       L ≤ 23 →
         8 ≤ L →
-          pub StarkedAir.Block.Anc.PUB_CSV = 0 ∧
+          ZMod.val (pub StarkedAir.Block.Anc.PUB_H) < StarkedAir.Block.Anc.NANC ∧
               pub StarkedAir.Block.Anc.PUB_MLO = 0 ∧ pub StarkedAir.Block.Anc.PUB_MHI = 0 ∨
-            pub StarkedAir.Block.Anc.PUB_CSV = 1 ∧
+            StarkedAir.Block.Anc.NANC ≤ ZMod.val (pub StarkedAir.Block.Anc.PUB_H) ∧
               ∃ (b : StarkedAir.Spec.Block.Blk) (hw : ℕ → ℕ → StarkedAir.Spec.Sha256.Word),
                 StarkedAir.Spec.Block.parseBlock (StarkedAir.Block.Rb inst pub) = Option.some b ∧
                   StarkedAir.Spec.Block.stateBytes (StarkedAir.Spec.Bitcoin.sha256d (hw StarkedAir.Block.Anc.NANC)) =
@@ -2035,6 +2035,24 @@ Pins re-pinned:
   range lookups follow; `Block.Coin.N_MAIN`: 191. `Block.Coin.lastC` is the original again.
 Nine new definitions these reach are pinned (`coinBytes`, `serOf`, `RealCoin`, `pubMtp`, `Coin.extQ`, `TB`,
 `EX`, `TLEN`, `timeC`): 2,227 pins.
+
+**ANC-PRE-CSV (2026-11-23, D-060; the owner asked for what a run from genesis needs).** The ancestry
+component proves a block's previous median time past from height 11 on (every block with 11
+predecessors), not only from the CSV height: the coins a block creates carry that time (D-059), so it has
+to be proven below the CSV height too. The activation is no longer the CSV bit (public input 5) but the
+public height (input 2).
+
+Statements that change (`compat_*`, restated above): `Block.Anc.anc_sound`, `Block.block_mtp`,
+`Block.BlockPubOk.mtp`: the two cases are `(pub PUB_H).val < NANC` (limbs 0) and `NANC ≤ (pub PUB_H).val`
+(the median of 11 hash-chained predecessors), where they were `pub PUB_CSV = 0` and `pub PUB_CSV = 1`.
+The new statement is the stronger one wherever the leaf pins the CSV bit from the height
+(`Circuit.BlockCtx.ctx_sound`): from the CSV height on it says the same, and for heights 11 to 419,327 it
+says more.
+
+Pins: `Block.Anc.PUB_CSV` removed (the component no longer reads input 5); `Block.Anc.act` (the product
+`∏_{j<11} (H − j)` over the public height), `Block.Anc.gates` (the limbs are 0 unless `act · inv = 1`, `inv`
+a new column; the size gate as before) and `Block.Anc.anc` (126 columns) re-pinned; `Block.Anc.PUB_H`,
+`prodH`, `INV` added: 2,229 pins.
 -/
 
 theorem repin_walk_constraints : StarkedAir.Block.Walk.constraints =
@@ -2125,12 +2143,11 @@ StarkedAir.Blake2s.xorC 10614046002499631260
 StarkedAir.Block.ACTIVE 7200184553213182899
 StarkedAir.Block.Anc.FCOPY 16993442085808736178
 StarkedAir.Block.Anc.NANC 12679747259330932428
-StarkedAir.Block.Anc.PUB_CSV 9619963949715690370
 StarkedAir.Block.Anc.PUB_HASH 5130555358687355332
 StarkedAir.Block.Anc.PUB_MHI 6734708282103567336
 StarkedAir.Block.Anc.PUB_MLO 4752661515056156754
-StarkedAir.Block.Anc.act 11509978770161209219
-StarkedAir.Block.Anc.anc 10125080559040480986
+StarkedAir.Block.Anc.act 676745859265610072
+StarkedAir.Block.Anc.anc 695006122014265356
 StarkedAir.Block.Anc.ancCs 9783626794407537417
 StarkedAir.Block.Anc.ancHi 16832182175689144932
 StarkedAir.Block.Anc.ancLo 12020684667279038173
@@ -2139,7 +2156,7 @@ StarkedAir.Block.Anc.constraints 7621159090655947378
 StarkedAir.Block.Anc.countSum 16809981087988357060
 StarkedAir.Block.Anc.counts 14836816230479200725
 StarkedAir.Block.Anc.flagAt 16901033523947780528
-StarkedAir.Block.Anc.gates 1794441568831358114
+StarkedAir.Block.Anc.gates 18158561921596810402
 StarkedAir.Block.Anc.hashOut 3402835509522086075
 StarkedAir.Block.Anc.linkNF 2278687305262311651
 StarkedAir.Block.Anc.mpub 9633930507314077591
@@ -4302,6 +4319,9 @@ StarkedAir.Block.Coin.TB 581510623458879900
 StarkedAir.Block.Coin.EX 17617332127936783150
 StarkedAir.Block.Coin.TLEN 110532540116317034
 StarkedAir.Block.Coin.timeC 3724477292705353912
+StarkedAir.Block.Anc.PUB_H 11239342436784068239
+StarkedAir.Block.Anc.prodH 15222485046814318897
+StarkedAir.Block.Anc.INV 18009673915112070767
 "
 
 open Lean Elab Command in
@@ -4319,6 +4339,6 @@ run_cmd do
     | some h' => if h' != h then bad := bad.push s!"{c} changed"
     | none => bad := bad.push s!"{c} missing"
   unless bad.isEmpty do throwError "Compat pins: {bad.size} definitions changed:\n{"\n".intercalate bad.toList}"
-  if n != 2227 then throwError "Compat pins: expected 2227 pins, read {n}"
+  if n != 2229 then throwError "Compat pins: expected 2229 pins, read {n}"
 
 end StarkedAir.Compat

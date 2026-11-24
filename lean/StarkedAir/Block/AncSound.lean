@@ -190,25 +190,60 @@ theorem chainSat (hL : 8 ≤ L) : ChainSat (2 ^ L) (pubOf (2 ^ L) main) main := 
         · rw [if_neg (show ¬ 2 ^ L ≤ r + 256 by omega)]; simp
         · rw [if_neg h1]; simp
 
-/-! ## The CSV bit, the trace size, the block hash -/
+/-! ## The activation, the trace size, the block hash -/
 
 theorem gate_sat {c : Expr} (hc : c ∈ gates) {r : ℕ} (hr : r < 2 ^ L) :
     c.eval (2 ^ L) HeaderChain.preCols pub main r = 0 :=
   anc_sat hsat (by simp only [ancCs, List.mem_append]; right; exact hc) hr
 
-theorem act_bool : pub PUB_CSV = 0 ∨ pub PUB_CSV = 1 := by
-  have := gate_sat hsat (c := .mul act (.sub act (cst 1))) (by simp [gates]) (r := 0) (by positivity)
-  simp only [Expr.eval, act, eval_cst, Nat.cast_one, mul_eq_zero, sub_eq_zero] at this
-  exact this
+omit hsat in
+theorem eval_prodH_foldl (l : List ℕ) (init : Expr) (r : ℕ) :
+    (l.foldl (fun acc j => Expr.mul acc (.sub (.pub PUB_H) (cst j))) init).eval (2 ^ L) HeaderChain.preCols pub main r =
+      init.eval (2 ^ L) HeaderChain.preCols pub main r * (l.map (fun (j : ℕ) => pub PUB_H - (j : F))).prod := by
+  induction l generalizing init with
+  | nil => simp
+  | cons j t ih =>
+    rw [List.foldl_cons, ih, eval_mul', eval_sub', eval_cst, List.map_cons, List.prod_cons, mul_assoc]
+    rfl
 
-theorem off_zero (h0 : pub PUB_CSV = 0) : pub PUB_MLO = 0 ∧ pub PUB_MHI = 0 := by
-  have a := gate_sat hsat (c := .mul (.sub (cst 1) act) (.pub PUB_MLO)) (by simp [gates]) (r := 0) (by positivity)
-  have b := gate_sat hsat (c := .mul (.sub (cst 1) act) (.pub PUB_MHI)) (by simp [gates]) (r := 0) (by positivity)
-  simp only [Expr.eval, act, eval_cst, h0, Nat.cast_one, sub_zero, one_mul] at a b
-  exact ⟨a, b⟩
+omit hsat in
+theorem eval_prodH (l : List ℕ) (r : ℕ) :
+    (prodH l).eval (2 ^ L) HeaderChain.preCols pub main r = (l.map (fun (j : ℕ) => pub PUB_H - (j : F))).prod := by
+  unfold prodH
+  rw [eval_prodH_foldl, eval_cst, Nat.cast_one, one_mul]
 
-/-- With the CSV bit the trace has at least `2^12` rows. -/
-theorem rows_ge (h1 : pub PUB_CSV = 1) : 12 ≤ L := by
+omit hsat in
+/-- The product over `l` is nonzero when the height is none of `l`'s (small) members. -/
+theorem prodH_ne {l : List ℕ} (hl : ∀ j ∈ l, j < NANC ∧ (pub PUB_H).val ≠ j) (r : ℕ) :
+    (prodH l).eval (2 ^ L) HeaderChain.preCols pub main r ≠ 0 := by
+  rw [eval_prodH]
+  intro h0
+  obtain ⟨j, hj, hjx⟩ := List.mem_map.mp (List.prod_eq_zero_iff.mp h0)
+  obtain ⟨hj11, hne⟩ := hl j hj
+  apply hne
+  have : pub PUB_H = (j : F) := sub_eq_zero.mp hjx
+  rw [this, ZMod.val_natCast_of_lt (lt_of_lt_of_le hj11 (by norm_num [NANC, P]))]
+
+omit hsat in
+theorem act_ne (h1 : NANC ≤ (pub PUB_H).val) (r : ℕ) :
+    act.eval (2 ^ L) HeaderChain.preCols pub main r ≠ 0 :=
+  prodH_ne (fun j hj => ⟨List.mem_range.mp hj, by have := List.mem_range.mp hj; omega⟩) r
+
+theorem off_zero (h0 : (pub PUB_H).val < NANC) : pub PUB_MLO = 0 ∧ pub PUB_MHI = 0 := by
+  have hz : act.eval (2 ^ L) HeaderChain.preCols pub main 0 = 0 := by
+    unfold act
+    rw [eval_prodH]
+    apply List.prod_eq_zero
+    refine List.mem_map.mpr ⟨(pub PUB_H).val, List.mem_range.mpr h0, ?_⟩
+    rw [ZMod.natCast_zmod_val, sub_self]
+  have a := gate_sat hsat (c := .mul (.sub (.mul act (col INV)) (cst 1)) (.pub PUB_MLO)) (by simp [gates]) (r := 0) (by positivity)
+  have b := gate_sat hsat (c := .mul (.sub (.mul act (col INV)) (cst 1)) (.pub PUB_MHI)) (by simp [gates]) (r := 0) (by positivity)
+  rw [eval_mul', eval_sub', eval_mul', hz, eval_cst] at a b
+  have hne : (0 : F) * (col INV).eval (2 ^ L) HeaderChain.preCols pub main 0 - ((1 : ℕ) : F) ≠ 0 := by simp
+  exact ⟨(mul_eq_zero.mp a).resolve_left hne, (mul_eq_zero.mp b).resolve_left hne⟩
+
+/-- From height 11 on the trace has at least `2^12` rows. -/
+theorem rows_ge (h1 : NANC ≤ (pub PUB_H).val) : 12 ≤ L := by
   by_contra hlt
   push_neg at hlt
   have hn0 : 0 < 2 ^ L := by positivity
@@ -219,12 +254,14 @@ theorem rows_ge (h1 : pub PUB_CSV = 1) : 12 ≤ L := by
     rw [this, Int.mul_emod_right]; rfl
   have cp := gate_sat hsat (c := .sub (col FCOPY) (pre FIRST)) (by simp [gates]) hn0
   have g := gate_sat hsat (c := .mul (.mul act (pre FIRST)) (col FCOPY 2048)) (by simp [gates]) hn0
-  simp only [Expr.eval, eval_col, wrap_zero hn0, eval_first hn0, act, sub_eq_zero] at cp
-  simp only [Expr.eval, eval_col, hw, eval_first hn0, act, h1, cp] at g
+  simp only [Expr.eval, eval_col, wrap_zero hn0, eval_first hn0, sub_eq_zero] at cp
+  rw [eval_mul', eval_mul', eval_first hn0] at g
+  simp only [eval_col, hw, cp] at g
   simp at g
+  exact act_ne h1 0 g
 
 /-- **The block hash.** Period 11's hash is public inputs 25–40 (limb `2w + h` is half `h` of word `w`). -/
-theorem hash_out (hL : 8 ≤ L) (h1 : pub PUB_CSV = 1) :
+theorem hash_out (hL : 8 ≤ L) (h1 : NANC ≤ (pub PUB_H).val) :
     ∀ w < 8, ∀ h ≤ 1, pub (PUB_HASH + 2 * w + h) = ((half16 (stateWord (hashAt main NANC) w) h : ℕ) : F) := by
   have hL12 := rows_ge hsat h1
   have hn : 4096 ≤ 2 ^ L := le_trans (by norm_num) (Nat.pow_le_pow_right (by norm_num) hL12)
@@ -235,9 +272,10 @@ theorem hash_out (hL : 8 ≤ L) (h1 : pub PUB_CSV = 1) :
     intro jj hjj h hh
     have hr : 212 + jj < 2 ^ L := by omega
     have hcol : HeaderChain.preCols.getD (OUT0 + jj) (.periodic [0]) = oneRow (212 + jj) := by interval_cases jj <;> rfl
-    have hsel : (Expr.mul (.mul (pre (OUT0 + jj)) (pre FIRST)) act).eval (2 ^ L) HeaderChain.preCols pub main (212 + jj) = 1 := by
-      simp only [Expr.eval, eval_oneRow hcol hr, eval_first hr, act, h1,
-        show (212 + jj) % 256 = 212 + jj by omega, show 212 + jj < 256 by omega, if_true]; simp
+    have hsel : (Expr.mul (.mul (pre (OUT0 + jj)) (pre FIRST)) act).eval (2 ^ L) HeaderChain.preCols pub main (212 + jj) =
+        act.eval (2 ^ L) HeaderChain.preCols pub main (212 + jj) := by
+      rw [eval_mul', eval_mul', eval_oneRow hcol hr, eval_first hr]
+      simp only [show (212 + jj) % 256 = 212 + jj by omega, show 212 + jj < 256 by omega, if_true]; simp
     have h2816 : ((256 * NANC : ℕ) : ℤ) = 2816 := by norm_num [NANC]
     have hw : wrap (2 ^ L) (212 + jj) ((256 * NANC : ℕ) : ℤ) = 2816 + 212 + jj := by
       have h' : (4096 : ℤ) ≤ ((2 ^ L : ℕ) : ℤ) := by exact_mod_cast hn
@@ -260,7 +298,9 @@ theorem hash_out (hL : 8 ≤ L) (h1 : pub PUB_CSV = 1) :
       have c := anc_sat hsat (mem X b hXb) hr
       have hb : ∀ i < 32, (main (X + i) (2816 + 212 + jj)).val ≤ 1 :=
         bits hcs (by omega) (by rcases hXb with ⟨rfl, -⟩ | ⟨rfl, -⟩ <;> decide)
-      rw [eval_mul', hsel, one_mul, eval_sub', eval_limb hw hb hh, sub_eq_zero] at c
+      rw [eval_mul', hsel] at c
+      have c := (mul_eq_zero.mp c).resolve_left (act_ne h1 _)
+      rw [eval_sub', eval_limb hw hb hh, sub_eq_zero] at c
       exact c.symm
     exact ⟨ev A _ (Or.inl ⟨rfl, rfl⟩), ev E _ (Or.inr ⟨rfl, rfl⟩)⟩
   intro w hw h hh
@@ -427,17 +467,18 @@ end Period
 /-! ## The counts -/
 
 /-- At most 5 of the 11 predecessors' times are above the MTP, and at most 5 below. -/
-theorem counts_le (hL : 8 ≤ L) (h1 : pub PUB_CSV = 1) :
+theorem counts_le (hL : 8 ≤ L) (h1 : NANC ≤ (pub PUB_H).val) :
     ∑ k ∈ Finset.range NANC, (decide (mtpOf pub < leN (headerWord main k 17))).toNat ≤ 5 ∧
     ∑ k ∈ Finset.range NANC, (decide (leN (headerWord main k 17) < mtpOf pub)).toNat ≤ 5 := by
   have hL12 := rows_ge hsat h1
   have hn : 4096 ≤ 2 ^ L := le_trans (by norm_num) (Nat.pow_le_pow_right (by norm_num) hL12)
   have hcs := chainSat hsat hL
   have hr : 240 < 2 ^ L := by omega
-  have hsel : (Expr.mul (.mul (pre MTPC) (pre FIRST)) act).eval (2 ^ L) HeaderChain.preCols pub main 240 = 1 := by
+  have hsel : (Expr.mul (.mul (pre MTPC) (pre FIRST)) act).eval (2 ^ L) HeaderChain.preCols pub main 240 =
+      act.eval (2 ^ L) HeaderChain.preCols pub main 240 := by
     have := ev_sel (logSize := L) (pub := pub) (main := main) (j := 0) (by omega) (k := 11) (by norm_num) (q := 240) (by norm_num)
     simp only [Nat.mul_zero, Nat.zero_add] at this
-    simp only [Expr.eval, show MTPC = MTP0 + 11 from rfl, this, eval_first hr, act, h1]; simp
+    rw [eval_mul', eval_mul', show MTPC = MTP0 + 11 from rfl, this, eval_first hr]; simp
   have hb : ∀ rr, rr < 2 ^ L → (main 108 rr).val ≤ 1 :=
     fun rr h => bool_val (sha_sat hcs) h (Or.inr ⟨by norm_num, by norm_num⟩)
   have esum : ∀ (s : ℕ) (fl : ℕ → Bool), 229 ≤ s → s ≤ 230 →
@@ -458,7 +499,9 @@ theorem counts_le (hL : 8 ≤ L) (h1 : pub PUB_CSV = 1) :
   constructor
   · have c := anc_sat hsat (c := (counts.getD 0 (cst 0))) (by simp [ancCs, counts]) hr
     simp only [counts, List.getD_cons_zero] at c
-    rw [eval_mul', hsel, one_mul, eval_sub', eval_add',
+    rw [eval_mul', hsel] at c
+    have c := (mul_eq_zero.mp c).resolve_left (act_ne h1 _)
+    rw [eval_sub', eval_add',
       esum 229 (fun k => decide (mtpOf pub < leN (headerWord main k 17))) (by norm_num) (by norm_num)
         (fun k hk => flag_above hsat (k := k) (by unfold NANC at hk; omega) hL),
       ev_window (by norm_num) (wrap_zero hr) hAbits, eval_cst, sub_eq_zero] at c
@@ -472,7 +515,9 @@ theorem counts_le (hL : 8 ≤ L) (h1 : pub PUB_CSV = 1) :
     omega
   · have c := anc_sat hsat (c := (counts.getD 1 (cst 0))) (by simp [ancCs, counts]) hr
     simp only [counts, List.getD_cons_succ, List.getD_cons_zero] at c
-    rw [eval_mul', hsel, one_mul, eval_sub', eval_add',
+    rw [eval_mul', hsel] at c
+    have c := (mul_eq_zero.mp c).resolve_left (act_ne h1 _)
+    rw [eval_sub', eval_add',
       esum 230 (fun k => decide (leN (headerWord main k 17) < mtpOf pub)) (by norm_num) (by norm_num)
         (fun k hk => flag_below hsat (k := k) (by unfold NANC at hk; omega) hL),
       ev_window (by norm_num) (wrap_zero hr) hEbits, eval_cst, sub_eq_zero] at c
@@ -489,14 +534,14 @@ theorem counts_le (hL : 8 ≤ L) (h1 : pub PUB_CSV = 1) :
 
 /-- **Ancestry soundness.** -/
 theorem anc_sound (hL : 8 ≤ L) :
-    (pub PUB_CSV = 0 ∧ pub PUB_MLO = 0 ∧ pub PUB_MHI = 0) ∨
-    (pub PUB_CSV = 1 ∧ 12 ≤ L ∧
+    ((pub PUB_H).val < NANC ∧ pub PUB_MLO = 0 ∧ pub PUB_MHI = 0) ∨
+    (NANC ≤ (pub PUB_H).val ∧ 12 ≤ L ∧
       (∀ j ≤ NANC, sha256d (headerWord main j) = hashAt main j) ∧
       (∀ j, 1 ≤ j → j ≤ NANC → prevHash (headerWord main j) = hashAt main (j - 1)) ∧
       (∀ w < 8, ∀ h ≤ 1, pub (PUB_HASH + 2 * w + h) = ((half16 (stateWord (hashAt main NANC) w) h : ℕ) : F)) ∧
       ((pub PUB_MLO).val < 65536 ∧ (pub PUB_MHI).val < 65536) ∧
       mtpOf pub = medianTimePast ((List.range NANC).map (fun k => timeOf (headerWord main k))).reverse) := by
-  rcases act_bool hsat with h0 | h1
+  rcases lt_or_ge (pub PUB_H).val NANC with h0 | h1
   · exact Or.inl ⟨h0, off_zero hsat h0⟩
   right
   have hL12 := rows_ge hsat h1

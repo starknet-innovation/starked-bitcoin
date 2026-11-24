@@ -32,7 +32,7 @@ test "cuda resident arena: real block sizes plan and bind (uniform and tiered, L
     defer cat.deinit();
     const pubs = try a.alloc(M31, bs.N_PUB);
     @memset(pubs, M31.zero());
-    for ([_]u32{ 20, 22, 23 }) |L| for ([_]bs.Profile{ .uniform, .tiered }) |profile| {
+    for ([_]u32{ 20, 22, 23 }) |L| for ([_]bs.Profile{ .uniform, .tiered, .tight }) |profile| {
         const logs = bs.profileLogs(L, profile);
         const parts = bs.partsAt(airs, logs, pubs[0..bs.N_PUB]);
         const cfg = try rec.config(L);
@@ -100,9 +100,9 @@ test "cuda resident arena: the (L, profile) table for the chain survey (STARKED_
     const pubs = try a.alloc(M31, bs.N_PUB);
     @memset(pubs, M31.zero());
     // docs/design/chain-survey.md: planned device arena (device LogUp), bytes, per (L, profile).
-    for ([_]bs.Profile{ .uniform, .tiered }) |profile| for (8..25) |l| {
+    for ([_]bs.Profile{ .uniform, .tiered, .tight }) |profile| for (8..25) |l| {
         const L: u32 = @intCast(l);
-        if (profile == .tiered and L < bs.TIERED_MIN_L) continue;
+        if (profile != .uniform and L < bs.TIERED_MIN_L) continue;
         const parts = bs.partsAt(airs, bs.profileLogs(L, profile), pubs[0..bs.N_PUB]);
         var prepared = prover.Prepared.init(a, &parts, &cat, try rec.config(L), .device_logup) catch |e| {
             std.debug.print("arena,{s},{d},error,{s}\n", .{ @tagName(profile), L, @errorName(e) });

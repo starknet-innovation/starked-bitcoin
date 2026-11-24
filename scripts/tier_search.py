@@ -6,12 +6,15 @@ then `tiered`, then `uniform`. Prints the slack of each component below L, the p
 hand-picked profiles, and the offsets a coordinate search finds. No proving.
 
 Usage: python3 scripts/tier_search.py needs.csv
-Columns per component (preprocessed + main + interaction) are those of docs/design/component-sizes.md;
-update `cols` when an AIR changes.
+Columns per component (preprocessed + main + 4 per pair of lookups) are read from `airs/block_*.json`.
 """
 import sys, collections
 names="bytes fields msg sha merkle tables walk ctx wmerkle undo b2msg b2s fpwalk urec coin anc".split()
-cols=dict(zip(names,[18,264,54,188,67,13,65,96,37,18,33,406,24,63,354,179]))
+import json, os
+def ncols(n):
+    j=json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)),'..','airs',f'block_{n}.json')))
+    return j['n_preprocessed']+j['n_main']+4*((len(j.get('lookups',[]))+1)//2)
+cols={n:ncols(n) for n in names}
 I={n:i for i,n in enumerate(names)}
 rows=[list(map(int,l.split(','))) for l in open(sys.argv[1]) if 'error' not in l]
 def cl(n): return max(0,(n-1).bit_length())

@@ -42,19 +42,34 @@ pub const FOREST_MAGIC = "SBFOREST";
 /// A circuit's identity: preprocessed root and circuit hash.
 pub const Id = struct { root: [8]u32, hash: [8]u32 };
 
-/// A block's size key in a forest's `logs` (D-045): its L in the low 7 bits, the tiered profile as
-/// bit 7 (uniform blocks keep the plain L, as before).
+/// A block's size key in a forest's `logs` (D-045): its L in the low 6 bits, the tiered profile as
+/// bit 7 and the tight one (TIERS-2) as bit 6 (uniform blocks keep the plain L, as before).
 pub fn sizeKey(log_size: u32, profile: bs.Profile) u8 {
-    return @as(u8, @intCast(log_size)) | (@as(u8, @intFromEnum(profile)) << 7);
+    std.debug.assert(log_size < 64);
+    return @as(u8, @intCast(log_size)) | switch (profile) {
+        .uniform => @as(u8, 0),
+        .tiered => 0x80,
+        .tight => 0x40,
+    };
+}
+
+/// The profile of a size key; null for a key with both profile bits.
+pub fn keyProfile(key: u8) ?bs.Profile {
+    return switch (key & 0xc0) {
+        0 => .uniform,
+        0x80 => .tiered,
+        0x40 => .tight,
+        else => null,
+    };
 }
 
 /// A size key the soundness theorems cover (Lean `SizeOk`): uniform up to L = 23, tiered from
 /// `TIERED_MIN_L` up to L = 24.
 pub fn keyOk(key: u8) bool {
-    const log: u32 = key & 0x7f;
+    const log: u32 = key & 0x3f;
     if (log >= 25) return false;
-    const profile: bs.Profile = if (key & 0x80 != 0) .tiered else .uniform;
-    if (profile == .tiered and log < bs.TIERED_MIN_L) return false;
+    const profile = keyProfile(key) orelse return false;
+    if (profile != .uniform and log < bs.TIERED_MIN_L) return false;
     return bs.sizeOk(bs.profileLogs(log, profile));
 }
 
@@ -69,13 +84,29 @@ pub const Vk = struct {
     /// The tiered profile's leaf identities (D-045). Encoded only when one is set, so a uniform-only
     /// key keeps its bytes.
     leaf_tiered: [25]?Id = @splat(null),
+    /// The tight profile's (TIERS-2). Encoded after the tiered table, only when one is set.
+    leaf_tight: [25]?Id = @splat(null),
+
+    fn tableOf(self: anytype, profile: bs.Profile) switch (@TypeOf(self)) {
+        *Vk => *[25]?Id,
+        else => *const [25]?Id,
+    } {
+        return switch (profile) {
+            .uniform => &self.leaf,
+            .tiered => &self.leaf_tiered,
+            .tight => &self.leaf_tight,
+        };
+    }
 
     /// The leaf identity for a forest `logs` entry.
     pub fn leafFor(self: *const Vk, key: u8) !Id {
-        const log = key & 0x7f;
         if (!keyOk(key)) return error.BadLogs;
-        const table = if (key & 0x80 != 0) &self.leaf_tiered else &self.leaf;
-        return table[log] orelse error.LeafSizeNotSetUp;
+        return self.tableOf(keyProfile(key).?)[key & 0x3f] orelse error.LeafSizeNotSetUp;
+    }
+
+    fn hasTight(self: *const Vk) bool {
+        for (self.leaf_tight) |l| if (l != null) return true;
+        return false;
     }
 
     fn hasTiered(self: *const Vk) bool {
@@ -98,7 +129,15 @@ pub const Vk = struct {
         }
         try e.words(&self.node.root);
         try e.words(&self.node.hash);
-        if (self.hasTiered()) for (self.leaf_tiered) |l| {
+        const tight = self.hasTight();
+        if (self.hasTiered() or tight) for (self.leaf_tiered) |l| {
+            try e.int(u8, @intFromBool(l != null));
+            if (l) |id| {
+                try e.words(&id.root);
+                try e.words(&id.hash);
+            }
+        };
+        if (tight) for (self.leaf_tight) |l| {
             try e.int(u8, @intFromBool(l != null));
             if (l) |id| {
                 try e.words(&id.root);
@@ -122,6 +161,14 @@ pub const Vk = struct {
         vk.node = .{ .root = try d.words(8), .hash = try d.words(8) };
         vk.leaf_tiered = @splat(null);
         if (d.pos != d.bytes.len) for (&vk.leaf_tiered) |*l| {
+            l.* = switch (try d.int(u8)) {
+                0 => null,
+                1 => .{ .root = try d.words(8), .hash = try d.words(8) },
+                else => return error.BadVk,
+            };
+        };
+        vk.leaf_tight = @splat(null);
+        if (d.pos != d.bytes.len) for (&vk.leaf_tight) |*l| {
             l.* = switch (try d.int(u8)) {
                 0 => null,
                 1 => .{ .root = try d.words(8), .hash = try d.words(8) },
@@ -178,7 +225,7 @@ pub fn setup(gpa: std.mem.Allocator, a: std.mem.Allocator, tables: *const leaf.T
         var ctx = try br.leafCircuitOf(gpa, a, airs, &files[i], bfri);
         defer ctx.deinit();
         const r = try identityOf(gpa, QM31, &ctx, shape.target, fri.log_blowup_factor);
-        if (key & 0x80 != 0) vk.leaf_tiered[key & 0x7f] = r.id else vk.leaf[key] = r.id;
+        vk.tableOf(keyProfile(@intCast(key)).?)[key & 0x3f] = r.id;
         vk.trace_log = r.trace_log;
     };
     var topo = try br.topology(gpa, &tables.table, &shape.shared);
@@ -388,6 +435,9 @@ test "block VK round trip; expected keys fold as the nodes do" {
     const uniform_bytes = try vk.encode(a);
     try std.testing.expectEqual(@as(u32, 22), sizeKey(22, .uniform));
     try std.testing.expectEqual(@as(u32, 0x80 | 22), sizeKey(22, .tiered));
+    try std.testing.expectEqual(@as(u32, 0x40 | 22), sizeKey(22, .tight));
+    try std.testing.expect(keyOk(sizeKey(24, .tight)) and !keyOk(sizeKey(11, .tight)) and !keyOk(0xc0 | 22));
+    try std.testing.expectEqual(bs.Profile.tight, keyProfile(sizeKey(13, .tight)).?);
     try std.testing.expect(keyOk(sizeKey(23, .uniform)) and !keyOk(sizeKey(24, .uniform)));
     try std.testing.expect(keyOk(sizeKey(24, .tiered)) and !keyOk(sizeKey(11, .tiered)));
     try std.testing.expectError(error.BadLogs, vk.leafFor(sizeKey(24, .uniform)));
@@ -409,7 +459,7 @@ test "block VK round trip; expected keys fold as the nodes do" {
 /// Since CONNECT-RULES step 4 (2026-11-20: the time-based lock's claim; step 3 gave `6f40f98f…9292`, step 2 `95cda9e5…f426`). With the AIRs of m3a5
 /// (2196ba3), which D-045 kept unchanged and the proofs of blocks 935,001-972,500 use, it was
 /// `golden_vk_0_170_m3a5`.
-pub const golden_vk_0_170 = "b63cfaf3bb76cf0c0b4ac2f7260b05bdeeabba7dcc6c55cf11255e5a62633dd5";
+pub const golden_vk_0_170 = "2ed05f01d7386aa815df773aacbd073d61bcd000e0fdf613b08c1aa11f3bc3c4";
 pub const golden_vk_0_170_m3a5 = "dc0661443658274e9d278072f5118a5c7a1d91d04616c2ce02650a3090c695f8";
 
 test "block VK golden: the uniform key of blocks 0 and 170" {

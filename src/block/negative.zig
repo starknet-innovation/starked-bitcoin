@@ -161,7 +161,7 @@ fn legacy(a: std.mem.Allocator, tx1: Tx) ![]u8 {
     return block(a, &txs, 1231731025);
 }
 
-const pre_ctx = checks.Ctx{ .height = 1000, .prev_mtp = 1231700000 };
+const pre_ctx = checks.Ctx{ .height = 1000, .prev_mtp = 1231715347, .anc = checks.ancOf("170") };
 
 test "block negative: mutated legacy blocks are rejected; the unmutated one is accepted" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -184,7 +184,7 @@ test "block negative: mutated legacy blocks are rejected; the unmutated one is a
         .{ .name = "lock time above the height", .tx = .{ .ins = &.{.{ .seq = 0 }}, .outs = &.{.{}}, .lock = 5000 } },
         .{ .name = "time lock at the cutoff", .tx = .{ .ins = &.{.{ .seq = 0 }}, .outs = &.{.{}}, .lock = 1231731025 } },
         .{ .name = "one non-final sequence among final ones", .tx = .{ .ins = &.{ .{}, .{ .n = 1, .seq = 0xfffffffe } }, .outs = &.{.{}}, .lock = 2000 } },
-        .{ .name = "BIP34 height missing", .tx = ok_tx, .ctx = .{ .height = 300000, .prev_mtp = 1231700000 } },
+        .{ .name = "BIP34 height missing", .tx = ok_tx, .ctx = .{ .height = 300000, .prev_mtp = 1231715347, .anc = checks.ancOf("170") } },
     };
     for (cases) |c| {
         std.debug.print("{s}\n", .{c.name});
@@ -430,11 +430,14 @@ test "block negative: BIP68 coin times: a record's honest time is the median tim
         try std.testing.expectEqualSlices(u32, &.{1000 + 499999 - 6}, claims);
         try std.testing.expectEqual(Verdict.accepted, try judgeM(a, raw, claims, ctx));
     }
-    // Below the CSV height a block's previous median time past is not proven (public limbs 0): time 0.
+    // Below the CSV height too (D-060): the synthetic undo's coins are from height 999.
     const pre = try legacy(a, .{ .version = 2, .ins = &.{.{ .seq = 0x00400002 }}, .outs = &.{.{}} });
-    for (try bsys.timeClaims(a, try bsys.syntheticUndo(a, pre, 1000), headers)) |m| try std.testing.expectEqual(@as(u32, 0), m);
+    for (try bsys.timeClaims(a, try bsys.syntheticUndo(a, pre, 1000), headers)) |m| try std.testing.expectEqual(@as(u32, 1000 + 999 - 6), m);
     try std.testing.expectEqual(@as(u32, 1000 + 419328 - 6), coin.coinTime(headers, 419328));
-    try std.testing.expectEqual(@as(u32, 0), coin.coinTime(headers, 419327));
+    try std.testing.expectEqual(@as(u32, 1000 + 419327 - 6), coin.coinTime(headers, 419327));
+    // The first block with 11 predecessors is 11; below it a block's public limbs are 0, so the time is 0.
+    try std.testing.expectEqual(@as(u32, 1000 + 11 - 6), coin.coinTime(headers, 11));
+    for (0..11) |h| try std.testing.expectEqual(@as(u32, 0), coin.coinTime(headers, h));
 }
 
 test "block negative: BIP68: a forged lock bit is caught by the fields' constraint; a cleared one unbalances the input tuple" {
@@ -560,6 +563,53 @@ fn sigBlock(a: std.mem.Allocator, height: u32, ins: []const SigIn) !struct { raw
 }
 
 const sig_ctx = checks.Ctx{ .height = 500000, .prev_mtp = 1231715347, .anc = checks.ancOf("170") };
+
+test "block negative: a real time-based relative lock (block 947,544); the coin's time one second later is rejected" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const airs = try bsys.parseAirs(a);
+    const raw = @embedFile("testdata:block_947544");
+    const undo = @embedFile("testdata:undo_947544");
+    // `STARKED_WRITE_MTPS=1` rewrites the records' times from the header file (run from the repository).
+    if (std.process.hasEnvVarConstant("STARKED_WRITE_MTPS")) {
+        const hb = try std.fs.cwd().readFileAlloc(a, "data/headers-972501.bin", 1 << 27);
+        const ts = try coin.timeClaims(a, undo, @as([*]const [80]u8, @ptrCast(hb.ptr))[0 .. hb.len / 80]);
+        try std.fs.cwd().writeFile(.{ .sub_path = "testdata/mtps/947544.bin", .data = std.mem.sliceAsBytes(ts) });
+    }
+    const mb = @embedFile("testdata:mtps_947544");
+    const mtps = try a.alloc(u32, mb.len / 4);
+    for (mtps, 0..) |*m, i| m.* = std.mem.readInt(u32, mb[4 * i ..][0..4], .little);
+    const anc = checks.ancOf("947544");
+    // Core (`getblockheader`, `mediantime`): block 947,543 has 1777700078, block 943,326 has 1775106682.
+    const prev: u32 = 1777700078;
+    try std.testing.expectEqual(prev, @import("anc.zig").median(anc));
+    const ctx = checks.Ctx{ .height = 947544, .prev_mtp = prev, .anc = anc };
+    // The block's one time lock: sequence lock 5,063 (units of 512 s) on a coin created at height 943,327.
+    const coin_time: u32 = 1775106682;
+    const slack: u32 = prev - coin_time - 512 * 5063;
+    try std.testing.expectEqual(@as(u32, 1140), slack);
+    var n_at: usize = 0;
+    for (mtps) |m| n_at += @intFromBool(m == coin_time);
+    try std.testing.expect(n_at >= 1);
+    const Case = struct { add: u32, want: Verdict };
+    for ([_]Case{ .{ .add = 0, .want = .accepted }, .{ .add = slack, .want = .accepted }, .{ .add = slack + 1, .want = .rejected } }) |c| {
+        const ms = try a.dupe(u32, mtps);
+        for (ms) |*m| if (m.* == coin_time) {
+            m.* += c.add;
+        };
+        var cx = ctx;
+        cx.force = true;
+        const b = try bsys.buildFull(a, raw, undo, cx, .{ .mtps = ms });
+        const v = try bsys.firstViolation(a, &airs, &b);
+        if (v) |x| std.debug.print("  coin time +{d}: {s} row {d} violates constraint {d}\n", .{ c.add, bsys.names[x.comp], x.row, x.constraint });
+        const verdict: Verdict = if (v != null or (try bsys.unbalanced(a, &airs, &b)) != null) .rejected else .accepted;
+        try std.testing.expectEqual(c.want, verdict);
+        if (c.add == slack + 1) try std.testing.expectError(error.TimeLockNotMet, bsys.buildFull(a, raw, undo, ctx, .{ .mtps = ms }));
+        if (c.add == 0) try bsys.proveVerify(a, &airs, &b);
+    }
+    std.debug.print("block 947544: a real time lock met with {d} s to spare; proved and verified; rejected at {d} s later\n", .{ slack, slack + 1 });
+}
 
 fn judgeU(a: std.mem.Allocator, raw: []const u8, undo: []const u8, ctx: checks.Ctx) !Verdict {
     var c = ctx;

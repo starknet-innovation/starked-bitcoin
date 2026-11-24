@@ -209,9 +209,16 @@ pub fn build(b: *std.Build) void {
     lib.addAnonymousImport("air:block_coin", .{ .root_source_file = b.path("airs/block_coin.json") });
     lib.addAnonymousImport("testdata:block_170", .{ .root_source_file = b.path("testdata/blocks/170.bin") });
     lib.addAnonymousImport("testdata:anc_170", .{ .root_source_file = b.path("testdata/anc/170.bin") });
+    lib.addAnonymousImport("testdata:anc_91722", .{ .root_source_file = b.path("testdata/anc/91722.bin") });
+    lib.addAnonymousImport("testdata:anc_91812", .{ .root_source_file = b.path("testdata/anc/91812.bin") });
+    lib.addAnonymousImport("testdata:anc_91842", .{ .root_source_file = b.path("testdata/anc/91842.bin") });
+    lib.addAnonymousImport("testdata:anc_91880", .{ .root_source_file = b.path("testdata/anc/91880.bin") });
+    lib.addAnonymousImport("testdata:anc_400000", .{ .root_source_file = b.path("testdata/anc/400000.bin") });
     lib.addAnonymousImport("testdata:anc_481824", .{ .root_source_file = b.path("testdata/anc/481824.bin") });
     lib.addAnonymousImport("testdata:anc_709632", .{ .root_source_file = b.path("testdata/anc/709632.bin") });
     lib.addAnonymousImport("testdata:anc_970347", .{ .root_source_file = b.path("testdata/anc/970347.bin") });
+    lib.addAnonymousImport("testdata:mtps_947544", .{ .root_source_file = b.path("testdata/mtps/947544.bin") });
+    lib.addAnonymousImport("testdata:anc_947544", .{ .root_source_file = b.path("testdata/anc/947544.bin") });
     lib.addAnonymousImport("testdata:anc_774628", .{ .root_source_file = b.path("testdata/anc/774628.bin") });
     lib.addAnonymousImport("testdata:block_91722", .{ .root_source_file = b.path("testdata/blocks/91722.bin") });
     lib.addAnonymousImport("testdata:block_91812", .{ .root_source_file = b.path("testdata/blocks/91812.bin") });
@@ -221,6 +228,7 @@ pub fn build(b: *std.Build) void {
     lib.addAnonymousImport("testdata:block_481824", .{ .root_source_file = b.path("testdata/blocks/481824.bin") });
     lib.addAnonymousImport("testdata:block_709632", .{ .root_source_file = b.path("testdata/blocks/709632.bin") });
     lib.addAnonymousImport("testdata:block_970347", .{ .root_source_file = b.path("testdata/blocks/970347.bin") });
+    lib.addAnonymousImport("testdata:block_947544", .{ .root_source_file = b.path("testdata/blocks/947544.bin") });
     lib.addAnonymousImport("testdata:block_774628", .{ .root_source_file = b.path("testdata/blocks/774628.bin") });
     lib.addAnonymousImport("testdata:block_0", .{ .root_source_file = b.path("testdata/blocks/0.bin") });
     lib.addAnonymousImport("testdata:block_9", .{ .root_source_file = b.path("testdata/blocks/9.bin") });
@@ -234,6 +242,7 @@ pub fn build(b: *std.Build) void {
     lib.addAnonymousImport("testdata:undo_481824", .{ .root_source_file = b.path("testdata/undo/481824.undo") });
     lib.addAnonymousImport("testdata:undo_709632", .{ .root_source_file = b.path("testdata/undo/709632.undo") });
     lib.addAnonymousImport("testdata:undo_970347", .{ .root_source_file = b.path("testdata/undo/970347.undo") });
+    lib.addAnonymousImport("testdata:undo_947544", .{ .root_source_file = b.path("testdata/undo/947544.undo") });
     lib.addAnonymousImport("testdata:undo_774628", .{ .root_source_file = b.path("testdata/undo/774628.undo") });
 
     // `zig build test -Dtest-filter=<substring>` runs only matching tests (the full suite takes ~16 min).

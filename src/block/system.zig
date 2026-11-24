@@ -40,6 +40,26 @@ pub const Profile = enum(u8) {
     /// {sha, msg, bytes, walk} at L; {fpwalk, b2s, undo, b2msg} at L−2; ctx and tables at 8;
     /// anc at 12; the rest at max(L−5, 8). Requires L ≥ 12, so the largest size is L.
     tiered = 1,
+    /// TIERS-2 (D-055): sha at L; msg and bytes at L−1; {fpwalk, b2s, undo, b2msg} at L−3; walk at L−4;
+    /// fields at L−7; coin at L−8; urec at L−9; merkle and wmerkle at L−10 (each at least 8); ctx and
+    /// tables at 8; anc at 12. Requires L ≥ 12. Offsets from `scripts/tier_search.py` on blocks
+    /// 935,001–972,500 (2026-11-23): 39 % fewer proven cells than `tiered` there.
+    tight = 2,
+};
+
+/// `tight`'s offsets below L, per component (ctx, tables and anc are fixed sizes).
+pub const TIGHT_OFF = blk: {
+    var o: [N_COMP]u32 = @splat(0);
+    o[C.msg] = 1;
+    o[C.bytes] = 1;
+    for ([_]usize{ C.fpwalk, C.b2s, C.undo, C.b2msg }) |i| o[i] = 3;
+    o[C.walk] = 4;
+    o[C.fields] = 7;
+    o[C.coin] = 8;
+    o[C.urec] = 9;
+    o[C.merkle] = 10;
+    o[C.wmerkle] = 10;
+    break :blk o;
 };
 
 /// Component indices (the order of `jsons`).
@@ -69,6 +89,13 @@ pub fn profileLogs(L: u32, profile: Profile) [N_COMP]u32 {
     var out: [N_COMP]u32 = @splat(L);
     if (profile == .uniform) return out;
     std.debug.assert(L >= TIERED_MIN_L);
+    if (profile == .tight) {
+        for (&out, TIGHT_OFF) |*o, off| o.* = @max(L -| off, 8);
+        out[C.ctx] = 8;
+        out[C.tables] = 8;
+        out[C.anc] = 12;
+        return out;
+    }
     out = @splat(@max(L - 5, 8));
     for ([_]usize{ C.sha, C.msg, C.bytes, C.walk }) |i| out[i] = L;
     for ([_]usize{ C.fpwalk, C.b2s, C.undo, C.b2msg }) |i| out[i] = L - 2;
@@ -299,7 +326,7 @@ pub fn shape(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctxs: ?
     needs[C.fpwalk] = fp_rows + 1;
     needs[C.urec] = recs.len + 1;
     needs[C.coin] = tok_rows + 1;
-    needs[C.anc] = if (height >= checks.CSV_HEIGHT) ancw.MIN_ROWS_CSV else 256;
+    needs[C.anc] = if (height >= checks.ANC_HEIGHT) ancw.MIN_ROWS_ANC else 256;
     for (&needs) |*n| n.* = @max(n.*, 256);
     return .{ .rows = rows, .ntx = ntx, .txs = txs, .msgs = msgs, .pl = pl, .txids = txids, .undo = undo, .nodes = nodes, .root = root, .wnodes = wnodes, .recs = recs, .osegs = osegs, .usegs = usegs, .needs = needs, .sig = sigc };
 }
@@ -307,10 +334,10 @@ pub fn shape(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctxs: ?
 /// `fetched`: the fetched undo stream (`coin.undoStream`), with the creating transactions' indices in
 /// `opts.ctx`.
 pub fn buildFull(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctx0: checks.Ctx, opts: Opts) !Built {
-    // Below the CSV height the previous MTP is unused and its public limbs are 0 (D-043 part 3).
+    // Below height 11 the previous MTP's public limbs are 0 (D-060).
     var ctx = ctx0;
-    if (!ctx.csv()) ctx.prev_mtp = 0;
-    if (ctx.csv() and ctx.anc == null) return error.MissingAncestors;
+    if (!ctx.ancOn()) ctx.prev_mtp = 0;
+    if (ctx.ancOn() and ctx.anc == null) return error.MissingAncestors;
     const sh = try shape(a, raw, fetched, opts.ctx, opts.mtps, ctx.height, ctx.force);
     const rows = sh.rows;
     const ntx = sh.ntx;
@@ -403,7 +430,7 @@ pub fn buildFull(a: std.mem.Allocator, raw: []const u8, fetched: []const u8, ctx
     try ranges.appendSlice(a, coin_ranges.items);
     const tm = try checks.tables(a, logs[C.tables], ranges.items, wk.opcodes);
 
-    const am = try ancw.generate(a, logs[C.anc], raw[0..80], if (ctx.csv()) ctx.anc.? else null, ctx.prev_mtp, ctx.force);
+    const am = try ancw.generate(a, logs[C.anc], ctx.height, raw[0..80], if (ctx.ancOn()) ctx.anc.? else null, ctx.prev_mtp, ctx.force);
     const cw = try commit.commitment(a, undo);
     var pubs: [N_PUB]M31 = undefined;
     @memcpy(pubs[0..8], &checks.pubs(raw, ntx, ctx));
@@ -470,14 +497,17 @@ pub fn partsAt(airs: *const [N_COMP]ir.Air, logs: [N_COMP]u32, pubs: *const [N_P
     return out;
 }
 
-/// (L, profile) for components needing `needs` rows: `tiered` when asked for and every component
-/// fits its tier, else `uniform`; L at least `min_log`.
+/// (L, profile) for components needing `needs` rows: `tiered` or `tight` when asked for and every
+/// component fits its tier, else `uniform`; L at least `min_log`.
 pub const Sized = struct { L: u32, profile: Profile };
 
-/// The production choice: tiered for blocks of uniform size 2^12 and more, uniform below.
+/// The production choice: for blocks of uniform size 2^12 and more, `tight` when the block fits it, else
+/// `tiered`, else `uniform`; uniform below.
 pub fn sizesAuto(needs: [N_COMP]usize, min_log: u32) Sized {
     const u = sizesFor(needs, .uniform, min_log);
     if (u.L < TIERED_MIN_L) return u;
+    const t = sizesFor(needs, .tight, min_log);
+    if (t.profile == .tight) return t;
     return sizesFor(needs, .tiered, min_log);
 }
 
@@ -486,12 +516,14 @@ pub fn sizesFor(needs: [N_COMP]usize, profile: Profile, min_log: u32) Sized {
     for (needs) |n| max = @max(max, n);
     const uniform_L = @max(std.math.log2_int_ceil(usize, max), min_log);
     if (profile == .uniform) return .{ .L = uniform_L, .profile = .uniform };
+    // `tiered` and `tight` share L: the size of the largest of sha, msg, bytes and walk (as
+    // `scripts/tier_search.py` simulates them); a block that misses a tier falls back.
     var top: usize = 0;
     for ([_]usize{ C.sha, C.msg, C.bytes, C.walk }) |i| top = @max(top, needs[i]);
     const L = @max(std.math.log2_int_ceil(usize, top), min_log, TIERED_MIN_L);
-    const logs = profileLogs(L, .tiered);
+    const logs = profileLogs(L, profile);
     for (needs, logs) |n, l| if (n > @as(usize, 1) << @intCast(l)) return .{ .L = uniform_L, .profile = .uniform };
-    return .{ .L = L, .profile = .tiered };
+    return .{ .L = L, .profile = profile };
 }
 
 /// A block's size as the survey reports it (docs/design/chain-survey.md): `sizesAuto`'s choice, the
@@ -517,6 +549,7 @@ pub fn sizeReport(needs: [N_COMP]usize) SizeReport {
     var best: usize = 0;
     for (needs, 0..) |n, i| {
         if (sized.profile == .tiered and i != C.sha and i != C.msg and i != C.bytes and i != C.walk) continue;
+        if (sized.profile == .tight and i != C.sha and i != C.msg and i != C.bytes and i != C.walk) continue;
         if (n > best) {
             best = n;
             binding = i;
@@ -689,15 +722,15 @@ test "block system: block 0's STWZEVA-composed proof is byte-identical and verif
 /// block, proved by `proof_file.prove` at test strength (10 PoW bits, 3 queries, blowup 1). They pin
 /// the block AIRs: a change here is a change of every block proof and VK.
 /// Since CONNECT-RULES step 2 (2026-11-19: `block_fields` and `block_coin` gained the height-based
-/// relative lock) step 3 (2026-11-20: the full sigop cost) and step 4 (2026-11-20: the time-based lock's claim). The values of m3a5 (2196ba3), which D-045 kept unchanged and with which the proofs
+/// relative lock) step 3 (2026-11-20: the full sigop cost) and step 4 (2026-11-20: the time-based lock's claim), and ANC-PRE-CSV (2026-11-23, D-060: the ancestry from height 11). The values of m3a5 (2196ba3), which D-045 kept unchanged and with which the proofs
 /// of blocks 935,001-972,500 were made, are in `golden_small_m3a5`.
 pub const golden_small = [_][]const u8{
-    "299aeae0c721b19e245be8fc078bd8f364feb9a658e1a214768f7c21b3f7794a", // 0
-    "c6c957ced3c8b17f0deda251e6baeee4087671e90ec52c3739f7a6e7ddf658db", // 170
-    "74b12e84ff6407a489e439f03d1020a983273ab8d123f8e0070ea5508c7a0218", // 91722
-    "32a2071e8141e42b53669b13c241ea807175b20d41d9213e87ecafa1a2aa2432", // 91812
-    "e7a1b666ce119ff57957367412a9970a67b616f3e5e6a09c57ee09abb64b70a4", // 91842
-    "8ab71ad0b3599f9e8ef2aa766ba732e9b3022ede889fc6ce09ccd54164cea2af", // 91880
+    "1a40ae848582e4fcd2bdc2ad55103e70b977052e00b21b398ac3e1b43233b018", // 0
+    "a9f81cd597a5dd0101d5eb08b3a446cb69981fcad6a2630844334acdf7bf41bb", // 170
+    "7dc9b48aa37a49d222e9d19e3363c18dff7f5e2d7e1e4844df4e226d076a4edc", // 91722
+    "696c5fac9bac04a055c2a8505a68f92f743c9fcecd0c441ecc8c414e235f8d63", // 91812
+    "11b49e3d8e7e0db0ac6dc40cfd5482c780a78080cce86835a27f376305aa516f", // 91842
+    "5c7f5b21da9adc291f9d69132b3d509a39b92f0af836b8a9835d1d8605c5c94e", // 91880
 };
 
 /// The same hashes with the AIRs before CONNECT-RULES step 2 (m3a5, 2196ba3). Kept for reference only.
@@ -758,6 +791,72 @@ test "block system: tiered profile (D-045): the small samples satisfy every comp
     }
 }
 
+test "block system: tight profile (TIERS-2, D-061): the small samples satisfy every component, prove and verify through a proof file" {
+    const pf = @import("proof_file.zig");
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const airs = try parseAirs(a);
+    for (checks.samples_small) |s| {
+        // 2^15: room for every tier of these small blocks (walk is at L − 4, fields at L − 7).
+        const b = try buildFull(a, s.raw, s.undo, s.ctx, .{ .profile = .tight, .min_log = 15 });
+        try std.testing.expectEqual(Profile.tight, b.profile);
+        try std.testing.expectEqualSlices(u32, &profileLogs(15, .tight), &b.logs);
+        if (try firstViolation(a, &airs, &b)) |v| {
+            std.debug.print("height {d}: {s} row {d} violates constraint {d}\n", .{ s.ctx.height, names[v.comp], v.row, v.constraint });
+            return error.TestUnexpectedResult;
+        }
+        if (try unbalanced(a, &airs, &b)) |rel| {
+            std.debug.print("height {d}: relation {d} unbalanced\n", .{ s.ctx.height, rel });
+            return error.TestUnexpectedResult;
+        }
+        const proof = try pf.prove(a, &airs, &b, pf.testFri());
+        const bytes_ = try pf.encode(a, &.{ .log_size = b.log_size, .profile = b.profile, .pubs = b.pubs, .proof = proof, .provenance = "test" });
+        const f = try pf.decode(a, bytes_);
+        try std.testing.expectEqual(Profile.tight, f.profile);
+        try pf.verifyStark(a, &airs, &f, pf.testFri());
+        // The same proof read under another profile fails.
+        for ([_]Profile{ .uniform, .tiered }) |other| {
+            var g = try pf.decode(a, bytes_);
+            g.profile = other;
+            try std.testing.expect(std.meta.isError(pf.verifyStark(a, &airs, &g, pf.testFri())));
+        }
+        std.debug.print("height {d}: tight L={d} sizes {any}: proved, verified ({d} bytes)\n", .{ s.ctx.height, b.log_size, b.logs, bytes_.len });
+    }
+}
+
+test "block system: sizesAuto prefers tight, then tiered, then uniform; tight's sizes are covered to L = 24" {
+    try std.testing.expectEqualSlices(u32, &.{ 21, 15, 21, 22, 12, 8, 18, 8, 12, 19, 19, 19, 19, 13, 14, 12 }, &profileLogs(22, .tight));
+    try std.testing.expectEqualSlices(u32, &.{ 11, 8, 11, 12, 8, 8, 8, 8, 8, 9, 9, 9, 9, 8, 8, 12 }, &profileLogs(12, .tight));
+    try std.testing.expect(sizeOk(profileLogs(24, .tight)));
+    try std.testing.expect(!sizeOk(profileLogs(25, .tight)));
+    // A block shaped like a recent full one fits tight.
+    var needs: [N_COMP]usize = @splat(256);
+    needs[C.sha] = 3_000_000;
+    needs[C.msg] = 2_000_000;
+    needs[C.bytes] = 1_600_000;
+    needs[C.walk] = 200_000;
+    needs[C.b2s] = 400_000;
+    needs[C.anc] = 4096;
+    const t = sizesAuto(needs, 0);
+    try std.testing.expectEqual(Profile.tight, t.profile);
+    try std.testing.expectEqual(@as(u32, 22), t.L);
+    // The walk above its tight tier (2^18): tiered at the same L.
+    needs[C.walk] = 300_000;
+    const u = sizesAuto(needs, 0);
+    try std.testing.expectEqual(Profile.tiered, u.profile);
+    try std.testing.expectEqual(@as(u32, 22), u.L);
+    // msg above L − 1: tiered.
+    needs[C.walk] = 200_000;
+    needs[C.msg] = 2_200_000;
+    try std.testing.expectEqual(Profile.tiered, sizesAuto(needs, 0).profile);
+    // The coin above tiered's L − 5 too: uniform.
+    needs[C.coin] = 200_000;
+    try std.testing.expectEqual(Profile.uniform, sizesAuto(needs, 0).profile);
+    // Forced tight that does not fit falls back to uniform, as forced tiered does.
+    try std.testing.expectEqual(Profile.uniform, sizesFor(needs, .tight, 0).profile);
+}
+
 test "block system: sizesFor picks tiered only when every component fits, else uniform" {
     var needs: [N_COMP]usize = @splat(256);
     needs[C.sha] = 1 << 20;
@@ -790,19 +889,23 @@ test "block system: SizeOk matches the AIRs' lookups; uniform stops at 23, tiere
     try std.testing.expect(!sizeOk(profileLogs(25, .tiered)));
 }
 
-test "block sizes: auto is uniform below 2^12 and tiered from 2^12" {
+test "block sizes: auto is uniform below 2^12; from 2^12 tight, else tiered, else uniform" {
     var needs: [N_COMP]usize = @splat(256);
     needs[C.sha] = 2000; // uniform 2^11
     const small = sizesAuto(needs, 0);
     try std.testing.expectEqual(Profile.uniform, small.profile);
     try std.testing.expectEqual(@as(u32, 11), small.L);
     needs[C.sha] = 3000; // uniform 2^12
-    try std.testing.expectEqual(Profile.tiered, sizesAuto(needs, 0).profile);
+    try std.testing.expectEqual(Profile.tight, sizesAuto(needs, 0).profile);
     needs[C.sha] = 1 << 22;
     const big = sizesAuto(needs, 0);
-    try std.testing.expectEqual(Profile.tiered, big.profile);
+    try std.testing.expectEqual(Profile.tight, big.profile);
     try std.testing.expectEqual(@as(u32, 22), big.L);
-    needs[C.coin] = 1 << 21; // too big for its tier (L − 5): falls back to uniform
+    needs[C.coin] = 1 << 15; // above tight's L − 8, within tiered's L − 5
+    const mid = sizesAuto(needs, 0);
+    try std.testing.expectEqual(Profile.tiered, mid.profile);
+    try std.testing.expectEqual(@as(u32, 22), mid.L);
+    needs[C.coin] = 1 << 21; // too big for tiered's tier too: falls back to uniform
     try std.testing.expectEqual(Profile.uniform, sizesAuto(needs, 0).profile);
 }
 

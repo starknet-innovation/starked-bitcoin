@@ -203,7 +203,8 @@ estimated: per-leaf cost is seconds, not the header leaf's 31 s.
   the 11 times are above the MTP (public 3, 7) and at most 5 below, so it is their median. A copy of
   `FIRST` read 2048 rows down forces at least 4096 rows. Below CSV the MTP limbs are 0 (the cutoff is
   the block's own time). No lookups, no new preprocessed columns, no public times; the tree is
-  unchanged. Cost: 125 columns (+~11% of the block system's width), and CSV-era blocks need log ≥ 12;
+  unchanged. (Since D-060, 2026-11-23, branch `connect-rules`: switched on by the public height from
+  height 11, not by the CSV bit; 126 columns.) Cost: 125 columns (+~11% of the block system's width), and CSV-era blocks need log ≥ 12;
   the leaf over blocks 0–3 went from 115 s to 161 s. Lean: `AncSound.anc_sound` (the header chain's
   `header_hash`/`header_link` reused through `chainSat`: the ancestry trace satisfies the header
   chain's base constraints for public inputs read from the trace), `median_of_counts`,

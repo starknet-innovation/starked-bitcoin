@@ -21,6 +21,35 @@ Next: <the exact next step; must match status.md>
 
 ---
 
+## 2026-11-23 · session 46 · What a run from genesis needs: a real time lock proved, ANC-PRE-CSV, the recursion's guarantee, the `tight` profile
+
+Who: Claude (agent, Fable 5.2); owner: "I'm ok with 1 and 2" (D-059 confirmed; push of b95fe45), "I'll eventually want to go the full hog and prove from genesis, so build whatever is needed for that", "do 1. Do 2, 3 and 4 as well"
+Roadmap: CONNECT-RULES in progress (no re-prove); ANC-PRE-CSV done (D-060, to confirm); TIERS-2 built (D-061; GPU timing open); TIERS-GEN in progress; REC-CORE added (backlog)
+Done:
+- b95fe45 pushed to `origin/connect-rules` (owner's go).
+- **A real time lock.** Blocks 947,544, 968,708 and 937,433 (from the node; found with `rules.csv`) proved at production strength on the Mac and verified (`chainproof prove-block`; 3.4 s, 3.3 s, 15.3 s). New test on block 947,544 in `negative.zig` (`testdata/{blocks,undo,anc,mtps}/947544.*`): accepted; accepted with the coin's time 1,140 s later (exactly met); rejected 1 s past that.
+- **ANC-PRE-CSV (D-060).** `Block/Anc.lean`: the activation is `∏_{j<11} (H − j)` over the public height; column 125 holds its inverse; the limbs are 0 unless `act · inv = 1`. `AncSound.anc_sound`, `block_mtp`, `BlockPubOk'.mtp`, `BlockPubOk.mtp` restated (`height < 11` / `11 ≤ height`). Zig: `checks.ANC_HEIGHT`, `Ctx.ancOn`, `anc.generate(height)`, `coin.coinTime` (0 below 11 only), `proof_file.ancestors`; ancestors for the pre-CSV samples (`testdata/anc/{91722,91812,91842,91880,400000}.bin`); `airs/block_anc.json` and `gpu/cuda_aot` regenerated; goldens re-pinned (`golden_vk_0_170 = 2ed05f01…c3c4`). `Compat.lean`: three statements restated, 2,229 pins.
+- **The recursion's guarantee.** `Circuit/RecCtx.lean` (additive): `CtxOk`, `ctxOk_of_ctx`, `BlockPubOkC`, `MtpOk`, `epoch_hyps_of_rngC`, `RecCR.forest_epochCW`: a verified forest whose leaves guarantee `LeafAt BlockPubOkC` gives every block hypothesis of `epoch_systems_coreS` and each block's `MtpOk`.
+- **TIERS-2 (D-061).** `survey` needs of 935,001–972,500 with this branch (node, 0 errors); `scripts/tier_search.py` now reads column counts from `airs/`; profile `tight` (`system.Profile`, `TIGHT_OFF`, `sizesAuto`), forest size key (bit 6) and `Vk.leaf_tight`, `--tight` in `prove-epoch` and `cuda-epoch`, runner size `tight`; arena tables in `survey.zig` recomputed with a `tight` row.
+- `replay --needs <csv>`: per-block component needs during a replay. Started on the node from genesis to 780,000 (`/data/replay/needs_run.sh`, `needsrun/needs-full.csv`).
+Evidence:
+- `lake build`: exit 0, 8,940 jobs. `#print axioms` of `Anc.anc_sound`, `block_mtp`, `epoch_hyps_of_rngC`, `RecCR.forest_epochCW`, `ctxOk_of_ctx`, `epoch_systems_coreS`: propext, Classical.choice, Quot.sound.
+- Time-lock test: "block 947544: a real time lock met with 1140 s to spare; proved and verified; rejected at 1141 s later". Core (`getblockheader`, `mediantime`): 947,543 → 1777700078; 943,326 → 1775106682; 937,432 → 1771521254; 933,115 → 1768928998 (difference 2,592,256 = 512 × 5,063).
+- `tier_search.py data/survey/needs-r5.csv`: "single new profile (then tiered): … 8.913e+13 39.1% below current"; "one {'old': 2587, 0: 34913}".
+- `STARKED_ARENA_TABLE=1 zig build cuda-test -Dcuda=true -Dtest-filter="chain survey"`: 2^23 `tiered` 55.48 GiB, `tight` 34.94 GiB; 2^24 `tight` 69.87 GiB. `zig build cuda-test -Dcuda=true` and `cuda-check`: exit 0.
+- `zig build test -Doptimize=ReleaseFast --summary all`: "11/11 steps succeeded; 157/159 tests passed; 2 skipped", exit 0 (after every change above).
+- `scripts/check_air_drift.sh`: 93 of 93 ok, exit 0 (run with no `lake build` running).
+- Whole-chain needs, heights 0–492,992 (`data/survey/needs-0-492992.csv`, local; 0 errors): under `sizesAuto`, `tight` is taken by 84 % of blocks below 100,000 and by 1–6 % of blocks from 100,000 to 492,992, where it saves 0.0 % of the cells. Its offsets, fitted on 2026 blocks, do not fit blocks before segwit.
+Problems / lessons:
+- **My first activation for ANC-PRE-CSV was wrong and Lean did not see it.** I forced the limbs to 0 below height 11 with `∏_{j≠k} (H − j)` terms; they are nonzero above height 10 as well, so every valid block from height 11 was rejected (27 Zig tests failed: "anc row 0 violates constraint 204"). The soundness proof built, because soundness says nothing about honest traces being accepted. Lesson: run the witness tests before believing an AIR change, whatever Lean says; there is no completeness proof here.
+- The Mac slept during a test run (`pmset -g log`: "Maintenance Sleep" every 15 minutes), which made a 36-minute suite take two hours. `caffeinate -ims -t 14400 &` before long local runs.
+- The first needs run on the node was killed by the OOM killer at block 150,000: `--capacity 200000000` (copied from `replay_run.sh`) sizes the coin table for 200 M coins and a rehash touches all of it (14 GB). Run without it; the node's 16 GB then limits the replay to about height 780,000.
+- The second needs run (without `--capacity`) was killed at block 492,993 too (12.8 GB resident with a 2 GB coin heap: most likely the per-block arena keeping its largest size, and the coin table). bitcoind was not affected. A whole-chain needs run needs a machine with more memory, or `replay` checkpoints and an arena that is freed.
+- A Python `str.replace` chain silently skipped one edit because an earlier replacement had changed its target. Assert every replacement.
+Next: TIERS-GEN: needs for 492,993 to the tip on a machine with more memory, then a profile search per era (the first 493,000 blocks say `tight` is for recent blocks only); the GPU timing of `tight` against `tiered` (owner's go); see status.md.
+
+---
+
 ## 2026-11-23 · session 45b · CONNECT-RULES step 5: device parity of the R5 AIRs on an H100
 
 Who: Claude (agent, Fable 5.2); owner: "For GPU time you can do the first part. Don't reprove the whole thing yet."

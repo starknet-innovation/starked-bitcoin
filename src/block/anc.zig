@@ -1,6 +1,6 @@
 //! Ancestry (D-043 part 3, option A): the witness for the `block_anc` component (Lean: `Block/Anc.lean`).
 //! A header chain in the header-chain AIR's layout (one header per 256 rows, SHA256d at rows 0–215):
-//! with the CSV bit, periods 0–10 are the block's 11 predecessors (oldest first) and period 11 its own
+//! from height 11 on, periods 0–10 are the block's 11 predecessors (oldest first) and period 11 its own
 //! header; later periods are filler headers that only carry the previous hash. Rows 229 and 230 of every
 //! period compare the MTP with the header's time; period 0's row 240 holds the two counts' slack.
 
@@ -11,11 +11,20 @@ const sha = @import("../sha256/witness.zig");
 const hc = @import("../btc/header_chain.zig");
 
 pub const json = @embedFile("air:block_anc");
-pub const N_MAIN = sha.N_MAIN + 1;
+pub const N_MAIN = sha.N_MAIN + 2;
+/// Column 125: the inverse of the activation `∏_{j<11} (height − j)` from height 11 on (0 below).
+pub const INV = sha.N_MAIN + 1;
+
+/// `∏_{j<11} (height − j)` in the field: nonzero exactly when the height is not in 0..10.
+pub fn activation(height: u32) M31 {
+    var p = M31.one();
+    for (0..NANC) |j| p = p.mul(M31.fromCanonical(height).sub(M31.fromCanonical(@intCast(j))));
+    return p;
+}
 pub const NANC = 11;
 pub const PERIOD = hc.PERIOD;
-/// Rows the component needs with the CSV bit (12 periods, rounded up to a power of two).
-pub const MIN_ROWS_CSV: usize = 4096;
+/// Rows the component needs from height 11 on (12 periods, rounded up to a power of two).
+pub const MIN_ROWS_ANC: usize = 4096;
 
 pub const Header = [80]u8;
 
@@ -48,13 +57,13 @@ fn cmp(a: u32, w: u32) Cmp {
     return .{ .a = a, .e = d, .w = w, .b = @intFromBool(b), .c = c };
 }
 
-/// `own` is the block's header; `anc` its 11 predecessors (oldest first) when the CSV bit is set, in which
+/// `own` is the block's header; `anc` its 11 predecessors (oldest first) from height 11 on, in which
 /// case `mtp` must be their median; otherwise `mtp` is 0.
-pub fn generate(a: std.mem.Allocator, log_size: u32, own: *const Header, anc: ?*const [NANC]Header, mtp: u32, force: bool) ![][]M31 {
+pub fn generate(a: std.mem.Allocator, log_size: u32, height: u32, own: *const Header, anc: ?*const [NANC]Header, mtp: u32, force: bool) ![][]M31 {
     const n = @as(usize, 1) << @intCast(log_size);
     if (n < PERIOD) return error.TooSmall;
     const csv = anc != null;
-    if (csv and n < MIN_ROWS_CSV) return error.TooSmall;
+    if (csv and n < MIN_ROWS_ANC) return error.TooSmall;
     if (csv and median(anc.?) != mtp and !force) return error.MtpMismatch;
     if (!csv and mtp != 0) return error.MtpMismatch;
     const np = n / PERIOD;
@@ -116,6 +125,9 @@ pub fn generate(a: std.mem.Allocator, log_size: u32, own: *const Header, anc: ?*
     @memcpy(main[0..sha.N_MAIN], sm);
     main[sha.N_MAIN] = try a.alloc(M31, n);
     for (main[sha.N_MAIN], 0..) |*x, r| x.* = if (r < PERIOD) M31.one() else M31.zero();
+    main[INV] = try a.alloc(M31, n);
+    const act = activation(height);
+    @memset(main[INV], if (act.isZero()) M31.zero() else try act.inv());
     for (bits, 0..) |bc, i| for (bc, 0..) |x, s| {
         main[sha.CA_LO][i * PERIOD + 229 + s] = M31.fromCanonical(x[0]);
         main[sha.CA_LO + 1][i * PERIOD + 229 + s] = M31.fromCanonical(x[1]);
@@ -125,10 +137,10 @@ pub fn generate(a: std.mem.Allocator, log_size: u32, own: *const Header, anc: ?*
 
 // ---------------------------------------------------------------- tests
 
-fn testPubs(own: *const Header, csv: bool, mtp: u32) [41]M31 {
+fn testPubs(own: *const Header, height: u32, mtp: u32) [41]M31 {
     var p = [_]M31{M31.zero()} ** 41;
+    p[2] = M31.fromCanonical(height);
     p[3] = M31.fromCanonical(mtp & 0xffff);
-    p[5] = M31.fromCanonical(@intFromBool(csv));
     p[7] = M31.fromCanonical(mtp >> 16);
     @memcpy(p[25..41], &@import("system.zig").hashLimbs(own));
     return p;
@@ -153,29 +165,43 @@ test "block anc: block 170's predecessors give its MTP; tampers are rejected" {
     const mtp = median(anc);
     try std.testing.expectEqual(@as(u32, 1231715347), mtp);
     const log_size: u32 = 12;
-    const pubs = testPubs(own, true, mtp);
-    const honest = try generate(a, log_size, own, anc, mtp, false);
+    const pubs = testPubs(own, 170, mtp);
+    const honest = try generate(a, log_size, 170, own, anc, mtp, false);
     try std.testing.expect(try violation(a, air, log_size, &pubs, honest) == null);
     // A wrong MTP (the next time up or down), forced through.
     for ([_]u32{ mtp + 1, mtp - 1 }) |m| {
-        const p = testPubs(own, true, m);
-        const w = try generate(a, log_size, own, anc, m, true);
+        const p = testPubs(own, 170, m);
+        const w = try generate(a, log_size, 170, own, anc, m, true);
         try std.testing.expect(try violation(a, air, log_size, &p, w) != null);
     }
     // A predecessor that does not chain (one time byte changed), forced through.
     var bad = anc.*;
     bad[3][68] +%= 1;
-    try std.testing.expectError(error.BrokenAncestry, generate(a, log_size, own, &bad, median(&bad), false));
-    try std.testing.expect(try violation(a, air, log_size, &pubs, try generate(a, log_size, own, &bad, median(&bad), true)) != null);
+    try std.testing.expectError(error.BrokenAncestry, generate(a, log_size, 170, own, &bad, median(&bad), false));
+    try std.testing.expect(try violation(a, air, log_size, &pubs, try generate(a, log_size, 170, own, &bad, median(&bad), true)) != null);
     // Another block's hash in the public inputs.
     var other = pubs;
     other[25] = other[25].add(M31.one());
     try std.testing.expect(try violation(a, air, log_size, &other, honest) != null);
-    // Below the CSV height: limbs 0 accepted, nonzero rejected; and a 2048-row trace cannot claim CSV.
-    const off = try generate(a, 11, own, null, 0, false);
-    try std.testing.expect(try violation(a, air, 11, &testPubs(own, false, 0), off) == null);
-    try std.testing.expect(try violation(a, air, 11, &testPubs(own, false, mtp), off) != null);
-    try std.testing.expect(try violation(a, air, 11, &testPubs(own, true, mtp), off) != null);
+    // Heights 0–10: limbs 0 accepted, nonzero rejected. From height 11 (and for a height that is not a
+    // small number at all) a trace without the predecessors is rejected, with or without the limbs, at
+    // 2048 rows and at 4096.
+    for ([_]u32{ 0, 1, 5, 10 }) |h| {
+        const off = try generate(a, 11, h, own, null, 0, false);
+        try std.testing.expect(try violation(a, air, 11, &testPubs(own, h, 0), off) == null);
+        try std.testing.expect(try violation(a, air, 11, &testPubs(own, h, mtp), off) != null);
+        try std.testing.expect(try violation(a, air, 11, &testPubs(own, h, 1 << 16), off) != null);
+    }
+    for ([_]u32{ 11, 12, 170, 419327, 419328, 0x7ffffffe }) |h| {
+        const off = try generate(a, 11, h, own, null, 0, false);
+        const off12 = try generate(a, 12, h, own, null, 0, false);
+        try std.testing.expect(try violation(a, air, 11, &testPubs(own, h, 0), off) != null);
+        try std.testing.expect(try violation(a, air, 11, &testPubs(own, h, mtp), off) != null);
+        try std.testing.expect(try violation(a, air, 12, &testPubs(own, h, 0), off12) != null);
+        // The honest trace of block 170 is accepted at any height from 11 on (the height is bound
+        // elsewhere: by the leaf and the header chain).
+        try std.testing.expect(try violation(a, air, log_size, &testPubs(own, h, mtp), try generate(a, log_size, h, own, anc, mtp, false)) == null);
+    }
 }
 
 test "block anc: the STWZEVA-composed proof is byte-identical under the production profile" {
@@ -190,8 +216,8 @@ test "block anc: the STWZEVA-composed proof is byte-identical under the producti
     const anc: *const [NANC]Header = @import("checks.zig").ancOf("170");
     const mtp = median(anc);
     const log_size: u32 = 12;
-    const pubs = testPubs(own, true, mtp);
-    const main = try generate(a, log_size, own, anc, mtp, false);
+    const pubs = testPubs(own, 170, mtp);
+    const main = try generate(a, log_size, 170, own, anc, mtp, false);
     const parts = [_]system.Part{.{ .air = &air, .log_size = log_size, .pubs = &pubs }};
     const mains = [_][]const []const M31{@ptrCast(main)};
     // 70 queries, 26-bit PoW, blowup 1, fold step 1.

@@ -120,6 +120,9 @@ pub const PATTERN = [6]u8{ 0x6a, 0x24, 0xaa, 0x21, 0xa9, 0xed };
 pub const BIP34_HEIGHT: u32 = 227931;
 pub const CSV_HEIGHT: u32 = 419328;
 pub const SEGWIT_HEIGHT: u32 = 481824;
+/// From this height a block has 11 predecessors and its proof derives the previous median time past from
+/// them (`block_anc`; ANC-PRE-CSV, D-060). Below it public inputs 3 and 7 are 0.
+pub const ANC_HEIGHT: u32 = 11;
 
 /// The block's context, from the header chain.
 pub const Ctx = struct {
@@ -128,7 +131,7 @@ pub const Ctx = struct {
     /// Tests only: build the witness of an invalid block anyway (wrapping arithmetic, values truncated
     /// to their limbs), to check that the AIR rejects it.
     force: bool = false,
-    /// The 11 predecessors' headers, oldest first (D-043 part 3); required at and above the CSV height.
+    /// The 11 predecessors' headers, oldest first (D-043 part 3); required from `ANC_HEIGHT`.
     anc: ?*const [11][80]u8 = null,
 
     pub fn cutoff(self: Ctx, raw: []const u8) u32 {
@@ -140,6 +143,10 @@ pub const Ctx = struct {
     pub fn csv(self: Ctx) bool {
         return self.height >= CSV_HEIGHT;
     }
+    /// The previous median time past is proven (and public): the block has 11 predecessors.
+    pub fn ancOn(self: Ctx) bool {
+        return self.height >= ANC_HEIGHT;
+    }
     pub fn segwit(self: Ctx) bool {
         return self.height >= SEGWIT_HEIGHT;
     }
@@ -148,9 +155,9 @@ pub const Ctx = struct {
 /// Public inputs 0–6: length, transaction count, height, prevMtp, and the three activation bits.
 /// The block's public inputs: length, transaction count, height, the previous MTP's low 16 bits, the
 /// activation bits (BIP34, CSV, segwit), and the previous MTP's high 16 bits.
-/// Below the CSV height the MTP is unused and its limbs are 0 (D-043 part 3).
+/// Below `ANC_HEIGHT` the MTP limbs are 0 (D-060; before it, below the CSV height, D-043 part 3).
 pub fn pubs(raw: []const u8, ntx: u32, ctx: Ctx) [8]M31 {
-    const m: u32 = if (ctx.csv()) ctx.prev_mtp else 0;
+    const m: u32 = if (ctx.ancOn()) ctx.prev_mtp else 0;
     return .{
         f(raw.len),                    f(ntx),                         f(ctx.height),
         f(m & 0xffff),                 f(@intFromBool(ctx.bip34())),   f(@intFromBool(ctx.csv())),
@@ -560,14 +567,14 @@ pub fn tables(a: std.mem.Allocator, log_size: u32, ranges: []const u32, opcodes:
 pub const Sample = struct { raw: []const u8, ctx: Ctx, undo: []const u8 = &.{1} };
 pub const samples_small = [_]Sample{
     .{ .raw = @embedFile("testdata:block_0"), .undo = @embedFile("testdata:undo_0"), .ctx = .{ .height = 0, .prev_mtp = 0 } },
-    .{ .raw = @embedFile("testdata:block_170"), .undo = @embedFile("testdata:undo_170"), .ctx = .{ .height = 170, .prev_mtp = 1231715347 } },
-    .{ .raw = @embedFile("testdata:block_91722"), .undo = @embedFile("testdata:undo_91722"), .ctx = .{ .height = 91722, .prev_mtp = 1289721830 } },
-    .{ .raw = @embedFile("testdata:block_91812"), .undo = @embedFile("testdata:undo_91812"), .ctx = .{ .height = 91812, .prev_mtp = 1289756038 } },
-    .{ .raw = @embedFile("testdata:block_91842"), .undo = @embedFile("testdata:undo_91842"), .ctx = .{ .height = 91842, .prev_mtp = 1289767733 } },
-    .{ .raw = @embedFile("testdata:block_91880"), .undo = @embedFile("testdata:undo_91880"), .ctx = .{ .height = 91880, .prev_mtp = 1289778307 } },
+    .{ .raw = @embedFile("testdata:block_170"), .undo = @embedFile("testdata:undo_170"), .ctx = .{ .height = 170, .prev_mtp = 1231715347, .anc = ancOf("170") } },
+    .{ .raw = @embedFile("testdata:block_91722"), .undo = @embedFile("testdata:undo_91722"), .ctx = .{ .height = 91722, .prev_mtp = 1289721830, .anc = ancOf("91722") } },
+    .{ .raw = @embedFile("testdata:block_91812"), .undo = @embedFile("testdata:undo_91812"), .ctx = .{ .height = 91812, .prev_mtp = 1289756038, .anc = ancOf("91812") } },
+    .{ .raw = @embedFile("testdata:block_91842"), .undo = @embedFile("testdata:undo_91842"), .ctx = .{ .height = 91842, .prev_mtp = 1289767733, .anc = ancOf("91842") } },
+    .{ .raw = @embedFile("testdata:block_91880"), .undo = @embedFile("testdata:undo_91880"), .ctx = .{ .height = 91880, .prev_mtp = 1289778307, .anc = ancOf("91880") } },
 };
 pub const samples_large = [_]Sample{
-    .{ .raw = @embedFile("testdata:block_400000"), .undo = @embedFile("testdata:undo_400000"), .ctx = .{ .height = 400000, .prev_mtp = 1456414666 } },
+    .{ .raw = @embedFile("testdata:block_400000"), .undo = @embedFile("testdata:undo_400000"), .ctx = .{ .height = 400000, .prev_mtp = 1456414666, .anc = ancOf("400000") } },
     .{ .raw = @embedFile("testdata:block_481824"), .undo = @embedFile("testdata:undo_481824"), .ctx = .{ .height = 481824, .prev_mtp = 1503536364, .anc = ancOf("481824") } },
     .{ .raw = @embedFile("testdata:block_709632"), .undo = @embedFile("testdata:undo_709632"), .ctx = .{ .height = 709632, .prev_mtp = 1636860027, .anc = ancOf("709632") } },
     .{ .raw = @embedFile("testdata:block_970347"), .undo = @embedFile("testdata:undo_970347"), .ctx = .{ .height = 970347, .prev_mtp = 1791376871, .anc = ancOf("970347") } },

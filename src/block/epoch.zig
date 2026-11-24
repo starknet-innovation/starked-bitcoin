@@ -228,7 +228,7 @@ pub fn coinSetFrom(a: std.mem.Allocator, init: []const Coin, first: u32, blocks:
     for (init) |c| try set.put(.{ .txid = c.txid, .vout = c.vout }, c);
     for (blocks, 0..) |raw, hh| {
         const height: u32 = first + @as(u32, @intCast(hh));
-        const time: u32 = if (headers) |hs| coin.coinTime(hs, height) else if (height < @import("connect_rules.zig").CSV_HEIGHT) 0 else return error.MissingHeaders;
+        const time: u32 = if (headers) |hs| coin.coinTime(hs, height) else if (height < @import("checks.zig").ANC_HEIGHT) 0 else return error.MissingHeaders;
         const rows = try fields.tokenize(a, raw);
         var txi: u32 = 0;
         var tx_start: usize = 0;

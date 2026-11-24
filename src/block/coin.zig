@@ -236,24 +236,24 @@ pub fn timeClaims(a: std.mem.Allocator, fetched: []const u8, headers: []const [8
     const out = try a.alloc(u32, recs.len);
     for (recs, out) |rc, *o| {
         const c: usize = rc.code >> 1;
-        if (c >= connect_rules.CSV_HEIGHT and c > headers.len) return error.MissingHeaders;
+        if (c >= checks_anc and c > headers.len) return error.MissingHeaders;
         o.* = coinTime(headers, c);
     }
     return out;
 }
 
-/// The time of a coin created at `height`: the median of the (up to) 11 headers before it; 0 below the CSV
-/// height, where a block's previous median time past is not proven and its public limbs are 0 (D-043
-/// part 3): what the creating block's proof has as public inputs 3 and 7.
+/// `checks.ANC_HEIGHT` (not imported here: `checks.zig` imports this file's users).
+const checks_anc: usize = 11;
+
+/// The time of a coin created at `height`: the median of the 11 headers before it; 0 below height 11,
+/// where a block has fewer predecessors and its public limbs are 0 (D-060): what the creating block's
+/// proof has as public inputs 3 and 7.
 pub fn coinTime(headers: []const [80]u8, height: usize) u32 {
-    if (height < connect_rules.CSV_HEIGHT) return 0;
-    const lo = if (height >= 11) height - 11 else 0;
-    const n = height - lo;
-    if (n == 0) return 0;
+    if (height < checks_anc) return 0;
     var t: [11]u32 = undefined;
-    for (headers[lo..height], 0..) |h, i| t[i] = std.mem.readInt(u32, h[68..72], .little);
-    std.mem.sort(u32, t[0..n], {}, std.sort.asc(u32));
-    return t[n / 2];
+    for (headers[height - 11 .. height], 0..) |h, i| t[i] = std.mem.readInt(u32, h[68..72], .little);
+    std.mem.sort(u32, &t, {}, std.sort.asc(u32));
+    return t[5];
 }
 
 /// A coin's bytes: its `serTxOut`, then its time (4 bytes, little-endian). Lean `Spec.CoinEpoch.coinBytes`.
@@ -936,7 +936,9 @@ test "coin events: blocks 9 and 170 balance (block 170 spends block 9's coinbase
     }
     try std.testing.expectEqual(@as(u32, 0), b9.nin);
     try std.testing.expectEqual(@as(u32, 1), b170.nin);
-    // The final set: block 170's coinbase output and its second transaction's two outputs.
+    // The final set: block 170's coinbase output and its second transaction's two outputs, each with the
+    // block's previous median time past (D-060: proven from height 11). Block 9's coin, spent here, has
+    // time 0 (fewer than 11 predecessors).
     const ch = Challenge.testing();
     const rows = try fields.tokenize(a, s170.raw);
     var txids: [2][32]u8 = undefined;
@@ -963,7 +965,7 @@ test "coin events: blocks 9 and 170 balance (block 170 spends block 9's coinbase
         if (r.kind == fields.K_LOCK) txi += 1;
         if (r.kind == fields.K_OUT) {
             vout = if (prev_out) vout + 1 else 0;
-            final = final.add(try coinFrac(ch, txids[txi], vout, 170, txi == 0, try coinBytes(a, s170.raw[r.start .. r.start + r.len], 0), txi));
+            final = final.add(try coinFrac(ch, txids[txi], vout, 170, txi == 0, try coinBytes(a, s170.raw[r.start .. r.start + r.len], s170.ctx.prev_mtp), txi));
             prev_out = true;
         } else if (r.kind != fields.K_LOCK) prev_out = false;
     }

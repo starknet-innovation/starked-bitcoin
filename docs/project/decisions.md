@@ -698,3 +698,54 @@ Rejected: three 11-bit parts packed into 16-bit-limb slots (D-058's sketch: thre
 checks on every row, and a change of the tuple in the set pass); leaving the time out of the Merkle leaf
 (two record lengths under one relation, or a changed leaf format).
 To undo: revert the commit; the proofs of 935,001–972,500 on `main` do not depend on it.
+
+### D-060 — ANC-PRE-CSV: the previous median time past is proven from height 11, keyed on the public height
+Date: 2026-11-23 · By: owner ("I'll eventually want to … prove from genesis, so build whatever is needed for that"; "Do 2") and agent (Claude) (the form below) · Status: applied on branch `connect-rules`; the form is **to confirm by the owner**
+Decision: (1) `block_anc` proves a block's previous median time past (public inputs 3 and 7) at every
+height from 11 on, the first block with 11 predecessors. Before, it did so from the CSV height (419,328)
+only (D-043 part 3), so coins created below it carried time 0 (D-059, limit 2).
+(2) The component is switched on by the **public height** (input 2), not by the CSV bit (input 5):
+`act = ∏_{j<11} (H − j)`, a product over a public input, of degree 0 in the trace. The hash and count
+constraints are multiplied by `act`. A new column (125) holds `act⁻¹`; the limbs are 0 unless
+`act · inv = 1`, so they are 0 at heights 0–10 and free otherwise. No new public input; the leaf and node
+circuits do not change in shape.
+(3) At heights 0–10 the limbs stay 0, so a coin created there carries time 0, not Core's median of fewer
+than 11 times.
+(4) The gate: `Block.Anc.anc_sound`, `Block.block_mtp` and `Block.BlockPubOk.mtp` are restated (cases
+`height < 11` and `11 ≤ height`, where they were CSV bit 0 and 1); `Anc.PUB_CSV` unpinned, `act`, `gates`,
+`anc` re-pinned, `PUB_H`, `prodH`, `INV` added (2,229 pins).
+Why: a run from genesis needs every coin's time bound to the chain; a time lock is at most 65,535 × 512 s
+(about 388 days), so the coins that matter are those created in the year before the CSV height. Keying on
+the height avoids a 162nd public input and a change of every recursion circuit.
+Limit kept (a security statement, to check): coins created at heights 0–10 carry time 0. Core would use
+their real median time (January 2009). The first block that can enforce a time lock is 419,328 (2016), so
+for those coins every lock is met under both values; the proof does not show this, it follows from the
+chain's timestamps.
+Cost: every block proof below the CSV height gains a 4,096-row ancestry trace (126 columns), where it had
+256 rows. Every block VK changes (as steps 2–4 already require).
+Rejected: a new public bit for the activation (changes the public-input count, the leaf circuit and every
+VK shape); handling fewer than 11 predecessors in the AIR (a variable-length median for eleven blocks);
+switching on at a later height justified by timestamps (a chain fact in the statement for 400,000 blocks
+instead of 11).
+My first version of (2) was wrong: it forced the limbs to 0 with `∏_{j≠k} (H − j)` terms, which are
+nonzero above height 10 too, so every valid block from height 11 was rejected. The Lean soundness proof
+passed (it does not prove completeness); the Zig tests caught it.
+To undo: revert the commit.
+
+### D-061 — TIERS-2: the `tight` size profile, as built
+Date: 2026-11-23 · By: owner (D-055; "Do … 4 as well") and agent (Claude) (the offsets and the rule) · Status: applied on branch `connect-rules`; not yet timed on a GPU
+Decision: a third profile, `tight` (`system.Profile`, value 2): sha at L; msg and bytes at L−1; fpwalk,
+b2s, undo, b2msg at L−3; walk at L−4; fields L−7; coin L−8; urec L−9; merkle and wmerkle L−10 (floor 8);
+ctx and tables 8; anc 12. L is what `tiered` uses (the largest of sha, msg, bytes, walk). `sizesAuto`
+takes `tight` when the block fits it, else `tiered`, else `uniform`.
+Measured (`scripts/tier_search.py` on `survey` needs of blocks 935,001–972,500 with this branch's AIRs):
+39.1 % fewer proven cells than `tiered` alone; 34,913 of 37,500 blocks fit. A second new profile would add
+about five points and is not built.
+Format: a forest size key holds L in 6 bits, `tiered` as bit 7 (as before) and `tight` as bit 6; the block
+tree's VK gains a third leaf table, encoded only when used.
+Measured after (2026-11-24, needs of blocks 0–492,992): `tight` is taken by 1–6 % of the blocks from height
+100,000 to 492,992 and saves 0.0 % of their cells; it is a profile for recent blocks.
+Open: the offsets come from 37,500 recent blocks. For a run from genesis they should be searched again on
+the whole chain (`replay --needs`, added for this); the CUDA arena table has no `tight` row yet; one GPU
+timing must confirm that cells predict time.
+To undo: remove the enum value; `auto` then chooses as before.

@@ -2,7 +2,8 @@
 **Ancestry (D-043 part 3, option A): the previous-block MTP inside the block proof.** The 16th component
 of the block system. Its trace is a header chain of 256-row periods laid out exactly as the header-chain
 AIR's (`Gadgets/HeaderChain.lean`: SHA256d at rows 0–215, the same preprocessed columns), with the
-header chain's SHA, plumbing and prev-hash linkage constraints. When the CSV bit (public input 5) is set:
+header chain's SHA, plumbing and prev-hash linkage constraints. When the height (public input 2) is at
+least 11, so that the block has 11 predecessors (ANC-PRE-CSV, D-060; before, only from the CSV height):
 
 * period 11's hash is the block hash (public inputs 25–40), so periods 0–10 are the block's 11
   predecessors, oldest first, each committing to the previous one's hash;
@@ -11,14 +12,13 @@ header chain's SHA, plumbing and prev-hash linkage constraints. When the CSV bit
   `GetMedianTimePast`);
 * the trace has at least 4096 rows (12 periods fit).
 
-Below the CSV height the MTP is unused (the lock-time cutoff is the block's own time) and public inputs 3
-and 7 are 0. The timestamps are not public.
+At heights 0–10 public inputs 3 and 7 are 0. Below the CSV height the lock-time cutoff does not use the
+MTP (it is the block's own time); the MTP is proven there because it is the time of the coins the block
+creates (D-059). The timestamps are not public.
 
-Layout per period (rows relative to the period): rows 229 (slot 1) and 230 (slot 2) compare, in the
-header chain's `cmpLo`/`cmpHi` form, `a` against `w` (raw time words, `e` the 32-bit difference, column
-108 the flag `[a < w]`, 109 the carry). Row 229: `a` = the MTP, `w` = the header's time (row 77); row 230:
-`a` = the header's time, `w` = the MTP. Period 0, row 240: the two counts' slack in `a` and `e` bits 0..2.
-Column 124 is a copy of the preprocessed `FIRST`.
+The activation is a product over the public height, `act = ∏_{j<11} (H − j)`: nonzero exactly when
+`H ∉ {0, …, 10}`, and of degree 0 in the trace. Column 125 holds its inverse when it is nonzero: the
+limbs are 0 unless `act · inv = 1`.
 -/
 import StarkedAir.Gadgets.Mtp
 import StarkedAir.Lookup
@@ -27,14 +27,18 @@ namespace StarkedAir.Block.Anc
 
 open StarkedAir StarkedAir.Sha256 StarkedAir.HeaderChain
 
+def PUB_H : ℕ := 2
 def PUB_MLO : ℕ := 3
-def PUB_CSV : ℕ := 5
 def PUB_MHI : ℕ := 7
 def PUB_HASH : ℕ := 25
 /-- Number of predecessors; the block header is period `NANC`. -/
 def NANC : ℕ := 11
 
-def act : Expr := .pub PUB_CSV
+/-- `∏_{j ∈ l} (H − j)`, `H` the public height. -/
+def prodH (l : List ℕ) : Expr := l.foldl (fun acc j => .mul acc (.sub (.pub PUB_H) (cst j))) (cst 1)
+
+/-- Nonzero exactly when the height is not in `0 … 10`. -/
+def act : Expr := prodH (List.range NANC)
 /-- Limb `h` of the MTP. -/
 def mpub (h : ℕ) : Expr := .pub (if h = 0 then PUB_MLO else PUB_MHI)
 
@@ -85,12 +89,14 @@ def counts : List Expr :=
 /-- Column 124 copies `FIRST` (the prover reads preprocessed columns at offset 0 only). -/
 def FCOPY : ℕ := Sha256.N_MAIN
 
-/-- The CSV bit is boolean; without it the MTP limbs are 0; with it the trace has more than 2048 rows
+/-- Column 125: the inverse of `act` when it is nonzero (any value otherwise). -/
+def INV : ℕ := Sha256.N_MAIN + 1
+
+/-- At a height below 11 (`act = 0`) the MTP limbs are 0; from 11 on the trace has more than 2048 rows
 (`FIRST` read 2048 rows down is 1 exactly when the trace has at most 2048 rows). -/
 def gates : List Expr :=
-  [ .mul act (.sub act (cst 1)),
-    .mul (.sub (cst 1) act) (.pub PUB_MLO),
-    .mul (.sub (cst 1) act) (.pub PUB_MHI),
+  [ .mul (.sub (.mul act (col INV)) (cst 1)) (.pub PUB_MLO),
+    .mul (.sub (.mul act (col INV)) (cst 1)) (.pub PUB_MHI),
     .sub (col FCOPY) (pre FIRST),
     .mul (.mul act (pre FIRST)) (col FCOPY 2048) ]
 
@@ -99,7 +105,7 @@ def ancCs : List Expr := hashOut ++ ([0, 1].flatMap operands) ++ [ancLo, ancHi] 
 def constraints : List Expr := Sha256.constraints ++ plumbing ++ linkNF ++ ancCs
 
 def anc : Comp where
-  air := { name := "block_anc", nMain := Sha256.N_MAIN + 1, pre := HeaderChain.preCols, constraints := constraints }
+  air := { name := "block_anc", nMain := Sha256.N_MAIN + 2, pre := HeaderChain.preCols, constraints := constraints }
   lookups := []
 
 end StarkedAir.Block.Anc

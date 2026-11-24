@@ -86,7 +86,11 @@ pub const Epoch = struct {
             .chal = self.ch,
             .ctx = f.ctx,
             .mtps = try bs.timeClaims(a, f.undo, self.all),
-            .profile = if (size == .tiered) .tiered else .uniform,
+            .profile = switch (size) {
+                .tiered => .tiered,
+                .tight => .tight,
+                else => .uniform,
+            },
             .auto = size == .auto,
             .skip_device_columns = skip_device_columns,
         });
@@ -104,7 +108,7 @@ pub const Epoch = struct {
     }
 };
 
-pub const Size = enum { auto, uniform, tiered };
+pub const Size = enum { auto, uniform, tiered, tight };
 
 /// Block `hh`'s files: the raw block (checked against the header), its fetched undo stream and the
 /// creating transactions' indices.

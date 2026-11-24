@@ -20,15 +20,18 @@ const sys = sb.block.system;
 
 /// Planned arena bytes, `prover.Prepared.init(...).memory.bytes()` with device LogUp, production
 /// config (`prove_rec.config(L)`), computed on the host by `zig build cuda-test -Dcuda=true
-/// -Dtest-filter="chain survey"` with STARKED_ARENA_TABLE=1 at d9a2aba. Index L − 8.
-const arena_uniform = [_]u64{ 8529232, 14633024, 27447056, 53293200, 104899328, 208020864, 414168992, 826365760, 1650655328, 3299126048, 6595954544, 13189494096, 26376451264, 52750239168, 105497684048, 210992438384, 421981807136 };
+/// -Dtest-filter="chain survey"` with STARKED_ARENA_TABLE=1 (2026-11-23, branch `connect-rules`, after D-060 and D-061). Index L − 8.
+const arena_uniform = [_]u64{ 9192336, 15844736, 30016496, 58357104, 114952160, 228051568, 454155392, 906263584, 1810376000, 3618492416, 7234612304, 14466734640, 28930857376, 57858976416, 115715083568, 231427162448, 462851180288 };
 /// Index L − 12.
-const arena_tiered = [_]u64{ 40078384, 66538160, 122020240, 232884832, 454510064, 897652176, 1783823392, 3556048384, 7100376432, 14188906096, 28365834496, 56719555872, 113426858704 };
+const arena_tiered = [_]u64{ 41882896, 69473184, 127742576, 244181840, 476956384, 942397104, 1873165584, 3734585056, 7457302096, 14902609744, 29793094112, 59573927424, 119135454128 };
+/// Index L − 12 (TIERS-2).
+const arena_tight = [_]u64{ 32860288, 50639392, 86891088, 159295088, 305073376, 597930512, 1183879984, 2356013888, 4700159648, 9388324768, 18764524096, 37516787296, 75021173776 };
 
 pub fn arenaBytes(L: u32, profile: sys.Profile) ?u64 {
     return switch (profile) {
         .uniform => if (L >= 8 and L - 8 < arena_uniform.len) arena_uniform[L - 8] else null,
         .tiered => if (L >= 12 and L - 12 < arena_tiered.len) arena_tiered[L - 12] else null,
+        .tight => if (L >= 12 and L - 12 < arena_tight.len) arena_tight[L - 12] else null,
     };
 }
 

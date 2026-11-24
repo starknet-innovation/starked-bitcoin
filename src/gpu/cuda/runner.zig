@@ -41,7 +41,7 @@ const Opts = struct {
     large: ?u32 = null,
     production: bool = false,
     /// Size profile: by size (tiered from 2^12, uniform below; the default), or forced.
-    size: enum { auto, uniform, tiered } = .auto,
+    size: enum { auto, uniform, tiered, tight } = .auto,
     min_log: u32 = 0,
     skip_cpu: bool = false,
     cpu_sha: ?[]const u8 = null,
@@ -207,7 +207,11 @@ pub fn main() !void {
     const device_witness = !opts.host_witness and !opts.mock;
     const lean = device_witness and (opts.skip_cpu or opts.cpu_proof != null) and !opts.host_logup;
     const built = try a.create(bs.Built);
-    built.* = try bs.buildFull(a, sample.raw, sample.undo, sample.ctx, .{ .min_log = opts.min_log, .profile = if (opts.size == .tiered) .tiered else .uniform, .auto = opts.size == .auto, .skip_device_columns = lean });
+    built.* = try bs.buildFull(a, sample.raw, sample.undo, sample.ctx, .{ .min_log = opts.min_log, .profile = switch (opts.size) {
+        .tiered => .tiered,
+        .tight => .tight,
+        else => .uniform,
+    }, .auto = opts.size == .auto, .skip_device_columns = lean });
     const parts = try a.create([bs.N_COMP]system.Part);
     parts.* = bs.parts(airs, built);
     var mains: [bs.N_COMP][]const []const M31 = undefined;

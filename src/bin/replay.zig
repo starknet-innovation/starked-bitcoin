@@ -6,13 +6,14 @@
 //! checkpoint to resume from).
 //!
 //!   replay <headers.bin> <out> [--from <h> <set-(h-1).bin>] [--to <h>] [--blocks <dir>]
-//!          [--window <a> <b>] [--set-at <h>]... [--set-every <n>] [--capacity <coins>]
+//!          [--window <a> <b>] [--set-at <h>]... [--set-every <n>] [--capacity <coins>] [--needs <csv>]
 //!
 //! Blocks come from `<dir>/<h>.bin` (`--blocks`, needs `--to`) or from stdin as records
 //! (LE32 height, LE32 n, n raw bytes; scripts/stream_blocks.py), consecutive from `--from` (default 0)
 //! until `--to` or the end of the stream. `--set-every n` writes the set after every block h with
 //! n | h + 1. Progress goes to stderr every 10 s; one line per written set (count, amount, Core's
-//! `hash_serialized`, the digest of the file).
+//! `hash_serialized`, the digest of the file). `--needs <csv>` appends, per block, the rows each of the 16
+//! block components needs (the input of `scripts/tier_search.py`).
 
 const std = @import("std");
 const sb = @import("starked_bitcoin");
@@ -45,6 +46,7 @@ pub fn main() !void {
     defer set_at.deinit(gpa);
     var set_every: u32 = 0;
     var capacity: u32 = 0;
+    var needs_path: ?[]const u8 = null;
     var i: usize = 3;
     while (i < args.len) : (i += 1) {
         const x = args[i];
@@ -71,6 +73,9 @@ pub fn main() !void {
         } else if (std.mem.eql(u8, x, "--capacity") and more >= 1) {
             capacity = parse(args[i + 1]);
             i += 1;
+        } else if (std.mem.eql(u8, x, "--needs") and more >= 1) {
+            needs_path = args[i + 1];
+            i += 1;
         } else usage();
     }
     if (blocks_dir != null and to == null) usage();
@@ -89,6 +94,12 @@ pub fn main() !void {
     if (headers.len % 80 != 0) return error.BadHeaderFile;
     const n_headers: u32 = @intCast(headers.len / 80);
 
+    const needs_file: ?std.fs.File = if (needs_path) |np| blk: {
+        // Appends, so a resumed run continues the file.
+        const f = try std.fs.cwd().createFile(np, .{ .truncate = false });
+        try f.seekFromEnd(0);
+        break :blk f;
+    } else null;
     var set = try R.Set.init(gpa, capacity);
     defer set.deinit();
     var timer = try std.time.Timer.start();
@@ -128,16 +139,27 @@ pub fn main() !void {
         };
         if (h >= n_headers) return error.BeyondHeaders;
         const want = if (window) |w| h >= w[0] and h <= w[1] else false;
-        const u = set.apply(a, raw, headers[80 * h ..][0..80], h, sb.block.coin.coinTime(std.mem.bytesAsSlice([80]u8, headers), h), want) catch |e| {
+        const u = set.apply(a, raw, headers[80 * h ..][0..80], h, sb.block.coin.coinTime(std.mem.bytesAsSlice([80]u8, headers), h), want or needs_file != null) catch |e| {
             std.debug.print("replay: block {d}: {s}\n", .{ h, @errorName(e) });
             return e;
         };
         bytes += raw.len;
-        if (u) |x| {
+        // `--needs`: the rows each of the 16 block components needs (`survey`'s STARKED_SURVEY_NEEDS line),
+        // for the size-profile search over the whole chain (TIERS-2, `scripts/tier_search.py`).
+        if (needs_file) |f| {
+            var line: [512]u8 = undefined;
+            var w: usize = (try std.fmt.bufPrint(&line, "{d}", .{h})).len;
+            if (sb.block.system.shape(a, raw, u.?.undo, null, null, h, false)) |sh| {
+                for (sh.needs) |n| w += (try std.fmt.bufPrint(line[w..], ",{d}", .{n})).len;
+            } else |e| w += (try std.fmt.bufPrint(line[w..], ",error,{s}", .{@errorName(e)})).len;
+            line[w] = '\n';
+            try f.writeAll(line[0 .. w + 1]);
+        }
+        if (u) |x| if (want) {
             try std.fs.cwd().writeFile(.{ .sub_path = try std.fmt.bufPrint(&path_buf, "{s}/blocks/{d}.bin", .{ out, h }), .data = raw });
             try std.fs.cwd().writeFile(.{ .sub_path = try std.fmt.bufPrint(&path_buf, "{s}/undo/{d}.undo", .{ out, h }), .data = x.undo });
             try std.fs.cwd().writeFile(.{ .sub_path = try std.fmt.bufPrint(&path_buf, "{s}/undo/{d}.ctx", .{ out, h }), .data = x.ctx });
-        }
+        };
         try set.maybeCompact();
         const at = std.mem.indexOfScalar(u32, set_at.items, h) != null or (set_every > 0 and (h + 1) % set_every == 0);
         if (at) {

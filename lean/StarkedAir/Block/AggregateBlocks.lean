@@ -43,11 +43,11 @@ theorem BlockPubOk.toV {p : ℕ → F} (hp : BlockPubOk p) : BlockPubOk' p := by
   obtain ⟨inst, L, hL, h8, h23, hsat, hS⟩ := hp
   exact ⟨inst, fun _ => L, hL, h8, h8, h8, SizeOk.of_le23 fun _ _ => h23, hsat, hS⟩
 
-/-- **The previous MTP of a proven block** (`block_mtp`), with per-component sizes: 0 below the CSV height; at and above it the
+/-- **The previous MTP of a proven block** (`block_mtp`), with per-component sizes: 0 below height 11; from there on the
 median time past of 11 headers hash-chained, in order, to a header with the block's SHA256d. -/
 theorem BlockPubOk'.mtp {p : ℕ → F} (hp : BlockPubOk' p) :
-    (p Anc.PUB_CSV = 0 ∧ p Anc.PUB_MLO = 0 ∧ p Anc.PUB_MHI = 0) ∨
-    (p Anc.PUB_CSV = 1 ∧ ∃ (inst : ℕ → Inst) (b : Spec.Block.Blk) (hw : ℕ → ℕ → Spec.Sha256.Word),
+    ((p Anc.PUB_H).val < Anc.NANC ∧ p Anc.PUB_MLO = 0 ∧ p Anc.PUB_MHI = 0) ∨
+    (Anc.NANC ≤ (p Anc.PUB_H).val ∧ ∃ (inst : ℕ → Inst) (b : Spec.Block.Blk) (hw : ℕ → ℕ → Spec.Sha256.Word),
       Spec.Block.parseBlock (Rb inst p) = some b ∧
       Spec.Block.stateBytes (Spec.Bitcoin.sha256d (hw Anc.NANC)) = Spec.Block.sha256d b.header ∧
       (∀ j, 1 ≤ j → j ≤ Anc.NANC → Spec.Bitcoin.prevHash (hw j) = Spec.Bitcoin.sha256d (hw (j - 1))) ∧
@@ -59,11 +59,11 @@ theorem BlockPubOk'.mtp {p : ℕ → F} (hp : BlockPubOk' p) :
   · exact Or.inl h0
   · exact Or.inr ⟨h1, inst, b, hw, h⟩
 
-/-- **The previous MTP of a proven block** (`block_mtp`): 0 below the CSV height; at and above it the
+/-- **The previous MTP of a proven block** (`block_mtp`): 0 below height 11; from there on the
 median time past of 11 headers hash-chained, in order, to a header with the block's SHA256d. -/
 theorem BlockPubOk.mtp {p : ℕ → F} (hp : BlockPubOk p) :
-    (p Anc.PUB_CSV = 0 ∧ p Anc.PUB_MLO = 0 ∧ p Anc.PUB_MHI = 0) ∨
-    (p Anc.PUB_CSV = 1 ∧ ∃ (inst : ℕ → Inst) (b : Spec.Block.Blk) (hw : ℕ → ℕ → Spec.Sha256.Word),
+    ((p Anc.PUB_H).val < Anc.NANC ∧ p Anc.PUB_MLO = 0 ∧ p Anc.PUB_MHI = 0) ∨
+    (Anc.NANC ≤ (p Anc.PUB_H).val ∧ ∃ (inst : ℕ → Inst) (b : Spec.Block.Blk) (hw : ℕ → ℕ → Spec.Sha256.Word),
       Spec.Block.parseBlock (Rb inst p) = some b ∧
       Spec.Block.stateBytes (Spec.Bitcoin.sha256d (hw Anc.NANC)) = Spec.Block.sha256d b.header ∧
       (∀ j, 1 ≤ j → j ≤ Anc.NANC → Spec.Bitcoin.prevHash (hw j) = Spec.Bitcoin.sha256d (hw (j - 1))) ∧
