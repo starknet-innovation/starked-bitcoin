@@ -32,8 +32,6 @@ case "$cmd" in
 build)
   set -e
   time zig build cuda-archive-plan -Dcuda=true -Dcuda-arch="$CUDA_ARCH"
-  # shellcheck disable=SC2086
-  time zig build install $CUDA_FLAGS            # cuda-set (and cuda-prove, cuda-epoch) on our archive
   if [ -z "$(archive)" ]; then
     (cd "$st" && time zig build benchmark-circuit-cuda-resident -Doptimize=ReleaseFast \
       -Dcuda-nvcc=$CUDA_HOME/bin/nvcc -Dcuda-host-cxx=/usr/bin/g++ \
@@ -42,8 +40,10 @@ build)
   fi
   lib=$(archive)
   echo "circuit archive: $lib"
+  # One install with the circuit archive: an install without it relinks cuda-epoch-tree (and
+  # cuda-set-tree) against the C stubs, silently replacing working binaries (2026-11-25).
   # shellcheck disable=SC2086
-  time zig build cuda-set-tree $CUDA_FLAGS -Dcuda-circuit-archive="$(dirname "$lib")"
+  time zig build install $CUDA_FLAGS -Dcuda-circuit-archive="$(dirname "$lib")"
   time zig build -Doptimize=ReleaseFast -p zig-out-cpu
   ls -l zig-out/bin/cuda-set zig-out/bin/cuda-set-tree zig-out-cpu/bin/chainproof
   echo "== SET BUILD DONE =="

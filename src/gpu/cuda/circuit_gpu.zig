@@ -19,6 +19,21 @@ const component_list = circuit.common.component_list;
 const Context = circuit.builder.Context;
 const leaf = sb.recursion.leaf;
 
+/// SM targets the session accepts: the build's (`-Dcuda-arch`, as `prover.accepted_sms`). It was fixed
+/// at { 80, 90 }, which refused the L40S, A40 and RTX 4090 although the archive is built for them.
+const accepted_sms = blk: {
+    @setEvalBranchQuota(100_000);
+    const text = @import("cuda_build").architectures;
+    var n: usize = 0;
+    var it = std.mem.tokenizeAny(u8, text, ", ");
+    while (it.next()) |_| n += 1;
+    var out: [n]u32 = undefined;
+    it = std.mem.tokenizeAny(u8, text, ", ");
+    var i: usize = 0;
+    while (it.next()) |tok| : (i += 1) out[i] = std.fmt.parseInt(u32, if (std.mem.startsWith(u8, tok, "sm_")) tok[3..] else tok, 10) catch @compileError("bad -Dcuda-arch entry: " ++ tok);
+    break :blk out;
+};
+
 pub fn secs(t: u64) f64 {
     return @as(f64, @floatFromInt(t)) / 1e9;
 }
@@ -86,7 +101,7 @@ pub const Gpu = struct {
         errdefer template.deinit();
         var catalog = try cuda.air_aot.build(gpa, leaf.bundle_bytes);
         errdefer catalog.deinit();
-        return .{ .template = template, .catalog = catalog, .runtime = if (open) try cuda_backend.runtime.NativeRuntime.open(&.{ 80, 90 }) else null };
+        return .{ .template = template, .catalog = catalog, .runtime = if (open) try cuda_backend.runtime.NativeRuntime.open(&accepted_sms) else null };
     }
 
     pub fn deinit(self: *Gpu, gpa: std.mem.Allocator) void {
