@@ -20,6 +20,29 @@ Next: <the exact next step; must match status.md>
 ```
 
 ---
+## 2026-11-25 — GPU-UTIL: the sample on an L40S, a 4090 and an H100; a thread-safety fix (session 49b)
+Who: Claude (agent, Fable 5.2); owner: "Run the measurement and push"
+Roadmap: GPU-UTIL → measured; a cheaper card class confirmed for block proofs
+Done:
+- `connect-rules` pushed to ed86401.
+- The 590-block sample with the stage output on three RunPod pods (L40S community $0.79/h, RTX 4090
+  secure $0.89/h, H100 SXM secure $4.39/h; all deleted, `list-pods` empty; about $4.6, estimate).
+- Fix: `cuda-epoch`'s catalog used the run's arena from the worker threads; now `std.heap.smp_allocator`.
+- `scripts/pod/util_run.sh` (the measurement); results and revised levers in gpu-util.md.
+Evidence (logs in `data/store/gpu/2026-11-25-gpu-util/`, local):
+- Wall with 8 workers: H100 474.2 s (590 proofs), L40S 512.7 s (587), 4090 224.4 s (408).
+- sha256 of the 587 proofs made on both the H100 and the L40S: all equal.
+- Before the fix, `--jobs 8`: 0 of 5 runs passed (random plan errors); after: 3 of 3 short runs and
+  all four full runs.
+- Chain-weighted: H100 267 h; L40S 287 h for 99.2 % of blocks.
+Problems / lessons:
+- The race did not show under `--jobs 3` on 20 vCPUs (session 48) except in the forced `--tiered`
+  run; it showed at once on hosts with more cores. A shared structure that allocates needs a
+  thread-safe allocator even when it is `*const`.
+- I deleted the 4090 pod before deciding to compare proof hashes: its proofs are not hash-checked.
+Next: the owner's decision on the rehearsal, now on L40S-class cards; re-time the trees and a set
+pass there.
+
 ## 2026-11-25 — GPU-UTIL: where the proving cost goes, and the levers (session 49)
 Who: Claude (agent, Fable 5.2), with the owner
 Roadmap: GPU-UTIL → exploration written

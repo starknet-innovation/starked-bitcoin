@@ -3,6 +3,12 @@
 Status: **proposal for the owner**, 2026-11-24. Nothing here is started. Figures marked *measured* come
 from runs in the log (sessions 46b, 47, 48); the others are estimates and say from what.
 
+> **Update 2026-11-25:** the block proofs need not run on H100s. Measured on the same sample, an L40S
+> ($1.09/h) is at 92 % of an H100's speed with byte-identical proofs, and an RTX 4090 equals it on the
+> classes it fits: block proofs about $315 instead of $1,170–1,270 (secure prices). See
+> [gpu-util.md](gpu-util.md). The table below is not yet redone; the trees and set passes are not
+> measured on those cards.
+
 ## What the run produces
 
 One sealed proof that blocks 0 to 972,500 connect as Bitcoin Core connects them (with the rules of

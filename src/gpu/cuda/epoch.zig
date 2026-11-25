@@ -209,7 +209,9 @@ pub fn main() !void {
     const fri = if (weak) PF.testFri() else PF.productionFri();
     const airs = try a.create([bs.N_COMP]sb.air.ir.Air);
     airs.* = try bs.parseAirs(a);
-    var catalog = try res.catalog.Catalog.init(a, airs);
+    // The workers admit programs through the catalog, which allocates: it needs a thread-safe
+    // allocator (the run's arena is not; with it, plans failed at random under several workers).
+    var catalog = try res.catalog.Catalog.init(std.heap.smp_allocator, airs);
     defer catalog.deinit();
     std.fs.cwd().makePath(try std.fmt.allocPrint(a, "{s}/proofs", .{dir})) catch {};
     std.debug.print("{s} {d}..{d}: {d} blocks loaded ({d:.1} s); {s}, {s}\n", .{ if (ep.standalone) "standalone (testing challenge)" else "epoch", ep.from, ep.to, ep.count(), secs(timer.lap()), if (weak) "test strength" else "production", if (mock) "--mock (CPU proofs)" else "device proofs, one CUDA session" });

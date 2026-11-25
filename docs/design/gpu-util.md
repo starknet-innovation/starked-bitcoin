@@ -44,7 +44,69 @@ about 0.45 for the Blake2s group, and by difference about 0.6 for sha. Rough: th
 constraint evaluation 0.57 s. On the H100 the same stage took 1.15 s at 2^23, so about 0.58 s at 2^22
 (inferred by halving, not measured at 2^22). Half of the device time may not need an H100 at all.
 
+## Measured on three cards (2026-11-25)
+
+The 590-block sample of session 48, `cuda-epoch` with the stage output, `--jobs 3` then `--jobs 8`,
+`nvidia-smi` at 100 ms. Logs in `data/store/gpu/2026-11-25-gpu-util/` (local). *All measured.*
+
+| Card (RunPod, per hour) | Proofs | Wall, 8 workers | Device time, same 587 blocks | Busy / memory / power |
+|---|---|---|---|---|
+| H100 SXM 80 GB ($4.39 secure) | 590 | 474.2 s | 410.3 s | 82 % / 18 % / 283 W |
+| L40S 48 GB ($1.09 secure, $0.79 community) | 587 | 512.7 s | 476.7 s | 88 % / 62 % / 272 W |
+| RTX 4090 24 GB ($0.89 secure, $0.34 community) | 408 | 224.4 s | (408 blocks) 161.9 s; H100 164.6 s, L40S 180.9 s | 66 % / 37 % / 215 W |
+
+- **The L40S is at 92 % of the H100's speed on this sample at a quarter of the price**, and the 4090
+  equals the H100 on every class it fits. The 587 proofs made on both the H100 and the L40S are
+  **byte-identical** (sha256 of each file). The 4090's proofs were not hash-checked (the pod was gone).
+- **What fits.** L40S: everything but 2^23 `tiered` and the uniform blocks (4 of the sample deferred).
+  4090: to 2^22 `tight` and `early` and 2^21 `tiered` (183 deferred, from 2^22 `tiered` up).
+- **Weighted by the chain's classes** (mean seconds per block of each (L, profile) class, 8 workers,
+  times the class's blocks; 99.4 % of blocks are in measured classes): H100 267 hours; L40S 287 hours
+  for 99.2 % of blocks; the 68 % of blocks a 4090 fits take 108.5 hours on it (H100 111.3, L40S 107.6),
+  and the remaining L40S classes 180 hours. About 2 hours stay on an H100 (2^23 `tiered`).
+- **Block proofs, priced:** H100 only $1,170 (secure). L40S for all it fits: **about $315** (secure),
+  $230 (community). 4090s for what they fit and L40S for the rest: about $295 (secure). Add the 10 %
+  margin of genesis-run.md.
+- **Stages** (ms per proof, H100 | L40S | 4090):
+
+| Stage | 2^12 `tight` | 2^22 `early` | 2^23 `tight` |
+|---|---|---|---|
+| ingress | 4.9, 4.9, 5.8 | 55, 53, 59 | 69, 74, – |
+| trace generation | 0.5, 0.4, 0.5 | 17, 47, 40 | 39, 96, – |
+| trace commit (with LogUp) | 4.0, 3.1, 3.0 | 168, 242, 202 | 323, 499, – |
+| constraint evaluation | 8.7, 5.4, 5.5 | 403, 413, 370 | 787, 823, – |
+| OODS | 46, 36, 33 | 93, 79, 71 | 121, 104, – |
+| quotient | 3.7, 2.6, 2.5 | 29, 53, 44 | 53, 106, – |
+| the rest | 13, 10, 10 | 19, 18, 16 | 22, 23, – |
+| outside the stage clock | 1.7, 2.5, 2.6 | 5.3, 3.2, 2.6 | 5.1, 2.4, – |
+| **proving call** | **83, 65, 63** | **789, 908, 804** | **1,420, 1,726, –** |
+
+  What it shows: constraint evaluation is 51–55 % of a large proof and runs at the same speed on all
+  three cards (arithmetic-bound). The H100 gains only in trace commit, trace generation and the
+  quotient (1.5–2.5 times), which move memory. Its memory controller is 18 % busy: its bandwidth is
+  mostly unused. **The fixed cost per proof is OODS**: 33–46 ms whatever the size, more than half of a
+  small block's proof. Ingress is 5–7 % in batch mode, not the 19 % of the single run. Nothing
+  measurable happens outside the stage clock.
+- **Witness workers.** With 8 instead of 3 the proving thread waited 5.3 s instead of 14.5 s on the
+  H100 (wall 493.8 s to 474.2 s, 4 %); L40S 23.4 s to 12.9 s; 4090 59.4 s to 31.1 s (there the
+  deferred blocks' witnesses are built for nothing).
+- **A bug found and fixed.** Under 8 workers every run failed at once with random plan errors
+  (`ReadBeforeWrite`, `CudaCatalogBodyMismatch`, `ParameterOutOfBounds`, …): the workers admitted
+  programs through the catalog, whose allocator was the run's arena (not thread-safe). The catalog now
+  uses `std.heap.smp_allocator`: 3 of 3 short runs and every full run passed. Session 48's failure of
+  the forced `--tiered` run shows the same errors and is very likely the same race (not re-run).
+- Cost of the three pods: about $4.6 (4090 0.70 h, L40S 0.88 h, H100 0.75 h; estimate, not from billing).
+
+**Not measured:** the trees, the set passes and the uniform blocks on these cards (other circuits,
+other memory needs); 2^23 on any 24 GB or 32 GB card; a community L40S against a secure one.
+
 ## Levers, by expected saving
+
+**Revised after the measurement:** lever 1 is confirmed and is the largest by far (block proofs from
+about $1,170 to about $315). In lever 3, ingress drops out, the workers are worth 4 %, and the fixed
+cost has a name (OODS, about 40 ms of every proof: about 10 of the 267 hours).
+
+## Levers as written before the measurement
 
 Baseline (genesis-run.md, secure prices): block proofs $1,270, trees $480–570, set passes $490.
 
