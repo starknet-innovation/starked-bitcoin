@@ -137,7 +137,8 @@ pub const PreRoots = struct {
     airs: *const [bs.N_COMP]ir.Air,
     fri: FriConfigV2,
     mutex: std.Thread.Mutex = .{},
-    roots: [2][25]?rec.Hasher.Hash = @splat(@splat(null)),
+    /// One row per size profile (four since D-061 and D-062; two rows overflowed on `tight` and `early`).
+    roots: [@typeInfo(bs.Profile).@"enum".fields.len][25]?rec.Hasher.Hash = @splat(@splat(null)),
 
     pub fn get(self: *PreRoots, gpa: std.mem.Allocator, f: *const File) !rec.Hasher.Hash {
         self.mutex.lock();
