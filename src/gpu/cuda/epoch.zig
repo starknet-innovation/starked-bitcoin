@@ -60,7 +60,10 @@ fn readHeights(a: std.mem.Allocator, path: []const u8) ![]const u32 {
 }
 
 /// Device seconds per (L, profile) class, for the summary.
-const Class = struct { n: usize = 0, total: f64 = 0, device: f64 = 0 };
+const telemetry = @import("stwo_cuda_backend").runtime.telemetry;
+/// Per (L, profile): counts and times, and the device's own per-stage clock, launches and syncs summed
+/// over the class's proofs (zero under `--mock`).
+const Class = struct { n: usize = 0, total: f64 = 0, device: f64 = 0, stage_ns: [telemetry.stage_count]u64 = [_]u64{0} ** telemetry.stage_count, launches: u64 = 0, syncs: u64 = 0, h2d: u64 = 0 };
 
 /// One block's host work, done by a worker: the witness and (on the device path) the plans and host
 /// trees. Owned by its arena; the main thread proves it and frees it.
@@ -228,6 +231,8 @@ pub fn main() !void {
     var proved: usize = 0;
     var passed: usize = 0;
     var deferred = std.ArrayList(u32).empty;
+    // Time the proving thread waited for a block's witness and plans (the device idle meanwhile).
+    var t_wait: u64 = 0;
     std.debug.print("height L profile witness_s plans_s device_s total_s bytes\n", .{});
     // The blocks this run proves.
     var todo = std.ArrayList(usize).empty;
@@ -266,7 +271,9 @@ pub fn main() !void {
     }
     for (todo.items, 0..) |k, jj| {
         const slot = &pipe.slots[jj % n_jobs];
+        var wait = try std.time.Timer.start();
         slot.ready.wait();
+        t_wait += wait.read();
         slot.ready.reset();
         const job = slot.job.?;
         slot.job = null;
@@ -280,6 +287,7 @@ pub fn main() !void {
         const b = job.b;
         var lap = try std.time.Timer.start();
         var t_device: u64 = 0;
+        var counters: ?telemetry.Counters = null;
         const proof = if (mock) blk: {
             const p = try PF.prove(ba, airs, b, fri);
             t_device = lap.lap();
@@ -299,6 +307,7 @@ pub fn main() !void {
                 continue;
             };
             t_device = lap.lap();
+            counters = result.verdict.counters;
             break :blk result.proof;
         };
         if (verify) try system.verifyExt(ba, job.cfg, job.parts, &.{}, proof);
@@ -313,6 +322,14 @@ pub fn main() !void {
         c.value_ptr.n += 1;
         c.value_ptr.total += secs(t_total);
         c.value_ptr.device += secs(t_device);
+        if (counters) |ct| {
+            for (ct.stages, 0..) |st, si| {
+                c.value_ptr.stage_ns[si] += st.device_elapsed_ns;
+                c.value_ptr.syncs += st.sync_calls;
+            }
+            c.value_ptr.launches += ct.kernel_launches;
+            c.value_ptr.h2d += ct.h2d_bytes;
+        }
         std.debug.print("{d} {d} {s} {d:.3} {d:.3} {d:.3} {d:.3} {d}{s}\n", .{ hh, b.log_size, @tagName(b.profile), secs(job.t_witness), secs(job.t_plans), secs(t_device), secs(t_total), bytes.len, if (verify) " verified" else "" });
     }
     const elapsed = secs(run.read());
@@ -329,5 +346,21 @@ pub fn main() !void {
     while (it.next()) |e| {
         const v = e.value_ptr.*;
         std.debug.print("  L {d} {s}: {d} blocks, mean {d:.3} s (device {d:.3} s)\n", .{ e.key_ptr.* >> 2, @tagName(@as(bs.Profile, @enumFromInt(e.key_ptr.* & 3))), v.n, v.total / @as(f64, @floatFromInt(v.n)), v.device / @as(f64, @floatFromInt(v.n)) });
+    }
+    // Where the device time goes, per class: the device's stage clock (ms per proof), what of the
+    // proving call it does not cover (host-side gaps: launches, syncs, the terminal download), and the
+    // launch and sync counts. For GPU-UTIL (docs/design/gpu-util.md).
+    if (!mock) {
+        std.debug.print("proving thread waited {d:.1} s for witnesses (device idle)\n", .{secs(t_wait)});
+        it = classes.iterator();
+        while (it.next()) |e| {
+            const v = e.value_ptr.*;
+            const cnt: f64 = @floatFromInt(v.n);
+            var sum: u64 = 0;
+            for (v.stage_ns) |x| sum += x;
+            std.debug.print("  stages L {d} {s} (ms/proof):", .{ e.key_ptr.* >> 2, @tagName(@as(bs.Profile, @enumFromInt(e.key_ptr.* & 3))) });
+            for (v.stage_ns, 0..) |x, si| if (x != 0) std.debug.print(" {s} {d:.1}", .{ @tagName(@as(telemetry.Stage, @enumFromInt(si))), @as(f64, @floatFromInt(x)) / 1e6 / cnt });
+            std.debug.print("; outside the stage clock {d:.1}; launches {d:.0}, syncs {d:.0}, h2d {d:.1} MiB\n", .{ v.device * 1e3 / cnt - @as(f64, @floatFromInt(sum)) / 1e6 / cnt, @as(f64, @floatFromInt(v.launches)) / cnt, @as(f64, @floatFromInt(v.syncs)) / cnt, @as(f64, @floatFromInt(v.h2d)) / cnt / (1 << 20) });
+        }
     }
 }

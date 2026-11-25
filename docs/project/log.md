@@ -20,6 +20,29 @@ Next: <the exact next step; must match status.md>
 ```
 
 ---
+## 2026-11-25 — GPU-UTIL: where the proving cost goes, and the levers (session 49)
+Who: Claude (agent, Fable 5.2), with the owner
+Roadmap: GPU-UTIL → exploration written
+Done:
+- Read the Delving thread (t/3070, reply of 2026-11-24): advice to iterate on small steps before a
+  run from genesis; a split with cheap-hash commitments between the layers.
+- `scripts/cell_split.py`: shares of the proven cells over the chain. SHA-256 of block bytes 72.3 %,
+  the Blake2s undo commitment 19.6 %, parsing and checks 7.2 %, coins 0.9 %; padding 41 %.
+- `docs/design/gpu-util.md`: findings from the logs and the levers (a cheaper GPU class; split sizes
+  19.3 % fewer cells; several blocks per proof 388,833 proofs instead of 972,503; pipeline fixes).
+- `cuda-epoch` prints, per (L, profile), the device's stage clock, launches, syncs, H2D bytes, and the
+  time the proving thread waited for witnesses.
+Evidence:
+- `python3 scripts/cell_split.py` (972,503 blocks weighted, 1.170e15 cells).
+- `zig build cuda-epoch -Dcuda=true -Doptimize=ReleaseFast -- … --heights <3 blocks> --mock`: 3 proofs,
+  the sizes of session 48's device proofs (772825, 780570, 781525 B). The new device lines do not
+  print under `--mock`: untested until a GPU run.
+- RunPod prices read live on 2026-11-25 (table in gpu-util.md).
+Problems / lessons:
+- `zig build cuda-check` does not compile `src/gpu/cuda/epoch.zig`; build `cuda-epoch` to check it.
+Next: with the owner's go, the 590-block sample on a 24 GB and a 48 GB card and on an H100, with the
+stage output (about $5).
+
 
 ## 2026-11-24 · session 48 · GENESIS-PLAN: a sample of every era timed on an H100; the costed plan
 
