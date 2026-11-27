@@ -26,10 +26,15 @@ jobs:
           mkdir -p "$RUNNER_TEMP/zig" && tar -xJf zig.tar.xz -C "$RUNNER_TEMP/zig" --strip-components=1
           rm zig.tar.xz
           echo "$RUNNER_TEMP/zig" >> "$GITHUB_PATH"
-      - name: Install elan, which installs the Lean version in lean/lean-toolchain
+      # elan's release binary, checked against the SHA-256 GitHub publishes for it (elan-init.sh would
+      # fetch the latest release instead). elan then installs the Lean version in lean/lean-toolchain.
+      - name: Install elan 4.4.0
         run: |
-          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
-            | sh -s -- -y --default-toolchain none
+          curl -sSfL -o elan.tar.gz https://github.com/leanprover/elan/releases/download/v4.4.0/elan-aarch64-unknown-linux-gnu.tar.gz
+          echo "45cde3006f82f98804c94cf2ca4949d117060a5f3cc8afa62f523759947ee21f  elan.tar.gz" | sha256sum -c -
+          tar -xzf elan.tar.gz -C "$RUNNER_TEMP"
+          "$RUNNER_TEMP/elan-init" -y --default-toolchain none
+          rm elan.tar.gz "$RUNNER_TEMP/elan-init"
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
       # Skips the Zig test suite and the AIR drift check (about an hour); see scripts/check.sh.
       - run: ./scripts/check.sh

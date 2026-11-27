@@ -12,8 +12,8 @@ git config core.hooksPath .githooks
 ## Check your change
 
 ```sh
-./scripts/check.sh          # format, lint, build and tests
-./scripts/check.sh --fast   # the same without tests; this is what the commit hook runs
+./scripts/check.sh          # build, forbidden Lean tactics, generated files, Lean proofs and axioms, tests, AIR drift
+./scripts/check.sh --fast   # build, forbidden Lean tactics, generated files; this is what the commit hook runs
 ```
 
 CI runs `./scripts/check.sh` on every pull request, without the Zig test suite and the AIR drift
