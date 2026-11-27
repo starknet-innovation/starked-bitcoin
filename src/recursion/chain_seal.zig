@@ -48,6 +48,7 @@ const Key = leaf.Key;
 /// The exported parameterizations (`lake env lean --run Export.lean chain_seal <m,m,…> [genesis]`).
 pub fn programJson(ms: []const u32, gen: bool) ![]const u8 {
     if (gen and std.mem.eql(u32, ms, &.{ 1, 2, 3 })) return @embedFile("air:chain_seal_1_2_3_genesis");
+    if (gen and std.mem.eql(u32, ms, &.{ 6, 7 })) return @embedFile("air:chain_seal_6_7_genesis");
     if (!gen and std.mem.eql(u32, ms, &.{ 16, 16 })) return @embedFile("air:chain_seal_16_16");
     return error.SealNotExported;
 }
@@ -86,6 +87,7 @@ fn eState(ms: []const u32, gen: bool, j: usize) usize {
 /// The exported SEAL-T parameterizations (`Export.lean chain_seal_t <D> <m,m,…> [genesis]`).
 pub fn programJsonT(ms: []const u32, gen: bool, d: usize) ![]const u8 {
     if (d == 32 and gen and std.mem.eql(u32, ms, &.{ 1, 2, 3 })) return @embedFile("air:chain_seal_t32_1_2_3_genesis");
+    if (d == 32 and gen and std.mem.eql(u32, ms, &.{ 6, 7 })) return @embedFile("air:chain_seal_t32_6_7_genesis");
     if (d == 32 and !gen and std.mem.eql(u32, ms, &.{ 16, 16 })) return @embedFile("air:chain_seal_t32_16_16");
     return error.SealNotExported;
 }

@@ -44,6 +44,7 @@ pub fn programJson(m: usize, prev: bool) ![]const u8 {
         2 => @embedFile("air:epoch_root_2"),
         3 => @embedFile("air:epoch_root_3"),
         6 => @embedFile("air:epoch_root_6"),
+        7 => @embedFile("air:epoch_root_7"),
         16 => @embedFile("air:epoch_root_16"),
         else => error.EpochRootNotExported,
     };

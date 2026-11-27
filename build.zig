@@ -138,8 +138,10 @@ pub fn build(b: *std.Build) void {
     lib.addAnonymousImport("air:set_leaf_out", .{ .root_source_file = b.path("airs/set_leaf_out.json") });
     lib.addAnonymousImport("air:set_node_glue", .{ .root_source_file = b.path("airs/set_node_glue.json") });
     lib.addAnonymousImport("air:chain_seal_1_2_3_genesis", .{ .root_source_file = b.path("airs/chain_seal_1_2_3_genesis.json") });
+    lib.addAnonymousImport("air:chain_seal_6_7_genesis", .{ .root_source_file = b.path("airs/chain_seal_6_7_genesis.json") });
     lib.addAnonymousImport("air:chain_seal_16_16", .{ .root_source_file = b.path("airs/chain_seal_16_16.json") });
     lib.addAnonymousImport("air:chain_seal_t32_1_2_3_genesis", .{ .root_source_file = b.path("airs/chain_seal_t32_1_2_3_genesis.json") });
+    lib.addAnonymousImport("air:chain_seal_t32_6_7_genesis", .{ .root_source_file = b.path("airs/chain_seal_t32_6_7_genesis.json") });
     lib.addAnonymousImport("air:chain_seal_t32_16_16", .{ .root_source_file = b.path("airs/chain_seal_t32_16_16.json") });
     lib.addAnonymousImport("air:block_reader", .{ .root_source_file = b.path("airs/block_reader.json") });
     lib.addAnonymousImport("air:block_sha", .{ .root_source_file = b.path("airs/block_sha.json") });
@@ -195,6 +197,7 @@ pub fn build(b: *std.Build) void {
     lib.addAnonymousImport("air:epoch_root_16", .{ .root_source_file = b.path("airs/epoch_root_16.json") });
     lib.addAnonymousImport("air:epoch_root_16_prev", .{ .root_source_file = b.path("airs/epoch_root_16_prev.json") });
     lib.addAnonymousImport("air:epoch_root_6", .{ .root_source_file = b.path("airs/epoch_root_6.json") });
+    lib.addAnonymousImport("air:epoch_root_7", .{ .root_source_file = b.path("airs/epoch_root_7.json") });
     lib.addAnonymousImport("air:epoch_root_7_prev", .{ .root_source_file = b.path("airs/epoch_root_7_prev.json") });
     lib.addAnonymousImport("air:epoch_root_3", .{ .root_source_file = b.path("airs/epoch_root_3.json") });
     lib.addAnonymousImport("air:epoch_root_3_prev", .{ .root_source_file = b.path("airs/epoch_root_3_prev.json") });

@@ -20,6 +20,34 @@ Next: <the exact next step; must match status.md>
 ```
 
 ---
+## 2026-11-25/27 — Rehearsal: blocks 0–3999 from genesis sealed on GPUs, new AIRs (session 49c)
+Who: Claude (agent; Fable 5.2, then Opus 5.5); owner: "1. Push 2. Yes" (push; the rehearsal), then "yes" (restart)
+Roadmap: GENESIS-PLAN prerequisite 1 (rehearsal) done
+Done:
+- `connect-rules` pushed to e5e5a5b. Local commits: e26b4f9 (PreRoots per profile), 1f52d43 (tree
+  prover's GPU list from the build; prove_set.sh links the archive once), e0e3599 and this session's
+  last commit (epoch roots 6, 7, 7-prev; chain_seal and chain_seal_t32 for [6,7] genesis; drift ok).
+- Local: the 16-block test chain end to end on the new AIRs (roots, join, set passes, seal; tampers
+  rejected).
+- GPU: two epochs 0..1999, 2000..3999 from genesis: block proofs, trees, verify-epoch-wide, three set
+  passes, prove-chain, verify-chain (set files and set proofs), prove-seal, verify-seal: all VERIFIED;
+  the seal verified again on the Mac. Timings in genesis-run.md.
+Evidence:
+- "SEALED blocks 0..3999: … 588753 bytes; … 3836 coins, 19995000000000 sat"; "VERIFIED blocks 0..3999 as
+  one sealed proof"; hash_serialized fd469d52315ca2182f9d0595f35fefab5f3aab73f22aa35decbcdf5179fb81ba.
+- Pods: A40 bz1iacv4mbbwcp, A100 ixizfvhbig7stn (old account, billed $22.10 by RunPod; stopped by
+  RunPod at zero balance, still on that account), A100 9d38lblt9h3gsj (new account, $3.98 by balance);
+  all others deleted.
+Problems / lessons:
+- The A100 on the old account idled about 7 h after its script ended: my ssh wait loops died (exit 255)
+  and I did not check; the prepaid balance ran out and RunPod stopped it. Watchers must alert on lost
+  connections and match an exact end marker (one matched "SEGMENTS DONE").
+- My own script errors cost reruns: a set build without the A40's architecture; a DATA override that
+  hid headers.bin from the forest assembly; a cut that removed the tree() function.
+- A 5.6 GB scp to a pod reported success with 2.5 GB written.
+Next: the owner's go on the plan's remaining prerequisites (epoch loading, data route, multi-GPU
+driving, the export-after-trees step); a revised cost with these timings.
+
 ## 2026-11-25 — GPU-UTIL: the sample on an L40S, a 4090 and an H100; a thread-safety fix (session 49b)
 Who: Claude (agent, Fable 5.2); owner: "Run the measurement and push"
 Roadmap: GPU-UTIL → measured; a cheaper card class confirmed for block proofs

@@ -79,6 +79,38 @@ Proposed: seven epochs, `[0, 500,000)`, three of 100,000 blocks to 800,000, `[80
 sizes), each proven under two challenges, and the final set once: about 1.47 billion coin records.
 Fewer epochs would save set passes but do not fit the 2^30 bound; more epochs cost about $50–110 each.
 
+## Rehearsal on the new AIRs (2026-11-25 to 27): done
+
+Blocks 0 to 3999 as two epochs from genesis, proved end to end on GPUs and sealed: block proofs, both
+trees, both epochs verified, three set passes on the GPU (each with a CPU byte check), roots, join,
+chain verification with set proofs, seal (588,753 bytes), verified on the pod and again on the Mac
+(3,836 coins, 19,995,000,000,000 sat, `hash_serialized fd469d52…`). Logs and outputs in
+`data/store/gpu/2026-11-2{5,7}-rehearsal/` (local). Measured there (*measured*, 6 vCPU-class pods):
+
+| Step | A40 48 GB ($0.59/h) | A100 80 GB ($2.19/h) |
+|---|---|---|
+| Block proofs, genesis era | 0.111 s/block | 0.108–0.118 s/block |
+| Block proofs, 935,001–935,300 | 3.09 s/block | 2.14 s/block |
+| Tree leaves, genesis blocks (2^21) | 0.37 s | 0.23 s |
+| Tree leaves, recent blocks (2^22) | 0.62 s | 0.39 s |
+| Tree nodes (2^24, peak 47 GB) | do not fit | 2,000-block tree in 19–20 min with leaves |
+| Set-pass segment (test logs) | – | 0.14 s + tree |
+
+Found and fixed on the way: `PreRoots` sized for two profiles (crash on `tight`/`early`), the tree
+prover's GPU list fixed at sm_80/sm_90 (refused every 48 GB card), `prove_set.sh build` relinking
+`cuda-epoch-tree` against the stubs, the catalog allocator race (session 49b).
+
+**New prerequisites the rehearsal showed:**
+- **Exported circuits per shape.** Epoch roots exist per child count and the seal per exact list of
+  the epochs' child counts (`chain_seal <m,m,…> genesis`, plus the SEAL-T variant). The rehearsal
+  needed `epoch_root_6`, `_7`, `_7_prev` and `chain_seal(_t32)_6_7_genesis`, exported from Lean.
+  The run needs the same once its forests are known: export after the trees, before the join.
+- **Nodes need 80 GB.** Leaves (8 GB peak) fit any card; tree nodes do not fit 48 GB. Split the
+  trees: leaves on cheap cards, nodes on A100/H100 80 GB.
+- **Transfers.** Uploads ran at 8–30 MB/s on these hosts (not the 1 MB/s of October), but one 5.6 GB
+  scp reported success with 2.5 GB written: check sizes after every transfer.
+- **Pod watching.** An A100 idled about 7 hours after its script ended (about $15); see the log.
+
 ## What must be built or checked first
 
 1. **A rehearsal on the new AIRs.** Since CONNECT-RULES only block proofs have run. The leaf circuits for
