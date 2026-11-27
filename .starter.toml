@@ -1,0 +1,10 @@
+[[package]]
+path = "."
+lang = "zig"
+
+[[package]]
+path = "lean"
+lang = "lean"
+
+[skip]
+uncovered = "lean-consensus/ is generated from lean/StarkedAir/Spec; check.sh runs gen_lean_consensus.py --check"
