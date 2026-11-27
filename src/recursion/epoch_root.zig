@@ -35,6 +35,7 @@ pub fn programJson(m: usize, prev: bool) ![]const u8 {
         1 => @embedFile("air:epoch_root_1_prev"),
         2 => @embedFile("air:epoch_root_2_prev"),
         3 => @embedFile("air:epoch_root_3_prev"),
+        7 => @embedFile("air:epoch_root_7_prev"),
         16 => @embedFile("air:epoch_root_16_prev"),
         else => error.EpochRootNotExported,
     };
@@ -42,6 +43,7 @@ pub fn programJson(m: usize, prev: bool) ![]const u8 {
         1 => @embedFile("air:epoch_root_1"),
         2 => @embedFile("air:epoch_root_2"),
         3 => @embedFile("air:epoch_root_3"),
+        6 => @embedFile("air:epoch_root_6"),
         16 => @embedFile("air:epoch_root_16"),
         else => error.EpochRootNotExported,
     };
